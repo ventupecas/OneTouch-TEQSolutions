@@ -1,0 +1,96 @@
+cubes:
+  - name: sc_task
+    sql_table: public.sc_task
+    data_source: default
+
+    joins: []
+
+    dimensions:
+      - name: description
+        sql: description
+        type: string
+
+      - name: request
+        sql: request
+        type: string
+
+      - name: approval_history
+        sql: approval_history
+        type: string
+
+      - name: item
+        sql: item
+        type: string
+
+      - name: approval_set
+        sql: approval_set
+        type: string
+
+      - name: additional_comments
+        sql: additional_comments
+        type: string
+
+      - name: active
+        sql: active
+        type: string
+
+      - name: work_notes
+        sql: work_notes
+        type: string
+
+      - name: request_item
+        sql: request_item
+        type: string
+
+      - name: assignment_group
+        sql: assignment_group
+        type: string
+
+      - name: created
+        sql: created
+        type: string
+
+      - name: assigned_to
+        sql: assigned_to
+        type: string
+
+      - name: opened_by
+        sql: opened_by
+        type: string
+
+      - name: approval
+        sql: approval
+        type: string
+
+      - name: parent
+        sql: parent
+        type: string
+
+      - name: state
+        sql: state
+        type: string
+
+      - name: sla_flag
+        sql: sla_flag
+        type: string
+
+      - name: number
+        sql: number
+        type: string
+
+      - name: updated
+        sql: updated
+        type: string
+
+      - name: short_description
+        sql: short_description
+        type: string
+
+    measures:
+      - name: count
+        type: count
+
+    pre_aggregations:
+      # Pre-aggregation definitions go here.
+      # Learn more in the documentation: https://cube.dev/docs/caching/pre-aggregations/getting-started
+

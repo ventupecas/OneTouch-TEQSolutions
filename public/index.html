@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI-Driven Analytics Tool</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header class="app-header">
+        <h1>📊 DataLens AI</h1>
+        <nav class="tab-navigation">
+            <button class="tab-btn active" onclick="switchTab('chat')">💬 AI Assistant</button>
+            <button class="tab-btn" onclick="switchTab('dashboard')">📈 Dashboards</button>
+        </nav>
+    </header>
+
+    <main class="app-content">
+        <!-- CHAT VIEW CONTAINER -->
+        <section id="chat-view" class="view-panel active">
+            <div class="chat-container">
+                <div class="chat-messages" id="chat-log">
+                    <div class="msg system-msg">Hello! Ask me any question about your 75,000 data rows (e.g., "Show me status breakdown of orders").</div>
+                </div>
+                <div class="chat-input-area">
+                    <input type="text" id="user-prompt" placeholder="Ask a data question..." onkeydown="if(event.key === 'Enter') sendPrompt()">
+                    <button id="send-btn" onclick="sendPrompt()">Ask Claude</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- DASHBOARD VIEW CONTAINER (METABASE) -->
+        <section id="dashboard-view" class="view-panel">
+            <div class="dashboard-container">
+                <!-- Change this src URL to match your Metabase setup or future secure embedding endpoint -->
+                <iframe src="http://localhost:8080/public/dashboard/your-dashboard-uuid-here" frameborder="0" width="100%" height="100%" allowtransparency></iframe>
+            </div>
+        </section>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>

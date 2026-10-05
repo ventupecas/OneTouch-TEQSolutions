@@ -1,0 +1,44 @@
+cubes:
+  - name: ritm_approvals
+    sql_table: public.ritm_approvals
+    data_source: default
+
+    joins: []
+
+    dimensions:
+      - name: assignment_group
+        sql: assignment_group
+        type: string
+
+      - name: parent
+        sql: parent
+        type: string
+
+      - name: approval
+        sql: approval
+        type: string
+
+      - name: state
+        sql: state
+        type: string
+
+      - name: created
+        sql: created
+        type: string
+
+      - name: short_description
+        sql: short_description
+        type: string
+
+      - name: task_type
+        sql: task_type
+        type: string
+
+    measures:
+      - name: count
+        type: count
+
+    pre_aggregations:
+      # Pre-aggregation definitions go here.
+      # Learn more in the documentation: https://cube.dev/docs/caching/pre-aggregations/getting-started
+

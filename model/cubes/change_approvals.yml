@@ -1,0 +1,48 @@
+cubes:
+  - name: change_approvals
+    sql_table: public.change_approvals
+    data_source: default
+
+    joins: []
+
+    dimensions:
+      - name: approval
+        sql: approval
+        type: string
+
+      - name: created
+        sql: created
+        type: string
+
+      - name: assignment_group
+        sql: assignment_group
+        type: string
+
+      - name: work_notes
+        sql: work_notes
+        type: string
+
+      - name: state
+        sql: state
+        type: string
+
+      - name: parent
+        sql: parent
+        type: string
+
+      - name: task_type
+        sql: task_type
+        type: string
+
+      - name: short_description
+        sql: short_description
+        type: string
+
+    measures:
+      - name: count
+        type: count
+
+    pre_aggregations:
+      # Pre-aggregation definitions go here.
+      # Learn more in the documentation: https://cube.dev/docs/caching/pre-aggregations/getting-started
+

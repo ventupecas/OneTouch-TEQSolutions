@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  # 1. THE DATA LAYER (PostgreSQL)
+  postgres:
+    image: postgres:16-alpine
+    container_name: analytics_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password123
+      POSTGRES_DB: analytics_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./csv_data:/tmp/my_csv_files    # Your Windows folder mount
+
+  # 2. THE SEMANTIC LAYER (Cube.dev)
+  cube:
+    image: cubejs/cube:v0.35            # 👈 CHANGED: Uses official v0.35 branch tag
+    container_name: analytics_cube
+    restart: always
+    ports:
+      - "4000:4000"     # REST & GraphQL API Port
+      - "15432:15432" 
+    volumes:
+      - .:/cube/conf            # 👈 CHANGED: Map your entire project root folder directly
+  # SQL API Port (What Metabase connects to)
+    environment:
+      CUBEJS_DB_TYPE: postgres
+      CUBEJS_DB_HOST: postgres
+      CUBEJS_DB_NAME: analytics_db
+      CUBEJS_DB_USER: admin
+      CUBEJS_DB_PASS: password123
+      CUBEJS_DEV_MODE: "true"
+      CUBEJS_API_SECRET: super_secret_key_change_me_later
+      CUBEJS_PG_SQL_PORT: 15432         # Activates Cube's Postgres SQL wire api
+      CUBEJS_SQL_USER: admin_cube       # Custom username for Metabase login
+      CUBEJS_SQL_PASSWORD: cubepassword123  # Custom password for Metabase login
+    depends_on:
+      - postgres
+
+  # 3. THE VISUALIZATION LAYER (Metabase)
+  metabase:
+    image: metabase/metabase:v0.50.4    # 👈 CHANGED: Uses a highly stable, explicit build version
+    container_name: analytics_metabase
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      MB_DB_TYPE: h2
+    volumes:
+      - mbdata:/metabase-data
+    depends_on:
+      - cube
+
+volumes:
+  pgdata:
+  mbdata:

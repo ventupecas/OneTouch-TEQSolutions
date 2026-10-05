@@ -1,0 +1,24 @@
+# 🔑 SENSITIVE ENVIRONMENT VARIABLES & SECRETS
+.env
+
+# 📦 DEPENDENCY FOLDERS (Can be re-installed using 'npm install')
+node_modules/
+.npm
+.eslintcache
+
+# 📊 RAW DATA & LARGE DATASETS (Keep your 75,000 CSV rows local)
+csv_data/
+*.csv
+*.sql
+*.json
+
+# 🐳 DOCKER INTERNAL PERSISTENT STORAGE
+# (This ensures database state stays local to your computer's hard drive)
+.docker/
+pgdata/
+mbdata/
+
+# 🖥️ OPERATING SYSTEM SPECIFIC JUNK
+Thumbs.db
+.DS_Store
+desktop.ini

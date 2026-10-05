@@ -1,0 +1,192 @@
+cubes:
+  - name: incident
+    sql_table: public.incident
+    data_source: default
+
+    joins: []
+
+    dimensions:
+      - name: business_impact
+        sql: business_impact
+        type: string
+
+      - name: assignment_group
+        sql: assignment_group
+        type: string
+
+      - name: location
+        sql: location
+        type: string
+
+      - name: downgrade_reason
+        sql: downgrade_reason
+        type: string
+
+      - name: reopen_count
+        sql: reopen_count
+        type: string
+
+      - name: opened_by_group
+        sql: opened_by_group
+        type: string
+
+      - name: problem
+        sql: problem
+        type: string
+
+      - name: assigned_to
+        sql: assigned_to
+        type: string
+
+      - name: state
+        sql: state
+        type: string
+
+      - name: responsibility_for_outage
+        sql: responsibility_for_outage
+        type: string
+
+      - name: breach_reason
+        sql: breach_reason
+        type: string
+
+      - name: short_description
+        sql: short_description
+        type: string
+
+      - name: downgrade_type
+        sql: downgrade_type
+        type: string
+
+      - name: contact_type
+        sql: contact_type
+        type: string
+
+      - name: number
+        sql: number
+        type: string
+
+      - name: reassignment_count
+        sql: reassignment_count
+        type: string
+
+      - name: kb_article
+        sql: kb_article
+        type: string
+
+      - name: description
+        sql: description
+        type: string
+
+      - name: on_hold_reason
+        sql: on_hold_reason
+        type: string
+
+      - name: knowledge_article_reference
+        sql: knowledge_article_reference
+        type: string
+
+      - name: created
+        sql: created
+        type: string
+
+      - name: subcategory
+        sql: subcategory
+        type: string
+
+      - name: closed
+        sql: closed
+        type: string
+
+      - name: impact
+        sql: impact
+        type: string
+
+      - name: parent_incident
+        sql: parent_incident
+        type: string
+
+      - name: caused_by_change
+        sql: caused_by_change
+        type: string
+
+      - name: resolved
+        sql: resolved
+        type: string
+
+      - name: category
+        sql: category
+        type: string
+
+      - name: priority
+        sql: priority
+        type: string
+
+      - name: tags
+        sql: tags
+        type: string
+
+      - name: cause_sub_code
+        sql: cause_sub_code
+        type: string
+
+      - name: cause_code
+        sql: cause_code
+        type: string
+
+      - name: close_notes
+        sql: close_notes
+        type: string
+
+      - name: was_p1
+        sql: was_p1
+        type: string
+
+      - name: risk_register_number
+        sql: risk_register_number
+        type: string
+
+      - name: close_code
+        sql: close_code
+        type: string
+
+      - name: business_impact_outage
+        sql: business_impact_outage
+        type: string
+
+      - name: work_notes
+        sql: work_notes
+        type: string
+
+      - name: updated
+        sql: updated
+        type: string
+
+      - name: affected_user
+        sql: affected_user
+        type: string
+
+      - name: configuration_item
+        sql: configuration_item
+        type: string
+
+      - name: urgency
+        sql: urgency
+        type: string
+
+      - name: third_party_related_ticket
+        sql: third_party_related_ticket
+        type: string
+
+      - name: global_incident
+        sql: global_incident
+        type: string
+
+    measures:
+      - name: count
+        type: count
+
+    pre_aggregations:
+      # Pre-aggregation definitions go here.
+      # Learn more in the documentation: https://cube.dev/docs/caching/pre-aggregations/getting-started
+

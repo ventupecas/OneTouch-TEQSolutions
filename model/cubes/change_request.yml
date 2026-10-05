@@ -1,0 +1,172 @@
+cubes:
+  - name: change_request
+    sql_table: public.change_request
+    data_source: default
+
+    joins: []
+
+    dimensions:
+      - name: brewery
+        sql: brewery
+        type: string
+
+      - name: description
+        sql: description
+        type: string
+
+      - name: planned_start_date_1
+        sql: planned_start_date_1
+        type: string
+
+      - name: planned_end_date_1
+        sql: planned_end_date_1
+        type: string
+
+      - name: requested_by
+        sql: requested_by
+        type: string
+
+      - name: problem
+        sql: problem
+        type: string
+
+      - name: purpose_of_change
+        sql: purpose_of_change
+        type: string
+
+      - name: approval
+        sql: approval
+        type: string
+
+      - name: comments_and_work_notes
+        sql: comments_and_work_notes
+        type: string
+
+      - name: type
+        sql: type
+        type: string
+
+      - name: enhancement
+        sql: enhancement
+        type: string
+
+      - name: state
+        sql: state
+        type: string
+
+      - name: close_code
+        sql: close_code
+        type: string
+
+      - name: state_1
+        sql: state_1
+        type: string
+
+      - name: process_failure
+        sql: process_failure
+        type: string
+
+      - name: brewery_locations
+        sql: brewery_locations
+        type: string
+
+      - name: task_type
+        sql: task_type
+        type: string
+
+      - name: failure_code
+        sql: failure_code
+        type: string
+
+      - name: planned_start_date
+        sql: planned_start_date
+        type: string
+
+      - name: environment
+        sql: environment
+        type: string
+
+      - name: project
+        sql: project
+        type: string
+
+      - name: incident
+        sql: incident
+        type: string
+
+      - name: risk
+        sql: risk
+        type: string
+
+      - name: change_plan
+        sql: change_plan
+        type: string
+
+      - name: backout_plan
+        sql: backout_plan
+        type: string
+
+      - name: owner_group
+        sql: owner_group
+        type: string
+
+      - name: configuration_item
+        sql: configuration_item
+        type: string
+
+      - name: verification_plan
+        sql: verification_plan
+        type: string
+
+      - name: sap_transport_required
+        sql: sap_transport_required
+        type: string
+
+      - name: sub_type
+        sql: sub_type
+        type: string
+
+      - name: planned_end_date
+        sql: planned_end_date
+        type: string
+
+      - name: diwakar_kumar
+        sql: diwakar_kumar
+        type: string
+
+      - name: number
+        sql: number
+        type: string
+
+      - name: work_notes
+        sql: work_notes
+        type: string
+
+      - name: success_code
+        sql: success_code
+        type: string
+
+      - name: sap_impact
+        sql: sap_impact
+        type: string
+
+      - name: created
+        sql: created
+        type: string
+
+      - name: short_description
+        sql: short_description
+        type: string
+
+      - name: outage
+        sql: outage
+        type: string
+
+    measures:
+      - name: count
+        type: count
+
+    pre_aggregations:
+      # Pre-aggregation definitions go here.
+      # Learn more in the documentation: https://cube.dev/docs/caching/pre-aggregations/getting-started
+
