@@ -58,3 +58,20 @@ services:
 volumes:
   pgdata:
   mbdata:
+
+
+  # 4. THE NODE APPLICATION ORCHESTRATOR LAYER
+  app:
+    build: .
+    container_name: analytics_node_app
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      PORT: 8000
+      # 🎯 CRITICAL: We use 'cube' as the host name! Docker resolves this internally.
+      CUBE_API_URL: http://cube:4000/cubejs-api/v1/load
+      CUBE_API_TOKEN: super_secret_key_change_me_later
+      ANTHROPIC_API_KEY: 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
+    depends_on:
+      - cube
