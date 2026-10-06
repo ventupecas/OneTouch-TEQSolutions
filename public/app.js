@@ -27,9 +27,9 @@ window.sendPrompt = async function() {
     // Append standard generic loading sequence notification
     const loadingId = appendMessage('ai-msg', '🤖 Thinking and querying Cube.dev...');
 
-    try {
-        // 🎯 FIX: Force the explicit absolute localhost URL matching your Node port
-        const response = await fetch('http://localhost:8000/api/query', {
+     try {
+        // 🎯 FIX: Force the path to be relative so it routes cleanly inside the Docker context
+        const response = await fetch('/api/query', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ userPrompt: userPromptText })
