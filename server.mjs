@@ -8,19 +8,13 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 8000;
 
-app.use(cors());
+app.use(cors({ origin: '*' }));
 app.use(express.json());
 app.use(express.static('public'));
 
-// Secure Check: Ensure API client doesn't initialize empty
-const apiKey = process.env.ANTHROPIC_API_KEY;
-if (!apiKey || apiKey.includes('your_actual')) {
-  console.error("❌ ERROR: Your ANTHROPIC_API_KEY is missing or invalid in your .env file!");
-}
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const anthropic = new Anthropic({ apiKey: apiKey });
-
-// FIXED CONTEXT: A detailed blueprint ensuring Claude always answers
+// 🎯 COMPREHENSIVE PRODUCTION ITSM DATA LAYER CONTEXT
 const CUBE_SCHEMA_CONTEXT = `
 You are a highly precise automated database analytics translator.
 Your single goal is to read a user's natural language question and translate it into a single, clean JSON object for Cube.dev.
@@ -60,36 +54,42 @@ Return a Cube query object using only those exact member names, for example:
 Omit measures, dimensions, or filters that are not needed. Do not include SQL, prose, or unsupported fields.
 `;
 
+// 🛡️ RESILIENT NETWORK RETRY LOOP HANDSHAKE
+async function fetchWithRetry(url, options, retries = 3, delay = 2000) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fetch(url, options);
+    } catch (err) {
+      if (i === retries - 1) throw err;
+      console.warn(`⚠️ Cube is busy or compiling. Retrying in ${delay / 1000}s... (Attempt ${i + 1}/${retries})`);
+      await new Promise(res => setTimeout(res, delay));
+    }
+  }
+}
+
 app.post('/api/query', async (req, res) => {
   try {
     const { userPrompt } = req.body;
     if (!userPrompt) return res.status(400).json({ error: 'userPrompt parameter is required.' });
 
-    console.log(`💬 User data prompt received: "${userPrompt}"`);
-
+    console.log(`\n💬 Processing prompt: "${userPrompt}"`);
     let responseText = "";
 
-    // 🎨 VERIFIED FIX: Use Anthropic's Native Event Stream handler to prevent empty array locks
+    // 🎨 Pass text request downstream via Anthropic Event Streaming
     const stream = await anthropic.messages.stream({
       model: "claude-sonnet-5-5",
       max_tokens: 1000,
       system: CUBE_SCHEMA_CONTEXT,
-      messages: [{ role: "user", content: `Provide the raw Cube JSON object representing: "${userPrompt}"` }],
+      messages: [{ role: "user", content: `Provide the raw Cube JSON object for: "${userPrompt}"` }],
     });
 
-    // Capture text tokens in real-time as they stream out from Anthropic
-    stream.on('text', (text) => {
-      responseText += text;
-    });
-
-    // Wait for the stream completion event loop to finalize safely
+    stream.on('text', (text) => { responseText += text; });
     await stream.finalMessage();
 
-    // Sanitize and isolate the JSON data segment
     const sanitizedJSON = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
-        const targetCubeQuery = JSON.parse(sanitizedJSON);
+    const targetCubeQuery = JSON.parse(sanitizedJSON);
 
-    // 🛡️ DYNAMIC UPDATE: Allow queries that return dimensions/lists of records too!
+    // 🛡️ DYNAMIC OVERRIDE: Accept both calculations and structural row lists
     if (targetCubeQuery.error || (!targetCubeQuery.measures && !targetCubeQuery.dimensions)) {
       console.warn("⚠️ Claude generated an invalid query payload framework:", targetCubeQuery);
       return res.status(400).json({ 
@@ -97,48 +97,37 @@ app.post('/api/query', async (req, res) => {
       });
     }
 
-    console.log("🤖 Claude Compiled Query Payload:", targetCubeQuery);
+    console.log("🤖 Claude Compiled Query:", JSON.stringify(targetCubeQuery, null, 2));
 
-    // 1. FIRST: Define and execute the fetch command to create cubeResponse
-    const cubeResponse = await fetch(process.env.CUBE_API_URL || 'http://localhost:4000/cubejs-api/v1/load', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': process.env.CUBE_API_TOKEN || 'super_secret_key_change_me_later',
-      },
-      body: JSON.stringify({ query: targetCubeQuery }), 
-    });
+    // 🚀 Send payload directly to the shared network container link
+    const cubeResponse = await fetchWithRetry(
+      process.env.CUBE_API_URL || 'http://cube:4000/cubejs-api/v1/load', 
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': process.env.CUBE_API_TOKEN || 'super_secret_key_change_me_later',
+        },
+        body: JSON.stringify({ query: targetCubeQuery }),
+      }
+    );
 
-    // 2. SECOND: Now you can safely check cubeResponse without getting an undefined error
     const contentType = cubeResponse.headers.get('content-type') || '';
     if (contentType.includes('text/html')) {
-      const htmlErrorText = await cubeResponse.text();
-      console.error("❌ Cube.dev returned an HTML Error Page instead of JSON:", htmlErrorText);
-      return res.status(500).json({ 
-        error: "Cube.dev engine returned an internal server web error page. Re-check paths." 
-      });
+      return res.status(500).json({ error: "Cube.dev is still initializing its internal model registry. Try again in a few seconds." });
     }
 
-    // 3. THIRD: Parse the clean JSON response payload
     const data = await cubeResponse.json();
+    if (data.error) return res.status(400).json({ error: `Cube Engine Error: ${data.error}` });
 
-
-
-    if (data.error) {
-      console.error("❌ Cube Database Model Error:", data.error);
-      return res.status(400).json({ error: `Cube engine compilation error: ${data.error}` });
-    }
-
-    // Return the payload back to the browser user interface
     res.json({ aiInterpretation: targetCubeQuery, results: data.data || [] });
+
   } catch (error) {
-    console.error("❌ /api/query failed:", error);
-    res.status(500).json({
-      error: error instanceof Error ? error.message : 'Unknown server error'
-    });
+    console.error('📋 Execution Failure Context:', error);
+    res.status(500).json({ error: `Server pipeline failed: ${error.message}` });
   }
 });
 
 app.listen(port, () => {
-  console.log(`🚀 Node.js Orchestrator framework live on http://localhost:${port}`);
+  console.log(`🚀 Node.js Orchestrator live on port ${port}`);
 });
