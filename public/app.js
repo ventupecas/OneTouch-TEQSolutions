@@ -24,7 +24,7 @@ async function sendPrompt() {
 
     try {
         // Fetch stream array data parameters directly from our Node Server Orchestrator
-        const response = await fetch('http://localhost:5000/api/query', {
+        const response = await fetch('http://localhost:8000/api/query', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ userPrompt: userPromptText })
