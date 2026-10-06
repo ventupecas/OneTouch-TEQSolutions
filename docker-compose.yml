@@ -74,7 +74,7 @@ services:
       # 🎯 VERIFY THIS MATCHES PRECISELY:
       CUBE_API_URL: http://cube:4000/cubejs-api/v1/load
       CUBE_API_TOKEN: super_secret_key_change_me_later
-      ANTHROPIC_API_KEY: sk-ant-your_actual_claude_api_key_here
+      ANTHROPIC_API_KEY: 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
     depends_on:
       - cube
     networks:
