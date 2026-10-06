@@ -30,6 +30,8 @@ async function sendPrompt() {
             body: JSON.stringify({ userPrompt: userPromptText })
         });
 
+        console.log("THIS IS THE RESPONSE FROM THE SERVER:", response);
+
         const data = await response.json();
 
 
