@@ -10,7 +10,8 @@ node_modules/
 csv_data/
 *.csv
 *.sql
-*.json
+csv_data/*.json
+my_data/*.json
 
 # 🐳 DOCKER INTERNAL PERSISTENT STORAGE
 # (This ensures database state stays local to your computer's hard drive)
