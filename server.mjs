@@ -66,7 +66,8 @@ app.post('/api/query', async (req, res) => {
 
     console.log("🤖 Claude Compiled Query:", JSON.stringify(targetCubeQuery, null, 2));
 
-    const cubeResponse = await fetch(process.env.CUBE_API_URL || 'http://localhost:4000/cubejs-api/v1/load', {
+       // 🛡️ Ensure the backup parameter bypasses IPv6 lookups as well
+    const cubeResponse = await fetch(process.env.CUBE_API_URL || 'http://127.0.0', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
