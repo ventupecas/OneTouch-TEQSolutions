@@ -37,6 +37,7 @@ services:
       CUBEJS_PG_SQL_PORT: 15432
       CUBEJS_SQL_USER: admin_cube
       CUBEJS_SQL_PASSWORD: cubepassword123
+      CUBEJS_BIND_ADDRESS: "0.0.0.0"
     depends_on:
       - postgres
 
