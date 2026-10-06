@@ -14,19 +14,18 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./csv_data:/tmp/my_csv_files    # Your Windows folder mount
+      - ./csv_data:/tmp/my_csv_files
 
   # 2. THE SEMANTIC LAYER (Cube.dev)
   cube:
-    image: cubejs/cube:v0.35            # 👈 CHANGED: Uses official v0.35 branch tag
+    image: cubejs/cube:v0.35
     container_name: analytics_cube
     restart: always
     ports:
-      - "4000:4000"     # REST & GraphQL API Port
-      - "15432:15432" 
+      - "4000:4000"     # REST API
+      - "15432:15432"   # SQL API
     volumes:
-      - .:/cube/conf            # 👈 CHANGED: Map your entire project root folder directly
-  # SQL API Port (What Metabase connects to)
+      - .:/cube/conf
     environment:
       CUBEJS_DB_TYPE: postgres
       CUBEJS_DB_HOST: postgres
@@ -35,15 +34,15 @@ services:
       CUBEJS_DB_PASS: password123
       CUBEJS_DEV_MODE: "true"
       CUBEJS_API_SECRET: super_secret_key_change_me_later
-      CUBEJS_PG_SQL_PORT: 15432         # Activates Cube's Postgres SQL wire api
-      CUBEJS_SQL_USER: admin_cube       # Custom username for Metabase login
-      CUBEJS_SQL_PASSWORD: cubepassword123  # Custom password for Metabase login
+      CUBEJS_PG_SQL_PORT: 15432
+      CUBEJS_SQL_USER: admin_cube
+      CUBEJS_SQL_PASSWORD: cubepassword123
     depends_on:
       - postgres
 
   # 3. THE VISUALIZATION LAYER (Metabase)
   metabase:
-    image: metabase/metabase:v0.50.4    # 👈 CHANGED: Uses a highly stable, explicit build version
+    image: metabase/metabase:v0.50.4
     container_name: analytics_metabase
     restart: always
     ports:
@@ -55,12 +54,7 @@ services:
     depends_on:
       - cube
 
-volumes:
-  pgdata:
-  mbdata:
-
-
-  # 4. THE NODE APPLICATION ORCHESTRATOR LAYER
+  # 4. THE NODE APPLICATION ORCHESTRATOR LAYER (🏆 ALIGNED PERFECTLY HERE)
   app:
     build: .
     container_name: analytics_node_app
@@ -69,9 +63,14 @@ volumes:
       - "8000:8000"
     environment:
       PORT: 8000
-      # 🎯 CRITICAL: We use 'cube' as the host name! Docker resolves this internally.
-      CUBE_API_URL: http://cube:4000/cubejs-api/v1/load
+      CUBE_API_URL: http://docker.internal
       CUBE_API_TOKEN: super_secret_key_change_me_later
-      ANTHROPIC_API_KEY: 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
+      ANTHROPIC_API_KEY: sk-ant-your_actual_claude_api_key_here  # 👈 PASTE YOUR KEY HERE
     depends_on:
       - cube
+
+# Persistent storage section kept completely separated at the root level
+volumes:
+  pgdata:
+  mbdata:
+  
