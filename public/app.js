@@ -22,15 +22,16 @@ async function sendPrompt() {
     // Append standard generic loading sequence notification
     const loadingId = appendMessage('ai-msg', '🤖 Thinking and querying Cube.dev...');
 
-    try {
-        // Fetch stream array data parameters directly from our Node Server Orchestrator
-        const response = await fetch('http://localhost:5000/api/query', {
+        try {
+        // 🎯 FIX: Strip localhost out completely so it works seamlessly inside the Docker network context
+        const response = await fetch('/api/query', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ userPrompt: userPromptText })
         });
 
         const data = await response.json();
+
         document.getElementById(loadingId).remove(); // Clear loading block
 
         if (data.error) {
