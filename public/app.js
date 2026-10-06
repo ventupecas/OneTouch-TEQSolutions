@@ -24,11 +24,13 @@ async function sendPrompt() {
 
     try {
         // Fetch stream array data parameters directly from our Node Server Orchestrator
-        const response = await fetch('http://localhost:8000/api/query', {
+               // 🎯 FIX THIS LINE: Change the explicit URL to a clean relative path
+        const response = await fetch('/api/query', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ userPrompt: userPromptText })
         });
+
 
         const data = await response.json();
         document.getElementById(loadingId).remove(); // Clear loading block
