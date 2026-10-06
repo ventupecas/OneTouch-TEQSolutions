@@ -38,21 +38,45 @@ async function sendPrompt() {
             return;
         }
 
-        // Parse result data arrays natively inside browser canvas logs
+               // Parse result data arrays natively inside browser canvas logs
         let finalOutputString = `<strong>Here is what I found:</strong><br><br>`;
         
         if (data.results && data.results.length > 0) {
-            finalOutputString += `<pre>${JSON.stringify(data.results, null, 2)}</pre>`;
+            // Start building a clean, responsive HTML table structure
+            finalOutputString += `<div class="table-responsive"><table class="data-table"><thead><tr>`;
+            
+            // 1. DYNAMIC HEADERS: Extract column names from the first data row object
+            const columns = Object.keys(data.results[0]);
+            columns.forEach(col => {
+                // Clean up the header text (e.g., convert "orders.total_revenue" to "Total Revenue")
+                const cleanHeader = col.split('.').pop().replace(/_/g, ' ').toUpperCase();
+                finalOutputString += `<th>${cleanHeader}</th>`;
+            });
+            finalOutputString += `</tr></thead><tbody>`;
+            
+            // 2. DYNAMIC ROWS: Populate the cells with dataset metrics
+            data.results.forEach(row => {
+                finalOutputString += `<tr>`;
+                columns.forEach(col => {
+                    let value = row[col];
+                    // Format numbers neatly if applicable
+                    if (!isNaN(value) && value.toString().indexOf('-') === -1 && value !== '') {
+                        value = Number(value).toLocaleString();
+                    }
+                    finalOutputString += `<td>${value}</td>`;
+                });
+                finalOutputString += `</tr>`;
+            });
+            
+            finalOutputString += `</tbody></table></div>`;
         } else {
             finalOutputString += `No exact matching transaction records were found for that selection window inside the database.`;
         }
 
         appendMessage('ai-msg', finalOutputString);
-
-    } catch (err) {
-        document.getElementById(loadingId).remove();
-        appendMessage('ai-msg', `❌ Could not talk to backend server orchestration framework.`);
-        console.error(err);
+    } catch (error) {
+        document.getElementById(loadingId)?.remove();
+        appendMessage('ai-msg', `❌ Error: ${error.message}`);
     }
 }
 
