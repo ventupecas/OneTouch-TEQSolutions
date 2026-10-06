@@ -1,0 +1,107 @@
+2026/10/06-18:53:29.250845 365 RocksDB version: 7.9.2
+2026/10/06-18:53:29.251819 365 Compile date 2022-12-22 09:30:39
+2026/10/06-18:53:29.251828 365 DB SUMMARY
+2026/10/06-18:53:29.251830 365 DB Session ID:  SOXELQ60GDERX4KN2F6Q
+2026/10/06-18:53:29.259131 365 CURRENT file:  CURRENT
+2026/10/06-18:53:29.259141 365 IDENTITY file:  IDENTITY
+2026/10/06-18:53:29.260262 365 MANIFEST file:  MANIFEST-000013 size: 165 Bytes
+2026/10/06-18:53:29.260269 365 SST files in /cube/conf/.cubestore/data/metastore dir, Total Num: 1, files: 000009.sst 
+2026/10/06-18:53:29.260271 365 Write Ahead Log file in /cube/conf/.cubestore/data/metastore: 000008.log size: 931 ; 000012.log size: 79130 ; 
+2026/10/06-18:53:29.260282 365                         Options.error_if_exists: 0
+2026/10/06-18:53:29.260283 365                       Options.create_if_missing: 1
+2026/10/06-18:53:29.260284 365                         Options.paranoid_checks: 1
+2026/10/06-18:53:29.260285 365             Options.flush_verify_memtable_count: 1
+2026/10/06-18:53:29.260286 365                               Options.track_and_verify_wals_in_manifest: 0
+2026/10/06-18:53:29.260287 365        Options.verify_sst_unique_id_in_manifest: 1
+2026/10/06-18:53:29.260287 365                                     Options.env: 0x5ba103a82e98
+2026/10/06-18:53:29.260289 365                                      Options.fs: PosixFileSystem
+2026/10/06-18:53:29.260290 365                                Options.info_log: 0x781b590d5490
+2026/10/06-18:53:29.260291 365                Options.max_file_opening_threads: 16
+2026/10/06-18:53:29.260292 365                              Options.statistics: (nil)
+2026/10/06-18:53:29.260293 365                               Options.use_fsync: 0
+2026/10/06-18:53:29.260294 365                       Options.max_log_file_size: 0
+2026/10/06-18:53:29.260295 365                  Options.max_manifest_file_size: 1073741824
+2026/10/06-18:53:29.260296 365                   Options.log_file_time_to_roll: 0
+2026/10/06-18:53:29.260298 365                       Options.keep_log_file_num: 1000
+2026/10/06-18:53:29.260298 365                    Options.recycle_log_file_num: 0
+2026/10/06-18:53:29.260299 365                         Options.allow_fallocate: 1
+2026/10/06-18:53:29.260300 365                        Options.allow_mmap_reads: 0
+2026/10/06-18:53:29.260301 365                       Options.allow_mmap_writes: 0
+2026/10/06-18:53:29.260302 365                        Options.use_direct_reads: 0
+2026/10/06-18:53:29.260302 365                        Options.use_direct_io_for_flush_and_compaction: 0
+2026/10/06-18:53:29.260303 365          Options.create_missing_column_families: 0
+2026/10/06-18:53:29.260304 365                              Options.db_log_dir: 
+2026/10/06-18:53:29.260304 365                                 Options.wal_dir: 
+2026/10/06-18:53:29.260305 365                Options.table_cache_numshardbits: 6
+2026/10/06-18:53:29.260306 365                         Options.WAL_ttl_seconds: 330
+2026/10/06-18:53:29.260307 365                       Options.WAL_size_limit_MB: 0
+2026/10/06-18:53:29.260307 365                        Options.max_write_batch_group_size_bytes: 1048576
+2026/10/06-18:53:29.260308 365             Options.manifest_preallocation_size: 4194304
+2026/10/06-18:53:29.260309 365                     Options.is_fd_close_on_exec: 1
+2026/10/06-18:53:29.260310 365                   Options.advise_random_on_open: 1
+2026/10/06-18:53:29.260311 365                    Options.db_write_buffer_size: 0
+2026/10/06-18:53:29.260311 365                    Options.write_buffer_manager: 0x781b5901e320
+2026/10/06-18:53:29.260312 365         Options.access_hint_on_compaction_start: 1
+2026/10/06-18:53:29.260313 365           Options.random_access_max_buffer_size: 1048576
+2026/10/06-18:53:29.260313 365                      Options.use_adaptive_mutex: 0
+2026/10/06-18:53:29.260314 365                            Options.rate_limiter: (nil)
+2026/10/06-18:53:29.260316 365     Options.sst_file_manager.rate_bytes_per_sec: 0
+2026/10/06-18:53:29.260317 365                       Options.wal_recovery_mode: 2
+2026/10/06-18:53:29.260317 365                  Options.enable_thread_tracking: 0
+2026/10/06-18:53:29.260325 365                  Options.enable_pipelined_write: 0
+2026/10/06-18:53:29.260326 365                  Options.unordered_write: 0
+2026/10/06-18:53:29.260327 365         Options.allow_concurrent_memtable_write: 1
+2026/10/06-18:53:29.260327 365      Options.enable_write_thread_adaptive_yield: 1
+2026/10/06-18:53:29.260328 365             Options.write_thread_max_yield_usec: 100
+2026/10/06-18:53:29.260329 365            Options.write_thread_slow_yield_usec: 3
+2026/10/06-18:53:29.260329 365                               Options.row_cache: None
+2026/10/06-18:53:29.260330 365                              Options.wal_filter: None
+2026/10/06-18:53:29.260331 365             Options.avoid_flush_during_recovery: 0
+2026/10/06-18:53:29.260332 365             Options.allow_ingest_behind: 0
+2026/10/06-18:53:29.260332 365             Options.two_write_queues: 0
+2026/10/06-18:53:29.260333 365             Options.manual_wal_flush: 0
+2026/10/06-18:53:29.260334 365             Options.wal_compression: 0
+2026/10/06-18:53:29.260334 365             Options.atomic_flush: 0
+2026/10/06-18:53:29.260335 365             Options.avoid_unnecessary_blocking_io: 0
+2026/10/06-18:53:29.260336 365                 Options.persist_stats_to_disk: 0
+2026/10/06-18:53:29.260336 365                 Options.write_dbid_to_manifest: 0
+2026/10/06-18:53:29.260337 365                 Options.log_readahead_size: 0
+2026/10/06-18:53:29.260338 365                 Options.file_checksum_gen_factory: Unknown
+2026/10/06-18:53:29.260338 365                 Options.best_efforts_recovery: 0
+2026/10/06-18:53:29.260339 365                Options.max_bgerror_resume_count: 2147483647
+2026/10/06-18:53:29.260340 365            Options.bgerror_resume_retry_interval: 1000000
+2026/10/06-18:53:29.260341 365             Options.allow_data_in_errors: 0
+2026/10/06-18:53:29.260341 365             Options.db_host_id: __hostname__
+2026/10/06-18:53:29.260342 365             Options.enforce_single_del_contracts: true
+2026/10/06-18:53:29.260343 365             Options.max_background_jobs: 1
+2026/10/06-18:53:29.260344 365             Options.max_background_compactions: -1
+2026/10/06-18:53:29.260344 365             Options.max_subcompactions: 1
+2026/10/06-18:53:29.260345 365             Options.avoid_flush_during_shutdown: 0
+2026/10/06-18:53:29.260346 365           Options.writable_file_max_buffer_size: 1048576
+2026/10/06-18:53:29.260347 365             Options.delayed_write_rate : 16777216
+2026/10/06-18:53:29.260347 365             Options.max_total_wal_size: 0
+2026/10/06-18:53:29.260348 365             Options.delete_obsolete_files_period_micros: 21600000000
+2026/10/06-18:53:29.260349 365                   Options.stats_dump_period_sec: 600
+2026/10/06-18:53:29.260349 365                 Options.stats_persist_period_sec: 600
+2026/10/06-18:53:29.260350 365                 Options.stats_history_buffer_size: 1048576
+2026/10/06-18:53:29.260351 365                          Options.max_open_files: -1
+2026/10/06-18:53:29.260352 365                          Options.bytes_per_sync: 0
+2026/10/06-18:53:29.260352 365                      Options.wal_bytes_per_sync: 0
+2026/10/06-18:53:29.260353 365                   Options.strict_bytes_per_sync: 0
+2026/10/06-18:53:29.260353 365       Options.compaction_readahead_size: 0
+2026/10/06-18:53:29.260354 365                  Options.max_background_flushes: -1
+2026/10/06-18:53:29.260355 365 Compression algorithms supported:
+2026/10/06-18:53:29.260356 365 	kZSTDNotFinalCompression supported: 1
+2026/10/06-18:53:29.260367 365 	kZSTD supported: 1
+2026/10/06-18:53:29.260368 365 	kXpressCompression supported: 0
+2026/10/06-18:53:29.260369 365 	kLZ4HCCompression supported: 0
+2026/10/06-18:53:29.260370 365 	kLZ4Compression supported: 0
+2026/10/06-18:53:29.260370 365 	kBZip2Compression supported: 0
+2026/10/06-18:53:29.260371 365 	kZlibCompression supported: 0
+2026/10/06-18:53:29.260372 365 	kSnappyCompression supported: 1
+2026/10/06-18:53:29.260374 365 Fast CRC32 supported: Not supported on x86
+2026/10/06-18:53:29.260376 365 DMutex implementation: pthread_mutex_t
+2026/10/06-18:53:29.260379 365 Allocator: Jemalloc
+2026/10/06-18:53:29.272161 365 [WARN] [db/db_impl/db_impl_open.cc:2087] DB::Open() failed: Corruption: CURRENT file corrupted
+2026/10/06-18:53:29.274140 365 [db/db_impl/db_impl.cc:504] Shutdown: canceling all background work
+2026/10/06-18:53:29.275290 365 [db/db_impl/db_impl.cc:711] Shutdown complete

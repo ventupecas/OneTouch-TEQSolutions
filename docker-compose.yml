@@ -12,6 +12,7 @@ services:
       - "5432:5432"
 
   # 2. THE SEMANTIC LAYER (Cube.dev)
+   # 2. THE SEMANTIC LAYER (Cube.dev)
   cube:
     image: cubejs/cube:v0.35
     container_name: analytics_cube
@@ -32,7 +33,9 @@ services:
       CUBEJS_PG_SQL_PORT: 15432
       CUBEJS_SQL_USER: admin_cube
       CUBEJS_SQL_PASSWORD: cubepassword123
-      CUBEJS_BIND_ADDRESS: "0.0.0.0"     # 👈 IMPORTANT: Allows outside connection loops
+      # 🎯 ADD THIS EXACT LINE HERE TO UNBLOCK THE CONNECTIONS:
+      CUBEJS_BIND_ADDRESS: "0.0.0.0"
+     # 👈 IMPORTANT: Allows outside connection loops
     depends_on:
       - postgres
 
