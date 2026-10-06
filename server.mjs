@@ -101,9 +101,10 @@ app.post('/api/query', async (req, res) => {
 
     // 🚀 Send payload directly to the shared network container link
      // 🚀 Send payload directly to the raw machine network point
+        // 🚀 Send query payload directly to the internal cube container service name
     const cubeResponse = await fetchWithRetry(
-      // 🎯 UPDATE THIS STRING: Change http://cube:4000 to http://127.0.0.1:4000
-      process.env.CUBE_API_URL || 'http://127.0.0.1:4000', 
+      // 🎯 VERIFY THIS MATCHES PRECISELY:
+      process.env.CUBE_API_URL || 'http://cube:4000/cubejs-api/v1/load', 
       {
         method: 'POST',
         headers: {
@@ -113,6 +114,7 @@ app.post('/api/query', async (req, res) => {
         body: JSON.stringify({ query: targetCubeQuery }),
       }
     );
+
 
     const contentType = cubeResponse.headers.get('content-type') || '';
     if (contentType.includes('text/html')) {

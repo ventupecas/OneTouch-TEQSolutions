@@ -16,12 +16,14 @@ services:
     image: cubejs/cube:v0.35
     container_name: analytics_cube
     restart: always
-    network_mode: "host"           # 🎯 FORCE HOST MODE HERE
+    ports:
+      - "4000:4000"     # REST API
+      - "15432:15432"   # SQL API
     volumes:
       - .:/cube/conf
     environment:
       CUBEJS_DB_TYPE: postgres
-      CUBEJS_DB_HOST: 127.0.0.1    # Target local machine port route directly
+      CUBEJS_DB_HOST: postgres
       CUBEJS_DB_NAME: analytics_db
       CUBEJS_DB_USER: admin
       CUBEJS_DB_PASS: password123
@@ -30,7 +32,7 @@ services:
       CUBEJS_PG_SQL_PORT: 15432
       CUBEJS_SQL_USER: admin_cube
       CUBEJS_SQL_PASSWORD: cubepassword123
-      CUBEJS_BIND_ADDRESS: "0.0.0.0"
+      CUBEJS_BIND_ADDRESS: "0.0.0.0"     # 👈 IMPORTANT: Allows outside connection loops
     depends_on:
       - postgres
 
@@ -53,15 +55,17 @@ services:
     build: .
     container_name: analytics_node_app
     restart: always
-    network_mode: "host"           # 🎯 KEEPS APPS LINKED TOGETHER
+    ports:
+      - "8000:8000"
     volumes:
       - .:/app
       - /app/node_modules
     environment:
       PORT: 8000
-      CUBE_API_URL: http://127.0.0.1:4000
+      # 🎯 TARGETS CUBE BY SERVICE NAME NATIVELY:
+      CUBE_API_URL: http://cube:4000/cubejs-api/v1/load
       CUBE_API_TOKEN: super_secret_key_change_me_later
-      ANTHROPIC_API_KEY: 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 # 👈 ENSURE YOUR KEY IS HERE
+      ANTHROPIC_API_KEY: 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
     depends_on:
       - cube
 
