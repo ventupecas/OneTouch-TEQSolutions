@@ -22,14 +22,16 @@ async function sendPrompt() {
     // Append standard generic loading sequence notification
     const loadingId = appendMessage('ai-msg', '🤖 Thinking and querying Cube.dev...');
 
-    try {
-        // Fetch stream array data parameters directly from our Node Server Orchestrator
-               // 🎯 FIX THIS LINE: Change the explicit URL to a clean relative path
+       try {
+        // 🎯 FIX THIS LINE: Make it a clean, relative endpoint path
         const response = await fetch('/api/query', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ userPrompt: userPromptText })
         });
+
+        const data = await response.json();
+
 
 
         const data = await response.json();
