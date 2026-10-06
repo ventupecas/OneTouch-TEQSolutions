@@ -61,6 +61,9 @@ services:
     restart: always
     ports:
       - "8000:8000"
+    volumes:
+      - .:/app                        # 👈 ADD THIS EXACT VOLUME MOUNT LINE HERE
+      - /app/node_modules 
     environment:
       PORT: 8000
       CUBE_API_URL: http://cube:4000/cubejs-api/v1/load
