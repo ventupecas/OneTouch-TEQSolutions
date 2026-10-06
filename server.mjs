@@ -100,8 +100,10 @@ app.post('/api/query', async (req, res) => {
     console.log("🤖 Claude Compiled Query:", JSON.stringify(targetCubeQuery, null, 2));
 
     // 🚀 Send payload directly to the shared network container link
+     // 🚀 Send payload directly to the raw machine network point
     const cubeResponse = await fetchWithRetry(
-      process.env.CUBE_API_URL || 'http://cube:4000/cubejs-api/v1/load', 
+      // 🎯 UPDATE THIS STRING: Change http://cube:4000 to http://127.0.0.1:4000
+      process.env.CUBE_API_URL || 'http://127.0.0.1:4000', 
       {
         method: 'POST',
         headers: {
