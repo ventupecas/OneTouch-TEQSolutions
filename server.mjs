@@ -70,7 +70,7 @@ app.post('/api/query', async (req, res) => {
 
        // 🛡️ Ensure the backup parameter bypasses IPv6 lookups as well
      // 🛡️ Ensure the default backup path targets port 4000, not 15432
-     const cubeResponse = await fetch(process.env.CUBE_API_URL || 'http://docker.internal', {
+     const cubeResponse = await fetch(process.env.CUBE_API_URL || 'http://localhost:4000/v1/load', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
