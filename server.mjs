@@ -8,9 +8,11 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 8000;
 
-app.use(cors());
+// 🎯 VERIFY THIS LINE: Make sure app.use(cors()) sits at the very top of your server.mjs
+app.use(cors({ origin: '*' })); 
 app.use(express.json());
 app.use(express.static('public'));
+
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
