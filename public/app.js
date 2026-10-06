@@ -22,8 +22,8 @@ async function sendPrompt() {
     // Append standard generic loading sequence notification
     const loadingId = appendMessage('ai-msg', '🤖 Thinking and querying Cube.dev...');
 
-           try {
-        // 🎯 HARMONIZED FIX: Force relative tracking so it leverages the master Docker port gateway natively
+               try {
+        // 🎯 FIX: Explicitly relative route path
         const response = await fetch('/api/query', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -31,6 +31,7 @@ async function sendPrompt() {
         });
 
         const data = await response.json();
+
 
         document.getElementById(loadingId).remove(); // Clear loading block
 
