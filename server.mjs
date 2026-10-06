@@ -87,17 +87,17 @@ app.post('/api/query', async (req, res) => {
 
     // Sanitize and isolate the JSON data segment
     const sanitizedJSON = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
-       const targetCubeQuery = JSON.parse(sanitizedJSON);
+        const targetCubeQuery = JSON.parse(sanitizedJSON);
 
-    // 🛡️ SAFETY CHECK: If Claude returned a custom error object, intercept it
-    if (targetCubeQuery.error || !targetCubeQuery.measures) {
+    // 🛡️ DYNAMIC UPDATE: Allow queries that return dimensions/lists of records too!
+    if (targetCubeQuery.error || (!targetCubeQuery.measures && !targetCubeQuery.dimensions)) {
       console.warn("⚠️ Claude generated an invalid query payload framework:", targetCubeQuery);
       return res.status(400).json({ 
-        error: `The AI assistant couldn't map that specific question to your active Cube schema columns. Try asking something like: 'Show me total revenue by status'.` 
+        error: `The AI assistant couldn't map that specific question to your active Cube schema columns.` 
       });
     }
 
-        console.log("🤖 Claude Compiled Query Payload:", targetCubeQuery);
+    console.log("🤖 Claude Compiled Query Payload:", targetCubeQuery);
 
     // 1. FIRST: Define and execute the fetch command to create cubeResponse
     const cubeResponse = await fetch(process.env.CUBE_API_URL || 'http://localhost:4000/cubejs-api/v1/load', {
