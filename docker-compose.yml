@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # 1. THE DATA LAYER (PostgreSQL)
   postgres:
@@ -15,6 +13,8 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./csv_data:/tmp/my_csv_files
+    networks:
+      - analytics_network
 
   # 2. THE SEMANTIC LAYER (Cube.dev)
   cube:
@@ -37,9 +37,11 @@ services:
       CUBEJS_PG_SQL_PORT: 15432
       CUBEJS_SQL_USER: admin_cube
       CUBEJS_SQL_PASSWORD: cubepassword123
-      CUBEJS_BIND_ADDRESS: "0.0.0.0"
+      CUBEJS_BIND_ADDRESS: "0.0.0.0"      # Force Cube to listen to outer requests
     depends_on:
       - postgres
+    networks:
+      - analytics_network
 
   # 3. THE VISUALIZATION LAYER (Metabase)
   metabase:
@@ -54,6 +56,8 @@ services:
       - mbdata:/metabase-data
     depends_on:
       - cube
+    networks:
+      - analytics_network
 
   # 4. THE NODE APPLICATION ORCHESTRATOR LAYER
   app:
@@ -63,18 +67,24 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - .:/app                        # 👈 ADD THIS EXACT VOLUME MOUNT LINE HERE
-      - /app/node_modules 
+      - .:/app
+      - /app/node_modules
     environment:
       PORT: 8000
+      # 🎯 VERIFY THIS MATCHES PRECISELY:
       CUBE_API_URL: http://cube:4000/cubejs-api/v1/load
       CUBE_API_TOKEN: super_secret_key_change_me_later
-      ANTHROPIC_API_KEY: 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  # 👈 PASTE YOUR KEY HERE
+      ANTHROPIC_API_KEY: sk-ant-your_actual_claude_api_key_here
     depends_on:
       - cube
+    networks:
+      - analytics_network
+# Dedicated high-speed network bridge definition
+networks:
+  analytics_network:
+    driver: bridge
 
-# Persistent storage section kept completely separated at the root level
+# Persistent storage maps
 volumes:
   pgdata:
   mbdata:
-
