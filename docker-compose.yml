@@ -65,7 +65,7 @@ services:
       PORT: 8000
       CUBE_API_URL: http://docker.internal
       CUBE_API_TOKEN: super_secret_key_change_me_later
-      ANTHROPIC_API_KEY: sk-ant-your_actual_claude_api_key_here  # 👈 PASTE YOUR KEY HERE
+      ANTHROPIC_API_KEY: "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" # 👈 PASTE YOUR KEY HERE
     depends_on:
       - cube
 
