@@ -1,5 +1,13 @@
 # 🔑 SENSITIVE ENVIRONMENT VARIABLES & SECRETS
 .env
+.env.*
+!.env.example
+
+# 🧊 Cube Store local data & scratch diagnostics
+.cubestore/
+diag*.txt
+curl.txt
+files.txt
 
 # 📦 DEPENDENCY FOLDERS (Can be re-installed using 'npm install')
 node_modules/

@@ -12,6 +12,7 @@ async function sendPrompt() {
     const inputField = document.getElementById('user-prompt');
     const chatLog = document.getElementById('chat-log');
     const userPromptText = inputField.value.trim();
+    console.log("User Prompt Text:", userPromptText);
 
     if (!userPromptText) return;
 
@@ -30,7 +31,7 @@ async function sendPrompt() {
             body: JSON.stringify({ userPrompt: userPromptText })
         });
 
-        console.log("THIS IS THE RESPONSE FROM THE SERVER:", response);
+        console.log("THIS IS THE RESPONSE FROM THE SERVER:", response.status, response.statusText);
 
         const data = await response.json();
 

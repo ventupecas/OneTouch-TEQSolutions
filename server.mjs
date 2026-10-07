@@ -12,7 +12,17 @@ app.use(cors({ origin: '*' }));
 app.use(express.json());
 app.use(express.static('public'));
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const anthropicKey = (process.env.ANTHROPIC_API_KEY || '').trim();
+if (!anthropicKey || anthropicKey.startsWith('REPLACE_WITH')) {
+  console.error('❌ ANTHROPIC_API_KEY is missing or still the placeholder. Set a real key in .env, then run: docker compose up -d --force-recreate app');
+}
+
+const anthropicWorkspaceId = (process.env.ANTHROPIC_WORKSPACE_ID || '').trim();
+
+const anthropic = new Anthropic({
+  apiKey: anthropicKey,
+  defaultHeaders: anthropicWorkspaceId ? { 'anthropic-workspace-id': anthropicWorkspaceId } : undefined,
+});
 
 // 🎯 COMPREHENSIVE PRODUCTION ITSM DATA LAYER CONTEXT
 const CUBE_SCHEMA_CONTEXT = `

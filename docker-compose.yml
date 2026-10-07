@@ -10,6 +10,12 @@ services:
       POSTGRES_DB: analytics_db
     ports:
       - "5432:5432"
+    volumes:
+      # Persist data so recreating the container doesn't wipe the tables
+      - pgdata:/var/lib/postgresql/data
+      # On first start (empty data dir) Postgres runs this script to create + load the tables
+      - ./load_csv.sql:/docker-entrypoint-initdb.d/load_csv.sql:ro
+      - ./csv_data:/tmp/my_csv_files:ro
 
   # 2. THE SEMANTIC LAYER (Cube.dev)
    # 2. THE SEMANTIC LAYER (Cube.dev)
@@ -22,6 +28,8 @@ services:
       - "15432:15432"   # SQL API
     volumes:
       - .:/cube/conf
+      # Keep Cube Store's RocksDB files out of the OneDrive-synced folder (prevents corruption)
+      - cubestore_data:/cube/conf/.cubestore
     environment:
       CUBEJS_DB_TYPE: postgres
       CUBEJS_DB_HOST: postgres
@@ -35,6 +43,9 @@ services:
       CUBEJS_SQL_PASSWORD: cubepassword123
       # 🎯 ADD THIS EXACT LINE HERE TO UNBLOCK THE CONNECTIONS:
       CUBEJS_BIND_ADDRESS: "0.0.0.0"
+      # Force Cube onto 4000 (the mounted .env must not hijack the port)
+      CUBEJS_PORT: "4000"
+      PORT: "4000"
      # 👈 IMPORTANT: Allows outside connection loops
     depends_on:
       - postgres
@@ -68,9 +79,13 @@ services:
       # 🎯 TARGETS CUBE BY SERVICE NAME NATIVELY:
       CUBE_API_URL: http://cube:4000/cubejs-api/v1/load
       CUBE_API_TOKEN: super_secret_key_change_me_later
-      ANTHROPIC_API_KEY: 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
+      # Secret comes from the git-ignored .env file (never hard-code it here)
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      ANTHROPIC_WORKSPACE_ID: ${ANTHROPIC_WORKSPACE_ID:-}
     depends_on:
       - cube
 
 volumes:
+  pgdata:
   mbdata:
+  cubestore_data:
