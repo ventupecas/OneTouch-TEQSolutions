@@ -162,6 +162,24 @@ cubes:
         sql: outage
         type: string
 
+      # --- derived date buckets (added for trend / per-period questions) ---
+      - name: created_day
+        sql: "LEFT({CUBE}.created, 10)"
+        type: string
+
+      - name: created_month
+        sql: "LEFT({CUBE}.created, 7)"
+        type: string
+
+      - name: created_week
+        sql: "TO_CHAR(NULLIF({CUBE}.created, '')::timestamp, 'IYYY-\"W\"IW')"
+        type: string
+
+      - name: planned_start_month
+        sql: "LEFT({CUBE}.planned_start_date, 7)"
+        type: string
+
+
     measures:
       - name: count
         type: count

@@ -43,13 +43,30 @@ async function sendPrompt() {
             return;
         }
 
-        // Parse result data arrays natively inside browser canvas logs
-        let finalOutputString = `<strong>Here is what I found:</strong><br><br>`;
-        
-        if (data.results && data.results.length > 0) {
-            finalOutputString += `<pre>${JSON.stringify(data.results, null, 2)}</pre>`;
+        // Clarification or unsupported question: show the explanation only
+        if (data.intent === 'clarify' || data.intent === 'unsupported') {
+            appendMessage('ai-msg', `🙋 ${escapeHtml(data.message || 'I need a little more detail to run that.')}`);
+            return;
+        }
+
+        // Normal query: restate what was fetched, list assumptions, then the rows
+        let finalOutputString = '';
+        if (data.message) {
+            finalOutputString += `<strong>${escapeHtml(data.message)}</strong><br>`;
         } else {
-            finalOutputString += `No exact matching transaction records were found for that selection window inside the database.`;
+            finalOutputString += `<strong>Here is what I found:</strong><br>`;
+        }
+        if (data.assumptions && data.assumptions.length > 0) {
+            finalOutputString += `<em>Assumptions:</em><ul>` +
+                data.assumptions.map(a => `<li>${escapeHtml(a)}</li>`).join('') +
+                `</ul>`;
+        }
+        finalOutputString += `<br>`;
+
+        if (data.results && data.results.length > 0) {
+            finalOutputString += `<pre>${escapeHtml(JSON.stringify(data.results, null, 2))}</pre>`;
+        } else {
+            finalOutputString += `No matching records were found for that question.`;
         }
 
         appendMessage('ai-msg', finalOutputString);
@@ -59,6 +76,15 @@ async function sendPrompt() {
         appendMessage('ai-msg', `❌ Could not talk to backend server orchestration framework.`);
         console.error(err);
     }
+}
+
+// Escape text that came from the server or the model before inserting as HTML
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
 }
 
 // Element Node Builder Helper

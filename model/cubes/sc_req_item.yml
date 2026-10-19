@@ -86,6 +86,24 @@ cubes:
         sql: fulfilled_time
         type: string
 
+      # --- derived date buckets (added for trend / per-period questions) ---
+      - name: opened_day
+        sql: "LEFT({CUBE}.opened, 10)"
+        type: string
+
+      - name: opened_month
+        sql: "LEFT({CUBE}.opened, 7)"
+        type: string
+
+      - name: opened_week
+        sql: "TO_CHAR(NULLIF({CUBE}.opened, '')::timestamp, 'IYYY-\"W\"IW')"
+        type: string
+
+      - name: closed_month
+        sql: "LEFT({CUBE}.closed, 7)"
+        type: string
+
+
     measures:
       - name: count
         type: count
