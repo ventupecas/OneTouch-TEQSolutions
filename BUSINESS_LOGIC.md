@@ -6,10 +6,11 @@ This document explains how the tool turns an IT person's question into a Cube.de
 
 ```
 user text ──► Claude (system prompt = this business logic, JSON schema enforced)
-          ──► { intent, entity, query, message, assumptions }
-          ──► normalizeAndValidate()  (member whitelist, one-cube rule, value spelling, limits)
-          ──► POST /cubejs-api/v1/load
-          ──► rows + the restated question + the assumptions, back to the chat UI
+          ──► { intent, queries: [{ entity, query }, ...], message, assumptions }
+          ──► normalizeAndValidate()  (member whitelist, one-cube-per-query rule, value spelling, limits, merge plan)
+          ──► POST /cubejs-api/v1/load once per ticket type, in parallel
+          ──► combineResults() when the per-type counts should be one table
+          ──► tables + the restated question + the assumptions, back to the chat UI
 ```
 
 Three intents can come back:
@@ -33,21 +34,49 @@ The `assumptions` list is always shown to the user. It is how the tool stays hon
 | `ritm_approvals` | approval records for RITMs | manager / software / security sign-off | 5,379 | `created` |
 | `sc_task` | SCTASK | the fulfillment work items behind a RITM | 16,321 | `created` |
 
-Relationships are by ticket number only (RITM → REQ, SCTASK → RITM, approvals → parent). The cubes are **not joined**, so one question must resolve to one table. The validator rejects mixed-cube queries.
+Relationships are by ticket number only (RITM → REQ, SCTASK → RITM, approvals → parent). The cubes are **not joined**, so each sub-query stays inside one table and the validator rejects any sub-query that mixes tables. Questions about several ticket types become several sub-queries whose results are shown side by side.
 
 Export coverage is roughly 2026-06-01 to 2026-09-01 (incidents from 2026-07-05).
 
 ## 3. Entity resolution (which table?)
 
+### "Ticket" means any ticket type
+
+A ticket is any single event logged in ServiceNow. The four ticket types are incidents, changes, requested items, and catalog tasks. Approval records are sign-offs attached to a change or request, so they only count when the user asks about approvals.
+
+Generic words fan out to every ticket type: ticket, tix, case, record, event, everything, anything, workload, volume, "what came in". A question with no type word at all is treated the same way.
+
+The set is then narrowed to the types where every requested filter or grouping exists. The assumptions say which types were dropped and why.
+
+| the question involves | ticket types that have it |
+|---|---|
+| priority, impact, urgency, category, P1–P4, how it was reported | incidents only |
+| change type, risk, environment, outage, planned dates | changes only |
+| catalog item | requests, tasks |
+| team / group / queue | incidents and tasks (assigned team), changes (owning team). Requests have no team column. |
+| location | incidents, requests |
+| a person it is assigned to | incidents, tasks |
+| status, date, summary, ticket number | all four, each in its own terms |
+
+Each type gets the same filter in its own vocabulary. For example, "open" uses each type's own open states. "Last month" uses the opened date for requests and the created date for the others.
+
+How the results are shown:
+
+- **Counts** ("how many tickets", "tickets per month", "top teams by tickets") merge into one table with a column per ticket type and a total. For "top N", the server ranks on the merged totals, so the top 10 is a true combined top 10.
+- **Lists** ("show me the Wintel team's open stuff") show one table per ticket type, 25 rows each by default.
+- A request and the tasks created to fulfil it count as separate tickets, and the assumptions say so.
+
+### When one type is named
+
 | user says | cube |
 |---|---|
-| ticket, tix, issue, case, outage, alert, P1/P2, sev1, "went down" | `incident` |
+| incident, INC, issue, outage, alert, P1/P2, sev1, "went down" | `incident` |
 | change, CHG, CR, RFC, CAB, deploy, release, patch, reboot, maintenance window | `change_request` |
 | request, RITM, REQ, catalog, ordered, onboarding, termination, software request, new laptop | `sc_req_item` |
 | task, SCTASK, fulfillment task, work item | `sc_task` |
 | "who approved", "which approval group", "sitting with the security approvers" | `change_approvals` / `ritm_approvals` |
 | a bare ticket number | by prefix: INC, CHG, RITM, REQ, SCTASK |
-| nothing recognizable | `incident`, stated as an assumption |
+| nothing recognizable | all four ticket types, as above |
 
 "Changes pending approval" uses `change_request.approval`, not the approvals table. The approvals tables are only for questions about approvers.
 
@@ -126,7 +155,9 @@ Assume and state it whenever a sensible default exists. Ask (`clarify`) only whe
 
 `normalizeAndValidate()` in [business_logic.mjs](business_logic.mjs) runs on every response before Cube sees it:
 
-- every member must exist in the catalog, and all members must belong to one cube
+- every member must exist in the catalog, and each sub-query's members must belong to its own cube
+- each ticket type may appear at most once
+- several count sub-queries, each grouped by at most one column, are merged. The server fetches all groups, then sorts and limits the merged totals.
 - operators are whitelisted (`equals`, `notEquals`, `contains`, `notContains`, `startsWith`, `endsWith`, `set`, `notSet`, `gt`, `gte`, `lt`, `lte`)
 - `equals` / `notEquals` values are snapped to the exact spelling in the data
 - `order` may only reference selected members; list queries default to 50 rows; everything is capped at 500

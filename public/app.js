@@ -52,7 +52,18 @@ async function sendPrompt() {
         // Normal query: restate what was fetched, show the rows as a table,
         // and tuck the assumptions into a collapsible note underneath
         let html = `<div class="result-title">${escapeHtml(data.message || 'Here is what I found:')}</div>`;
-        html += renderResults(data.results || [], data.entity);
+        if (data.combined) {
+            // Counts across several ticket types: one table, one column per type
+            html += renderCombined(data.combined);
+        } else if (data.sections && data.sections.length > 1) {
+            // Lists across several ticket types: one titled table per type
+            html += data.sections.map(s =>
+                `<div class="section-title">${escapeHtml(capitalize(nounFor(s.entity, 2)))}</div>` +
+                renderResults(s.rows, s.entity)
+            ).join('');
+        } else {
+            html += renderResults(data.results || [], data.entity);
+        }
 
         if (data.assumptions && data.assumptions.length > 0) {
             html += `<details class="assumptions"><summary>How I read your question</summary><ul>` +
@@ -247,6 +258,47 @@ function renderResults(rows, entity) {
     return `<div class="result-caption">${caption}</div>` +
         `<div class="table-wrap"><table class="result-table"><thead><tr>${head}</tr></thead>` +
         `<tbody>${body}</tbody></table></div>`;
+}
+
+function nounFor(entity, n) {
+    const [singular, plural] = ENTITY_NOUNS[entity] || ['record', 'records'];
+    return n === 1 ? singular : plural;
+}
+
+function capitalize(s) {
+    return s ? s[0].toUpperCase() + s.slice(1) : s;
+}
+
+// Counts merged across ticket types (see combineResults in business_logic.mjs)
+function renderCombined(combined) {
+    const { dimension, entities, rows, totals } = combined;
+    if (!rows.length) {
+        return `<p class="result-empty">No matching tickets were found for that question.</p>`;
+    }
+
+    // No grouping: one row per ticket type, then the grand total
+    if (!dimension) {
+        const body = entities.map(e =>
+            `<tr><td>${escapeHtml(capitalize(nounFor(e, 2)))}</td><td class="num">${(totals.counts[e] || 0).toLocaleString()}</td></tr>`
+        ).join('');
+        return `<div class="result-big">${totals.total.toLocaleString()} <span>${totals.total === 1 ? 'ticket' : 'tickets'}</span></div>` +
+            `<div class="table-wrap"><table class="result-table"><thead><tr><th>Ticket Type</th><th class="num">Number of Tickets</th></tr></thead>` +
+            `<tbody>${body}</tbody><tfoot><tr><td>Total</td><td class="num">${totals.total.toLocaleString()}</td></tr></tfoot></table></div>`;
+    }
+
+    // Grouped: the grouping column, one column per ticket type, and a total
+    const typeHeads = entities.map(e => `<th class="num">${escapeHtml(capitalize(nounFor(e, 2)))}</th>`).join('');
+    const head = `<th>${escapeHtml(columnLabel(dimension))}</th>${typeHeads}<th class="num">Total</th>`;
+    const cell = n => `<td class="num">${n ? n.toLocaleString() : '—'}</td>`;
+    const body = rows.map(r =>
+        `<tr><td>${escapeHtml(formatValue(dimension, r.key))}</td>${entities.map(e => cell(r.counts[e])).join('')}` +
+        `<td class="num total">${r.total.toLocaleString()}</td></tr>`
+    ).join('');
+    const foot = `<tr><td>Total</td>${entities.map(e => cell(totals.counts[e])).join('')}<td class="num">${totals.total.toLocaleString()}</td></tr>`;
+
+    return `<div class="result-caption">${rows.length.toLocaleString()} ${rows.length === 1 ? 'row' : 'rows'}</div>` +
+        `<div class="table-wrap"><table class="result-table"><thead><tr>${head}</tr></thead>` +
+        `<tbody>${body}</tbody><tfoot>${foot}</tfoot></table></div>`;
 }
 
 // Element Node Builder Helper
