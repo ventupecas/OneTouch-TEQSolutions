@@ -71,6 +71,16 @@ async function sendPrompt() {
                 `</ul></details>`;
         }
 
+        // Offer the same tables as a download in any of the export formats
+        const tables = buildExportTables(data);
+        if (tables.length) {
+            html += downloadBarHtml(registerExport({
+                title: data.message || 'One Touch results',
+                question: userPromptText,
+                tables,
+            }));
+        }
+
         appendMessage('ai-msg wide', html);
 
     } catch (err) {
@@ -299,6 +309,165 @@ function renderCombined(combined) {
     return `<div class="result-caption">${rows.length.toLocaleString()} ${rows.length === 1 ? 'row' : 'rows'}</div>` +
         `<div class="table-wrap"><table class="result-table"><thead><tr>${head}</tr></thead>` +
         `<tbody>${body}</tbody><tfoot>${foot}</tfoot></table></div>`;
+}
+
+// =====================================================================
+// DOWNLOADS: the tables above -> PDF, Word, Excel, CSV, text, RTF or an archive
+// =====================================================================
+
+// Download payloads waiting for a click, keyed by the id of their download bar
+const exportPayloads = new Map();
+let exportCounter = 0;
+
+function registerExport(payload) {
+    const id = 'export-' + (++exportCounter);
+    exportPayloads.set(id, payload);
+    return id;
+}
+
+// Values as the user reads them, except counts stay real numbers so
+// spreadsheets can sum them, and empty cells stay empty instead of "—"
+function exportValue(member, raw) {
+    if (raw === null || raw === undefined || raw === '') return '';
+    if (splitMember(member).column === 'count') return Number(raw);
+    return formatValue(member, raw);
+}
+
+// One result table in the export shape (mirrors renderResults, without truncation)
+function exportTableFromRows(rows, title) {
+    if (!rows || !rows.length) return null;
+    const columns = Object.keys(rows[0]);
+
+    // A single record is shown as a field/value card, so export it that way too
+    if (rows.length === 1 && columns.length > 4) {
+        return {
+            title,
+            columns: [{ label: 'Field' }, { label: 'Value' }],
+            rows: columns.map(c => [columnLabel(c), String(exportValue(c, rows[0][c]))]),
+            footer: null,
+        };
+    }
+    return {
+        title,
+        columns: columns.map(c => ({ label: columnLabel(c), num: c.endsWith('.count') })),
+        rows: rows.map(r => columns.map(c => exportValue(c, r[c]))),
+        footer: null,
+    };
+}
+
+// Mirrors renderCombined: one column per ticket type plus a total
+function exportTableFromCombined(combined) {
+    const { dimension, entities, rows, totals } = combined;
+    if (!rows.length) return null;
+    const typeLabel = e => capitalize(nounFor(e, 2));
+
+    if (!dimension) {
+        return {
+            title: null,
+            columns: [{ label: 'Ticket Type' }, { label: 'Number of Tickets', num: true }],
+            rows: entities.map(e => [typeLabel(e), totals.counts[e] || 0]),
+            footer: ['Total', totals.total],
+        };
+    }
+    return {
+        title: null,
+        columns: [
+            { label: columnLabel(dimension) },
+            ...entities.map(e => ({ label: typeLabel(e), num: true })),
+            { label: 'Total', num: true },
+        ],
+        rows: rows.map(r => [formatValue(dimension, r.key), ...entities.map(e => r.counts[e] || 0), r.total]),
+        footer: ['Total', ...entities.map(e => totals.counts[e] || 0), totals.total],
+    };
+}
+
+function buildExportTables(data) {
+    let tables;
+    if (data.combined) {
+        tables = [exportTableFromCombined(data.combined)];
+    } else if (data.sections && data.sections.length > 1) {
+        tables = data.sections.map(s => exportTableFromRows(s.rows, capitalize(nounFor(s.entity, 2))));
+    } else {
+        tables = [exportTableFromRows(data.results || [], null)];
+    }
+    return tables.filter(Boolean);
+}
+
+const EXPORT_OPTIONS = [
+    ['Documents', [
+        ['xlsx', 'Excel (.xlsx)'],
+        ['csv', 'CSV (.csv)'],
+        ['pdf', 'PDF (.pdf)'],
+        ['docx', 'Word (.docx)'],
+        ['rtf', 'Rich Text (.rtf)'],
+        ['txt', 'Plain Text (.txt)'],
+    ]],
+    ['Archives (all formats above in one file)', [
+        ['zip', 'ZIP (.zip)'],
+        ['7z', '7-Zip (.7z)'],
+    ]],
+];
+
+function downloadBarHtml(exportId) {
+    const options = EXPORT_OPTIONS.map(([group, items]) =>
+        `<optgroup label="${escapeHtml(group)}">` +
+        items.map(([value, label]) => `<option value="${value}">${escapeHtml(label)}</option>`).join('') +
+        `</optgroup>`
+    ).join('');
+    return `<div class="download-bar" id="${exportId}">` +
+        `<label for="${exportId}-format">Download as</label>` +
+        `<select id="${exportId}-format">${options}</select>` +
+        `<button type="button" onclick="downloadExport('${exportId}')">⬇ Download</button>` +
+        `<span class="download-status" role="status"></span>` +
+        `</div>`;
+}
+
+async function downloadExport(exportId) {
+    const payload = exportPayloads.get(exportId);
+    const bar = document.getElementById(exportId);
+    if (!payload || !bar) return;
+
+    const format = bar.querySelector('select').value;
+    const button = bar.querySelector('button');
+    const status = bar.querySelector('.download-status');
+    button.disabled = true;
+    status.className = 'download-status';
+    status.textContent = `Preparing ${format.toUpperCase()} file…`;
+
+    try {
+        const response = await fetch('http://localhost:8000/api/export', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...payload, format }),
+        });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.error || `The server answered ${response.status}.`);
+        }
+
+        const blob = await response.blob();
+        const disposition = response.headers.get('Content-Disposition') || '';
+        const match = disposition.match(/filename="?([^";]+)"?/);
+        const fileName = match ? match[1] : `one-touch-export.${format}`;
+
+        // Hand the file to the browser through a temporary link
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+        status.textContent = `Downloaded ${fileName}`;
+    } catch (err) {
+        status.className = 'download-status error';
+        status.textContent = `❌ ${err.message}`;
+        console.error(err);
+    } finally {
+        button.disabled = false;
+    }
 }
 
 // Element Node Builder Helper

@@ -9,13 +9,17 @@ import {
   combineResults,
   OUTPUT_SCHEMA,
 } from './business_logic.mjs';
+import { buildExport, validateExport, ExportUnavailableError } from './export.mjs';
 
 dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 8000;
 
-app.use(cors({ origin: '*' }));
+// Content-Disposition is exposed so the browser can read the download's file name
+app.use(cors({ origin: '*', exposedHeaders: ['Content-Disposition'] }));
+// Exports carry whole result tables back up, so that route gets a bigger limit
+app.use('/api/export', express.json({ limit: '25mb' }));
 app.use(express.json());
 app.use(express.static('public'));
 
@@ -174,6 +178,26 @@ app.post('/api/query', async (req, res) => {
     }
     console.error('📋 Execution Failure Context:', error);
     res.status(500).json({ error: `Server pipeline failed: ${error.message}` });
+  }
+});
+
+// The tables shown in the chat -> a downloadable file (see export.mjs)
+app.post('/api/export', async (req, res) => {
+  const problem = validateExport(req.body);
+  if (problem) return res.status(400).json({ error: problem });
+
+  try {
+    const { buffer, fileName, contentType } = await buildExport(req.body);
+    console.log(`📥 Export ${req.body.format}: ${fileName} (${buffer.length.toLocaleString()} bytes)`);
+    res.attachment(fileName);
+    res.type(contentType);
+    res.send(buffer);
+  } catch (error) {
+    if (error instanceof ExportUnavailableError) {
+      return res.status(501).json({ error: error.message });
+    }
+    console.error('📥 Export failed:', error);
+    res.status(500).json({ error: `Could not create the ${req.body.format.toUpperCase()} file: ${error.message}` });
   }
 });
 
