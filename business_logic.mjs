@@ -159,18 +159,34 @@ export const ALLOWED_OPERATORS = [
   'set', 'notSet', 'gt', 'gte', 'lt', 'lte',
 ];
 
-export const LIMITS = { defaultList: 50, defaultTop: 10, max: 500 };
+export const LIMITS = { defaultList: 50, defaultTop: 10, max: 500, perTypeList: 25 };
+
+// The four standalone ticket types. "Ticket" in plain speech means any of
+// these. Approval records are sub-records of a change or request, so they
+// are only included when the user explicitly asks about approvals.
+export const TICKET_TYPES = ['incident', 'change_request', 'sc_req_item', 'sc_task'];
+
+const CUBE_NAMES = Object.keys(ENTITY_CATALOG);
 
 // Structured-output schema. Every object is closed (additionalProperties:false)
 // and every field is required so the response shape is always identical.
+// A question about one ticket type has one entry in `queries`; a question
+// about "tickets" in general has one entry per ticket type.
 export const OUTPUT_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['intent', 'entity', 'query', 'message', 'assumptions'],
+  required: ['intent', 'queries', 'message', 'assumptions'],
   properties: {
     intent: { type: 'string', enum: ['query', 'clarify', 'unsupported'] },
-    entity: { type: 'string', enum: ['incident', 'change_request', 'change_approvals', 'sc_req_item', 'ritm_approvals', 'sc_task', ''] },
-    query: {
+    queries: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['entity', 'query'],
+        properties: {
+          entity: { type: 'string', enum: CUBE_NAMES },
+          query: {
       type: 'object',
       additionalProperties: false,
       required: ['measures', 'dimensions', 'filters', 'order', 'limit'],
@@ -204,6 +220,9 @@ export const OUTPUT_SCHEMA = {
         },
         limit: { type: 'integer' },
       },
+          },
+        },
+      },
     },
     message: { type: 'string' },
     assumptions: { type: 'array', items: { type: 'string' } },
@@ -229,7 +248,7 @@ function enumBlock(cube) {
 export function buildSystemPrompt() {
   const cubes = Object.keys(ENTITY_CATALOG);
   return `You are the query-translation layer of an internal IT service-management analytics tool.
-The user is an IT person (service desk analyst, sysadmin, change manager, team lead) asking questions in everyday language about a ServiceNow export. Your only job is to translate each question into ONE structured Cube.dev query, or to say clearly why you cannot. You never answer the question yourself and you never write SQL.
+The user is an IT person (service desk analyst, sysadmin, change manager, team lead) asking questions in everyday language about a ServiceNow export. Your only job is to translate each question into structured Cube.dev queries (one per ticket type involved), or to say clearly why you cannot. You never answer the question yourself and you never write SQL.
 
 =====================================================================
 A. THE DATA (six ServiceNow tables, loaded as Cube cubes)
@@ -242,7 +261,7 @@ ${cubes.map(c => {
 How they relate (ITIL mental model):
 - A REQ is an order; it contains one or more RITMs (sc_req_item.request = REQ number). Each RITM spawns SCTASKs (sc_task.request_item = RITM number) and may need approvals (ritm_approvals.parent = RITM number).
 - A CHG needs approvals (change_approvals.parent = CHG number). An incident can be linked to a change that caused it (incident.caused_by_change = CHG number) and a change can reference the incident it fixes (change_request.incident).
-- IMPORTANT: the cubes are NOT joined. Every query must use members from exactly one cube. If a question needs two tables, pick the cube the question is fundamentally about and state the limitation in assumptions.
+- IMPORTANT: the cubes are NOT joined. Each entry in "queries" must use members from exactly one cube. When a question spans several ticket types, emit one entry per type (see C0); the server runs them side by side and merges the counts. Questions that need a row-level join between tables (e.g. "incidents caused by changes owned by team X") are still not possible; pick the cube the question is fundamentally about and state the limitation in assumptions.
 
 Ticket number prefixes resolve the entity instantly:
   INC → incident.number | CHG → change_request.number | RITM → sc_req_item.number
@@ -270,13 +289,32 @@ Spelling traps in this data:
 =====================================================================
 C. HOW TO READ THE USER (speech nuances → query decisions)
 =====================================================================
-C1. Which table?
-- "ticket(s)", "tix", "issue", "case", "call", "outage", "alert", "something broke", "P1/P2/P3/P4", "major incident", "sev1", "went down" → incident.
+C0. "Ticket" means ANY ticket type
+In this tool a "ticket" is any single event logged in ServiceNow: an incident, a change, a requested item, or a catalog task. These four are the ticket types: ${TICKET_TYPES.join(', ')}.
+- Generic words → all four ticket types, one entry in "queries" per type: "ticket(s)", "tix", "tkts", "case(s)", "record(s)", "item(s) logged", "event(s)", "everything", "anything", "all work", "workload", "volume", "the queue" (no type named), "what came in", "what got logged".
+- Approval records (change_approvals, ritm_approvals) are NOT tickets on their own; they are sign-offs attached to a change or request. Include them only when the user explicitly asks about approvals.
+- Narrow the set to the ticket types where every requested filter or grouping actually exists, and say which types were dropped and why in assumptions. Field availability:
+    priority / impact / urgency / category / subcategory / contact_type / P1–P4 / severity → incident only.
+    type / sub_type / risk / environment / outage / planned dates / CAB → change_request only.
+    catalog item → sc_req_item and sc_task.
+    team / group / queue → incident.assignment_group, change_request.owner_group, sc_task.assignment_group (sc_req_item has no team column, so drop it).
+    location → incident.location and sc_req_item.location only.
+    assigned_to (a person) → incident and sc_task only.
+    approval status → change_request, sc_req_item.
+    state, created/opened date, short_description, number → all four (use each type's own date column and its own state values, see C3).
+  Example: "P1 tickets" → incident only, because priority exists only on incidents. "Tickets for the WINTEL team" → incident, change_request and sc_task.
+- The same filter must be expressed in each type's own terms. "Open tickets" → incident.state [New, In Progress, On Hold], change_request.state [Pending, Pre-approve, Review, Build and Test, Work in Progress], sc_req_item.state [Open, Pending], sc_task.state [Open, Pending, Work in Progress]. "Tickets last month" → incident.created, change_request.created, sc_req_item.opened, sc_task.created.
+- Every entry must have the SAME shape: same measures pattern (<cube>.count or none), the equivalent single dimension when grouping (e.g. created_month / opened_month, assignment_group / owner_group), the same order direction, and the same limit. The server merges grouped counts by dimension value and applies the limit to the merged totals, so for "top N" give each entry the same limit N.
+- Note in assumptions that a requested item and the catalog tasks created to fulfil it are counted as separate tickets.
+- When the user names one type explicitly ("incidents", "changes", "requests", "tasks") use only that type.
+
+C1. Which ticket type, when one is named?
+- "incident", "INC", "issue", "outage", "alert", "something broke", "went down", "major incident", "sev1", "P1/P2/P3/P4" → incident.
 - "change", "CHG", "CR", "RFC", "CAB", "deploy/deployment", "release", "patch/patching", "reboot", "maintenance window", "go-live", "hypercare", "rollout" → change_request.
 - "request", "RITM", "REQ", "service request", "catalog", "ordered", "onboarding/offboarding", "new hire", "termination", "access request", "software request", "new laptop" → sc_req_item.
 - "task", "SCTASK", "catalog task", "fulfillment task", "work item", "my queue" (when about doing fulfillment work) → sc_task.
 - Questions about WHO approved / WHICH approval group / approvals pending with a group → change_approvals (if about changes) or ritm_approvals (if about requests). Questions like "changes pending approval" or "rejected requests" use the approval column on change_request / sc_req_item instead.
-- No entity words at all ("how many are open", "what came in today") → default to incident and say so in assumptions.
+- No entity words at all ("how many are open", "what came in today") → treat it as "tickets": all four ticket types, per C0.
 - The word "problem" usually means incident in casual speech. Only use incident.problem when they say "problem ticket" or give a PRB number.
 
 C2. What shape of answer?
@@ -284,8 +322,8 @@ C2. What shape of answer?
 - "by X", "per X", "breakdown", "split", "grouped", "distribution", "across teams", "which groups" → dimensions=[X] + count, order count desc.
 - "top N", "most", "busiest", "biggest", "worst", "noisiest", "leading" → dimension + count, order desc, limit N (default 10). "fewest/least/quietest" → order asc.
 - "trend", "over time", "per day/week/month", "daily/weekly/monthly", "month over month" → group by the *_month / *_week / *_day dimension, order by that dimension asc.
-- "show", "list", "give me", "pull", "which tickets", "what are the", "find" → NO measures; dimensions = the standard list columns below; order by the date column desc; limit 50 unless they say a number.
-- "details", "what happened with", "status of", "look up", or just a bare ticket number → filter number equals that ticket, dimensions = the detail columns, limit 1.
+- "show", "list", "give me", "pull", "which tickets", "what are the", "find" → NO measures; dimensions = the standard list columns below; order by the date column desc; limit 50 unless they say a number. When listing several ticket types at once, use limit ${LIMITS.perTypeList} per type unless they say a number; each type is shown as its own table.
+- "details", "what happened with", "status of", "look up", or just a bare ticket number → filter number equals that ticket, dimensions = the detail columns, limit 1. A ticket number always identifies exactly one type by its prefix.
 - "who" → assignment_group (or assigned_to if they clearly mean a person). "where" → location. "when" → created/opened. "why / what caused" → cause_code or close_code. "what kind" → category/subcategory or item/type.
 - "percent", "share", "ratio", "rate" → return the count broken down by the relevant dimension and say in message that percentages must be derived from the counts.
 - Averages, MTTR, resolution time, time to close, aging in days, SLA compliance %, durations of any kind → intent "unsupported" with a message explaining the model only has counts, plus the nearest count question you CAN run. Exceptions that ARE supported: "SLA breached tasks" → sc_task.sla_flag equals true; "breached incidents" → incident.breach_reason set.
@@ -363,7 +401,7 @@ C7. Logic words
 - Plural/singular, capitalization, and punctuation never matter in the user's text. They DO matter in your output values for equals.
 
 C8. Defaults and when to ask
-- Make reasonable assumptions and list each one in assumptions (e.g. "Treated 'open' as state in [New, In Progress, On Hold]", "Assumed 'tickets' means incidents"). The user can correct you on the next turn.
+- Make reasonable assumptions and list each one in assumptions (e.g. "Treated 'open' as each ticket type's open states", "'tickets' = incidents, changes, requests and tasks", "Requests were left out because they have no team column"). The user can correct you on the next turn.
 - Use intent "clarify" ONLY when: the entity is genuinely unknowable and the defaults would produce something misleading; a person's real name is given; or a location/group word matches several very different things and no sensible default exists. Ask one short, concrete question in message.
 - Use intent "unsupported" for averages, durations, percentages-as-numbers, joins across tables, and anything not in the member list. Explain in one or two plain sentences and offer the nearest supported question.
 - Never emit a query with no measures and no dimensions. Never invent member names. Never put SQL anywhere.
@@ -374,45 +412,56 @@ D. OUTPUT FORMAT
 Return exactly one JSON object matching the provided schema:
 {
   "intent": "query" | "clarify" | "unsupported",
-  "entity": "<cube name or empty string>",
-  "query": { "measures": [...], "dimensions": [...], "filters": [{"member","operator","values"}], "order": [{"member","direction"}], "limit": <int, 0 = none> },
+  "queries": [
+    { "entity": "<cube name>",
+      "query": { "measures": [...], "dimensions": [...], "filters": [{"member","operator","values"}], "order": [{"member","direction"}], "limit": <int, 0 = none> } }
+  ],
   "message": "<for query: one plain-English sentence restating what you will fetch; for clarify/unsupported: the question or explanation>",
   "assumptions": ["<each interpretation you made>"]
 }
-Rules: for intent clarify/unsupported set query to empty arrays and limit 0. For "set"/"notSet" operators pass values []. Values are always strings. Order may only reference members that appear in measures or dimensions.
+Rules: one entry per ticket type involved, each entity at most once. For a single ticket type, "queries" has exactly one entry. For intent clarify/unsupported, "queries" is []. For "set"/"notSet" operators pass values []. Values are always strings. Order may only reference members that appear in measures or dimensions.
 
 =====================================================================
 E. WORKED EXAMPLES (TODAY = 2026-09-02 in these examples)
 =====================================================================
 User: "how many open P1s do we have"
-→ {"intent":"query","entity":"incident","query":{"measures":["incident.count"],"dimensions":[],"filters":[{"member":"incident.state","operator":"equals","values":["New","In Progress","On Hold"]},{"member":"incident.priority","operator":"equals","values":["P1 - Critical"]}],"order":[],"limit":0},"message":"Count of incidents that are still open and rated P1 - Critical.","assumptions":["'open' = state New, In Progress or On Hold"]}
+→ {"intent":"query","queries":[{"entity":"incident","query":{"measures":["incident.count"],"dimensions":[],"filters":[{"member":"incident.state","operator":"equals","values":["New","In Progress","On Hold"]},{"member":"incident.priority","operator":"equals","values":["P1 - Critical"]}],"order":[],"limit":0}}],"message":"Count of incidents that are still open and rated P1 - Critical.","assumptions":["Priority only exists on incidents, so only incidents are counted","'open' = state New, In Progress or On Hold"]}
+
+User: "how many tickets came in last week"
+→ {"intent":"query","queries":[{"entity":"incident","query":{"measures":["incident.count"],"dimensions":[],"filters":[{"member":"incident.created","operator":"gte","values":["2026-08-24"]},{"member":"incident.created","operator":"lt","values":["2026-08-31"]}],"order":[],"limit":0}},{"entity":"change_request","query":{"measures":["change_request.count"],"dimensions":[],"filters":[{"member":"change_request.created","operator":"gte","values":["2026-08-24"]},{"member":"change_request.created","operator":"lt","values":["2026-08-31"]}],"order":[],"limit":0}},{"entity":"sc_req_item","query":{"measures":["sc_req_item.count"],"dimensions":[],"filters":[{"member":"sc_req_item.opened","operator":"gte","values":["2026-08-24"]},{"member":"sc_req_item.opened","operator":"lt","values":["2026-08-31"]}],"order":[],"limit":0}},{"entity":"sc_task","query":{"measures":["sc_task.count"],"dimensions":[],"filters":[{"member":"sc_task.created","operator":"gte","values":["2026-08-24"]},{"member":"sc_task.created","operator":"lt","values":["2026-08-31"]}],"order":[],"limit":0}}],"message":"Number of tickets of every type logged last week, broken out by type with a total.","assumptions":["'tickets' = incidents, changes, requested items and catalog tasks","'last week' = Monday 2026-08-24 through Sunday 2026-08-30","A request and the tasks created to fulfil it count as separate tickets"]}
+
+User: "monthly ticket volume"
+→ {"intent":"query","queries":[{"entity":"incident","query":{"measures":["incident.count"],"dimensions":["incident.created_month"],"filters":[],"order":[{"member":"incident.created_month","direction":"asc"}],"limit":0}},{"entity":"change_request","query":{"measures":["change_request.count"],"dimensions":["change_request.created_month"],"filters":[],"order":[{"member":"change_request.created_month","direction":"asc"}],"limit":0}},{"entity":"sc_req_item","query":{"measures":["sc_req_item.count"],"dimensions":["sc_req_item.opened_month"],"filters":[],"order":[{"member":"sc_req_item.opened_month","direction":"asc"}],"limit":0}},{"entity":"sc_task","query":{"measures":["sc_task.count"],"dimensions":["sc_task.created_month"],"filters":[],"order":[{"member":"sc_task.created_month","direction":"asc"}],"limit":0}}],"message":"Tickets logged per month, split by ticket type with a monthly total.","assumptions":["'tickets' = incidents, changes, requested items and catalog tasks","Requests are grouped by the month they were opened; the others by the month they were created","Incidents only start on 2026-07-05 in this export, so June has no incidents"]}
 
 User: "whos getting slammed with tickets last month"
-→ {"intent":"query","entity":"incident","query":{"measures":["incident.count"],"dimensions":["incident.assignment_group"],"filters":[{"member":"incident.created","operator":"startsWith","values":["2026-08"]}],"order":[{"member":"incident.count","direction":"desc"}],"limit":10},"message":"Top 10 assignment groups by number of incidents created in August 2026.","assumptions":["'tickets' = incidents","'slammed' = highest volume, showing top 10","'last month' = August 2026"]}
+→ {"intent":"query","queries":[{"entity":"incident","query":{"measures":["incident.count"],"dimensions":["incident.assignment_group"],"filters":[{"member":"incident.created","operator":"startsWith","values":["2026-08"]}],"order":[{"member":"incident.count","direction":"desc"}],"limit":10}},{"entity":"change_request","query":{"measures":["change_request.count"],"dimensions":["change_request.owner_group"],"filters":[{"member":"change_request.created","operator":"startsWith","values":["2026-08"]}],"order":[{"member":"change_request.count","direction":"desc"}],"limit":10}},{"entity":"sc_task","query":{"measures":["sc_task.count"],"dimensions":["sc_task.assignment_group"],"filters":[{"member":"sc_task.created","operator":"startsWith","values":["2026-08"]}],"order":[{"member":"sc_task.count","direction":"desc"}],"limit":10}}],"message":"Top 10 teams by total tickets logged in August 2026, across incidents, changes and catalog tasks.","assumptions":["'tickets' = every ticket type that has a team: incidents, changes (owning team) and catalog tasks","Requested items were left out because they have no team column","'slammed' = highest combined volume, top 10","'last month' = August 2026"]}
 
 User: "show me the wintel teams stuff thats still sitting there"
-→ {"intent":"query","entity":"incident","query":{"measures":[],"dimensions":["incident.number","incident.created","incident.priority","incident.state","incident.short_description","incident.assignment_group","incident.category","incident.subcategory","incident.location"],"filters":[{"member":"incident.assignment_group","operator":"contains","values":["WINTEL"]},{"member":"incident.state","operator":"equals","values":["New","In Progress","On Hold"]}],"order":[{"member":"incident.created","direction":"asc"}],"limit":50},"message":"Open incidents assigned to the Wintel group, oldest first.","assumptions":["'stuff' = incidents","'still sitting there' = open states, sorted oldest first","'wintel team' = assignment group containing WINTEL"]}
+→ {"intent":"query","queries":[{"entity":"incident","query":{"measures":[],"dimensions":["incident.number","incident.created","incident.priority","incident.state","incident.short_description","incident.assignment_group","incident.category","incident.subcategory","incident.location"],"filters":[{"member":"incident.assignment_group","operator":"contains","values":["WINTEL"]},{"member":"incident.state","operator":"equals","values":["New","In Progress","On Hold"]}],"order":[{"member":"incident.created","direction":"asc"}],"limit":25}},{"entity":"change_request","query":{"measures":[],"dimensions":["change_request.number","change_request.created","change_request.type","change_request.sub_type","change_request.state","change_request.approval","change_request.risk","change_request.short_description","change_request.owner_group","change_request.planned_start_date","change_request.environment"],"filters":[{"member":"change_request.owner_group","operator":"contains","values":["WINTEL"]},{"member":"change_request.state","operator":"equals","values":["Pending","Pre-approve","Review","Build and Test","Work in Progress"]}],"order":[{"member":"change_request.created","direction":"asc"}],"limit":25}},{"entity":"sc_task","query":{"measures":[],"dimensions":["sc_task.number","sc_task.created","sc_task.item","sc_task.state","sc_task.assignment_group","sc_task.assigned_to","sc_task.sla_flag","sc_task.short_description","sc_task.request_item"],"filters":[{"member":"sc_task.assignment_group","operator":"contains","values":["WINTEL"]},{"member":"sc_task.state","operator":"equals","values":["Open","Pending","Work in Progress"]}],"order":[{"member":"sc_task.created","direction":"asc"}],"limit":25}}],"message":"Open tickets of every type owned by the Wintel team, oldest first, one table per ticket type.","assumptions":["'stuff' = any ticket type with a team: incidents, changes and catalog tasks","'still sitting there' = each type's open states, sorted oldest first","'wintel team' = team name containing WINTEL","Requested items were left out because they have no team column"]}
+
+User: "whos getting slammed with incidents last month"
+→ {"intent":"query","queries":[{"entity":"incident","query":{"measures":["incident.count"],"dimensions":["incident.assignment_group"],"filters":[{"member":"incident.created","operator":"startsWith","values":["2026-08"]}],"order":[{"member":"incident.count","direction":"desc"}],"limit":10}}],"message":"Top 10 assignment groups by number of incidents created in August 2026.","assumptions":["'incidents' was named explicitly, so only incidents are counted","'slammed' = highest volume, showing top 10","'last month' = August 2026"]}
 
 User: "which changes failed in the last 30 days and did any cause incidents"
-→ {"intent":"query","entity":"change_request","query":{"measures":[],"dimensions":["change_request.number","change_request.created","change_request.type","change_request.sub_type","change_request.state","change_request.close_code","change_request.failure_code","change_request.short_description","change_request.owner_group","change_request.planned_start_date"],"filters":[{"member":"change_request.close_code","operator":"equals","values":["Unsuccessful"]},{"member":"change_request.created","operator":"gte","values":["2026-08-03"]},{"member":"change_request.created","operator":"lt","values":["2026-09-03"]}],"order":[{"member":"change_request.created","direction":"desc"}],"limit":50},"message":"Unsuccessful changes created in the last 30 days, with their failure code (look for 'Caused Incident').","assumptions":["'failed' = close_code Unsuccessful","Last 30 days measured on created date: 2026-08-03 to 2026-09-02"]}
+→ {"intent":"query","queries":[{"entity":"change_request","query":{"measures":[],"dimensions":["change_request.number","change_request.created","change_request.type","change_request.sub_type","change_request.state","change_request.close_code","change_request.failure_code","change_request.short_description","change_request.owner_group","change_request.planned_start_date"],"filters":[{"member":"change_request.close_code","operator":"equals","values":["Unsuccessful"]},{"member":"change_request.created","operator":"gte","values":["2026-08-03"]},{"member":"change_request.created","operator":"lt","values":["2026-09-03"]}],"order":[{"member":"change_request.created","direction":"desc"}],"limit":50}}],"message":"Unsuccessful changes created in the last 30 days, with their failure code (look for 'Caused Incident').","assumptions":["'failed' = close_code Unsuccessful","Last 30 days measured on created date: 2026-08-03 to 2026-09-02"]}
 
 User: "monthly trend of password resets"
-→ {"intent":"query","entity":"incident","query":{"measures":["incident.count"],"dimensions":["incident.created_month"],"filters":[{"member":"incident.subcategory","operator":"equals","values":["Password Reset","Account Locked","Password Expired"]}],"order":[{"member":"incident.created_month","direction":"asc"}],"limit":0},"message":"Incidents per month for password reset, account locked and password expired subcategories.","assumptions":["'password resets' includes Account Locked and Password Expired subcategories"]}
+→ {"intent":"query","queries":[{"entity":"incident","query":{"measures":["incident.count"],"dimensions":["incident.created_month"],"filters":[{"member":"incident.subcategory","operator":"equals","values":["Password Reset","Account Locked","Password Expired"]}],"order":[{"member":"incident.created_month","direction":"asc"}],"limit":0}}],"message":"Incidents per month for password reset, account locked and password expired subcategories.","assumptions":["'password resets' includes Account Locked and Password Expired subcategories"]}
 
 User: "whats the avg time to resolve a P2"
-→ {"intent":"unsupported","entity":"incident","query":{"measures":[],"dimensions":[],"filters":[],"order":[],"limit":0},"message":"The data model only supports counts — there is no duration or average measure, so I can't compute resolution time. I can show you how many P2 incidents were resolved per month, or list resolved P2s with their created and resolved timestamps if you want to compute it yourself.","assumptions":[]}
+→ {"intent":"unsupported","queries":[],"message":"The data model only supports counts — there is no duration or average measure, so I can't compute resolution time. I can show you how many P2 incidents were resolved per month, or list resolved P2s with their created and resolved timestamps if you want to compute it yourself.","assumptions":[]}
 
 User: "what did John Smith open last week"
-→ {"intent":"clarify","entity":"incident","query":{"measures":[],"dimensions":[],"filters":[],"order":[],"limit":0},"message":"People in this export are anonymized as 'Individual NNNN', so a real name won't match. Do you have the Individual ID, or a ticket number I can start from?","assumptions":[]}
+→ {"intent":"clarify","queries":[],"message":"People in this export are anonymized as 'Individual NNNN', so a real name won't match. Do you have the Individual ID, or a ticket number I can start from?","assumptions":[]}
 
 User: "software requests waiting on approval from the security guys"
-→ {"intent":"query","entity":"ritm_approvals","query":{"measures":[],"dimensions":["ritm_approvals.parent","ritm_approvals.assignment_group","ritm_approvals.approval","ritm_approvals.state","ritm_approvals.created","ritm_approvals.short_description"],"filters":[{"member":"ritm_approvals.short_description","operator":"contains","values":["Software"]},{"member":"ritm_approvals.assignment_group","operator":"contains","values":["Security"]},{"member":"ritm_approvals.state","operator":"equals","values":["Open"]}],"order":[{"member":"ritm_approvals.created","direction":"asc"}],"limit":50},"message":"Open RITM approval records for software requests sitting with a Security approval group, oldest first.","assumptions":["Used the approval-records table because the question is about a specific approver group","'software' matched on the approval short description"]}
+→ {"intent":"query","queries":[{"entity":"ritm_approvals","query":{"measures":[],"dimensions":["ritm_approvals.parent","ritm_approvals.assignment_group","ritm_approvals.approval","ritm_approvals.state","ritm_approvals.created","ritm_approvals.short_description"],"filters":[{"member":"ritm_approvals.short_description","operator":"contains","values":["Software"]},{"member":"ritm_approvals.assignment_group","operator":"contains","values":["Security"]},{"member":"ritm_approvals.state","operator":"equals","values":["Open"]}],"order":[{"member":"ritm_approvals.created","direction":"asc"}],"limit":50}}],"message":"Open RITM approval records for software requests sitting with a Security approval group, oldest first.","assumptions":["Used the approval-records table because the question is about a specific approver group","'software' matched on the approval short description"]}
 
 User: "INC1814467"
-→ {"intent":"query","entity":"incident","query":{"measures":[],"dimensions":["incident.number","incident.created","incident.updated","incident.resolved","incident.closed","incident.priority","incident.impact","incident.urgency","incident.state","incident.on_hold_reason","incident.short_description","incident.description","incident.category","incident.subcategory","incident.assignment_group","incident.assigned_to","incident.affected_user","incident.location","incident.configuration_item","incident.contact_type","incident.close_code","incident.close_notes","incident.cause_code","incident.reassignment_count","incident.reopen_count","incident.caused_by_change","incident.was_p1"],"filters":[{"member":"incident.number","operator":"equals","values":["INC1814467"]}],"order":[],"limit":1},"message":"Full details for incident INC1814467.","assumptions":[]}
+→ {"intent":"query","queries":[{"entity":"incident","query":{"measures":[],"dimensions":["incident.number","incident.created","incident.updated","incident.resolved","incident.closed","incident.priority","incident.impact","incident.urgency","incident.state","incident.on_hold_reason","incident.short_description","incident.description","incident.category","incident.subcategory","incident.assignment_group","incident.assigned_to","incident.affected_user","incident.location","incident.configuration_item","incident.contact_type","incident.close_code","incident.close_notes","incident.cause_code","incident.reassignment_count","incident.reopen_count","incident.caused_by_change","incident.was_p1"],"filters":[{"member":"incident.number","operator":"equals","values":["INC1814467"]}],"order":[],"limit":1}}],"message":"Full details for incident INC1814467.","assumptions":[]}
 
 User: "anything prod scheduled for next week with downtime?"
-→ {"intent":"query","entity":"change_request","query":{"measures":[],"dimensions":["change_request.number","change_request.created","change_request.type","change_request.sub_type","change_request.state","change_request.approval","change_request.risk","change_request.short_description","change_request.owner_group","change_request.planned_start_date","change_request.environment"],"filters":[{"member":"change_request.environment","operator":"equals","values":["Production"]},{"member":"change_request.outage","operator":"equals","values":["Yes"]},{"member":"change_request.planned_start_date","operator":"gte","values":["2026-09-07"]},{"member":"change_request.planned_start_date","operator":"lt","values":["2026-09-14"]}],"order":[{"member":"change_request.planned_start_date","direction":"asc"}],"limit":50},"message":"Production changes with a planned outage whose planned start falls in the week of 2026-09-07.","assumptions":["'next week' = Monday 2026-09-07 through Sunday 2026-09-13","'downtime' = outage Yes"]}
+→ {"intent":"query","queries":[{"entity":"change_request","query":{"measures":[],"dimensions":["change_request.number","change_request.created","change_request.type","change_request.sub_type","change_request.state","change_request.approval","change_request.risk","change_request.short_description","change_request.owner_group","change_request.planned_start_date","change_request.environment"],"filters":[{"member":"change_request.environment","operator":"equals","values":["Production"]},{"member":"change_request.outage","operator":"equals","values":["Yes"]},{"member":"change_request.planned_start_date","operator":"gte","values":["2026-09-07"]},{"member":"change_request.planned_start_date","operator":"lt","values":["2026-09-14"]}],"order":[{"member":"change_request.planned_start_date","direction":"asc"}],"limit":50}}],"message":"Production changes with a planned outage whose planned start falls in the week of 2026-09-07.","assumptions":["'next week' = Monday 2026-09-07 through Sunday 2026-09-13","'downtime' = outage Yes"]}
 `;
 }
 
@@ -463,12 +512,116 @@ function canonicalValue(member, raw) {
   return raw; // leave it; Cube will simply return no rows
 }
 
+
+// Validates one sub-query against its declared cube. Pushes human-readable
+// problems/warnings into the arrays passed in; returns the Cube-ready query.
+function validateOne(entity, q, problems, warnings) {
+  const tag = ENTITY_CATALOG[entity]?.label || entity;
+  const measures = (q.measures || []).filter(m => typeof m === 'string');
+  const dimensions = (q.dimensions || []).filter(d => typeof d === 'string');
+  const filters = Array.isArray(q.filters) ? q.filters : [];
+  const order = Array.isArray(q.order) ? q.order : [];
+
+  if (measures.length === 0 && dimensions.length === 0) {
+    problems.push(`${tag}: query has neither measures nor dimensions.`);
+    return null;
+  }
+
+  // every member must exist and belong to this entry's cube
+  const checkMember = (m, where) => {
+    const info = MEMBER_INDEX.get(m);
+    if (!info) { problems.push(`${tag}: unknown member "${m}" in ${where}.`); return null; }
+    if (info.cube !== entity) { problems.push(`${tag}: "${m}" belongs to ${info.cube}; each query must stay inside one table.`); return null; }
+    return info;
+  };
+  for (const m of measures) { const i = checkMember(m, 'measures'); if (i && i.kind !== 'measure') problems.push(`${tag}: "${m}" is not a measure.`); }
+  for (const d of dimensions) { const i = checkMember(d, 'dimensions'); if (i && i.kind !== 'dimension') problems.push(`${tag}: "${d}" is not a dimension.`); }
+
+  // filters: operator whitelist, value normalization, set/notSet shape
+  const cleanFilters = [];
+  for (const f of filters) {
+    if (!f || typeof f.member !== 'string') { problems.push(`${tag}: filter missing member.`); continue; }
+    if (!checkMember(f.member, 'filters')) continue;
+    if (!ALLOWED_OPERATORS.includes(f.operator)) { problems.push(`${tag}: operator "${f.operator}" not allowed.`); continue; }
+    if (f.operator === 'set' || f.operator === 'notSet') {
+      cleanFilters.push({ member: f.member, operator: f.operator });
+      continue;
+    }
+    let values = Array.isArray(f.values) ? f.values.map(v => String(v)) : [];
+    if (values.length === 0) { problems.push(`${tag}: filter on ${f.member} (${f.operator}) has no values.`); continue; }
+    if (f.operator === 'equals' || f.operator === 'notEquals') {
+      values = values.map(v => {
+        const c = canonicalValue(f.member, v);
+        if (c !== v) warnings.push(`Normalized "${v}" to "${c}" for ${f.member}.`);
+        return c;
+      });
+    }
+    cleanFilters.push({ member: f.member, operator: f.operator, values });
+  }
+
+  // order may only reference selected members; convert to Cube's object form
+  const selected = new Set([...measures, ...dimensions]);
+  const cubeOrder = {};
+  for (const o of order) {
+    if (!o || typeof o.member !== 'string') continue;
+    if (!selected.has(o.member)) { warnings.push(`Dropped order on ${o.member}: not in the selected members.`); continue; }
+    cubeOrder[o.member] = o.direction === 'asc' ? 'asc' : 'desc';
+  }
+
+  // limit: list queries get a default; everything is capped
+  let limit = Number.isInteger(q.limit) && q.limit > 0 ? q.limit : 0;
+  if (measures.length === 0 && limit === 0) limit = LIMITS.defaultList;
+  if (limit > LIMITS.max) { warnings.push(`Limit ${limit} capped to ${LIMITS.max}.`); limit = LIMITS.max; }
+
+  const cubeQuery = {};
+  if (measures.length) cubeQuery.measures = measures;
+  if (dimensions.length) cubeQuery.dimensions = dimensions;
+  if (cleanFilters.length) cubeQuery.filters = cleanFilters;
+  if (Object.keys(cubeOrder).length) cubeQuery.order = cubeOrder;
+  if (limit) cubeQuery.limit = limit;
+  return cubeQuery;
+}
+
+const isTimeBucket = member => /_(day|week|month)$/.test(member);
+
+// Decides whether several sub-queries can be shown as one combined table.
+// They can when every one is "count, grouped by at most one column". In that
+// case each sub-query fetches all groups (no order/limit) and the server
+// sorts and limits the merged totals, so "top 10 teams" is a true top 10.
+function planMerge(entries) {
+  if (entries.length < 2) return null;
+  const mergeable = entries.every(e =>
+    (e.cubeQuery.measures || []).length === 1 &&
+    (e.cubeQuery.dimensions || []).length <= 1);
+  if (!mergeable) return null;
+  const dimCounts = new Set(entries.map(e => (e.cubeQuery.dimensions || []).length));
+  if (dimCounts.size !== 1) return null;
+
+  const first = entries[0].cubeQuery;
+  const dimension = (first.dimensions || [])[0] || null;
+  let sortBy = 'total';
+  let direction = 'desc';
+  const [orderMember, orderDir] = Object.entries(first.order || {})[0] || [];
+  if (orderMember) {
+    sortBy = orderMember === dimension ? 'key' : 'total';
+    direction = orderDir;
+  } else if (dimension && isTimeBucket(dimension)) {
+    sortBy = 'key';
+    direction = 'asc';
+  }
+  const limit = Math.max(0, ...entries.map(e => e.cubeQuery.limit || 0));
+
+  for (const e of entries) { delete e.cubeQuery.order; delete e.cubeQuery.limit; }
+  return { dimension, sortBy, direction, limit };
+}
+
 /**
  * Takes the parsed structured output from Claude and returns one of
- *   { ok: true,  intent: 'query', cubeQuery, entity, message, assumptions }
- *   { ok: true,  intent: 'clarify' | 'unsupported', entity, message, assumptions }
+ *   { ok: true,  intent: 'query', queries: [{ entity, cubeQuery }], merge, message, assumptions }
+ *   { ok: true,  intent: 'clarify' | 'unsupported', queries: [], merge: null, message, assumptions }
  *   { ok: false, error }
- * cubeQuery is ready to POST to /cubejs-api/v1/load.
+ * Each cubeQuery is ready to POST to /cubejs-api/v1/load. `merge` is null, or
+ * a plan for combineResults() when the per-type counts should be one table.
  */
 export function normalizeAndValidate(ai) {
   const problems = [];
@@ -480,87 +633,62 @@ export function normalizeAndValidate(ai) {
   const assumptions = Array.isArray(ai.assumptions) ? ai.assumptions.filter(a => typeof a === 'string') : [];
 
   if (intent === 'clarify' || intent === 'unsupported') {
-    return { ok: true, intent, entity: ai.entity || '', message, assumptions };
+    return { ok: true, intent, queries: [], merge: null, message, assumptions };
   }
   if (intent !== 'query') return { ok: false, error: `Unknown intent "${intent}".` };
 
-  const q = ai.query || {};
-  const measures = (q.measures || []).filter(m => typeof m === 'string');
-  const dimensions = (q.dimensions || []).filter(d => typeof d === 'string');
-  const filters = Array.isArray(q.filters) ? q.filters : [];
-  const order = Array.isArray(q.order) ? q.order : [];
+  const raw = Array.isArray(ai.queries) ? ai.queries : [];
+  if (raw.length === 0) return { ok: false, error: 'No queries were produced.' };
 
-  if (measures.length === 0 && dimensions.length === 0) {
-    return { ok: false, error: 'Query has neither measures nor dimensions.' };
+  const seen = new Set();
+  const entries = [];
+  for (const item of raw) {
+    const entity = item?.entity;
+    if (!ENTITY_CATALOG[entity]) { problems.push(`Unknown ticket type "${entity}".`); continue; }
+    if (seen.has(entity)) { warnings.push(`Ignored a second query for ${entity}.`); continue; }
+    seen.add(entity);
+    const cubeQuery = validateOne(entity, item.query || {}, problems, warnings);
+    if (cubeQuery) entries.push({ entity, cubeQuery });
   }
-
-  // 4a. every member must exist, and all must belong to one cube
-  const cubesUsed = new Set();
-  const checkMember = (m, where) => {
-    const info = MEMBER_INDEX.get(m);
-    if (!info) { problems.push(`Unknown member "${m}" in ${where}.`); return null; }
-    cubesUsed.add(info.cube);
-    return info;
-  };
-  for (const m of measures) { const i = checkMember(m, 'measures'); if (i && i.kind !== 'measure') problems.push(`"${m}" is not a measure.`); }
-  for (const d of dimensions) { const i = checkMember(d, 'dimensions'); if (i && i.kind !== 'dimension') problems.push(`"${d}" is not a dimension.`); }
-
-  // 4b. filters: operator whitelist, value normalization, set/notSet shape
-  const cleanFilters = [];
-  for (const f of filters) {
-    if (!f || typeof f.member !== 'string') { problems.push('Filter missing member.'); continue; }
-    const info = checkMember(f.member, 'filters');
-    if (!info) continue;
-    if (!ALLOWED_OPERATORS.includes(f.operator)) { problems.push(`Operator "${f.operator}" not allowed.`); continue; }
-    if (f.operator === 'set' || f.operator === 'notSet') {
-      cleanFilters.push({ member: f.member, operator: f.operator });
-      continue;
-    }
-    let values = Array.isArray(f.values) ? f.values.map(v => String(v)) : [];
-    if (values.length === 0) { problems.push(`Filter on ${f.member} (${f.operator}) has no values.`); continue; }
-    if (f.operator === 'equals' || f.operator === 'notEquals') {
-      values = values.map(v => {
-        const c = canonicalValue(f.member, v);
-        if (c !== v) warnings.push(`Normalized "${v}" to "${c}" for ${f.member}.`);
-        return c;
-      });
-    }
-    cleanFilters.push({ member: f.member, operator: f.operator, values });
-  }
-
-  if (cubesUsed.size > 1) {
-    problems.push(`Query mixes cubes (${[...cubesUsed].join(', ')}); the cubes are not joined, so a query must stay inside one table.`);
-  }
-
-  // 4c. order may only reference selected members; convert to Cube's object form
-  const selected = new Set([...measures, ...dimensions]);
-  const cubeOrder = {};
-  for (const o of order) {
-    if (!o || typeof o.member !== 'string') continue;
-    if (!selected.has(o.member)) { warnings.push(`Dropped order on ${o.member}: not in the selected members.`); continue; }
-    cubeOrder[o.member] = o.direction === 'asc' ? 'asc' : 'desc';
-  }
-
-  // 4d. limit: list queries get a default; everything is capped
-  let limit = Number.isInteger(q.limit) && q.limit > 0 ? q.limit : 0;
-  if (measures.length === 0 && limit === 0) limit = LIMITS.defaultList;
-  if (limit > LIMITS.max) { warnings.push(`Limit ${limit} capped to ${LIMITS.max}.`); limit = LIMITS.max; }
-
   if (problems.length) return { ok: false, error: problems.join(' ') };
 
-  const cubeQuery = {};
-  if (measures.length) cubeQuery.measures = measures;
-  if (dimensions.length) cubeQuery.dimensions = dimensions;
-  if (cleanFilters.length) cubeQuery.filters = cleanFilters;
-  if (Object.keys(cubeOrder).length) cubeQuery.order = cubeOrder;
-  if (limit) cubeQuery.limit = limit;
+  const merge = planMerge(entries);
+  return { ok: true, intent: 'query', queries: entries, merge, message, assumptions: [...assumptions, ...warnings] };
+}
 
-  return {
-    ok: true,
-    intent: 'query',
-    entity: [...cubesUsed][0] || ai.entity || '',
-    cubeQuery,
-    message,
-    assumptions: [...assumptions, ...warnings],
-  };
+/**
+ * Merges per-type count results into one table.
+ *   sections: [{ entity, rows }]  (rows straight from Cube)
+ * Returns { dimension, entities, rows: [{ key, counts: { entity: n }, total }], totals }
+ * `dimension` is the first query's grouping member, used for labels and formatting.
+ */
+export function combineResults(plan, queries, sections) {
+  const entities = sections.map(s => s.entity);
+  const dimFor = Object.fromEntries(queries.map(q => [q.entity, (q.cubeQuery.dimensions || [])[0] || null]));
+  const byKey = new Map();
+
+  for (const { entity, rows } of sections) {
+    for (const r of rows) {
+      const key = plan.dimension ? (r[dimFor[entity]] ?? '') : '';
+      const n = Number(r[`${entity}.count`]) || 0;
+      if (!byKey.has(key)) byKey.set(key, { key, counts: {}, total: 0 });
+      const slot = byKey.get(key);
+      slot.counts[entity] = (slot.counts[entity] || 0) + n;
+      slot.total += n;
+    }
+  }
+
+  let rows = [...byKey.values()];
+  const sign = plan.direction === 'asc' ? 1 : -1;
+  rows.sort((a, b) => plan.sortBy === 'key'
+    ? sign * String(a.key).localeCompare(String(b.key))
+    : (sign * (a.total - b.total)) || String(a.key).localeCompare(String(b.key)));
+  if (plan.limit) rows = rows.slice(0, plan.limit);
+
+  const totals = { counts: {}, total: 0 };
+  for (const r of rows) {
+    for (const e of entities) totals.counts[e] = (totals.counts[e] || 0) + (r.counts[e] || 0);
+    totals.total += r.total;
+  }
+  return { dimension: plan.dimension, entities, rows, totals };
 }

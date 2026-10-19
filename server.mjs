@@ -6,6 +6,7 @@ import {
   buildSystemPrompt,
   buildUserMessage,
   normalizeAndValidate,
+  combineResults,
   OUTPUT_SCHEMA,
 } from './business_logic.mjs';
 
@@ -136,23 +137,34 @@ app.post('/api/query', async (req, res) => {
       console.log(`🙋 ${verdict.intent}: ${verdict.message}`);
       return res.json({
         intent: verdict.intent,
-        entity: verdict.entity,
         message: verdict.message,
         assumptions: verdict.assumptions,
+        sections: [],
         results: [],
       });
     }
 
-    console.log('🤖 Cube query:', JSON.stringify(verdict.cubeQuery));
-    const results = await runCubeQuery(verdict.cubeQuery);
+    // One Cube query per ticket type, run side by side
+    for (const q of verdict.queries) console.log(`🤖 Cube query [${q.entity}]:`, JSON.stringify(q.cubeQuery));
+    const sections = await Promise.all(verdict.queries.map(async q => ({
+      entity: q.entity,
+      rows: await runCubeQuery(q.cubeQuery),
+    })));
+
+    // Counts across several ticket types become one table with a total column
+    const combined = verdict.merge ? combineResults(verdict.merge, verdict.queries, sections) : null;
 
     res.json({
       intent: 'query',
-      entity: verdict.entity,
+      // `entity` / `results` describe the single-type case; `sections` and
+      // `combined` describe questions that spanned several ticket types
+      entity: sections.length === 1 ? sections[0].entity : 'multiple',
       message: verdict.message,
       assumptions: verdict.assumptions,
-      aiInterpretation: verdict.cubeQuery,
-      results,
+      aiInterpretation: verdict.queries,
+      results: sections.length === 1 ? sections[0].rows : [],
+      sections,
+      combined,
     });
 
   } catch (error) {
