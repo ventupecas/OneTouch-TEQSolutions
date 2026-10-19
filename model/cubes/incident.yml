@@ -182,6 +182,36 @@ cubes:
         sql: global_incident
         type: string
 
+      # --- derived date buckets (added for trend / per-period questions) ---
+      - name: created_day
+        sql: "LEFT({CUBE}.created, 10)"
+        type: string
+
+      - name: created_month
+        sql: "LEFT({CUBE}.created, 7)"
+        type: string
+
+      - name: created_week
+        sql: "TO_CHAR(NULLIF({CUBE}.created, '')::timestamp, 'IYYY-\"W\"IW')"
+        type: string
+
+      - name: resolved_day
+        sql: "LEFT({CUBE}.resolved, 10)"
+        type: string
+
+      - name: resolved_month
+        sql: "LEFT({CUBE}.resolved, 7)"
+        type: string
+
+      - name: closed_day
+        sql: "LEFT({CUBE}.closed, 10)"
+        type: string
+
+      - name: closed_month
+        sql: "LEFT({CUBE}.closed, 7)"
+        type: string
+
+
     measures:
       - name: count
         type: count
