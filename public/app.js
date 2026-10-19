@@ -49,27 +49,18 @@ async function sendPrompt() {
             return;
         }
 
-        // Normal query: restate what was fetched, list assumptions, then the rows
-        let finalOutputString = '';
-        if (data.message) {
-            finalOutputString += `<strong>${escapeHtml(data.message)}</strong><br>`;
-        } else {
-            finalOutputString += `<strong>Here is what I found:</strong><br>`;
-        }
+        // Normal query: restate what was fetched, show the rows as a table,
+        // and tuck the assumptions into a collapsible note underneath
+        let html = `<div class="result-title">${escapeHtml(data.message || 'Here is what I found:')}</div>`;
+        html += renderResults(data.results || [], data.entity);
+
         if (data.assumptions && data.assumptions.length > 0) {
-            finalOutputString += `<em>Assumptions:</em><ul>` +
+            html += `<details class="assumptions"><summary>How I read your question</summary><ul>` +
                 data.assumptions.map(a => `<li>${escapeHtml(a)}</li>`).join('') +
-                `</ul>`;
-        }
-        finalOutputString += `<br>`;
-
-        if (data.results && data.results.length > 0) {
-            finalOutputString += `<pre>${escapeHtml(JSON.stringify(data.results, null, 2))}</pre>`;
-        } else {
-            finalOutputString += `No matching records were found for that question.`;
+                `</ul></details>`;
         }
 
-        appendMessage('ai-msg', finalOutputString);
+        appendMessage('ai-msg wide', html);
 
     } catch (err) {
         document.getElementById(loadingId).remove();
@@ -87,11 +78,185 @@ function escapeHtml(value) {
         .replace(/"/g, '&quot;');
 }
 
+// =====================================================================
+// RESULT RENDERING: rows from Cube -> readable table in plain English
+// =====================================================================
+
+// What one row of each table is called, for count headers and summaries
+const ENTITY_NOUNS = {
+    incident: ['incident', 'incidents'],
+    change_request: ['change', 'changes'],
+    change_approvals: ['change approval', 'change approvals'],
+    sc_req_item: ['request', 'requests'],
+    ritm_approvals: ['request approval', 'request approvals'],
+    sc_task: ['task', 'tasks'],
+};
+
+// Column names that read badly when simply title-cased
+const COLUMN_LABELS = {
+    number: 'Ticket',
+    short_description: 'Summary',
+    description: 'Full Description',
+    assignment_group: 'Assigned Team',
+    owner_group: 'Owning Team',
+    assigned_to: 'Assigned To',
+    opened_by_group: 'Opened By Team',
+    configuration_item: 'Server / System',
+    contact_type: 'Reported Via',
+    reassignment_count: 'Times Reassigned',
+    reopen_count: 'Times Reopened',
+    caused_by_change: 'Caused By Change',
+    was_p1: 'Was Ever P1',
+    on_hold_reason: 'On Hold Because',
+    close_code: 'Close Result',
+    close_notes: 'Close Notes',
+    cause_code: 'Cause',
+    sub_type: 'Change Category',
+    type: 'Change Type',
+    planned_start_date: 'Planned Start',
+    planned_end_date: 'Planned End',
+    planned_start_month: 'Planned Start Month',
+    outage: 'Planned Outage',
+    sap_impact: 'Affects SAP',
+    sap_transport_required: 'SAP Transport Needed',
+    process_failure: 'Process Failure',
+    brewery: 'Brewery Change',
+    brewery_locations: 'Breweries Affected',
+    item: 'Catalog Item',
+    requested_for: 'Requested For',
+    opened_by: 'Opened By',
+    request: 'Parent Order (REQ)',
+    request_item: 'Parent Request (RITM)',
+    parent: 'Parent Ticket',
+    sla_flag: 'SLA Breached',
+    active: 'Still Active',
+    fulfilled_time: 'Fulfilled',
+    kb_article: 'Knowledge Article',
+    created_day: 'Day Created',
+    created_week: 'Week Created',
+    created_month: 'Month Created',
+    opened_day: 'Day Opened',
+    opened_week: 'Week Opened',
+    opened_month: 'Month Opened',
+    resolved_day: 'Day Resolved',
+    resolved_month: 'Month Resolved',
+    closed_day: 'Day Closed',
+    closed_month: 'Month Closed',
+};
+
+// Columns whose values are long free text: shortened in tables, full on hover
+const LONG_TEXT = new Set(['short_description', 'description', 'close_notes', 'work_notes',
+    'comments_and_work_notes', 'additional_comments', 'change_plan', 'backout_plan',
+    'verification_plan', 'purpose_of_change', 'approval_history']);
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+    'August', 'September', 'October', 'November', 'December'];
+
+function splitMember(member) {
+    const dot = member.indexOf('.');
+    return { cube: member.slice(0, dot), column: member.slice(dot + 1) };
+}
+
+function columnLabel(member) {
+    const { cube, column } = splitMember(member);
+    if (column === 'count') {
+        const noun = (ENTITY_NOUNS[cube] || ['record', 'records'])[1];
+        return `Number of ${noun[0].toUpperCase()}${noun.slice(1)}`;
+    }
+    if (COLUMN_LABELS[column]) return COLUMN_LABELS[column];
+    return column.split('_')
+        .map(w => ['sla', 'sap', 'ci', 'kb', 'id'].includes(w) ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1))
+        .join(' ');
+}
+
+function formatValue(member, raw) {
+    const { column } = splitMember(member);
+    if (raw === null || raw === undefined || raw === '') return '—';
+    const v = String(raw);
+
+    if (column === 'count') return Number(v).toLocaleString();
+    if (v === 'true') return 'Yes';
+    if (v === 'false') return 'No';
+
+    // "2026-08-14 08:44:55" -> "Aug 14, 2026, 8:44 AM"
+    let m = v.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/);
+    if (m) {
+        const d = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+        return d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+    }
+    // "2026-08-14" -> "Aug 14, 2026"
+    m = v.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (m) {
+        const d = new Date(+m[1], +m[2] - 1, +m[3]);
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+    // "2026-08" -> "August 2026"
+    m = v.match(/^(\d{4})-(\d{2})$/);
+    if (m) return `${MONTHS[+m[2] - 1]} ${m[1]}`;
+    // "2026-W33" -> "Week 33 of 2026"
+    m = v.match(/^(\d{4})-W(\d{2})$/);
+    if (m) return `Week ${+m[2]} of ${m[1]}`;
+
+    return v;
+}
+
+// One table cell; long text is cut short with the full value on hover
+function cellHtml(member, raw, truncate) {
+    const { column } = splitMember(member);
+    const text = formatValue(member, raw);
+    const isNumber = column === 'count';
+    const cls = isNumber ? ' class="num"' : '';
+    if (truncate && LONG_TEXT.has(column) && text.length > 120) {
+        return `<td${cls} title="${escapeHtml(text)}">${escapeHtml(text.slice(0, 117))}…</td>`;
+    }
+    return `<td${cls}>${escapeHtml(text)}</td>`;
+}
+
+function renderResults(rows, entity) {
+    if (!rows.length) {
+        return `<p class="result-empty">No matching records were found for that question.</p>`;
+    }
+    const columns = Object.keys(rows[0]);
+    const [singular, plural] = ENTITY_NOUNS[entity] || ['record', 'records'];
+
+    // A single number ("how many open P1s") reads best as a sentence
+    if (rows.length === 1 && columns.length === 1 && columns[0].endsWith('.count')) {
+        const n = Number(rows[0][columns[0]]);
+        return `<div class="result-big">${n.toLocaleString()} <span>${n === 1 ? singular : plural}</span></div>`;
+    }
+
+    // A single record with many fields (ticket lookup) reads best as a field/value card
+    if (rows.length === 1 && columns.length > 4) {
+        const body = columns.map(c => {
+            const { column } = splitMember(c);
+            const text = formatValue(c, rows[0][c]);
+            const cls = LONG_TEXT.has(column) ? ' class="long"' : '';
+            return `<tr><th>${escapeHtml(columnLabel(c))}</th><td${cls}>${escapeHtml(text)}</td></tr>`;
+        }).join('');
+        return `<div class="table-wrap"><table class="result-table detail"><tbody>${body}</tbody></table></div>`;
+    }
+
+    // Everything else: a normal table with a header row
+    const head = columns.map(c => {
+        const cls = c.endsWith('.count') ? ' class="num"' : '';
+        return `<th${cls}>${escapeHtml(columnLabel(c))}</th>`;
+    }).join('');
+    const body = rows.map(r => `<tr>${columns.map(c => cellHtml(c, r[c], true)).join('')}</tr>`).join('');
+    const caption = `${rows.length.toLocaleString()} ${rows.length === 1 ? 'row' : 'rows'}`;
+
+    return `<div class="result-caption">${caption}</div>` +
+        `<div class="table-wrap"><table class="result-table"><thead><tr>${head}</tr></thead>` +
+        `<tbody>${body}</tbody></table></div>`;
+}
+
 // Element Node Builder Helper
+let messageCounter = 0;
 function appendMessage(cssClass, text) {
     const chatLog = document.getElementById('chat-log');
     const msgBlock = document.createElement('div');
-    const uniqueId = 'msg-' + Date.now();
+    // A counter, not Date.now(): two messages added in the same millisecond
+    // would share an id and the loading bubble could remove the wrong one
+    const uniqueId = 'msg-' + (++messageCounter);
     
     msgBlock.id = uniqueId;
     msgBlock.className = `msg ${cssClass}`;
