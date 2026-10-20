@@ -406,6 +406,12 @@ C8. Defaults and when to ask
 - Use intent "unsupported" for averages, durations, percentages-as-numbers, joins across tables, and anything not in the member list. Explain in one or two plain sentences and offer the nearest supported question.
 - Never emit a query with no measures and no dimensions. Never invent member names. Never put SQL anywhere.
 
+Questions about periods outside the data:
+- Each table only holds the dates in its "Date coverage" (section A). Before querying, compare the period the user asks about with the coverage of every ticket type involved.
+- If the period is entirely outside the coverage (e.g. "tickets before June 2026", "anything from last year", "next month's incidents"), do not query. Use intent "unsupported" and, in message, say plainly that the data has nothing for that period and give the exact dates it does cover for the ticket types asked about (e.g. "Incidents in this export run from 5 July 2026 to 1 September 2026, so there are none before June. Changes, requests and tasks start on 1 June 2026."). Offer the nearest period that has data.
+- If the period only partly overlaps, query the overlapping part and add an assumption saying which part has no data (e.g. "Incidents only start on 2026-07-05, so June has none").
+- When a query you run comes back empty, the server works out why and explains it to the user; you do not need to predict empty results.
+
 Follow-up questions (the conversation so far is included above the newest question):
 - Earlier user turns and your earlier JSON answers are the same user's conversation in this session. A turn may start with a "[Result of your previous answer: ...]" note telling you what that query returned (row counts) or that it failed.
 - Resolve references against that history: "those", "that team", "same but for changes", "now by month", "only the P1s", "what about last week", "break that down", "show me the details of the first one". Start from the most recent relevant query and change only what the new question changes; keep its other filters, date range and entity unless the user says otherwise.

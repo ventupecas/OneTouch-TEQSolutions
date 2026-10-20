@@ -13,6 +13,7 @@ import {
 } from './business_logic.mjs';
 import { buildExport, validateExport, ExportUnavailableError } from './export.mjs';
 import * as auth from './auth.mjs';
+import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
 
 dotenv.config();
 
@@ -414,7 +415,21 @@ async function answerQuestion(conversation, userPrompt, res) {
       entity: q.entity,
       rows: await runCubeQuery(q.cubeQuery),
     })));
-    conversation.pendingNote = describeResults(sections);
+    // Nothing found: work out why (which filter emptied it, what dates the data
+    // covers) and have Claude say so plainly, instead of a bare "no records"
+    const emptyQueries = verdict.queries.filter((_, i) => isEmptyResult(sections[i].rows));
+    let explanation = null;
+    if (emptyQueries.length) {
+      try {
+        const facts = (await Promise.all(emptyQueries.map(q => diagnoseEmpty(q.entity, q.cubeQuery, runCubeQuery)))).flat();
+        console.log('🔎 Empty result facts:\n   ' + facts.join('\n   '));
+        explanation = await explainEmpty({ anthropic, model: CLAUDE_MODEL, question: userPrompt, searchedFor: verdict.message, facts });
+        console.log(`🔎 Explained: ${explanation}`);
+      } catch (error) {
+        console.error('🔎 Could not diagnose the empty result:', error.message);
+      }
+    }
+    conversation.pendingNote = describeResults(sections) + (explanation ? ` What the user was told about the empty result: ${explanation}` : '');
 
     // Counts across several ticket types become one table with a total column
     const combined = verdict.merge ? combineResults(verdict.merge, verdict.queries, sections) : null;
@@ -431,6 +446,9 @@ async function answerQuestion(conversation, userPrompt, res) {
       results: sections.length === 1 ? sections[0].rows : [],
       sections,
       combined,
+      // Why nothing (or part of it) was found; allEmpty means there's no table to show
+      explanation,
+      allEmpty: emptyQueries.length === verdict.queries.length,
     });
 
   } catch (error) {
