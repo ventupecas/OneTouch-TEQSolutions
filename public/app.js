@@ -1,3 +1,93 @@
+// =====================================================================
+// SIGN IN: the server checks the credentials and hands back a session
+// token, which every API call then sends as "Authorization: Bearer ..."
+// =====================================================================
+
+const API_BASE = 'http://localhost:8000';
+const TOKEN_KEY = 'onetouch-session';
+
+// sessionStorage can be blocked (private windows, strict settings)
+function readToken() {
+    try { return sessionStorage.getItem(TOKEN_KEY); } catch { return null; }
+}
+function saveToken(token) {
+    try {
+        if (token) sessionStorage.setItem(TOKEN_KEY, token);
+        else sessionStorage.removeItem(TOKEN_KEY);
+    } catch { /* stays signed in until the page is reloaded */ }
+}
+
+let sessionTokenValue = readToken();
+
+function authHeaders() {
+    return sessionTokenValue ? { Authorization: `Bearer ${sessionTokenValue}` } : {};
+}
+
+function showLoginError(message) {
+    document.getElementById('login-error').textContent = message || '';
+}
+
+function showApp(signedIn) {
+    document.body.classList.toggle('signed-out', !signedIn);
+    if (signedIn) document.getElementById('user-prompt').focus();
+    else document.getElementById('login-email').focus();
+}
+
+async function signIn() {
+    const button = document.getElementById('login-btn');
+    const passwordField = document.getElementById('login-password');
+    showLoginError('');
+    button.disabled = true;
+
+    try {
+        const response = await fetch(`${API_BASE}/api/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                username: document.getElementById('login-email').value,
+                password: passwordField.value,
+            }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.token) {
+            showLoginError(data.error || 'Sign-in failed. Please try again.');
+            passwordField.value = '';
+            passwordField.focus();
+            return;
+        }
+        sessionTokenValue = data.token;
+        saveToken(data.token);
+        passwordField.value = '';
+        showApp(true);
+    } catch (err) {
+        showLoginError('Could not reach the OneTouch server. Please try again.');
+        console.error(err);
+    } finally {
+        button.disabled = false;
+    }
+}
+
+function signOut(message) {
+    if (sessionTokenValue) {
+        fetch(`${API_BASE}/api/logout`, { method: 'POST', headers: authHeaders() }).catch(() => {});
+    }
+    sessionTokenValue = null;
+    saveToken(null);
+    showLoginError(typeof message === 'string' ? message : '');
+    showApp(false);
+}
+
+// An expired session (or a server restart) sends the user back to sign in
+function handleUnauthorized(response) {
+    if (response.status !== 401) return false;
+    signOut('Your session has ended. Please sign in again.');
+    return true;
+}
+
+// A token from earlier in this tab skips the sign-in page; if it has
+// expired, the first API call returns 401 and brings the page back
+showApp(Boolean(sessionTokenValue));
+
 // Tab Views Toggling Module
 function switchTab(viewName) {
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
@@ -25,13 +115,18 @@ async function sendPrompt() {
 
                try {
         // 🎯 FIX: Explicitly relative route path
-        const response = await fetch('http://localhost:8000/api/query', {
+        const response = await fetch(`${API_BASE}/api/query`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
             body: JSON.stringify({ userPrompt: userPromptText })
         });
 
         console.log("THIS IS THE RESPONSE FROM THE SERVER:", response.status, response.statusText);
+
+        if (handleUnauthorized(response)) {
+            document.getElementById(loadingId).remove();
+            return;
+        }
 
         const data = await response.json();
 
@@ -435,11 +530,15 @@ async function downloadExport(exportId) {
     status.textContent = `Preparing ${format.toUpperCase()} file…`;
 
     try {
-        const response = await fetch('http://localhost:8000/api/export', {
+        const response = await fetch(`${API_BASE}/api/export`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
             body: JSON.stringify({ ...payload, format }),
         });
+        if (handleUnauthorized(response)) {
+            status.textContent = '';
+            return;
+        }
         if (!response.ok) {
             const err = await response.json().catch(() => ({}));
             throw new Error(err.error || `The server answered ${response.status}.`);
