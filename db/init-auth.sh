@@ -3,10 +3,10 @@
 # allowed into it (onetouch_app). The tables themselves are created by the
 # app on start (auth.mjs -> ensureSchema).
 #
-# Runs automatically when the Postgres volume is first created. For an
-# existing volume, run it once by hand (safe to repeat; it also re-syncs the
-# role's password with AUTH_DB_PASSWORD):
-#   docker exec analytics_postgres sh /docker-entrypoint-initdb.d/20-init-auth.sh
+# Runs when the Postgres volume is first created, and again on every
+# `docker compose up` through the db-setup service (over the network, using
+# PGHOST/PGPASSWORD), so databases created before sign-in existed get it too.
+# Safe to repeat; it also re-syncs the role's password with AUTH_DB_PASSWORD.
 set -e
 
 if [ -z "$AUTH_DB_PASSWORD" ]; then
