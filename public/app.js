@@ -267,7 +267,12 @@ async function sendPrompt() {
         // Normal query: restate what was fetched, show the rows as a table,
         // and tuck the assumptions into a collapsible note underneath
         let html = `<div class="result-title">${escapeHtml(data.message || 'Here is what I found:')}</div>`;
-        if (data.combined) {
+        // Nothing found anywhere: the server's explanation replaces the empty tables
+        const explanationHtml = data.explanation
+            ? `<div class="result-explanation">${escapeHtml(data.explanation)}</div>` : '';
+        if (data.explanation && data.allEmpty) {
+            html += explanationHtml;
+        } else if (data.combined) {
             // Counts across several ticket types: one table, one column per type
             html += renderCombined(data.combined);
         } else if (data.sections && data.sections.length > 1) {
@@ -279,6 +284,8 @@ async function sendPrompt() {
         } else {
             html += renderResults(data.results || [], data.entity);
         }
+        // Some ticket types found nothing: explain those under the tables
+        if (data.explanation && !data.allEmpty) html += explanationHtml;
 
         if (data.assumptions && data.assumptions.length > 0) {
             html += `<details class="assumptions"><summary>How I read your question</summary><ul>` +

@@ -170,6 +170,16 @@ body {
 .result-title { font-weight: 600; margin-bottom: 8px; }
 .result-caption { font-size: 0.8rem; color: #718096; margin-bottom: 4px; }
 .result-empty { margin: 4px 0; color: #4a5568; }
+/* Why a question found nothing (dates covered, which condition emptied it) */
+.result-explanation {
+    margin: 6px 0 4px;
+    padding: 10px 14px;
+    background: #fffbea;
+    border-left: 3px solid #d69e2e;
+    border-radius: 4px;
+    color: var(--text);
+    line-height: 1.5;
+}
 
 .result-big { font-size: 2rem; font-weight: 700; color: var(--accent); margin: 4px 0 8px; }
 .result-big span { font-size: 1rem; font-weight: 500; color: var(--text); }
