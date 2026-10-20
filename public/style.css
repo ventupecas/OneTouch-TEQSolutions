@@ -28,6 +28,16 @@ body {
 .app-header h1 { margin: 0; font-size: 1.25rem; }
 .app-title { display: flex; align-items: center; gap: 8px; }
 .app-logo { width: 28px; height: 28px; border-radius: 6px; }
+/* Signed-in person's name, next to the OneTouch title */
+.user-name {
+    font-size: 0.95rem;
+    font-weight: 400;
+    color: #cbd5e0;
+    padding-left: 10px;
+    margin-left: 2px;
+    border-left: 1px solid #4a5568;
+}
+.user-name:empty { display: none; }
 
 .tab-navigation .tab-btn {
     background: transparent;
