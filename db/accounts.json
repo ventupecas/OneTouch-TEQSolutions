@@ -1,0 +1,251 @@
+{
+  "version": 1,
+  "note": "OneTouch sign-in accounts. Password hashes only. Regenerate with: node scripts/users.mjs export",
+  "accounts": [
+    {
+      "username": "adeazcarate",
+      "displayName": "Alex de Azcarate",
+      "passwordHash": "scrypt$16384$8$1$fXwHC8LbvPR8lE82JT2DZw==$67w0xgqfeGn/RqVF70P4rdg8BEKeuHBRh823EgtF+a5JR4c4rPc9dolyo3QImC+fjHJelHxwWghOyKqnZtBDDg==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "ahusseini",
+      "displayName": "Amir Husseini",
+      "passwordHash": "scrypt$16384$8$1$PvGjTpKmY8yuc/RyaCz3lQ==$CZTIctSLDt+eKZIHrThXfeTEA98HbMeleB9Ckelyoz38MipdP4V3jD9dkjmWplwN4l6jc4ASBR+o0BAU297FBg==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "ccamacho",
+      "displayName": "Cheryl Camacho",
+      "passwordHash": "scrypt$16384$8$1$42uzXhIQJZeTZuvDM6xQiA==$iNrSxCg7iPQf6Gtk2QwhXj/6iuLfj1634niIUoEqe/4SWQ3OOL7gPE8gOmlBv+l8DnOCs7n81EHW6L9JJRUXxA==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "chale",
+      "displayName": "Cortez Hale",
+      "passwordHash": "scrypt$16384$8$1$Qp72DxKykaTTW5p9c3RiWA==$OXqH2EfQ8btgEsXvH5lsB6swrYLSgZcNm5WyT/ISAT3eLFzyzZ9HYYFuCTMPR0IGgNFcmE7sSS08RT2PAyJt+Q==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "clewis",
+      "displayName": "Carl Lewis",
+      "passwordHash": "scrypt$16384$8$1$Uw24gh8sjvpZn5MKZ7+aWw==$+u2KryjQ/IGrhRN4NeyNlK4cR9ftlJb37aVxt30sw1Flo914e+pD+td+JonU42UsNEqB9ibZS2oIpw+D9JoXaw==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "cromero",
+      "displayName": "Cristhian Romero",
+      "passwordHash": "scrypt$16384$8$1$B48H2ZNOADtqR4PqJjjmlQ==$bYgzZyhZCGjc8VihnBjIy8IgrYW/cdIBR6XWb0qTZY/om4l7HXgQQYcgvAxXzSd8+B/P4a30+zLkcYUOfxDOlg==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "csotelo",
+      "displayName": "Cassidy Sotelo",
+      "passwordHash": "scrypt$16384$8$1$EyDX5VrJaRcPPGLaka4Efw==$07v4Xc3dCgxGPyYJSeKWQnRsMGymNO4+5DlU150OcT96+jFV3AhBSH+IuiF0ioTdP86g7K/CJ51hKQrJNsbOjg==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "dkrull",
+      "displayName": "Denis Krull",
+      "passwordHash": "scrypt$16384$8$1$BtAZAK730EZJYBxwRNKyJA==$hc2VPDPz7GO4qDRWgZ5jsmGa1Fw9c8lSCrBhVDY0n9nly1QhsxZsOIgec7lFvv+vs5zk6kjzy/YggES2Y6ZD2g==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "dmoore",
+      "displayName": "Darryl Moore",
+      "passwordHash": "scrypt$16384$8$1$tBJWZsmZWYaiVSRI3oPhZA==$6rFp6bb0MJ1dpIq5qzmu0DqBP70nfYNhM+TINk3B742uvBd/Nya66AWSRSZGRu4zfbXLvPsFUkIBKNQBkb+jPQ==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "dmukhopadhyay",
+      "displayName": "Debalina Mukhopadhyay",
+      "passwordHash": "scrypt$16384$8$1$ktW9+BGePu6WQ8A+8i0Xlw==$urCzLKcOfDPvEPHTp3NMi7eTEMooumyv+prtXOzHns3sEINFCChxJDQg9+zpB3Q0iztb6iniNeJHYvuDUT8UIw==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "dscott",
+      "displayName": "Desmond Scott",
+      "passwordHash": "scrypt$16384$8$1$QT0y/AXbV6X26Pp0MXJSFA==$dzcmHmgwEBqHpwDxTa8vvgX+4wfN4il+KPWCdjH2SNl/qFzVz0p5xygwV1crv9oBDgGspKAI5mkPZESaaOlymw==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "fgamboa",
+      "displayName": "Fernando Gamboa",
+      "passwordHash": "scrypt$16384$8$1$Btx4784FvqYAgq6mw6hrzQ==$RsAKfioLtQHnwOXSkb71V5o27Y8BWcrtzBUE217sh6bZgzKZI+3DNweinuwyFB5IEu246qx1PpeZCmzqgQfppg==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "icastanon",
+      "displayName": "Ivan Castanon",
+      "passwordHash": "scrypt$16384$8$1$49uqWCTNuHe98SDYsE6l9g==$jijWWKt/RjHpAZeDKtiYJBqswxkHsENhgYuH7dVKYGATXnfcwd6ZFtkUcbckD+9NPHwMsMTt2z4NcTTaEpdXhA==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "jcurry",
+      "displayName": "Jessie Curry",
+      "passwordHash": "scrypt$16384$8$1$nsSaojchibov2h5KeYFsAQ==$u/Pyo0vEJ6gdFW7TNVG53IvfB/XYctlDZ+/O/XsI1yqum/VhtGpjCluvxStsW9g8Mj0Yb+QrisRtQeiLB4llYA==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "jmendez",
+      "displayName": "Justin Mendez",
+      "passwordHash": "scrypt$16384$8$1$twmzTiAiUuFhKR7ayKQXFw==$JRuVw0+26mkWqPPSadyLkSuNtd8qefZXhR/08WXdc101s+67D7WvZQMZZ/RglVq0SfXHeMCeoj9n/z0q4U73zg==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "jreid",
+      "displayName": "Jakwoun Reid",
+      "passwordHash": "scrypt$16384$8$1$D6ule8n/h7CYAlil7XN02A==$eqQwEj6nLJtJQauiyREIc5frbYoI2XAomZWeLraXzxNhEQ3chFJRlVwHffsF5N4ieZjcILno47TGBvawXgkktQ==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "jromero",
+      "displayName": "Jose Romero",
+      "passwordHash": "scrypt$16384$8$1$iU8BddOmHDJjkTmomd9JSg==$YLVLvQslk5hvJdB9914VtrlP20tNQ0AZnF3v+2X82y1u8r85rjFwZoxONMsKmV2hj69btBTr+QYHJ37Z26Z7Nw==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "jschuette",
+      "displayName": "Jillane Schuette",
+      "passwordHash": "scrypt$16384$8$1$a6Epv8MQq1jyjFUx7yNXFg==$He1PZz7NuM3GRLoPEY5UA4nIjcqQq4kzn3ToaeZsOkof2oNJrU1L/o+UUolfPj3ZCtOFeEJeT3JXf7lzwDw74w==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "jturner",
+      "displayName": "Jonah Turner",
+      "passwordHash": "scrypt$16384$8$1$vCmfaXVfYxgyB+XyEyVClg==$B6r52rUywwuGuY9MpSOfe1HNWEaXRTxpWqlZvV1q5WVtL/OheYzodm0twiIVhasD9Ilc3e/PzTgM41QU8bgIZg==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "kbautch",
+      "displayName": "Kathleen Bautch",
+      "passwordHash": "scrypt$16384$8$1$w+3qSCode42EL3dwMnq7/Q==$kqR02sr5BVFAaD3MlruCKf736v/9Uz0Qr+LBIlV3zk4nbRQnLy2BsfH5VDvunCx1iqzZ12eLQo1vMMM3Xj1FbA==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "kkisiloski",
+      "displayName": "Krista Kisiloski",
+      "passwordHash": "scrypt$16384$8$1$9jqjm97SkrkEUiPg8abOGQ==$gNYDKi0KJRe7Q9N5dNOAeI9BN72r3MXNVZ9XQ92ujr+Re2qxdNS6gtCr6IaUzJcokDbXAazeslRoYBcm+Jv2rQ==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "lbell",
+      "displayName": "LaQuesha Bell",
+      "passwordHash": "scrypt$16384$8$1$ucZm4mn40Q005B5g1A5FjA==$nEfa7s7y1a/DlOZZ/I/HIwvqRStm2stXqcgy8k8H4S70Ahi7qQNXwUlU8D4Kstu0UsLNWzEky954TvrTCc4GPQ==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "lcowans",
+      "displayName": "Larry Cowans",
+      "passwordHash": "scrypt$16384$8$1$MrzueXNOkJ3wnCjkmnxrAg==$N4OF2FEMOr0KeIZBLLuoHfY0Y5VdXXVhetIqRqBugrXhHQHnDX9WyCfope3qOTpBtJ7t3bM/sOReKwRI4+haIg==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "lvang",
+      "displayName": "Luke Vang",
+      "passwordHash": "scrypt$16384$8$1$ax9J7dZuUs7kJIzWof9p7w==$rUjYnK+kew1P4RhTzewwVuRXZvfs3q9Lfjuv5LFj7CBmP5TUDMzLmQg/NRgO2Lgnzfq6CU4RvOpueO+8PfeeRg==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "mnewhouse",
+      "displayName": "Meighan Newhouse",
+      "passwordHash": "scrypt$16384$8$1$fW91cBDjcJS2NaSQNWicHA==$a2pISTDL9D1d+a8UxlQDu/SAeMPq+YzpJMcT+Nio2G17qELhhRQX1foYA27Le9km/VYsDdCLPdjyySB1BdKl+g==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "mperez",
+      "displayName": "Mimi Perez",
+      "passwordHash": "scrypt$16384$8$1$GWpBUI7utWGLLg4zoCGPOg==$M88MH62e3ilp1Of/82dtUJh4RU4KxNRwhTdMaRmyeCJcSjCnNhaCxLi6ZvEKOfNkC+MlFQMvJzRAWUe0D/eY5w==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "ndata",
+      "displayName": "Nicholas Data",
+      "passwordHash": "scrypt$16384$8$1$yRh62J7HU31a3oOZVQTUog==$mPr3DVQ4c6AMHnMzIlvICbHOk1Wt7O+MOdZ44UCN6pwit9C2hx5kYwn9q97ITeIHu3+R9NNzAOq8lXW9vj78iw==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "nmoseby",
+      "displayName": "Nikki Moseby",
+      "passwordHash": "scrypt$16384$8$1$z8zISKNH15B+sfiTq7njqw==$2UeJWphy5OBKyLzd24RvE30Yf3q21a/YtjSVR5j0MHQP9YGzW2Oe9LNfQ9Op+X69ytobg0V8R1C346bdNmrHZQ==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "rthakkar",
+      "displayName": "Rima Thakkar",
+      "passwordHash": "scrypt$16384$8$1$IrEmKhYiFOPfi3hgeuQZBw==$Cw0GJGs4piHu4SEotJYH7j5Bg/EDWCnMYBrfLutdN2gT++BKn0e8cG8t+VtI4eGWRUeMAedAXkMBzmDBWvw02g==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "sbudziszek",
+      "displayName": "Scott Budziszek",
+      "passwordHash": "scrypt$16384$8$1$5kKkkztwAqcAx2hPoxsrNw==$oUzf3OSNKYrgnZb9ex6ZOG1l1gq18N+oiO9i0BVgtLaZCE6sVzLaLsZ1vMBFq7SPdHLu9oSyl9Go9UvweOo6Dg==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "shastings",
+      "displayName": "Sequona Hastings",
+      "passwordHash": "scrypt$16384$8$1$XRThhfmzHUxTFWFVYMVTIw==$ZJXGXu7oL/uhkleoNzjOxixm5ZlNiu7EBs8bC4b35zeRvmvCALWdulIg2KX0HEqgoIWIDbCcz5LCkLJhwezOvQ==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "smaldonado",
+      "displayName": "Samantha Maldonado",
+      "passwordHash": "scrypt$16384$8$1$56ubZ65ZmUc1+fQlyePSjg==$racVoHg45W2u8z8qTCAnbneLCUrEqOkHJ04AKontXb5sDvMov1RGJnbZehiHc1ueNN3R4Kh2fK/KUGiszsGVeA==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "vperez",
+      "displayName": "Ventura Perez",
+      "passwordHash": "scrypt$16384$8$1$wbWfSRUURr514QZqlHZ2JQ==$NRQCtRuRe6Msy2avtv4t1l5kT+hm6o6HiSUAIiaCS4QVXeynqCnGXWq9ma2HCJJADYWildMMZIJuOGyFtF/jDA==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "vperez24",
+      "displayName": "Ventura Perez",
+      "passwordHash": "scrypt$16384$8$1$fK3wN/1powATIsXg11UR2A==$AXCnlwcFPr6a6KaZoLRs4/kViD3KX28bHHdBO4dW4xWc0T0Zs9YzXyZ1e2kw+7FJIOf6uIrjXGlFAWLABORiTA==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    },
+    {
+      "username": "ymartinez",
+      "displayName": "Yelyiz Martinez",
+      "passwordHash": "scrypt$16384$8$1$xChFfmgM0Eycz2vA2FaZwQ==$lYV/GUrQ+cZII+Jdxfh8Ht14KWUbwna0AjymIybd8b8cWxj4E0XiYqBujXLqKDV395x8RKQPtas2HuFCX2e96w==",
+      "active": true,
+      "updatedAt": "2026-10-20T15:26:10.457Z"
+    }
+  ]
+}

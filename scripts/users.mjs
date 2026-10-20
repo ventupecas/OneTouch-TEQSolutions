@@ -13,6 +13,11 @@
 //   Get-Content $HOME\Downloads\people.csv | docker exec -i analytics_node_app node scripts/users.mjs import -
 // Existing usernames are skipped, never overwritten.
 //
+// Sharing accounts with clones of the repo:
+//   docker exec analytics_node_app node scripts/users.mjs export
+// writes db/accounts.json (password hashes only); commit it, and every clone's
+// server loads it when it starts. `sync` loads it by hand.
+//
 // Passwords are typed at a hidden prompt. For automation, pipe the password
 // in and add --password-stdin (e.g. echo "secret" | ... add jsmith --password-stdin).
 
@@ -30,6 +35,10 @@ const USAGE = `Usage: npm run users -- <command> [args]
   activate <username>               Allow sign-in again
   import <file.csv | ->             Add everyone in a CSV (columns: Username, Display Name, Password);
                                     "-" reads the CSV from stdin. Existing usernames are skipped.
+  export [file]                     Write every account to db/accounts.json (or [file]) for clones;
+                                    password hashes only, never passwords
+  sync [file]                       Load db/accounts.json (or [file]): adds missing accounts and
+                                    applies newer changes (the server also does this when it starts)
 
 Add --password-stdin to read the password from stdin instead of prompting.`;
 
@@ -175,6 +184,23 @@ async function main() {
       if (!username) throw new Error(`Give a username: ${command} <username>`);
       const name = await auth.setActive(username, command === 'activate');
       return console.log(command === 'activate' ? `${name} can sign in again.` : `${name} can no longer sign in and was signed out.`);
+    }
+    case 'export': {
+      const fs = await import('node:fs/promises');
+      const file = username || auth.DEFAULT_ACCOUNTS_FILE;
+      const data = await auth.exportAccounts();
+      await fs.writeFile(file, JSON.stringify(data, null, 2) + '\n');
+      return console.log(`Wrote ${data.accounts.length} accounts to ${file}. Commit it so clones get them.`);
+    }
+    case 'sync': {
+      const fs = await import('node:fs/promises');
+      const file = username || auth.DEFAULT_ACCOUNTS_FILE;
+      const r = await auth.syncAccounts(JSON.parse(await fs.readFile(file, 'utf8')));
+      console.log(`From ${file}: ${r.added.length} added, ${r.updated.length} updated, ${r.unchanged} already up to date.`);
+      if (r.added.length) console.log(`  Added: ${r.added.join(', ')}`);
+      if (r.updated.length) console.log(`  Updated: ${r.updated.join(', ')}`);
+      if (r.invalid.length) { console.log(`  Skipped: ${r.invalid.join('; ')}`); process.exitCode = 1; }
+      return;
     }
     case 'import': {
       if (!username) throw new Error('Give a CSV file, or "-" to read it from stdin: import <file.csv | ->');

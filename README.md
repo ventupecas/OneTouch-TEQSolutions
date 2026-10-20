@@ -31,6 +31,26 @@ If port 8000 is busy, set `REMOTE_PORT=8100` (and open `localhost:8100`).
 
 You can also skip all of this and open the server address directly in your browser.
 
+## Running your own full copy (works without anyone else's computer)
+
+1. Install Docker Desktop and clone this repo.
+2. Copy `.env.example` to `.env`. Put an Anthropic API key in `ANTHROPIC_API_KEY`;
+   the other values can stay as they are for a local copy.
+3. Get the ServiceNow export (the six CSVs) from the team and put them in a `csv_data/`
+   folder. Without them the tool still starts and you can sign in, but every question
+   comes back empty. (Add them before the first start, or see "Reloading the data".)
+4. Run `docker compose up -d` and open http://localhost:8000.
+5. Sign in with your usual username and password. Everyone's accounts come with the
+   repo in `db/accounts.json` and are loaded automatically.
+
+**Getting account changes:** when someone is added, has their password reset, or is
+deactivated, the person who made the change exports and commits `db/accounts.json`.
+Pull, then restart your copy (`docker compose restart app`) to pick it up.
+
+**Reloading the data:** the CSVs are only loaded the first time the database starts.
+To load them later, `docker compose down -v` (this also clears your copy's sign-in
+sessions; accounts come back from `db/accounts.json`), then `docker compose up -d`.
+
 ## Running the server
 
 Needs Docker Desktop, the CSV export in `csv_data/`, and a `.env` file
@@ -82,3 +102,16 @@ Get-Content people.csv | docker exec -i analytics_node_app node scripts/users.mj
 ```
 
 Never commit that CSV: it holds everyone's passwords.
+
+**Sharing accounts with clones.** After any change above, write the accounts file and commit it:
+
+```
+docker exec analytics_node_app node scripts/users.mjs export
+git add db/accounts.json
+git commit -m "Update accounts"
+```
+
+`db/accounts.json` holds usernames, display names and password *hashes*, never the
+passwords themselves. Every copy loads it on start: missing accounts are added, and an
+account is only overwritten by a more recent change, so an old file never undoes a newer
+password reset or deactivation.

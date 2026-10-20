@@ -69,6 +69,11 @@ export async function ensureSchema() {
       expires_at  timestamptz NOT NULL
     );
     CREATE INDEX IF NOT EXISTS sessions_user_id_idx ON sessions (user_id);
+
+    -- When the password, name or active flag last changed (millisecond precision,
+    -- so it round-trips exactly through the accounts file; see syncAccounts)
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS
+      updated_at timestamptz NOT NULL DEFAULT date_trunc('milliseconds', now());
   `);
 }
 
@@ -194,7 +199,9 @@ export async function resetPassword(username, password) {
   const problem = validatePassword(password);
   if (problem) throw new Error(problem);
   const { rows } = await pool.query(
-    'UPDATE users SET password_hash = $2, failed_attempts = 0, locked_until = NULL WHERE username = $1 RETURNING id',
+    `UPDATE users SET password_hash = $2, failed_attempts = 0, locked_until = NULL,
+                      updated_at = date_trunc('milliseconds', now())
+      WHERE username = $1 RETURNING id`,
     [name, await hashPassword(password)]);
   if (!rows.length) throw new Error(`No user named "${name}".`);
   // Anyone signed in with the old password is signed out
@@ -205,7 +212,9 @@ export async function resetPassword(username, password) {
 export async function setActive(username, active) {
   const name = normalizeUsername(username);
   const { rows } = await pool.query(
-    'UPDATE users SET is_active = $2, failed_attempts = 0, locked_until = NULL WHERE username = $1 RETURNING id',
+    `UPDATE users SET is_active = $2, failed_attempts = 0, locked_until = NULL,
+                      updated_at = date_trunc('milliseconds', now())
+      WHERE username = $1 RETURNING id`,
     [name, active]);
   if (!rows.length) throw new Error(`No user named "${name}".`);
   if (!active) await pool.query('DELETE FROM sessions WHERE user_id = $1', [rows[0].id]);
@@ -218,3 +227,72 @@ export async function listUsers() {
        FROM users ORDER BY username`);
   return rows;
 }
+
+// ---------------------------------------------------------------------
+// Accounts file (db/accounts.json): shares accounts with clones of the repo.
+// Holds usernames, display names and password *hashes*, never passwords.
+// Written by `users export`; loaded automatically when the server starts.
+// ---------------------------------------------------------------------
+
+export const ACCOUNTS_FILE_VERSION = 1;
+
+export async function exportAccounts() {
+  const { rows } = await pool.query(
+    'SELECT username, display_name, password_hash, is_active, updated_at FROM users ORDER BY username');
+  return {
+    version: ACCOUNTS_FILE_VERSION,
+    note: 'OneTouch sign-in accounts. Password hashes only. Regenerate with: node scripts/users.mjs export',
+    accounts: rows.map(r => ({
+      username: r.username,
+      displayName: r.display_name,
+      passwordHash: r.password_hash,
+      active: r.is_active,
+      updatedAt: r.updated_at.toISOString(),
+    })),
+  };
+}
+
+// Brings the database up to date with an accounts file. Accounts missing
+// from the database are added; an existing account is only overwritten when
+// the file's copy changed more recently, so an old file can never undo a
+// newer password reset or deactivation. Accounts not in the file are left alone.
+// -> { added, updated, unchanged, invalid: [messages] }
+export async function syncAccounts(file) {
+  if (!file || file.version !== ACCOUNTS_FILE_VERSION || !Array.isArray(file.accounts)) {
+    throw new Error(`Not a OneTouch accounts file (expected version ${ACCOUNTS_FILE_VERSION} with an "accounts" list).`);
+  }
+  const result = { added: [], updated: [], unchanged: 0, invalid: [] };
+
+  for (const [i, a] of file.accounts.entries()) {
+    const name = normalizeUsername(a?.username);
+    const updatedAt = new Date(a?.updatedAt);
+    if (!/^[a-z0-9._-]{2,64}$/.test(name) || !String(a?.passwordHash).startsWith('scrypt$')
+        || typeof a?.active !== 'boolean' || Number.isNaN(updatedAt.getTime())) {
+      result.invalid.push(`entry ${i + 1} (${a?.username ?? 'no username'}) is malformed`);
+      continue;
+    }
+
+    const inserted = await pool.query(
+      `INSERT INTO users (username, password_hash, display_name, is_active, updated_at)
+       VALUES ($1, $2, $3, $4, $5) ON CONFLICT (username) DO NOTHING RETURNING id`,
+      [name, a.passwordHash, a.displayName || null, a.active, updatedAt]);
+    if (inserted.rows.length) { result.added.push(name); continue; }
+
+    const changed = await pool.query(
+      `UPDATE users SET password_hash = $2, display_name = $3, is_active = $4, updated_at = $5,
+                        failed_attempts = 0, locked_until = NULL
+        WHERE username = $1 AND updated_at < $5 RETURNING id`,
+      [name, a.passwordHash, a.displayName || null, a.active, updatedAt]);
+    if (changed.rows.length) {
+      // New password or deactivated: sessions from before the change end
+      await pool.query('DELETE FROM sessions WHERE user_id = $1', [changed.rows[0].id]);
+      result.updated.push(name);
+    } else {
+      result.unchanged += 1;
+    }
+  }
+  return result;
+}
+
+// Where the accounts file lives, relative to the project folder
+export const DEFAULT_ACCOUNTS_FILE = 'db/accounts.json';
