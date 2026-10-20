@@ -7,6 +7,18 @@ Ask questions about the ServiceNow export in plain English and download the resu
 One computer runs the full tool (the **server**). Everyone else signs in to it with
 the username and password they were given.
 
+## Coding helpers (Claude Code)
+
+The repo includes two Claude Code subagents in `.claude/agents/`:
+
+- **onetouch-developer** builds features: it knows how OneTouch fits together, how to run
+  and test it, and the pitfalls this project has hit.
+- **onetouch-reviewer** reviews a diff or branch for this project's risks (sign-in and data
+  exposure, secrets, Claude API rules, setup that breaks on other machines). Read-only.
+
+In Claude Code, ask for them by name (e.g. "use onetouch-reviewer on my branch"), or see
+them with `/agents`.
+
 ## Using OneTouch from a clone of this repo (remote mode)
 
 You don't need Docker, the data, or an API key. Your `localhost:8000` shows the tool
