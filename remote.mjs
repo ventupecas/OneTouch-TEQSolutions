@@ -33,10 +33,14 @@ const app = express();
 // Request headers worth passing on; everything else (cookies, host, ...) stays here
 const FORWARD_REQUEST = ['authorization', 'content-type', 'accept'];
 // Response headers the page needs back (downloads read Content-Disposition)
-const FORWARD_RESPONSE = ['content-type', 'content-disposition', 'cache-control'];
+// (and what Metabase's dashboard pages need: caching and framing rules)
+const FORWARD_RESPONSE = ['content-type', 'content-disposition', 'cache-control', 'etag', 'last-modified',
+  'content-security-policy', 'x-frame-options', 'location'];
 
+// /api is OneTouch itself; /public and /app are the Metabase dashboards the
+// server passes through for the Dashboards tab.
 // Bodies are passed through untouched; the same 25 MB cap as the server's export route
-app.use('/api', express.raw({ type: () => true, limit: '25mb' }), async (req, res) => {
+app.use(['/api', '/public', '/app'], express.raw({ type: () => true, limit: '25mb' }), async (req, res) => {
   const headers = {};
   for (const h of FORWARD_REQUEST) if (req.get(h)) headers[h] = req.get(h);
 

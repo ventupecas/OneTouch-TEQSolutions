@@ -83,6 +83,26 @@ For a permanent address, create a tunnel in a Cloudflare account (service:
 `http://app:8000`), put its token in `.env` as `TUNNEL_TOKEN`, and use
 `docker compose --profile tunnel-named up -d tunnel-named` instead.
 
+### Dashboards (Metabase)
+
+Three ITIL dashboards (Service Desk, Change / CAB, Requests) appear in OneTouch's
+**Dashboards** tab. To create them on a server:
+
+1. Fill in `METABASE_DB_PASSWORD`, `METABASE_ADMIN_EMAIL` and `METABASE_ADMIN_PASSWORD`
+   in `.env`. If you already set up Metabase yourself, use that admin login.
+2. Run `docker compose up -d` (creates the reporting views and Metabase's read-only user).
+3. Run:
+   ```
+   docker exec analytics_node_app node scripts/metabase-setup.mjs
+   ```
+
+Re-run step 3 any time; it rebuilds the dashboards in Metabase's "OneTouch ITIL"
+collection and never touches anything else. The charts are defined in
+`scripts/metabase-setup.mjs`, and the data they read in `db/reporting-views.sql`.
+
+Metabase itself is at http://localhost:3000 on the server only. The dashboards are
+public links that OneTouch passes through, so anyone with the link can view them.
+
 ### Accounts
 
 Accounts live in the server's own Postgres database (`onetouch_auth`). Manage them on the server:

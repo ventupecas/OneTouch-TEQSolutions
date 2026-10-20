@@ -139,7 +139,30 @@ body {
 .chat-input-area #new-chat-btn:hover { background: var(--bg-primary); }
 
 /* DASHBOARD PANEL */
-.dashboard-container { width: 100%; height: 100%; }
+.dashboard-container { width: 100%; height: 100%; display: flex; flex-direction: column; }
+.dashboard-picker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel-bg);
+}
+.dashboard-picker:empty { display: none; }
+.dashboard-choice {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 16px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text);
+    cursor: pointer;
+}
+.dashboard-choice:hover { background: var(--bg-primary); }
+.dashboard-choice.active { background: var(--accent); border-color: var(--accent); color: white; }
+.dashboard-message { margin: 40px auto; max-width: 560px; text-align: center; color: #4a5568; line-height: 1.6; }
+#dashboard-frame { flex: 1; width: 100%; border: 0; }
 
 /* RESULT TABLES */
 .ai-msg.wide { max-width: 100%; width: 100%; box-sizing: border-box; }

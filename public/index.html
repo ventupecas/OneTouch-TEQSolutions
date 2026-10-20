@@ -68,8 +68,10 @@
         <!-- DASHBOARD VIEW CONTAINER (METABASE) -->
         <section id="dashboard-view" class="view-panel">
             <div class="dashboard-container">
-                <!-- Change this src URL to match your Metabase setup or future secure embedding endpoint -->
-                <iframe src="http://localhost:8080/public/dashboard/your-dashboard-uuid-here" frameborder="0" width="100%" height="100%" allowtransparency></iframe>
+                <!-- Filled in by app.js from /api/dashboards (built by scripts/metabase-setup.mjs) -->
+                <nav class="dashboard-picker" id="dashboard-picker" aria-label="Dashboards"></nav>
+                <p class="dashboard-message" id="dashboard-message">Loading dashboards…</p>
+                <iframe id="dashboard-frame" title="Dashboard" hidden></iframe>
             </div>
         </section>
     </main>
