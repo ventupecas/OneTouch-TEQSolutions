@@ -10,8 +10,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: analytics_db
       AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:?set AUTH_DB_PASSWORD in .env}
+    # Only this computer can connect (127.0.0.1); other people reach the tool
+    # through the app on port 8000, never the database directly
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       # Persist data so recreating the container doesn't wipe the tables
       - pgdata:/var/lib/postgresql/data
@@ -27,9 +29,10 @@ services:
     image: cubejs/cube:v0.35
     container_name: analytics_cube
     restart: always
+    # This computer only (the app reaches Cube inside Docker's network)
     ports:
-      - "4000:4000"     # REST API
-      - "15432:15432"   # SQL API
+      - "127.0.0.1:4000:4000"     # REST API
+      - "127.0.0.1:15432:15432"   # SQL API
     volumes:
       - .:/cube/conf
       # Keep Cube Store's RocksDB files out of the OneDrive-synced folder (prevents corruption)
@@ -59,8 +62,9 @@ services:
     image: metabase/metabase:v0.50.4
     container_name: analytics_metabase
     restart: always
+    # This computer only: Metabase has its own logins, separate from OneTouch's
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       MB_DB_TYPE: h2
     volumes:
@@ -92,6 +96,35 @@ services:
     depends_on:
       - cube
       - postgres
+
+  # 5. OPTIONAL: SHARE OVER THE INTERNET (Cloudflare Tunnel). Off unless asked for.
+  # Quick tunnel: no account needed, gives a random https://....trycloudflare.com
+  # link that changes every time it starts (see it with: docker logs onetouch_tunnel).
+  #   docker compose --profile tunnel up -d tunnel
+  #   docker compose stop tunnel
+  tunnel:
+    image: cloudflare/cloudflared:2026.9.3
+    container_name: onetouch_tunnel
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://app:8000
+    depends_on:
+      - app
+
+  # Named tunnel: a permanent address on your own domain. Needs a Cloudflare
+  # account; create the tunnel there (route it to http://app:8000) and put its
+  # token in .env as TUNNEL_TOKEN.
+  #   docker compose --profile tunnel-named up -d tunnel-named
+  tunnel-named:
+    image: cloudflare/cloudflared:2026.9.3
+    container_name: onetouch_tunnel_named
+    profiles: ["tunnel-named"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    depends_on:
+      - app
 
 volumes:
   pgdata:

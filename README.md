@@ -1,1 +1,84 @@
 ## EVERYONE HAS THEIR OWN BRANCHES!!
+
+# OneTouch
+
+Ask questions about the ServiceNow export in plain English and download the results.
+
+One computer runs the full tool (the **server**). Everyone else signs in to it with
+the username and password they were given.
+
+## Using OneTouch from a clone of this repo (remote mode)
+
+You don't need Docker, the data, or an API key. Your `localhost:8000` shows the tool
+and passes everything to the OneTouch server, where your account lives.
+
+1. Install [Node.js](https://nodejs.org) 18 or newer.
+2. In the cloned folder, run once:
+   ```
+   npm install
+   ```
+3. Ask whoever runs OneTouch for the **server address**, then start remote mode with it:
+   ```
+   npm run remote -- https://the-link-you-were-given.trycloudflare.com
+   ```
+   On the same network as the server you can use its network address instead,
+   e.g. `npm run remote -- http://192.168.5.106:8000`.
+4. Open **http://localhost:8000** and sign in with your own username and password.
+
+Keep the terminal open while you use it; press `Ctrl+C` to stop. You can put the address
+in a `.env` file as `ONETOUCH_SERVER=...` and then just run `npm run remote`.
+If port 8000 is busy, set `REMOTE_PORT=8100` (and open `localhost:8100`).
+
+You can also skip all of this and open the server address directly in your browser.
+
+## Running the server
+
+Needs Docker Desktop, the CSV export in `csv_data/`, and a `.env` file
+(copy `.env.example` and fill in every value). Then:
+
+```
+docker compose up -d
+```
+
+The tool is at http://localhost:8000. Only port 8000 is reachable from other computers;
+Postgres, Cube and Metabase only accept connections from the server itself.
+
+### Sharing it
+
+**Same network (office Wi-Fi or VPN).** Others open `http://<server's IP address>:8000`
+(find the IP with `ipconfig`). Nothing else to set up. Traffic is not encrypted, so
+only use this on a network you trust.
+
+**Over the internet (Cloudflare Tunnel).** Get permission first: this puts company data
+behind a public link.
+
+```
+docker compose --profile tunnel up -d tunnel     # start
+docker logs onetouch_tunnel                      # find the https://....trycloudflare.com link
+docker compose stop tunnel                       # stop sharing
+```
+
+The quick-tunnel link changes every time the tunnel starts, so send people the new one.
+For a permanent address, create a tunnel in a Cloudflare account (service:
+`http://app:8000`), put its token in `.env` as `TUNNEL_TOKEN`, and use
+`docker compose --profile tunnel-named up -d tunnel-named` instead.
+
+### Accounts
+
+Accounts live in the server's own Postgres database (`onetouch_auth`). Manage them on the server:
+
+```
+docker exec -it analytics_node_app node scripts/users.mjs list
+docker exec -it analytics_node_app node scripts/users.mjs add jsmith "Jane Smith"
+docker exec -it analytics_node_app node scripts/users.mjs reset-password jsmith
+docker exec -it analytics_node_app node scripts/users.mjs deactivate jsmith
+docker exec -it analytics_node_app node scripts/users.mjs activate jsmith
+```
+
+Many at once, from a CSV with the columns `Username, Display Name, Password` (PowerShell):
+
+```
+Get-Content people.csv | docker exec -i analytics_node_app node scripts/users.mjs import -
+```
+
+Never commit that CSV: it holds everyone's passwords.

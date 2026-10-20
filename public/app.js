@@ -3,7 +3,10 @@
 // token, which every API call then sends as "Authorization: Bearer ..."
 // =====================================================================
 
-const API_BASE = 'http://localhost:8000';
+// The API lives on the same server that served this page, whether that's
+// localhost:8000, this computer's network address, or a tunnel link. Only a
+// page opened straight from disk (file://) has no server, so fall back then.
+const API_BASE = location.protocol.startsWith('http') ? location.origin : 'http://localhost:8000';
 const TOKEN_KEY = 'onetouch-session';
 
 // sessionStorage can be blocked (private windows, strict settings)
