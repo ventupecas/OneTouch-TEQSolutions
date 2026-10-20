@@ -22,6 +22,32 @@ services:
       - ./csv_data:/tmp/my_csv_files:ro
       # ...and to create the separate sign-in account database (onetouch_auth)
       - ./db/init-auth.sh:/docker-entrypoint-initdb.d/20-init-auth.sh:ro
+    # Healthy once Postgres accepts network connections. (-h 127.0.0.1 matters:
+    # during first-time setup a temporary server answers on the local socket only.)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U admin -d analytics_db"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+
+  # 1b. ACCOUNT DATABASE SETUP. Runs on every `docker compose up`, then exits.
+  # Postgres only runs its own setup scripts when its volume is brand new, so a
+  # database created before sign-in existed would never get onetouch_auth.
+  # This creates it if missing and keeps onetouch_app's password in step with .env.
+  db-setup:
+    image: postgres:16-alpine
+    restart: "no"
+    entrypoint: ["sh", "/init-auth.sh"]
+    environment:
+      PGHOST: postgres
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_USER: admin
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:?set AUTH_DB_PASSWORD in .env}
+    volumes:
+      - ./db/init-auth.sh:/init-auth.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   # 2. THE SEMANTIC LAYER (Cube.dev)
    # 2. THE SEMANTIC LAYER (Cube.dev)
@@ -94,8 +120,11 @@ services:
       AUTH_DB_HOST: postgres
       AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:?set AUTH_DB_PASSWORD in .env}
     depends_on:
-      - cube
-      - postgres
+      cube:
+        condition: service_started
+      # The account database must exist before the app loads db/accounts.json
+      db-setup:
+        condition: service_completed_successfully
 
   # 5. OPTIONAL: SHARE OVER THE INTERNET (Cloudflare Tunnel). Off unless asked for.
   # Quick tunnel: no account needed, gives a random https://....trycloudflare.com
