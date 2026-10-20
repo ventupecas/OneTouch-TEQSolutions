@@ -18,6 +18,8 @@ node_modules/
 csv_data/
 *.csv
 *.sql
+# ...except the table setup script: without it a fresh clone's database can't start
+!load_csv.sql
 
 # 🐳 DOCKER INTERNAL PERSISTENT STORAGE
 .docker/

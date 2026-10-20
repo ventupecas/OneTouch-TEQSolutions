@@ -1,4 +1,5 @@
 import dns from 'node:dns/promises';
+import { existsSync, readFileSync } from 'node:fs';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -418,10 +419,35 @@ app.listen(port, () => {
   console.log(`🚀 Node.js Orchestrator live on port ${port} (model: ${CLAUDE_MODEL})`);
 });
 
-// Create the account tables if this is a fresh database
-auth.ensureSchema()
-  .then(() => auth.listUsers())
-  .then(users => console.log(users.length
+// Account setup: create the tables if this is a fresh database, then load the
+// shared accounts file (db/accounts.json) so a fresh clone has everyone's
+// sign-ins. Retries, because on first start Postgres is still initializing.
+async function prepareAccounts(attempt = 1) {
+  try {
+    await auth.ensureSchema();
+  } catch (error) {
+    const wait = Math.min(attempt * 2, 15);
+    console.error(`🔐 Account database not reachable yet (${error.message}); retrying in ${wait}s`);
+    setTimeout(() => prepareAccounts(attempt + 1), wait * 1000).unref();
+    return;
+  }
+
+  const file = process.env.ACCOUNTS_FILE ?? auth.DEFAULT_ACCOUNTS_FILE;
+  if (file && existsSync(file)) {
+    try {
+      const r = await auth.syncAccounts(JSON.parse(readFileSync(file, 'utf8')));
+      if (r.added.length || r.updated.length) {
+        console.log(`🔐 Loaded ${file}: ${r.added.length} accounts added, ${r.updated.length} updated`);
+      }
+      if (r.invalid.length) console.warn(`🔐 ${file}: skipped ${r.invalid.join('; ')}`);
+    } catch (error) {
+      console.error(`🔐 Could not load ${file}: ${error.message}`);
+    }
+  }
+
+  const users = await auth.listUsers();
+  console.log(users.length
     ? `🔐 Account database ready (${users.length} ${users.length === 1 ? 'account' : 'accounts'})`
-    : '🔐 Account database ready, but it has no accounts yet. Add one with: docker exec -it analytics_node_app npm run users -- add <username>'))
-  .catch(error => console.error('🔐 Account database unavailable; nobody can sign in until it is reachable:', error.message));
+    : '🔐 Account database ready, but it has no accounts yet. Add one with: docker exec -it analytics_node_app node scripts/users.mjs add <username>');
+}
+prepareAccounts();
