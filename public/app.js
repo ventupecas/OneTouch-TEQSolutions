@@ -163,6 +163,54 @@ function switchTab(viewName) {
 
     event.target.classList.add('active');
     document.getElementById(`${viewName}-view`).classList.add('active');
+    if (viewName === 'dashboard') loadDashboards();
+}
+
+// =====================================================================
+// DASHBOARDS TAB: the Metabase dashboards made by scripts/metabase-setup.mjs,
+// shown through the OneTouch server (so they work from any address)
+// =====================================================================
+
+let dashboardsLoaded = false;
+
+async function loadDashboards() {
+    if (dashboardsLoaded) return;
+    const picker = document.getElementById('dashboard-picker');
+    const message = document.getElementById('dashboard-message');
+    try {
+        const response = await fetch(`${API_BASE}/api/dashboards`, { headers: authHeaders() });
+        if (handleUnauthorized(response)) return;
+        const { dashboards } = await response.json();
+        if (!dashboards.length) {
+            message.textContent = 'No dashboards yet. Whoever runs this OneTouch server can create them with: ' +
+                'docker exec analytics_node_app node scripts/metabase-setup.mjs';
+            return;
+        }
+        picker.innerHTML = '';
+        for (const d of dashboards) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'dashboard-choice';
+            button.textContent = d.name;
+            button.title = d.description || '';
+            button.onclick = () => showDashboard(d, button);
+            picker.appendChild(button);
+        }
+        dashboardsLoaded = true;
+        showDashboard(dashboards[0], picker.firstChild);
+    } catch (err) {
+        message.textContent = 'Could not load the dashboards. Please try again.';
+        console.error(err);
+    }
+}
+
+function showDashboard(dashboard, button) {
+    document.querySelectorAll('.dashboard-choice').forEach(b => b.classList.toggle('active', b === button));
+    const frame = document.getElementById('dashboard-frame');
+    // #bordered=false: no extra frame around the dashboard inside ours
+    frame.src = `${API_BASE}${dashboard.path}#bordered=false&titled=true`;
+    frame.hidden = false;
+    document.getElementById('dashboard-message').hidden = true;
 }
 
 // Asynchronous Chat Workflow Engine

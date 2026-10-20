@@ -21,6 +21,43 @@ const port = process.env.PORT || 8000;
 
 // Content-Disposition is exposed so the browser can read the download's file name
 app.use(cors({ origin: '*', exposedHeaders: ['Content-Disposition'] }));
+
+// =====================================================================
+// METABASE DASHBOARDS: Metabase only listens on this computer, so its
+// public-dashboard pages (and the scripts and data they load) are passed
+// through this server. That way the Dashboards tab works wherever OneTouch
+// does: localhost, the network address, the tunnel and remote mode.
+// =====================================================================
+
+const METABASE_URL = (process.env.METABASE_URL || 'http://localhost:3000').replace(/\/+$/, '');
+const METABASE_DASHBOARDS_FILE = 'metabase-dashboards.json';
+// What a public dashboard page needs from Metabase, and nothing else
+// (no admin pages, no signed-in API)
+const METABASE_PATHS = /^\/(public\/|app\/|api\/public\/|api\/session\/properties$|api\/geojson)/;
+// Headers passed back to the browser; fetch already undid any compression
+const METABASE_RESPONSE_HEADERS = ['content-type', 'cache-control', 'etag', 'last-modified',
+  'content-security-policy', 'x-frame-options', 'location'];
+
+app.use(async (req, res, next) => {
+  if (!METABASE_PATHS.test(req.path) || !['GET', 'HEAD'].includes(req.method)) return next();
+  try {
+    const upstream = await fetch(METABASE_URL + req.originalUrl, {
+      method: req.method,
+      headers: { accept: req.get('accept') || '*/*', 'accept-language': req.get('accept-language') || 'en' },
+      redirect: 'manual',
+      signal: AbortSignal.timeout(120 * 1000),
+    });
+    res.status(upstream.status);
+    for (const h of METABASE_RESPONSE_HEADERS) {
+      const v = upstream.headers.get(h);
+      if (v) res.set(h, v);
+    }
+    res.send(Buffer.from(await upstream.arrayBuffer()));
+  } catch (error) {
+    console.error(`📊 Metabase unreachable for ${req.path}: ${error.message}`);
+    res.status(502).send('Metabase is not reachable right now.');
+  }
+});
 // Exports carry whole result tables back up, so that route gets a bigger limit
 app.use('/api/export', express.json({ limit: '25mb' }));
 app.use(express.json());
@@ -154,11 +191,23 @@ async function requireLogin(req, res, next) {
   next();
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards'], requireLogin);
 
 // Who is signed in (the page shows their display name)
 app.get('/api/me', (req, res) => {
   res.json({ username: req.user.username, displayName: req.user.displayName });
+});
+
+// The dashboards built by scripts/metabase-setup.mjs, for the Dashboards tab
+app.get('/api/dashboards', (_req, res) => {
+  try {
+    const { dashboards } = JSON.parse(readFileSync(METABASE_DASHBOARDS_FILE, 'utf8'));
+    res.json({
+      dashboards: dashboards.map(d => ({ key: d.key, name: d.name, description: d.description, path: `/public/dashboard/${d.uuid}` })),
+    });
+  } catch {
+    res.json({ dashboards: [] });
+  }
 });
 
 // "New chat": Claude forgets this session's conversation

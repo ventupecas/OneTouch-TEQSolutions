@@ -20,6 +20,11 @@ csv_data/
 *.sql
 # ...except the table setup script: without it a fresh clone's database can't start
 !load_csv.sql
+# ...and the reporting views Metabase uses
+!db/*.sql
+
+# Metabase dashboard links differ per machine (scripts/metabase-setup.mjs writes them)
+metabase-dashboards.json
 
 # 🐳 DOCKER INTERNAL PERSISTENT STORAGE
 .docker/
