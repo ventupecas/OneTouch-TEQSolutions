@@ -4,19 +4,49 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OneTouch</title>
-    <link rel="icon" type="image/x-icon" href="/favicon.ico">
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-    <link rel="manifest" href="/site.webmanifest">
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+    <link rel="manifest" href="site.webmanifest">
     <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="signed-out">
+    <!-- SIGN-IN PAGE: shown until the user signs in -->
+    <div id="login-view" class="login-page">
+        <img src="molsoncoorslogo.png" alt="Molson Coors" class="login-brand">
+        <main class="box">
+            <img src="favicon-32x32.png" alt="" width="32" height="32">
+            <h1>Sign in to OneTouch</h1>
+            <p class="sub">Enter your Molson Coors Email</p>
+            <form id="login-form" onsubmit="event.preventDefault(); signIn();">
+                <label for="login-email">Molson Coors Email</label>
+                <div class="combo">
+                    <input id="login-email" type="text" placeholder="your-email" autocomplete="username" required
+                           spellcheck="false" autocapitalize="off">
+                    <span class="suffix">@molsoncoors.com</span>
+                </div>
+                <label for="login-password" class="password-label">Password</label>
+                <div class="combo">
+                    <input id="login-password" type="password" placeholder="your-password" autocomplete="current-password" required>
+                </div>
+                <p id="login-error" class="login-error" role="alert"></p>
+                <button id="login-btn" class="btn" type="submit">Continue with SSO</button>
+            </form>
+            <div class="or"><span>or use</span></div>
+            <div class="provs">
+                <button class="prov" type="button" onclick="showLoginError('Microsoft Entra ID sign-in is not available yet. Use your email and password.')"><img src="microsoftlogo.png" alt="" height="24" width="24"> Microsoft Entra ID</button>
+            </div>
+            <p class="foot">Forgot your email or password? <a href="#">Contact Support</a></p>
+        </main>
+    </div>
+
     <header class="app-header">
-        <h1 class="app-title"><img src="/android-chrome-192x192.png" alt="" class="app-logo"> OneTouch</h1>
+        <h1 class="app-title"><img src="android-chrome-192x192.png" alt="" class="app-logo"> OneTouch</h1>
         <nav class="tab-navigation">
             <button class="tab-btn active" onclick="switchTab('chat')">💬 AI Assistant</button>
             <button class="tab-btn" onclick="switchTab('dashboard')">📈 Dashboards</button>
+            <button class="sign-out-btn" type="button" onclick="signOut()">Sign out</button>
         </nav>
     </header>
 

@@ -1,3 +1,4 @@
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -22,6 +23,59 @@ app.use(cors({ origin: '*', exposedHeaders: ['Content-Disposition'] }));
 app.use('/api/export', express.json({ limit: '25mb' }));
 app.use(express.json());
 app.use(express.static('public'));
+
+// =====================================================================
+// SIGN IN: one allowed account; /api/query and /api/export need a session
+// =====================================================================
+
+const LOGIN_USERNAME = 'vperez';
+const LOGIN_PASSWORD = 'vperez24';
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+
+// token -> expiry time. Kept in memory, so a server restart signs everyone out.
+const sessions = new Map();
+
+// Compares hashes so the check takes the same time however close a guess is
+function sameText(a, b) {
+  const hash = s => createHash('sha256').update(String(s)).digest();
+  return timingSafeEqual(hash(a), hash(b));
+}
+
+app.post('/api/login', (req, res) => {
+  const { username, password } = req.body || {};
+  // The sign-in form shows "@molsoncoors.com" after the box, so accept it typed out too
+  const user = String(username || '').trim().replace(/@molsoncoors\.com$/i, '');
+  if (!sameText(user, LOGIN_USERNAME) || !sameText(password || '', LOGIN_PASSWORD)) {
+    return res.status(401).json({ error: 'Incorrect email or password.' });
+  }
+  const token = randomBytes(32).toString('hex');
+  sessions.set(token, Date.now() + SESSION_TTL_MS);
+  console.log(`🔐 ${user} signed in`);
+  res.json({ token, username: user });
+});
+
+function sessionToken(req) {
+  const m = (req.get('Authorization') || '').match(/^Bearer ([0-9a-f]{64})$/);
+  return m ? m[1] : null;
+}
+
+app.post('/api/logout', (req, res) => {
+  const token = sessionToken(req);
+  if (token) sessions.delete(token);
+  res.json({ ok: true });
+});
+
+function requireLogin(req, res, next) {
+  const token = sessionToken(req);
+  const expires = token && sessions.get(token);
+  if (!expires || expires < Date.now()) {
+    if (token) sessions.delete(token);
+    return res.status(401).json({ error: 'Please sign in again.' });
+  }
+  next();
+}
+
+app.use(['/api/query', '/api/export'], requireLogin);
 
 const anthropicKey = (process.env.ANTHROPIC_API_KEY || '').trim();
 if (!anthropicKey || anthropicKey.startsWith('REPLACE_WITH')) {
