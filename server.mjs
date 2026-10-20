@@ -32,8 +32,18 @@ const LOGIN_USERNAME = 'vperez';
 const LOGIN_PASSWORD = 'vperez24';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
-// token -> expiry time. Kept in memory, so a server restart signs everyone out.
+// token -> { expires, conversation, queue }. Kept in memory, so a server
+// restart signs everyone out and forgets every conversation.
 const sessions = new Map();
+
+// What Claude remembers for one signed-in session (see translateToQuery)
+function newConversation() {
+  return {
+    messages: [],     // Anthropic.MessageParam[]: user turns + Claude's full replies, append-only
+    turns: 0,         // completed question/answer pairs
+    pendingNote: null // what the last answer's query returned, told to Claude with the next question
+  };
+}
 
 // Compares hashes so the check takes the same time however close a guess is
 function sameText(a, b) {
@@ -49,7 +59,11 @@ app.post('/api/login', (req, res) => {
     return res.status(401).json({ error: 'Incorrect email or password.' });
   }
   const token = randomBytes(32).toString('hex');
-  sessions.set(token, Date.now() + SESSION_TTL_MS);
+  sessions.set(token, {
+    expires: Date.now() + SESSION_TTL_MS,
+    conversation: newConversation(),
+    queue: Promise.resolve(), // questions in one session run one at a time
+  });
   console.log(`🔐 ${user} signed in`);
   res.json({ token, username: user });
 });
@@ -67,15 +81,25 @@ app.post('/api/logout', (req, res) => {
 
 function requireLogin(req, res, next) {
   const token = sessionToken(req);
-  const expires = token && sessions.get(token);
-  if (!expires || expires < Date.now()) {
+  const session = token && sessions.get(token);
+  if (!session || session.expires < Date.now()) {
     if (token) sessions.delete(token);
     return res.status(401).json({ error: 'Please sign in again.' });
   }
+  req.session = session;
   next();
 }
 
-app.use(['/api/query', '/api/export'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation'], requireLogin);
+
+// "New chat": Claude forgets this session's conversation
+app.post('/api/conversation/reset', (req, res) => {
+  // Queued behind any question still running, so its answer can't land in the new conversation
+  req.session.queue = req.session.queue.then(() => {
+    req.session.conversation = newConversation();
+  });
+  req.session.queue.then(() => res.json({ ok: true }));
+});
 
 const anthropicKey = (process.env.ANTHROPIC_API_KEY || '').trim();
 if (!anthropicKey || anthropicKey.startsWith('REPLACE_WITH')) {
@@ -122,19 +146,39 @@ async function fetchWithRetry(url, options, retries = 3, delay = 2000) {
   }
 }
 
-// Step 1: plain English -> structured JSON (schema-enforced by the API)
-async function translateToQuery(userPrompt) {
+// A session's conversation starts over after this many questions, so one
+// very long session can't grow every request without limit
+const MAX_CONVERSATION_TURNS = 40;
+
+// Step 1: plain English -> structured JSON (schema-enforced by the API).
+// Claude sees the session's earlier questions and its own earlier answers,
+// so follow-ups like "same but for changes" or "only the P1s" work.
+async function translateToQuery(conversation, userPrompt) {
+  let memoryReset = false;
+  if (conversation.turns >= MAX_CONVERSATION_TURNS) {
+    Object.assign(conversation, newConversation());
+    memoryReset = true;
+  }
+
+  // Tell Claude what its previous answer produced, inside the new user turn
+  // (history is append-only: earlier turns are never edited after the fact)
+  const note = conversation.pendingNote ? `[Result of your previous answer: ${conversation.pendingNote}]\n\n` : '';
+  const userTurn = { role: 'user', content: note + buildUserMessage(userPrompt, referenceToday()) };
+
   const stream = anthropic.messages.stream({
     model: CLAUDE_MODEL,
     max_tokens: 4000,
     system: [
       { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
     ],
-    messages: [{ role: 'user', content: buildUserMessage(userPrompt, referenceToday()) }],
+    // Caches the conversation so far, so each follow-up only pays full price for the new turn
+    cache_control: { type: 'ephemeral' },
+    messages: [...conversation.messages, userTurn],
     output_config: { format: { type: 'json_schema', schema: OUTPUT_SCHEMA } },
   });
   const message = await stream.finalMessage();
 
+  // A failed call leaves the conversation as it was, so the user can just ask again
   if (message.stop_reason === 'refusal') {
     throw new Error('The assistant declined to translate that request.');
   }
@@ -143,7 +187,22 @@ async function translateToQuery(userPrompt) {
   }
 
   const text = message.content.filter(b => b.type === 'text').map(b => b.text).join('');
-  return { parsed: JSON.parse(text), usage: message.usage };
+  const parsed = JSON.parse(text);
+
+  // Remember the turn. Claude's reply goes back exactly as returned (thinking
+  // blocks included); Sonnet 5.5 rejects or drops altered earlier turns.
+  conversation.messages.push(userTurn, { role: 'assistant', content: message.content });
+  conversation.turns += 1;
+  conversation.pendingNote = null;
+
+  return { parsed, usage: message.usage, memoryReset };
+}
+
+// One line for Claude about what the last answer's queries returned
+function describeResults(sections) {
+  return sections
+    .map(s => `${s.entity} query returned ${s.rows.length} ${s.rows.length === 1 ? 'row' : 'rows'}`)
+    .join('; ') + '.';
 }
 
 // Step 2: validated Cube query -> rows
@@ -170,20 +229,35 @@ async function runCubeQuery(cubeQuery) {
 }
 
 app.post('/api/query', async (req, res) => {
+  const { userPrompt } = req.body;
+  if (!userPrompt || typeof userPrompt !== 'string') {
+    return res.status(400).json({ error: 'userPrompt parameter is required.' });
+  }
+
+  // Questions from one session run in order, so the conversation history
+  // can't interleave if the user sends a second one before the first returns
+  const session = req.session;
+  const run = session.queue.then(() => answerQuestion(session.conversation, userPrompt, res));
+  session.queue = run.catch(() => {});
+  await run;
+});
+
+async function answerQuestion(conversation, userPrompt, res) {
+  // Set once Claude's answer is in the conversation; from then on, whatever
+  // happens to the query is reported to Claude with the next question
+  let remembered = false;
+
   try {
-    const { userPrompt } = req.body;
-    if (!userPrompt || typeof userPrompt !== 'string') {
-      return res.status(400).json({ error: 'userPrompt parameter is required.' });
-    }
+    console.log(`\n💬 Processing prompt: "${userPrompt}" (turn ${conversation.turns + 1})`);
 
-    console.log(`\n💬 Processing prompt: "${userPrompt}"`);
-
-    const { parsed, usage } = await translateToQuery(userPrompt);
+    const { parsed, usage, memoryReset } = await translateToQuery(conversation, userPrompt);
+    remembered = true;
     console.log(`🧠 tokens in=${usage.input_tokens} cached=${usage.cache_read_input_tokens ?? 0} out=${usage.output_tokens}`);
 
     const verdict = normalizeAndValidate(parsed);
     if (!verdict.ok) {
       console.warn('⚠️ Rejected by validator:', verdict.error, JSON.stringify(parsed));
+      conversation.pendingNote = `it was rejected before running: ${verdict.error}`;
       return res.status(400).json({
         error: `I couldn't map that question onto the data: ${verdict.error}`,
         aiInterpretation: parsed,
@@ -197,6 +271,7 @@ app.post('/api/query', async (req, res) => {
         intent: verdict.intent,
         message: verdict.message,
         assumptions: verdict.assumptions,
+        memoryReset,
         sections: [],
         results: [],
       });
@@ -208,6 +283,7 @@ app.post('/api/query', async (req, res) => {
       entity: q.entity,
       rows: await runCubeQuery(q.cubeQuery),
     })));
+    conversation.pendingNote = describeResults(sections);
 
     // Counts across several ticket types become one table with a total column
     const combined = verdict.merge ? combineResults(verdict.merge, verdict.queries, sections) : null;
@@ -219,6 +295,7 @@ app.post('/api/query', async (req, res) => {
       entity: sections.length === 1 ? sections[0].entity : 'multiple',
       message: verdict.message,
       assumptions: verdict.assumptions,
+      memoryReset,
       aiInterpretation: verdict.queries,
       results: sections.length === 1 ? sections[0].rows : [],
       sections,
@@ -226,6 +303,7 @@ app.post('/api/query', async (req, res) => {
     });
 
   } catch (error) {
+    if (remembered) conversation.pendingNote = `it failed when run: ${error.message}`;
     if (error instanceof Anthropic.APIError) {
       console.error(`📋 Claude API error ${error.status}:`, error.message);
       return res.status(502).json({ error: `Claude API error (${error.status}): ${error.message}` });
@@ -233,7 +311,7 @@ app.post('/api/query', async (req, res) => {
     console.error('📋 Execution Failure Context:', error);
     res.status(500).json({ error: `Server pipeline failed: ${error.message}` });
   }
-});
+}
 
 // The tables shown in the chat -> a downloadable file (see export.mjs)
 app.post('/api/export', async (req, res) => {

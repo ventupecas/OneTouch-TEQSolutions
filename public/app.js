@@ -84,9 +84,37 @@ function handleUnauthorized(response) {
     return true;
 }
 
+// =====================================================================
+// CONVERSATION MEMORY: the server keeps this session's questions and
+// Claude's answers, so follow-ups ("same but for changes") work.
+// "New chat" clears both the screen and Claude's memory.
+// =====================================================================
+
+const WELCOME_HTML = document.getElementById('chat-log').innerHTML;
+
+async function resetConversation() {
+    if (!sessionTokenValue) return;
+    try {
+        const response = await fetch(`${API_BASE}/api/conversation/reset`, { method: 'POST', headers: authHeaders() });
+        handleUnauthorized(response);
+    } catch (err) {
+        console.error('Could not reset the conversation:', err);
+    }
+}
+
+async function newChat() {
+    await resetConversation();
+    document.getElementById('chat-log').innerHTML = WELCOME_HTML;
+    exportPayloads.clear();
+    document.getElementById('user-prompt').focus();
+}
+
 // A token from earlier in this tab skips the sign-in page; if it has
 // expired, the first API call returns 401 and brings the page back
 showApp(Boolean(sessionTokenValue));
+
+// A reload empties the chat on screen, so Claude forgets it too
+resetConversation();
 
 // Tab Views Toggling Module
 function switchTab(viewName) {
@@ -132,6 +160,10 @@ async function sendPrompt() {
 
 
         document.getElementById(loadingId).remove(); // Clear loading block
+
+        if (data.memoryReset) {
+            appendMessage('system-msg', 'This conversation got long, so Claude started fresh. Earlier questions are no longer remembered.');
+        }
 
         if (data.error) {
             appendMessage('ai-msg', `❌ Error: ${data.error}`);
