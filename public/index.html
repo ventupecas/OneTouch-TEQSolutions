@@ -60,6 +60,7 @@
                 <div class="chat-input-area">
                     <input type="text" id="user-prompt" placeholder="Ask a data question..." onkeydown="if(event.key === 'Enter') sendPrompt()">
                     <button id="send-btn" onclick="sendPrompt()">Ask Claude</button>
+                    <button id="new-chat-btn" type="button" onclick="newChat()" title="Start over: Claude forgets this conversation">New chat</button>
                 </div>
             </div>
         </section>

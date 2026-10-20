@@ -119,6 +119,15 @@ body {
     font-weight: 600;
 }
 
+/* Secondary: clears the chat and Claude's memory of it */
+.chat-input-area #new-chat-btn {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 0 16px;
+}
+.chat-input-area #new-chat-btn:hover { background: var(--bg-primary); }
+
 /* DASHBOARD PANEL */
 .dashboard-container { width: 100%; height: 100%; }
 
