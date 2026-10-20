@@ -1,3 +1,4 @@
+import dns from 'node:dns/promises';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -59,6 +60,31 @@ const MAX_FAILURES_PER_IP = 20;
 const FAILURE_WINDOW_MS = 15 * 60 * 1000;
 const failuresByIp = new Map(); // ip -> { count, resetAt }
 
+// Through the Cloudflare tunnel every request arrives from the tunnel
+// container, so the visitor's real address comes from Cloudflare's
+// CF-Connecting-IP header. That header is only believed from the tunnel
+// containers themselves; anyone else could simply make it up.
+const TUNNEL_HOSTS = ['tunnel', 'tunnel-named']; // service names in docker-compose.yml
+let tunnelAddresses = new Set();
+
+async function refreshTunnelAddresses() {
+  const found = new Set();
+  for (const host of TUNNEL_HOSTS) {
+    try {
+      for (const { address } of await dns.lookup(host, { all: true })) found.add(address);
+    } catch { /* that tunnel isn't running */ }
+  }
+  tunnelAddresses = found;
+}
+refreshTunnelAddresses();
+setInterval(refreshTunnelAddresses, 30 * 1000).unref();
+
+function clientIp(req) {
+  const direct = String(req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+  const forwarded = req.get('CF-Connecting-IP');
+  return tunnelAddresses.has(direct) && forwarded ? forwarded.trim() : direct;
+}
+
 function tooManyFailures(ip) {
   const entry = failuresByIp.get(ip);
   return Boolean(entry && entry.resetAt > Date.now() && entry.count >= MAX_FAILURES_PER_IP);
@@ -72,21 +98,22 @@ function recordFailure(ip) {
 
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body || {};
-  if (tooManyFailures(req.ip)) {
+  const ip = clientIp(req);
+  if (tooManyFailures(ip)) {
     return res.status(429).json({ error: 'Too many failed sign-in attempts. Please wait 15 minutes and try again.' });
   }
 
   try {
     const result = await auth.signIn(username, password);
     if (!result.ok) {
-      recordFailure(req.ip);
+      recordFailure(ip);
       return res.status(401).json({
         error: result.reason === 'locked'
           ? 'This account is locked for 15 minutes after too many wrong passwords.'
           : 'Incorrect email or password.',
       });
     }
-    console.log(`🔐 ${result.user.username} signed in`);
+    console.log(`🔐 ${result.user.username} signed in from ${ip}`);
     res.json({ token: result.token, username: result.user.username, displayName: result.user.displayName });
   } catch (error) {
     console.error('🔐 Sign-in failed:', error.message);
