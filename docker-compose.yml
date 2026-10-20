@@ -4,18 +4,22 @@ services:
     image: postgres:16-alpine
     container_name: analytics_postgres
     restart: always
+    # Passwords come from the git-ignored .env file (see .env.example)
     environment:
       POSTGRES_USER: admin
-      POSTGRES_PASSWORD: password123
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: analytics_db
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:?set AUTH_DB_PASSWORD in .env}
     ports:
       - "5432:5432"
     volumes:
       # Persist data so recreating the container doesn't wipe the tables
       - pgdata:/var/lib/postgresql/data
-      # On first start (empty data dir) Postgres runs this script to create + load the tables
+      # On first start (empty data dir) Postgres runs these scripts to create + load the tables
       - ./load_csv.sql:/docker-entrypoint-initdb.d/load_csv.sql:ro
       - ./csv_data:/tmp/my_csv_files:ro
+      # ...and to create the separate sign-in account database (onetouch_auth)
+      - ./db/init-auth.sh:/docker-entrypoint-initdb.d/20-init-auth.sh:ro
 
   # 2. THE SEMANTIC LAYER (Cube.dev)
    # 2. THE SEMANTIC LAYER (Cube.dev)
@@ -35,12 +39,12 @@ services:
       CUBEJS_DB_HOST: postgres
       CUBEJS_DB_NAME: analytics_db
       CUBEJS_DB_USER: admin
-      CUBEJS_DB_PASS: password123
+      CUBEJS_DB_PASS: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       CUBEJS_DEV_MODE: "true"
-      CUBEJS_API_SECRET: super_secret_key_change_me_later
+      CUBEJS_API_SECRET: ${CUBEJS_API_SECRET:?set CUBEJS_API_SECRET in .env}
       CUBEJS_PG_SQL_PORT: 15432
       CUBEJS_SQL_USER: admin_cube
-      CUBEJS_SQL_PASSWORD: cubepassword123
+      CUBEJS_SQL_PASSWORD: ${CUBEJS_SQL_PASSWORD:?set CUBEJS_SQL_PASSWORD in .env}
       # 🎯 ADD THIS EXACT LINE HERE TO UNBLOCK THE CONNECTIONS:
       CUBEJS_BIND_ADDRESS: "0.0.0.0"
       # Force Cube onto 4000 (the mounted .env must not hijack the port)
@@ -78,12 +82,16 @@ services:
       PORT: 8000
       # 🎯 TARGETS CUBE BY SERVICE NAME NATIVELY:
       CUBE_API_URL: http://cube:4000/cubejs-api/v1/load
-      CUBE_API_TOKEN: super_secret_key_change_me_later
-      # Secret comes from the git-ignored .env file (never hard-code it here)
+      # Secrets come from the git-ignored .env file (never hard-code them here)
+      CUBE_API_TOKEN: ${CUBE_API_TOKEN:?set CUBE_API_TOKEN in .env}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       ANTHROPIC_WORKSPACE_ID: ${ANTHROPIC_WORKSPACE_ID:-}
+      # Sign-in accounts: their own database and role (see auth.mjs, db/init-auth.sh)
+      AUTH_DB_HOST: postgres
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:?set AUTH_DB_PASSWORD in .env}
     depends_on:
       - cube
+      - postgres
 
 volumes:
   pgdata:

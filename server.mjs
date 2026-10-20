@@ -1,4 +1,3 @@
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -11,6 +10,7 @@ import {
   OUTPUT_SCHEMA,
 } from './business_logic.mjs';
 import { buildExport, validateExport, ExportUnavailableError } from './export.mjs';
+import * as auth from './auth.mjs';
 
 dotenv.config();
 
@@ -25,16 +25,13 @@ app.use(express.json());
 app.use(express.static('public'));
 
 // =====================================================================
-// SIGN IN: one allowed account; /api/query and /api/export need a session
+// SIGN IN: accounts and sessions live in Postgres (see auth.mjs);
+// /api/query, /api/export and /api/conversation need a session
 // =====================================================================
 
-const LOGIN_USERNAME = 'vperez';
-const LOGIN_PASSWORD = 'vperez24';
-const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-
-// token -> { expires, conversation, queue }. Kept in memory, so a server
-// restart signs everyone out and forgets every conversation.
-const sessions = new Map();
+// Conversation memory per session token: { conversation, queue }. Kept in
+// RAM, so a server restart keeps people signed in but Claude forgets.
+const conversations = new Map();
 
 // What Claude remembers for one signed-in session (see translateToQuery)
 function newConversation() {
@@ -45,27 +42,56 @@ function newConversation() {
   };
 }
 
-// Compares hashes so the check takes the same time however close a guess is
-function sameText(a, b) {
-  const hash = s => createHash('sha256').update(String(s)).digest();
-  return timingSafeEqual(hash(a), hash(b));
+function conversationState(token) {
+  let state = conversations.get(token);
+  if (!state) {
+    // queue: questions in one session run one at a time
+    state = { conversation: newConversation(), queue: Promise.resolve(), lastUsed: Date.now() };
+    conversations.set(token, state);
+  }
+  state.lastUsed = Date.now();
+  return state;
 }
 
-app.post('/api/login', (req, res) => {
+// Per-address brake on wrong passwords, on top of the per-account lockout in
+// auth.mjs (which can't cover guesses spread across many usernames)
+const MAX_FAILURES_PER_IP = 20;
+const FAILURE_WINDOW_MS = 15 * 60 * 1000;
+const failuresByIp = new Map(); // ip -> { count, resetAt }
+
+function tooManyFailures(ip) {
+  const entry = failuresByIp.get(ip);
+  return Boolean(entry && entry.resetAt > Date.now() && entry.count >= MAX_FAILURES_PER_IP);
+}
+
+function recordFailure(ip) {
+  const entry = failuresByIp.get(ip);
+  if (!entry || entry.resetAt <= Date.now()) failuresByIp.set(ip, { count: 1, resetAt: Date.now() + FAILURE_WINDOW_MS });
+  else entry.count += 1;
+}
+
+app.post('/api/login', async (req, res) => {
   const { username, password } = req.body || {};
-  // The sign-in form shows "@molsoncoors.com" after the box, so accept it typed out too
-  const user = String(username || '').trim().replace(/@molsoncoors\.com$/i, '');
-  if (!sameText(user, LOGIN_USERNAME) || !sameText(password || '', LOGIN_PASSWORD)) {
-    return res.status(401).json({ error: 'Incorrect email or password.' });
+  if (tooManyFailures(req.ip)) {
+    return res.status(429).json({ error: 'Too many failed sign-in attempts. Please wait 15 minutes and try again.' });
   }
-  const token = randomBytes(32).toString('hex');
-  sessions.set(token, {
-    expires: Date.now() + SESSION_TTL_MS,
-    conversation: newConversation(),
-    queue: Promise.resolve(), // questions in one session run one at a time
-  });
-  console.log(`🔐 ${user} signed in`);
-  res.json({ token, username: user });
+
+  try {
+    const result = await auth.signIn(username, password);
+    if (!result.ok) {
+      recordFailure(req.ip);
+      return res.status(401).json({
+        error: result.reason === 'locked'
+          ? 'This account is locked for 15 minutes after too many wrong passwords.'
+          : 'Incorrect email or password.',
+      });
+    }
+    console.log(`🔐 ${result.user.username} signed in`);
+    res.json({ token: result.token, username: result.user.username, displayName: result.user.displayName });
+  } catch (error) {
+    console.error('🔐 Sign-in failed:', error.message);
+    res.status(503).json({ error: 'Sign-in is unavailable right now (the account database could not be reached).' });
+  }
 });
 
 function sessionToken(req) {
@@ -73,24 +99,39 @@ function sessionToken(req) {
   return m ? m[1] : null;
 }
 
-app.post('/api/logout', (req, res) => {
+app.post('/api/logout', async (req, res) => {
   const token = sessionToken(req);
-  if (token) sessions.delete(token);
+  if (token) {
+    conversations.delete(token);
+    await auth.signOut(token).catch(err => console.error('🔐 Sign-out failed:', err.message));
+  }
   res.json({ ok: true });
 });
 
-function requireLogin(req, res, next) {
+async function requireLogin(req, res, next) {
   const token = sessionToken(req);
-  const session = token && sessions.get(token);
-  if (!session || session.expires < Date.now()) {
-    if (token) sessions.delete(token);
+  let user = null;
+  try {
+    user = token ? await auth.getSessionUser(token) : null;
+  } catch (error) {
+    console.error('🔐 Session check failed:', error.message);
+    return res.status(503).json({ error: 'The account database could not be reached. Please try again shortly.' });
+  }
+  if (!user) {
+    if (token) conversations.delete(token);
     return res.status(401).json({ error: 'Please sign in again.' });
   }
-  req.session = session;
+  req.user = user;
+  req.session = conversationState(token);
   next();
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me'], requireLogin);
+
+// Who is signed in (the page shows their display name)
+app.get('/api/me', (req, res) => {
+  res.json({ username: req.user.username, displayName: req.user.displayName });
+});
 
 // "New chat": Claude forgets this session's conversation
 app.post('/api/conversation/reset', (req, res) => {
@@ -100,6 +141,19 @@ app.post('/api/conversation/reset', (req, res) => {
   });
   req.session.queue.then(() => res.json({ ok: true }));
 });
+
+// Hourly housekeeping: expired sessions, idle conversations, old failure counts
+setInterval(async () => {
+  const idleCutoff = Date.now() - auth.SESSION_TTL_MS;
+  for (const [token, state] of conversations) if (state.lastUsed < idleCutoff) conversations.delete(token);
+  for (const [ip, entry] of failuresByIp) if (entry.resetAt <= Date.now()) failuresByIp.delete(ip);
+  try {
+    const removed = await auth.deleteExpiredSessions();
+    if (removed) console.log(`🔐 Removed ${removed} expired sessions`);
+  } catch (error) {
+    console.error('🔐 Session cleanup failed:', error.message);
+  }
+}, 60 * 60 * 1000).unref();
 
 const anthropicKey = (process.env.ANTHROPIC_API_KEY || '').trim();
 if (!anthropicKey || anthropicKey.startsWith('REPLACE_WITH')) {
@@ -336,3 +390,11 @@ app.post('/api/export', async (req, res) => {
 app.listen(port, () => {
   console.log(`🚀 Node.js Orchestrator live on port ${port} (model: ${CLAUDE_MODEL})`);
 });
+
+// Create the account tables if this is a fresh database
+auth.ensureSchema()
+  .then(() => auth.listUsers())
+  .then(users => console.log(users.length
+    ? `🔐 Account database ready (${users.length} ${users.length === 1 ? 'account' : 'accounts'})`
+    : '🔐 Account database ready, but it has no accounts yet. Add one with: docker exec -it analytics_node_app npm run users -- add <username>'))
+  .catch(error => console.error('🔐 Account database unavailable; nobody can sign in until it is reachable:', error.message));

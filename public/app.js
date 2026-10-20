@@ -33,6 +33,31 @@ function showApp(signedIn) {
     else document.getElementById('login-email').focus();
 }
 
+// The signed-in person's name, shown in the header and the chat greeting
+// (their display name, or their username if they don't have one)
+let currentUserName = '';
+
+function setCurrentUser(user) {
+    currentUserName = user ? (user.displayName || user.username || '') : '';
+    document.getElementById('user-name').textContent = currentUserName;
+    // The greeting uses just the first name: "Cassidy Sotelo" -> "Hello, Cassidy!"
+    const firstName = currentUserName.trim().split(/\s+/)[0];
+    const welcome = document.getElementById('welcome-msg');
+    if (welcome) welcome.textContent = firstName ? `Hello, ${firstName}!` : 'Hello!';
+}
+
+// Who owns the stored session (after a reload, the name isn't known yet)
+async function loadCurrentUser() {
+    if (!sessionTokenValue) return;
+    try {
+        const response = await fetch(`${API_BASE}/api/me`, { headers: authHeaders() });
+        if (handleUnauthorized(response)) return;
+        if (response.ok) setCurrentUser(await response.json());
+    } catch (err) {
+        console.error('Could not load the signed-in user:', err);
+    }
+}
+
 async function signIn() {
     const button = document.getElementById('login-btn');
     const passwordField = document.getElementById('login-password');
@@ -58,6 +83,8 @@ async function signIn() {
         sessionTokenValue = data.token;
         saveToken(data.token);
         passwordField.value = '';
+        clearChat();
+        setCurrentUser(data);
         showApp(true);
     } catch (err) {
         showLoginError('Could not reach the OneTouch server. Please try again.');
@@ -73,6 +100,9 @@ function signOut(message) {
     }
     sessionTokenValue = null;
     saveToken(null);
+    // The next person to sign in on this computer must not see this person's chat
+    clearChat();
+    setCurrentUser(null);
     showLoginError(typeof message === 'string' ? message : '');
     showApp(false);
 }
@@ -92,6 +122,13 @@ function handleUnauthorized(response) {
 
 const WELCOME_HTML = document.getElementById('chat-log').innerHTML;
 
+// Back to just the greeting (with the signed-in person's name)
+function clearChat() {
+    document.getElementById('chat-log').innerHTML = WELCOME_HTML;
+    exportPayloads.clear();
+    setCurrentUser(currentUserName ? { displayName: currentUserName } : null);
+}
+
 async function resetConversation() {
     if (!sessionTokenValue) return;
     try {
@@ -104,14 +141,14 @@ async function resetConversation() {
 
 async function newChat() {
     await resetConversation();
-    document.getElementById('chat-log').innerHTML = WELCOME_HTML;
-    exportPayloads.clear();
+    clearChat();
     document.getElementById('user-prompt').focus();
 }
 
 // A token from earlier in this tab skips the sign-in page; if it has
 // expired, the first API call returns 401 and brings the page back
 showApp(Boolean(sessionTokenValue));
+loadCurrentUser();
 
 // A reload empties the chat on screen, so Claude forgets it too
 resetConversation();
