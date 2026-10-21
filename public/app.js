@@ -174,6 +174,12 @@ function switchTab(viewName) {
 let dashboardsLoaded = false;
 const LAST_DASHBOARD_KEY = 'onetouch-dashboard';
 
+// Every page the frame can show, by its public id: the drawer's dashboards,
+// and the detail pages a click on a chart opens
+const dashboardPages = { main: new Map(), details: new Map() };
+let currentMainDashboard = null;
+const pageId = path => (String(path).match(/\/public\/dashboard\/([0-9a-f-]{36})/) || [])[1];
+
 // The last dashboard this browser showed (storage can be blocked: then none)
 function rememberedDashboard() {
     try { return localStorage.getItem(LAST_DASHBOARD_KEY); } catch { return null; }
@@ -189,7 +195,9 @@ async function loadDashboards() {
     try {
         const response = await fetch(`${API_BASE}/api/dashboards`, { headers: authHeaders() });
         if (handleUnauthorized(response)) return;
-        const { dashboards } = await response.json();
+        const { dashboards, details = [] } = await response.json();
+        for (const d of dashboards) dashboardPages.main.set(pageId(d.path), d);
+        for (const d of details) dashboardPages.details.set(pageId(d.path), d);
         if (!dashboards.length) {
             message.textContent = 'No dashboards yet. Whoever runs this OneTouch server can create them with: ' +
                 'docker exec analytics_node_app node scripts/metabase-setup.mjs';
@@ -239,22 +247,71 @@ async function loadDashboards() {
 }
 
 function showDashboard(dashboard) {
-    document.querySelectorAll('.dashboard-choice').forEach(b => {
-        const on = b.dataset.key === dashboard.key;
-        b.classList.toggle('active', on);
-        if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
-    });
-    document.getElementById('dashboard-current-group').textContent = dashboard.group;
-    document.getElementById('dashboard-current-name').textContent = dashboard.name;
-    document.getElementById('dashboard-current-desc').textContent = dashboard.description || '';
-
+    markCurrentDashboard(dashboard);
     const frame = document.getElementById('dashboard-frame');
     // #bordered=false: no extra frame around the dashboard inside ours;
     // titled=false: the toolbar above already names it
     frame.src = `${API_BASE}${dashboard.path}#bordered=false&titled=false`;
     frame.hidden = false;
     document.getElementById('dashboard-message').hidden = true;
+}
+
+// A drawer dashboard is showing: name it, highlight it, remember it
+function markCurrentDashboard(dashboard) {
+    currentMainDashboard = dashboard;
+    document.querySelectorAll('.dashboard-choice').forEach(b => {
+        const on = b.dataset.key === dashboard.key;
+        b.classList.toggle('active', on);
+        if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+    });
+    setDashboardHeading(dashboard.group, dashboard.name, dashboard.description || '', false);
     rememberDashboard(dashboard.key);
+}
+
+function setDashboardHeading(parent, name, description, onDetailPage) {
+    document.getElementById('dashboard-current-group').textContent = parent;
+    document.getElementById('dashboard-current-name').textContent = name;
+    document.getElementById('dashboard-current-desc').textContent = description;
+    document.getElementById('dashboard-back').hidden = !onDetailPage;
+    document.getElementById('dashboard-hint').hidden = onDetailPage;
+}
+
+// "Team: TCS-Network-Voice", or for a list "Incidents · Priority: P2 - High"
+function detailPageLabel(detail, search) {
+    const values = new URLSearchParams(search);
+    const set = detail.params.map(p => [p.name, values.get(p.slug)]).filter(([, v]) => v);
+    if (detail.params.length === 1) return `${detail.name}: ${set[0]?.[1] || ''}`;
+    return set.length ? `${detail.name} · ${set.map(([n, v]) => `${n}: ${v}`).join(', ')}` : detail.name;
+}
+
+// Clicks inside a dashboard move the frame to a detail page without
+// reloading it, so follow its address and keep the toolbar in step
+let lastFrameAddress = '';
+function followDashboardFrame() {
+    const frame = document.getElementById('dashboard-frame');
+    let where;
+    try { where = frame.contentWindow.location; } catch { return; } // not ours (yet)
+    if (!where || where.href === lastFrameAddress) return;
+    lastFrameAddress = where.href;
+
+    const id = pageId(where.pathname);
+    const main = dashboardPages.main.get(id);
+    const detail = dashboardPages.details.get(id);
+    if (main) {
+        if (main !== currentMainDashboard) markCurrentDashboard(main);
+        else setDashboardHeading(main.group, main.name, main.description || '', false);
+    } else if (detail) {
+        setDashboardHeading(currentMainDashboard ? currentMainDashboard.name : '', detailPageLabel(detail, where.search), '', true);
+    }
+}
+setInterval(followDashboardFrame, 400);
+document.getElementById('dashboard-frame').addEventListener('load', followDashboardFrame);
+
+function dashboardBack() {
+    // Only from a detail page: on a drawer dashboard there is nothing to go back to
+    // inside the frame, and history.back() would leave OneTouch's page instead
+    if (document.getElementById('dashboard-back').hidden) return;
+    document.getElementById('dashboard-frame').contentWindow.history.back();
 }
 
 // Opens or closes the drawer (no argument: the opposite of now)

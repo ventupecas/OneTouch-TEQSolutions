@@ -122,6 +122,14 @@ collection and never touches anything else. The charts, and which drawer group e
 dashboard sits in, are defined in `scripts/metabase-setup.mjs`; the data they read
 in `db/reporting-views.sql`.
 
+**Drilling down.** Click a bar, pie slice, line point, big number or blue table value
+to open a detail page for it: a record (incident, change, request), a team, a server or
+system, a site or brewery, a problem record, a catalog item, or a filtered list (e.g.
+"Incidents · Priority: P2 - High"). Detail pages link onward too; on a record, use the
+blue **Go to** row under it. OneTouch's toolbar shows where you are, with **← Back**.
+What each click opens is set by `click` / `links` on the charts in
+`scripts/metabase-setup.mjs`; the detail pages are its `DETAILS` list.
+
 Metabase itself is at http://localhost:3000 on the server only. The dashboards are
 public links that OneTouch passes through, so anyone with the link can view them.
 

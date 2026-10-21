@@ -202,15 +202,17 @@ app.get('/api/me', (req, res) => {
 // The dashboards built by scripts/metabase-setup.mjs, for the Dashboards tab
 app.get('/api/dashboards', (_req, res) => {
   try {
-    const { dashboards } = JSON.parse(readFileSync(METABASE_DASHBOARDS_FILE, 'utf8'));
+    const { dashboards, details = [] } = JSON.parse(readFileSync(METABASE_DASHBOARDS_FILE, 'utf8'));
     res.json({
       // `group` is the drawer heading; files from before groups existed get one heading
       dashboards: dashboards.map(d => ({
         key: d.key, group: d.group || 'Dashboards', name: d.name, description: d.description, path: `/public/dashboard/${d.uuid}`,
       })),
+      // The pages a click on a chart opens (not in the drawer); their filters name the page
+      details: details.map(d => ({ key: d.key, name: d.name, path: `/public/dashboard/${d.uuid}`, params: d.params })),
     });
   } catch {
-    res.json({ dashboards: [] });
+    res.json({ dashboards: [], details: [] });
   }
 });
 
