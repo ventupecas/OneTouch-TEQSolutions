@@ -140,29 +140,109 @@ body {
 
 /* DASHBOARD PANEL */
 .dashboard-container { width: 100%; height: 100%; display: flex; flex-direction: column; }
-.dashboard-picker {
+
+/* Top-left: the drawer button and the dashboard that's showing */
+.dashboard-toolbar {
     display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 20px;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 20px;
     border-bottom: 1px solid var(--border);
     background: var(--panel-bg);
 }
-.dashboard-picker:empty { display: none; }
-.dashboard-choice {
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 6px 16px;
-    font-size: 0.9rem;
+.drawer-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-size: 0.95rem;
     font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.drawer-toggle span { font-size: 1.1rem; line-height: 1; }
+.dashboard-current { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.dashboard-current-group { color: #718096; font-size: 0.85rem; }
+.dashboard-current-group:not(:empty)::after { content: ' ›'; }
+.dashboard-current-name { font-weight: 600; font-size: 1rem; }
+.dashboard-current-desc { color: #718096; font-size: 0.85rem; }
+
+/* The drawer slides over the dashboard from the left */
+.dashboard-body { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.dashboard-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(26, 32, 44, 0.35);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+    z-index: 2;
+}
+.dashboard-backdrop.open { opacity: 1; pointer-events: auto; }
+.dashboard-drawer {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(320px, 85vw);
+    background: var(--panel-bg);
+    border-right: 1px solid var(--border);
+    box-shadow: 4px 0 16px rgba(0, 0, 0, 0.12);
+    overflow-y: auto;
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform 0.2s ease, visibility 0.2s;
+    z-index: 3;
+}
+.dashboard-drawer.open { transform: none; visibility: visible; }
+.drawer-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 16px 6px;
+    font-weight: 700;
+}
+.drawer-close { background: none; border: none; font-size: 1rem; color: #718096; cursor: pointer; padding: 4px 6px; }
+.drawer-close:hover { color: var(--text); }
+.drawer-group { padding: 6px 8px 10px; }
+.drawer-group h3 {
+    margin: 8px 8px 4px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #718096;
+}
+.dashboard-choice {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    border-left: 3px solid transparent;
+    border-radius: 4px;
+    padding: 8px 10px;
     color: var(--text);
     cursor: pointer;
 }
 .dashboard-choice:hover { background: var(--bg-primary); }
-.dashboard-choice.active { background: var(--accent); border-color: var(--accent); color: white; }
+.dashboard-choice.active { background: #e6f6f1; border-left-color: var(--accent); }
+.dashboard-choice-name { font-weight: 600; font-size: 0.92rem; }
+.dashboard-choice-desc { font-size: 0.78rem; color: #718096; line-height: 1.35; }
+
 .dashboard-message { margin: 40px auto; max-width: 560px; text-align: center; color: #4a5568; line-height: 1.6; }
 #dashboard-frame { flex: 1; width: 100%; border: 0; }
+
+@media (max-width: 640px) {
+    .dashboard-toolbar { padding: 10px 16px; }
+    .dashboard-current-desc { display: none; }
+}
 
 /* RESULT TABLES */
 .ai-msg.wide { max-width: 100%; width: 100%; box-sizing: border-box; }

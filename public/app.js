@@ -172,6 +172,15 @@ function switchTab(viewName) {
 // =====================================================================
 
 let dashboardsLoaded = false;
+const LAST_DASHBOARD_KEY = 'onetouch-dashboard';
+
+// The last dashboard this browser showed (storage can be blocked: then none)
+function rememberedDashboard() {
+    try { return localStorage.getItem(LAST_DASHBOARD_KEY); } catch { return null; }
+}
+function rememberDashboard(key) {
+    try { localStorage.setItem(LAST_DASHBOARD_KEY, key); } catch { /* not remembered; that's fine */ }
+}
 
 async function loadDashboards() {
     if (dashboardsLoaded) return;
@@ -184,34 +193,90 @@ async function loadDashboards() {
         if (!dashboards.length) {
             message.textContent = 'No dashboards yet. Whoever runs this OneTouch server can create them with: ' +
                 'docker exec analytics_node_app node scripts/metabase-setup.mjs';
+            document.getElementById('dashboard-drawer-toggle').hidden = true;
             return;
         }
-        picker.innerHTML = '';
+
+        // The drawer: one heading per group, dashboards in the order the server lists them
+        const groups = new Map();
         for (const d of dashboards) {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'dashboard-choice';
-            button.textContent = d.name;
-            button.title = d.description || '';
-            button.onclick = () => showDashboard(d, button);
-            picker.appendChild(button);
+            if (!groups.has(d.group)) groups.set(d.group, []);
+            groups.get(d.group).push(d);
+        }
+        picker.innerHTML = '';
+        for (const [group, items] of groups) {
+            const section = document.createElement('section');
+            section.className = 'drawer-group';
+            const heading = document.createElement('h3');
+            heading.textContent = group;
+            section.appendChild(heading);
+            for (const d of items) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'dashboard-choice';
+                button.dataset.key = d.key;
+                button.innerHTML = '<span class="dashboard-choice-name"></span><span class="dashboard-choice-desc"></span>';
+                button.querySelector('.dashboard-choice-name').textContent = d.name;
+                button.querySelector('.dashboard-choice-desc').textContent = d.description || '';
+                button.onclick = () => {
+                    showDashboard(d);
+                    toggleDashboardDrawer(false);
+                };
+                section.appendChild(button);
+            }
+            picker.appendChild(section);
         }
         dashboardsLoaded = true;
-        showDashboard(dashboards[0], picker.firstChild);
+
+        const remembered = dashboards.find(d => d.key === rememberedDashboard());
+        showDashboard(remembered || dashboards[0]);
+        // First visit: open the drawer so people see everything that's there
+        if (!remembered) toggleDashboardDrawer(true);
     } catch (err) {
         message.textContent = 'Could not load the dashboards. Please try again.';
         console.error(err);
     }
 }
 
-function showDashboard(dashboard, button) {
-    document.querySelectorAll('.dashboard-choice').forEach(b => b.classList.toggle('active', b === button));
+function showDashboard(dashboard) {
+    document.querySelectorAll('.dashboard-choice').forEach(b => {
+        const on = b.dataset.key === dashboard.key;
+        b.classList.toggle('active', on);
+        if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+    });
+    document.getElementById('dashboard-current-group').textContent = dashboard.group;
+    document.getElementById('dashboard-current-name').textContent = dashboard.name;
+    document.getElementById('dashboard-current-desc').textContent = dashboard.description || '';
+
     const frame = document.getElementById('dashboard-frame');
-    // #bordered=false: no extra frame around the dashboard inside ours
-    frame.src = `${API_BASE}${dashboard.path}#bordered=false&titled=true`;
+    // #bordered=false: no extra frame around the dashboard inside ours;
+    // titled=false: the toolbar above already names it
+    frame.src = `${API_BASE}${dashboard.path}#bordered=false&titled=false`;
     frame.hidden = false;
     document.getElementById('dashboard-message').hidden = true;
+    rememberDashboard(dashboard.key);
 }
+
+// Opens or closes the drawer (no argument: the opposite of now)
+function toggleDashboardDrawer(open) {
+    const drawer = document.getElementById('dashboard-drawer');
+    const toggle = document.getElementById('dashboard-drawer-toggle');
+    const willOpen = typeof open === 'boolean' ? open : !drawer.classList.contains('open');
+    drawer.classList.toggle('open', willOpen);
+    document.getElementById('dashboard-backdrop').classList.toggle('open', willOpen);
+    toggle.setAttribute('aria-expanded', String(willOpen));
+    if (willOpen) {
+        (drawer.querySelector('.dashboard-choice.active') || drawer.querySelector('.dashboard-choice'))?.focus();
+    } else if (drawer.contains(document.activeElement)) {
+        toggle.focus();
+    }
+}
+
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && document.getElementById('dashboard-drawer').classList.contains('open')) {
+        toggleDashboardDrawer(false);
+    }
+});
 
 // Asynchronous Chat Workflow Engine
 async function sendPrompt() {
