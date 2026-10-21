@@ -1,30 +1,619 @@
-# OneTouch: building it from scratch
+## EVERYONE HAS THEIR OWN BRANCHES!!
 
-This guide rebuilds OneTouch, step by step, as it is on `main` today, for someone who
-**cannot clone the repository**. Every file the project needs is printed in full in
-[Appendix B](#appendix-b-every-file-in-full). The steps below say which files to create
-when, what each one does, and how to check that each stage works before you go on.
+# OneTouch
+
+Ask questions about the ServiceNow export in plain English, get the answers as tables,
+download them in eight formats, and explore ten ITIL dashboards.
+
+One computer runs the full tool (the **server**). Everyone else signs in to it with the
+username and password they were given.
+
+This file holds everything about OneTouch:
+
+- **[Part 1: Using and running OneTouch](#part-1-using-and-running-onetouch)**: how to reach
+  it, run your own copy, run the server, share it, set up dashboards and manage accounts.
+- **[Part 2: Every feature, in detail](#part-2-every-feature-in-detail)**: what each part of
+  OneTouch does, how it behaves, and its limits.
+- **[Part 3: Building it from scratch](#part-3-building-it-from-scratch)**: 22 steps to
+  rebuild OneTouch without cloning the repository, with every file printed in full in
+  [Appendix B](#appendix-b-every-file-in-full).
+- **[Branches and history](#where-each-branch-is)**: where each branch is and how the
+  repository got here.
 
 Keep it current: after any change to the code, run `npm run docs` and commit the updated
-file. `npm run check` fails when this guide no longer matches the code.
+file. `npm run check` (about a second, with no Docker or API key needed) fails when this
+file no longer matches the code, so run it before each commit.
 
-**Contents**
+---
 
-- [What you are building](#what-you-are-building)
-- Steps 1–22: [tools](#step-1-install-the-tools) · [data and API key](#step-2-get-the-data-and-an-anthropic-api-key) ·
-  [project folder](#step-3-create-the-project-folder) · [packages](#step-4-the-node-package-list) ·
-  [settings](#step-5-the-settings-file) · [tables](#step-6-the-database-tables-and-the-csv-files) ·
-  [database scripts](#step-7-the-database-setup-scripts) · [Cube model](#step-8-the-cube-data-model) ·
-  [Docker](#step-9-the-docker-files) · [first start](#step-10-start-the-database-and-cube-and-check-them) ·
-  [translator](#step-11-the-translator-business-logic) · [empty results and downloads](#step-12-empty-result-explanations-and-downloads) ·
-  [sign-in](#step-13-accounts-and-sign-in) · [server and page](#step-14-the-web-server-and-the-page) ·
-  [full start](#step-15-start-everything) · [first account](#step-16-the-first-account-and-the-first-question) ·
-  [dashboards](#step-17-metabase-dashboards) · [remote mode](#step-18-remote-mode) ·
-  [sharing](#step-19-sharing-it-with-other-people) · [Claude Code helpers](#step-20-claude-code-helpers) ·
-  [checks and this guide](#step-21-checks-and-this-guide) · [git and branches](#step-22-put-it-in-git-and-recreate-the-branches)
-- [Where each branch is](#where-each-branch-is) · [History](#history-how-the-real-repository-got-here)
-- Appendices: [A versions](#appendix-a-package-versions) · [B every file](#appendix-b-every-file-in-full) ·
-  [C images](#appendix-c-images) · [D files not copied](#appendix-d-files-not-copied-here)
+# Part 1: Using and running OneTouch
+
+## Using OneTouch from a clone of this repo (remote mode)
+
+You don't need Docker, the data, or an API key. Your `localhost:8000` shows the tool
+and passes everything to the OneTouch server, where your account lives.
+
+1. Install [Node.js](https://nodejs.org) 18 or newer.
+2. In the cloned folder, run once:
+   ```
+   npm install
+   ```
+3. Ask whoever runs OneTouch for the **server address**, then start remote mode with it:
+   ```
+   npm run remote -- https://the-link-you-were-given.trycloudflare.com
+   ```
+   On the same network as the server you can use its network address instead,
+   e.g. `npm run remote -- http://192.168.5.106:8000`.
+4. Open **http://localhost:8000** and sign in with your own username and password.
+
+Keep the terminal open while you use it, and press `Ctrl+C` to stop. You can put the
+address in a `.env` file as `ONETOUCH_SERVER=...` and then just run `npm run remote`.
+If port 8000 is busy, set `REMOTE_PORT=8100` (and open `localhost:8100`).
+
+You can also skip all of this and open the server address directly in your browser.
+
+## Running your own full copy (works without anyone else's computer)
+
+1. Install Docker Desktop and clone this repo.
+2. Copy `.env.example` to `.env`. Put an Anthropic API key in `ANTHROPIC_API_KEY`;
+   the other values can stay as they are for a local copy.
+3. Get the ServiceNow export (the six CSVs) from the team and put them in a `csv_data/`
+   folder. Without them the tool still starts and you can sign in, but every question
+   comes back empty. Add them before the first start, or see "Reloading the data".
+4. Run `docker compose up -d` and open http://localhost:8000.
+5. Sign in with your usual username and password. Everyone's accounts come with the
+   repo in `db/accounts.json` and are loaded automatically.
+
+**Getting account changes:** when someone is added, has their password reset, or is
+deactivated, the person who made the change exports and commits `db/accounts.json`.
+Pull, then restart your copy (`docker compose restart app`) to pick it up.
+
+**Reloading the data:** the CSVs are only loaded the first time the database starts.
+To load them later, run `docker compose down -v` and then `docker compose up -d`. This
+also clears your copy's sign-in sessions; accounts come back from `db/accounts.json`.
+
+## Running the server
+
+Needs Docker Desktop, the CSV export in `csv_data/`, and a `.env` file
+(copy `.env.example` and fill in every value). Then:
+
+```
+docker compose up -d
+```
+
+The tool is at http://localhost:8000. Only port 8000 is reachable from other computers;
+Postgres, Cube and Metabase only accept connections from the server itself.
+
+### Sharing it
+
+**Same network (office Wi-Fi or VPN).** Others open `http://<server's IP address>:8000`
+(find the IP with `ipconfig`). There's nothing else to set up. Traffic is not encrypted,
+so use this only on a network you trust.
+
+**Over the internet (Cloudflare Tunnel).** Get permission first: this puts company data
+behind a public link.
+
+```
+docker compose --profile tunnel up -d tunnel     # start
+docker logs onetouch_tunnel                      # find the https://....trycloudflare.com link
+docker compose stop tunnel                       # stop sharing
+```
+
+The quick-tunnel link changes every time the tunnel starts, so send people the new one.
+For a permanent address, create a tunnel in a Cloudflare account (service:
+`http://app:8000`), put its token in `.env` as `TUNNEL_TOKEN`, and use
+`docker compose --profile tunnel-named up -d tunnel-named` instead.
+
+### Dashboards (Metabase)
+
+Ten ITIL dashboards appear in OneTouch's **Dashboards** tab. Open them from the
+**☰ Dashboards** drawer in its top-left corner:
+
+| Group | Dashboards |
+|---|---|
+| Overview | IT Operations Overview, Sites & Breweries |
+| Incidents & Problems | Service Desk, Problems & Major Incidents, Monitoring & Alerts, Workload & Channels |
+| Change | Change / CAB, Change Risk & Business Impact |
+| Requests | Requests, Automation & Self-service |
+
+To create them on a server:
+
+1. Fill in `METABASE_DB_PASSWORD`, `METABASE_ADMIN_EMAIL` and `METABASE_ADMIN_PASSWORD`
+   in `.env`. If you already set up Metabase yourself, use that admin login.
+2. Run `docker compose up -d`. This creates the reporting views and Metabase's read-only user.
+3. Run:
+   ```
+   docker exec analytics_node_app node scripts/metabase-setup.mjs
+   ```
+
+Re-run step 3 any time. It rebuilds the dashboards in Metabase's "OneTouch ITIL"
+collection and never touches anything else. The charts, and which drawer group each
+dashboard sits in, are defined in `scripts/metabase-setup.mjs`. The data they read
+is defined in `db/reporting-views.sql`.
+
+**Drilling down.** Click a bar, pie slice, line point, big number or blue table value
+to open a detail page for it: a record (incident, change, request), a team, a server or
+system, a site or brewery, a problem record, a catalog item, or a filtered list (e.g.
+"Incidents · Priority: P2 - High"). Detail pages link onward too; on a record, use the
+blue **Go to** row under it. OneTouch's toolbar shows where you are, with **← Back**.
+What each click opens is set by `click` / `links` on the charts in
+`scripts/metabase-setup.mjs`; the detail pages are its `DETAILS` list.
+
+Metabase itself is at http://localhost:3000 on the server only. The dashboards are
+public links that OneTouch passes through, so anyone with the link can view them.
+
+### Accounts
+
+Accounts live in the server's own Postgres database (`onetouch_auth`). Manage them on the server:
+
+```
+docker exec -it analytics_node_app node scripts/users.mjs list
+docker exec -it analytics_node_app node scripts/users.mjs add jsmith "Jane Smith"
+docker exec -it analytics_node_app node scripts/users.mjs reset-password jsmith
+docker exec -it analytics_node_app node scripts/users.mjs deactivate jsmith
+docker exec -it analytics_node_app node scripts/users.mjs activate jsmith
+```
+
+To add many at once, use a CSV with the columns `Username, Display Name, Password` (PowerShell):
+
+```
+Get-Content people.csv | docker exec -i analytics_node_app node scripts/users.mjs import -
+```
+
+Never commit that CSV: it holds everyone's passwords.
+
+**Sharing accounts with clones.** After any change above, write the accounts file and commit it:
+
+```
+docker exec analytics_node_app node scripts/users.mjs export
+git add db/accounts.json
+git commit -m "Update accounts"
+```
+
+`db/accounts.json` holds usernames, display names and password *hashes*, never the
+passwords themselves. Every copy loads it on start. Missing accounts are added, and an
+account is only overwritten by a more recent change, so an old file never undoes a newer
+password reset or deactivation.
+
+## Coding helpers (Claude Code)
+
+The repo includes two Claude Code subagents in `.claude/agents/`:
+
+- **onetouch-developer** builds features. It knows how OneTouch fits together, how to run
+  and test it, and the pitfalls this project has hit.
+- **onetouch-reviewer** reviews a diff or branch for this project's risks (sign-in and data
+  exposure, secrets, Claude API rules, setup that breaks on other machines). It is read-only.
+
+In Claude Code, ask for them by name (e.g. "use onetouch-reviewer on my branch"), or see
+them with `/agents`.
+
+## Branches and checks
+
+Everyone works on their own branch (`Ventura`, `Luke`, `Q`) and brings changes into `main`
+with a pull request. Before each commit:
+
+```
+npm run docs     # refresh this file's appendices from the code
+npm run check    # syntax, shell scripts, docker-compose.yml, and this file (about 1 second)
+```
+
+---
+
+# Part 2: Every feature, in detail
+
+## 2.1 Sign-in
+
+**The page.** Before you sign in, OneTouch shows only the sign-in page: the Molson Coors
+logo, a box titled "Sign in to OneTouch", a **Molson Coors Email** field with
+`@molsoncoors.com` printed after it, a **Password** field, and a **Continue with SSO**
+button. Despite its label, that button signs in with the username and password stored in
+OneTouch; it is not single sign-on.
+
+- Type just the part before the `@`. Typing the whole address also works, because the
+  server removes a trailing `@molsoncoors.com`. Usernames are not case-sensitive, and
+  spaces around them are ignored.
+- The **Microsoft Entra ID** button only shows "Microsoft Entra ID sign-in is not
+  available yet. Use your email and password." The **Contact Support** link goes nowhere yet.
+- After a failed attempt the password box is cleared and the error appears under it.
+
+**What the server checks** (`POST /api/login`):
+
+| Situation | What you see |
+|---|---|
+| Wrong username or password | "Incorrect email or password." The server takes the same time whether or not the username exists, so it never reveals which accounts exist. |
+| 5 wrong passwords in a row on one account | That account is locked for 15 minutes: "This account is locked for 15 minutes after too many wrong passwords." A correct password resets the count. |
+| 20 failed attempts from one address within 15 minutes, across any usernames | "Too many failed sign-in attempts. Please wait 15 minutes and try again." Through the Cloudflare tunnel, the visitor's real address is used (taken from Cloudflare's header, and only believed when the request really came through the tunnel). |
+| Deactivated account | Treated as a wrong password. |
+| Account database unreachable | "Sign-in is unavailable right now (the account database could not be reached)." |
+
+**Sessions.** A successful sign-in returns a random 64-character token. The browser keeps
+it in the tab's `sessionStorage`, so:
+
+- Reloading the page keeps you signed in. Your name is fetched again (`/api/me`), and the
+  chat starts empty.
+- Closing the tab, or opening OneTouch in a new tab, means signing in again.
+- A session lasts 12 hours. After that, or after a password reset or deactivation, the
+  next action returns you to the sign-in page with "Your session has ended. Please sign
+  in again."
+- **Sign out** (top right) ends the session on the server, clears the chat from the screen
+  so the next person on that computer can't see it, and shows the sign-in page.
+- The server stores only a SHA-256 hash of each token, and only salted scrypt hashes of
+  passwords, so a copy of the account database can't be used to sign in. Expired
+  sessions are deleted every hour.
+
+## 2.2 The page around the tabs
+
+- **Header:** the OneTouch logo and name, the signed-in person's display name (or their
+  username if they have none), the **💬 AI Assistant** and **📈 Dashboards** tabs, and **Sign out**.
+- **Greeting:** the chat opens with "Hello, *first name*!", using the first word of the display name.
+- **Icons:** favicons, an Apple touch icon and a web-app manifest, so OneTouch can be
+  pinned to a phone's home screen as "One Touch".
+
+## 2.3 The AI Assistant (chat)
+
+### Asking
+
+Type a question in the box and press **Enter** or click **Ask Claude**. While it works, a
+bubble shows "🤖 Thinking and querying Cube.dev...". If you send another question before
+the first answer arrives, it waits its turn: questions in one session always run in order.
+
+### What happens to a question
+
+1. **Claude translates it** (model `claude-sonnet-5-5` unless `CLAUDE_MODEL` says
+   otherwise) into a structured JSON answer whose shape the API enforces: an `intent`, up
+   to one query per table, a one-sentence restatement, and the list of assumptions made.
+   The instructions (`business_logic.mjs`) describe the six tables, every column, the
+   exact values coded columns hold, ITIL vocabulary, and worked examples. They are sent
+   with prompt caching, so repeated questions cost less. Today's date is added to every
+   question (or `ASSUME_TODAY`, see 2.9).
+2. **The server checks Claude's answer** (`normalizeAndValidate`) before anything runs:
+   - only known columns, the `count` measure, and these operators: equals, notEquals,
+     contains, notContains, startsWith, endsWith, set, notSet, gt, gte, lt, lte;
+   - each query uses columns from one table only, and each table appears at most once;
+   - values for coded columns are corrected to their exact spelling (e.g. "p1" →
+     `P1 - Critical`, "cancelled" → `Canceled` for changes), and each correction is added
+     to the assumptions;
+   - sorting only on selected columns;
+   - lists without a limit get 50 rows; nothing returns more than 500.
+   If the answer fails these checks, you see "I couldn't map that question onto the
+   data: …", and Claude is told why on the next question.
+3. **Cube runs each query** against the database, one per table, side by side. If Cube
+   is still starting up, the server retries up to 3 times, 2 seconds apart.
+4. **Empty results are explained** (see 2.4).
+5. **Counts across several ticket types are merged** into one table with a column per
+   type and a total (`combineResults`). For "top N" questions, the server ranks the
+   merged totals, so it's a true top N across all types.
+
+### The three kinds of answer
+
+| Intent | When | What you see |
+|---|---|---|
+| `query` | The question fits the data | The results (below) |
+| `clarify` | It can't be answered sensibly without one more detail, e.g. a person's real name (people are anonymized as "Individual 1234"), or a place that matches very different things | 🙋 and one short question back |
+| `unsupported` | It needs something the data model doesn't have: averages, durations, resolution times, SLA %, joins between tables, or a period with no data | 🙋, a plain explanation, and the nearest question it *can* answer |
+
+### What a result looks like
+
+- **A title:** Claude's one-sentence restatement of what it fetched.
+- **One number** ("how many open P1s") → a big number with the right noun ("12 incidents").
+- **One record** with more than 4 fields (a ticket lookup) → a two-column field / value card.
+- **A list or breakdown** → a table with a row count above it. Long text (descriptions,
+  notes, plans) is cut at 120 characters, with the full text on hover.
+- **Counts across ticket types** → one table: the grouping column, one column per type,
+  a Total column and a Total row. Without grouping, it's a big total plus a row per type.
+- **Lists across ticket types** → one titled table per type (25 rows each unless you
+  ask for more).
+- **Readable values:** column names in plain English ("Assigned Team", "Server / System",
+  "Times Reassigned", "SLA Breached", "Parent Request (RITM)"), dates like
+  "Aug 14, 2026, 8:44 AM", months like "August 2026", weeks like "Week 33 of 2026",
+  true / false as Yes / No, empty values as "—", and counts with thousands separators.
+- **How I read your question:** a collapsible list of every assumption Claude made (what
+  "open" meant, which ticket types were included and why others were dropped, the exact
+  dates used, values that were corrected).
+- **Download as:** see 2.5.
+
+### What it understands
+
+The data is six ServiceNow tables. Four are **ticket types**: incidents (INC), changes
+(CHG), requested items (RITM) and catalog tasks (SCTASK). The other two hold approval
+records for changes and for requests.
+
+- **"Tickets" means all four types.** "How many tickets came in last week" runs four
+  queries and merges them. Approval records are included only when you ask about
+  approvals. A request and the tasks created to fulfil it count as separate tickets.
+- **Filters only go where they exist.** Priority, impact, urgency, category and channel
+  exist only on incidents; type, risk, environment, outage and planned dates only on
+  changes; catalog item on requests and tasks; team on incidents, changes (owning team)
+  and tasks; location on incidents and requests. Types without the field are left out,
+  and the assumptions say so.
+- **Ticket numbers** (INC…, CHG…, RITM…, REQ…, SCTASK…) pick the table instantly, and a
+  bare number shows that ticket's full record.
+- **Answer shape:** "how many" → a count; "by / per / breakdown" → grouped counts;
+  "top N / busiest / worst" → top N (10 by default); "trend / per month / weekly" → counts
+  per day, week or month in date order; "show / list / which" → a list, newest first;
+  "details / status of" → one record. "Percent / share" returns the counts and says
+  percentages must be worked out from them.
+- **Status words:** "open / backlog / pending / still open" → each type's open states;
+  "closed / done" → each type's closed states ("resolved" alone → Resolved); "stuck /
+  stale / aging" → open and older than 7 days; "on hold / waiting on the user / vendor";
+  "reopened"; "bounced around / reassigned"; "failed / rolled back / caused an incident"
+  for changes; "rejected"; "pending approval"; "fulfilled"; "SLA breached".
+- **Priority words:** P1 / critical / sev1 / "on fire" → P1; P2 / high / urgent; "high
+  priority" → P1 and P2; P3 / medium / normal; P4 / low / minor; impact words such as
+  "enterprise-wide", "site down", "single user"; "was a P1 at some point"; "downgraded".
+- **Time phrases:** "today", "yesterday", "last week" (Monday to Sunday), "this month",
+  "last month", "last 30 days", "since July", "Q3", "YTD", "recently" (7 days); "resolved /
+  closed / planned / went live in…" use those dates instead of the creation date. "Ever /
+  all time" means no date filter.
+- **Teams, places and things:** team nicknames map to the codes in the data ("wintel" →
+  `WINTEL`, "service desk" → `ServiceDesk`, "Accenture" → `ACN-`, "TCS" → `TCS-`, and
+  about 20 more). Brewery and office names, "HQ", "UK", "Canada" and "remote" map to
+  locations. Server or app names match the configuration item. Plain words map to
+  categories ("password / locked out", "printer", "VPN", "slow") and catalog items
+  ("new laptop", "shared mailbox", "admin rights", "termination"). Channels such as "called
+  in", "chat", "portal" and "monitoring alerts" are understood too.
+- **Logic and typos:** and / or / not / except / at least, plus shorthand and typos
+  ("incdent", "tkts", "chg's", "wrk in prog", "prio", "svr", "pw reset").
+- **Dates outside the export:** the export covers roughly 1 June to 1 September 2026
+  (incidents from 5 July 2026). A question entirely outside that is answered with the
+  dates the data does cover; a partly overlapping one runs on the overlap and says which
+  part has no data.
+
+### Follow-up questions (conversation memory)
+
+The server keeps your questions and Claude's answers for the session, and tells Claude
+how many rows each answer returned. So follow-ups work: "same but for changes", "now by
+month", "only the P1s", "what about last week", "show me the details of the first one".
+Claude keeps the earlier filters unless you change them, and the assumptions say what
+was carried over.
+
+- **New chat** clears the screen and makes Claude forget the conversation.
+- **Reloading the page** does the same.
+- After **40 questions**, Claude starts fresh automatically, and a note says "This
+  conversation got long, so Claude started fresh."
+- Memory lives in the server's RAM: a server restart keeps you signed in but Claude
+  forgets. Idle conversations are dropped after 12 hours.
+
+### Errors you might see
+
+| Message | Meaning |
+|---|---|
+| "I couldn't map that question onto the data: …" | Claude's query failed the checks; rephrase |
+| "Claude API error (…)" | The Anthropic API refused or failed (key, quota, outage) |
+| "The assistant declined to translate that request." | Claude refused |
+| "The translation was cut off; try a shorter question." | The answer ran out of room |
+| "Cube.dev is still initializing…" | Cube is starting; try again in a few seconds |
+| "Could not talk to backend server orchestration framework." | The page couldn't reach the server |
+
+## 2.4 Explanations for empty results
+
+When a query finds nothing (no rows, or counts that are all zero), the server works out
+why instead of just saying "no records" (`empty_results.mjs`):
+
+1. For each empty query it looks up the table's total rows and its first and last date.
+2. It removes the filters one at a time (up to 6) and counts what each removal brings
+   back. Where something comes back, it groups those rows by the removed filter's column
+   (dates by month, top 8 values) to show what the filter was hiding.
+3. Claude turns those facts into 1 to 3 plain sentences that start with the direct
+   answer, e.g. "There are no open P1 incidents right now: all 3 P1 incidents in the
+   data are closed." If a table is empty because no data was loaded, it says so. It ends
+   with a nearby question that would return data.
+4. If everything was empty, that explanation replaces the tables. If only some ticket
+   types were empty, the explanation goes under the tables. If Claude can't be reached,
+   a plain fallback gives the dates the data covers.
+
+## 2.5 Downloads
+
+Every result with a table has a **Download as** menu and a **⬇ Download** button.
+The file contains exactly what is on screen, with the same column names and formatting,
+except that long text is never cut and counts stay real numbers.
+
+| Format | What you get |
+|---|---|
+| Excel (.xlsx) | One worksheet per table, named after it. The header row is bold, shaded, frozen and has filters. Columns are sized to their content (up to 60 characters), counts use `#,##0`, very long text wraps, and the Total row is bold. |
+| CSV (.csv) | UTF-8 with a byte-order mark, so Excel opens it correctly. Several tables are separated by a blank line, each under its title. |
+| PDF (.pdf) | US Letter, landscape. Title, the question and the time it was generated, then each table with its row count, and "Page X of Y" at the bottom. Characters outside Western European ones show as "?". |
+| Word (.docx) | Landscape, with the same headings. Tables use smaller text when they have more than 8 columns. |
+| Rich Text (.rtf) | Opens in Word, WordPad, Pages and LibreOffice, with the same layout. |
+| Plain Text (.txt) | Aligned columns. Values longer than 60 characters wrap inside their column, and numbers are right-aligned. |
+| ZIP (.zip) / 7-Zip (.7z) | All six formats above in one archive. |
+
+Files are named `one-touch-<the question>-<date>.<format>`, e.g.
+`one-touch-how-many-open-p1s-2026-10-21.xlsx`. A result too large to export (over
+2 million cells) is refused. While the file is being made, the button says "Preparing
+XLSX file…", then "Downloaded *file name*", or the error.
+
+## 2.6 The Dashboards tab
+
+**The drawer.** **☰ Dashboards** opens a side drawer listing the dashboards under their
+group headings, each with a one-line description. On your first visit it opens by
+itself. Pick one and the drawer closes. **Escape**, **✕** or a click outside also close
+it. OneTouch remembers the last dashboard you viewed in this browser and opens it next time.
+
+**The toolbar** shows the group, name and description of the dashboard on screen, and
+the hint "Click a bar, slice, number or blue value for details". If no dashboards have
+been set up yet, the tab says so and gives the command that creates them.
+
+**About the numbers.** The export is a frozen snapshot, so "now", ages and "upcoming"
+are measured from the newest record in it (1 September 2026), not from today. Weekly
+charts use complete weeks only, because the first and last weeks of the export are
+partial. Placeholder systems (`zzz`) count as "no system recorded".
+
+### The ten dashboards
+
+**Overview → IT Operations Overview.** The latest complete week across incidents,
+changes and requests. Trend numbers compare it with the week before: incidents opened,
+changes raised, requests opened, and SLA breaches per week. There are also counts of
+open incidents, open requests, open catalog tasks and changes awaiting approval, plus
+three charts: weekly volume of incidents, changes and requests; open work by age (under 1
+day to over 30 days, stacked by type); and the teams with the most open work.
+
+**Overview → Sites & Breweries.** Where the work comes from. Counts of sites with
+incidents, incidents at breweries, changes affecting breweries, and breweries touched by
+changes. Incidents and requests by site (top 12), a brewery scorecard, changes by
+brewery (top 12), weekly incidents at the 5 busiest breweries, and brewery changes with
+an outage in the next 14 days. A change that lists several breweries counts once for each.
+
+**Incidents & Problems → Service Desk.** Incident management: open incidents, open more
+than 7 days, average hours to resolve, and the share reassigned at least once. Opened vs.
+resolved per week, open incidents by age, average hours to resolve by priority, open
+incidents by team (top 10), monitoring alerts vs. people per week, ticket ping-pong
+(reassignment by team), and problem candidates (the systems with the most incidents).
+
+**Incidents & Problems → Problems & Major Incidents.** Incidents linked to a problem,
+problem records with incidents, incidents closed with a workaround, and reopened
+incidents. The problem records with the most incidents, weekly incidents for the 5
+biggest problems, workarounds by subcategory (top 10), and recurring issues with no
+problem record (the same system and issue type returning with nothing linking them). Also
+the most used knowledge articles, incidents caused by changes, and P1 and P2 incidents.
+
+**Incidents & Problems → Monitoring & Alerts.** Event management: monitoring alerts,
+their share of all incidents, alerts closed within an hour (candidates for tuning or
+auto-closing), and alerts with no system recorded. Alerts per day, the noisiest systems
+(top 10), alerts by hour of day, how fast alerts close by type, teams receiving the most
+alerts, and where alerts come from (the group that opened them, which usually identifies
+the tool).
+
+**Incidents & Problems → Workload & Channels.** Incidents raised by people (not
+monitoring), the self-service share, and the share resolved without reassignment. Password
+and account issues, people-raised incidents by hour of day and by day of week, weekly
+incidents by channel, the channel mix, team workload, why open incidents are waiting
+(state or on-hold reason), and open incidents per person (top 10; people are anonymized).
+
+**Change → Change / CAB.** Changes in the export, the change success rate, the share
+that were emergency or expedited, and changes starting in the next 7 days. Upcoming
+Production changes (next 7 days), changes per week by type, changes by risk, change
+approvals waiting by approver group, and failed changes and changes that caused incidents.
+
+**Change → Change Risk & Business Impact.** Changes affecting breweries, changes
+affecting SAP, changes needing an SAP transport, and changes flagged as a process failure.
+Days of notice by change type (the median time between raising a change and its planned
+start, with changes logged after work began counted separately), changes with an outage
+per week by environment, the most changed systems (top 10), changes by category and
+risk, SAP and brewery changes in the next 14 days, and the list of process failures.
+
+**Requests → Requests.** Request fulfilment: open requests, open catalog tasks, the
+catalog task SLA breach rate, and request approvals waiting. The most requested items
+(top 10), requests opened vs. completed per week, fulfilment time for the most requested
+items, SLA breaches by team, open catalog tasks by team and state, and request approvals
+waiting by approver group.
+
+**Requests → Automation & Self-service.** Where automation would save the most effort:
+server start/stop requests (total and weekly average), requests completed within an
+hour, and rejected or cancelled requests (effort spent on requests that never went
+ahead). Automation candidates (high volume and slow to complete; high volume and done
+within an hour suggests it's already automated), server start/stop requests per week,
+password and account issues by channel (candidates for self-service reset), the most
+rejected or cancelled items (top 10), and requests by order guide.
+
+### Drill-down pages
+
+Clicking a chart element or a blue value opens a detail page inside the same frame. The
+toolbar then names it ("Team: TCS-Network-Voice", or for a list "Incidents · Priority:
+P2 - High") and shows **← Back**, which steps back one page.
+
+| Page | Opened by clicking | Shows |
+|---|---|---|
+| Incident | an incident number | the full record, a **Go to** row (team, system, site, problem, the change that caused it), and other incidents on the same system |
+| Change | a change number | the full record, a **Go to** row (owning team, system, linked incident, linked problem), its approvals, incidents it caused, and breweries affected |
+| Request | a RITM number | the full record, Go to, its catalog tasks and its approvals |
+| Team | a team name | open incidents, average hours to resolve, open catalog tasks, approvals waiting on the team, incidents per week, systems it works on, issue types, open incidents per person, and changes it owns |
+| Server / system | a system name | incidents, share from monitoring, open incidents, changes to it, incidents and changes per week, teams handling it, issue types, recent incidents |
+| Site | a site or brewery | incidents, open incidents, requests, changes at the brewery, incidents per week, most requested items, and issue types |
+| Problem | a problem record | linked incidents, how many are still open, systems affected, average hours to resolve, linked incidents per week, teams involved, and changes linked to the problem |
+| Catalog item | an item name | requests, median hours to complete, share done within an hour, still open, opened vs. completed per week, requests by site, open requests, teams fulfilling it, and approval outcomes |
+| Incidents list | a bar, slice or number about incidents | matching incidents with counts by team and by system. Filters: status, priority, subcategory, channel, source (monitoring or person), age bucket, open at least N days, hour of day, day of week, date, team, system, site, knowledge article, closed with a workaround, reopened, reassigned, status detail, assignee, raised by |
+| Changes list | a chart about changes | matching changes with counts by owning team. Filters: status, type, risk, category, environment, outage, approval, affects SAP, needs SAP transport, affects breweries, process failure, emergency or expedited, starts within N days |
+| Requests list | a chart about requests | matching requests with counts by item. Filters: status, catalog item, site, approval, outcome (rejected or cancelled), order guide |
+| Catalog tasks list | a chart about tasks | matching tasks with counts by team. Filters: status, team, state, SLA (breached or met), catalog item |
+
+**How it works.** Metabase listens only on the server itself, so OneTouch passes its
+public dashboard pages through (`/public/…`, `/app/…` and the public API, read-only, GET
+only). That way the tab works from localhost, the network address, the tunnel and
+remote mode alike. Metabase connects to the database as `metabase_reader`, which can read
+only the `reporting` views. The dashboards are public links: anyone who has a link can
+view that dashboard. `scripts/metabase-setup.mjs` checks every click target and filter
+before it changes anything in Metabase. Each run archives the previous dashboards and
+creates new ones with new links, and `metabase-dashboards.json` is rewritten with them.
+
+## 2.7 Accounts administration
+
+`scripts/users.mjs` runs inside the app container:
+
+| Command | What it does |
+|---|---|
+| `list` | Every account: username, display name, active, locked, created, last sign-in |
+| `add <username> ["Display Name"]` | Creates an account and asks for the password without showing it. Usernames are 2–64 characters (letters, numbers, `.`, `_`, `-`) and stored in lower case. Passwords can't be empty or longer than 200 characters; there's no other rule. |
+| `reset-password <username>` | Sets a new password, unlocks the account, and signs that person out everywhere |
+| `deactivate <username>` / `activate <username>` | Blocks or allows sign-in. Deactivating signs them out everywhere. |
+| `import <file.csv>` or `import -` | Adds everyone in a CSV (`Username, Display Name, Password`; Display Name optional). Existing usernames are skipped and their passwords left alone. `-` reads the CSV from standard input. |
+| `export [file]` | Writes every account to `db/accounts.json` (hashes only) |
+| `sync [file]` | Loads `db/accounts.json` by hand. The server also does this on every start. |
+
+Add `--password-stdin` to `add` or `reset-password` to pipe the password in for automation.
+
+**How the accounts file merges.** Missing accounts are added. An existing account is
+overwritten only if the file's copy changed more recently, so an old file can't undo a
+newer password reset or deactivation. Accounts not in the file are left alone. A newer
+password or a deactivation from the file also ends that person's sessions.
+
+**Separation.** Accounts live in their own database (`onetouch_auth`), which only the
+`onetouch_app` login can open. That login can't open the analytics data, and nothing on the
+analytics side (Cube, Metabase, Claude's queries) can read the accounts.
+
+## 2.8 Remote mode
+
+`npm run remote -- <server address>` (`remote.mjs`) serves the page from your own clone
+and forwards `/api`, `/public` and `/app` to the server. It forwards only the
+`Authorization`, `Content-Type` and `Accept` headers, waits up to 5 minutes for an
+answer, and passes request bodies up to 25 MB (large downloads). On start it checks that the server answers, and
+it warns if the address is wrong. If port 8000 is taken, it says so and suggests
+`REMOTE_PORT`.
+
+## 2.9 Dates and "today"
+
+Relative dates ("last month", "this week") are computed from today. The export ends
+around 1 September 2026, so as time passes those phrases fall outside it. Set
+`ASSUME_TODAY=2026-09-02` (any `YYYY-MM-DD`) in `.env` to pin "today" so they land
+inside the data. Leave it empty to use the real date.
+
+## 2.10 Logs
+
+`docker logs --tail 50 analytics_node_app` shows what the app is doing:
+
+| Starts with | Means |
+|---|---|
+| 💬 | A question arrived, with its turn number |
+| 🧠 | Claude's token use: input, cached, output |
+| 🤖 | Each Cube query that ran |
+| 🙋 | A clarify or unsupported answer |
+| 🔎 | Empty-result facts and the explanation given |
+| 📥 | A download: format, file name, size |
+| 🔐 | Sign-ins (with the address), sign-in failures, account database status, sessions cleaned up |
+| 📊 | Metabase unreachable |
+| ⚠️ / 📋 / ❌ | Validator rejections, failures, a missing API key |
+
+## 2.11 Development tools
+
+- **`npm run check`** (`scripts/check.mjs`): `node --check` on every JS file, shell
+  script syntax and LF line endings, `docker-compose.yml` validated against
+  `.env.example` (when Docker is installed), and whether this file matches the code.
+  It takes about a second.
+- **`npm run docs`** (`scripts/build-docs.mjs`): rewrites this file's appendices from the
+  current files. A new file it doesn't know about makes the check fail until it's added
+  to its lists.
+- **Claude Code agents:** `onetouch-developer` and `onetouch-reviewer` (see Part 1).
+
+---
+
+# Part 3: Building it from scratch
+
+This part rebuilds OneTouch, step by step, as it is on `main` today, for someone who
+**cannot clone the repository**. Every file the project needs is printed in full in
+[Appendix B](#appendix-b-every-file-in-full). The steps say which files to create when,
+what each one does, and how to check that each stage works before you go on.
+
+**Steps:** [tools](#step-1-install-the-tools) · [data and API key](#step-2-get-the-data-and-an-anthropic-api-key) · [project folder](#step-3-create-the-project-folder) · [packages](#step-4-the-node-package-list) · [settings](#step-5-the-settings-file) · [tables](#step-6-the-database-tables-and-the-csv-files) · [database scripts](#step-7-the-database-setup-scripts) · [Cube model](#step-8-the-cube-data-model) · [Docker](#step-9-the-docker-files) · [first start](#step-10-start-the-database-and-cube-and-check-them) · [translator](#step-11-the-translator-business-logic) · [empty results and downloads](#step-12-empty-result-explanations-and-downloads) · [sign-in](#step-13-accounts-and-sign-in) · [server and page](#step-14-the-web-server-and-the-page) · [full start](#step-15-start-everything) · [first account](#step-16-the-first-account-and-the-first-question) · [dashboards](#step-17-metabase-dashboards) · [remote mode](#step-18-remote-mode) · [sharing](#step-19-sharing-it-with-other-people) · [Claude Code helpers](#step-20-claude-code-helpers) · [checks and this guide](#step-21-checks-and-this-guide) · [git and branches](#step-22-put-it-in-git-and-recreate-the-branches)
 
 **Shortcut.** If you have this file as `documentation.md`, you can write every file in
 Appendix B to disk at once instead of copying them by hand. Save this as `extract.mjs`
@@ -47,8 +636,6 @@ console.log(`Wrote ${n} files`);
 
 You still need to do the steps that aren't files: installing tools, the data, `.env`,
 the images, and starting things. Then go straight to step 10.
-
----
 
 ## What you are building
 
@@ -439,7 +1026,7 @@ In Claude Code, ask for them by name or list them with `/agents`.
 - `scripts/build-docs.mjs` ([B.36](#b36)): `npm run docs`. It rewrites this guide's
   appendices from the current files. A new file the script doesn't know about makes the
   check fail until it's added to its `FILES` list (or to `SKIPPED` or `IMAGES`, with a reason).
-- `README.md` ([B.37](#b37)): the everyday instructions for users and admins.
+- `README.md` ([B.37](#b37)): the GitHub front page; it points here.
 - `documentation.md`: this file. Copy it in as it is; `npm run docs` regenerates everything
   from the "BEGIN GENERATED" line down.
 
@@ -473,13 +1060,13 @@ update the real `Luke` or `Q`: `git checkout Luke && git merge origin/main`.
 
 ## Where each branch is
 
-As of 2026-10-21, with `main` at PR #21:
+As of 2026-10-21, with `main` at PR #22:
 
 | Branch | Compared with `main` | Missing |
 |---|---|---|
 | `main` | — | — |
-| `Ventura` | same files (its last commit is what PR #20 merged) | PR #21 (checks and the first version of this file) |
-| `Luke` | 0 ahead, behind | PRs #14–#21: Metabase charts, better answers, Claude Code agents, dashboard drawer, dashboard drill-down, checks and docs |
+| `Ventura` | same files as PR #20 | PRs #21–#22 (checks and this file) |
+| `Luke` | 0 ahead, behind | PRs #14–#22: Metabase charts, better answers, Claude Code agents, dashboard drawer, dashboard drill-down, checks and docs |
 | `Q` | 0 ahead, behind | PR #13 (the `db-setup` service) and everything `Luke` is missing |
 
 No branch has work that `main` lacks. To refresh this table:
@@ -515,7 +1102,8 @@ git log --oneline origin/<branch>..origin/main                     # what the br
 | Oct 20 | PR #17 | Dashboard drawer with groups (PR #18 and #19 only synced branches) | 14, 17 |
 | Oct 20 | PR #20 | Better dashboards with drill-down pages | 17 |
 | Oct 21 | PR #21 | `npm run check` and the first `documentation.md` | 21 |
-| Oct 21 | this change | This from-scratch guide and `npm run docs` | 21 |
+| Oct 21 | PR #22 | This from-scratch guide and `npm run docs` | 21 |
+| Oct 21 | this change | README merged into this file; Part 2, the feature reference | — |
 
 <!-- BEGIN GENERATED: do not edit below; run `npm run docs` -->
 
@@ -8652,7 +9240,7 @@ Start from the diff (`git diff`, `git diff main...HEAD`, or what you were pointe
 **4. Setup that breaks on other machines**
 - Shell scripts must keep LF line endings (`.gitattributes`); Windows checkouts convert otherwise.
 - Database objects needed on existing installs must be created by the re-runnable `db-setup` scripts, not only by Postgres's first-start init.
-- New npm dependencies need `package.json` and `package-lock.json` updated; the README should say when collaborators must rebuild (`docker compose up -d --build -V`).
+- New npm dependencies need `package.json` and `package-lock.json` updated; documentation.md (Part 1) should say when collaborators must rebuild (`docker compose up -d --build -V`).
 - Code that reads `process.env` at import time may run before `dotenv.config()`.
 
 **5. Data correctness**
@@ -8876,181 +9464,27 @@ if (process.argv.includes('--check')) {
 <a id="b37"></a>
 ### B.37 `README.md`
 
-````markdown
+```markdown
 ## EVERYONE HAS THEIR OWN BRANCHES!!
 
 # OneTouch
 
-Ask questions about the ServiceNow export in plain English and download the results.
+Ask questions about the ServiceNow export in plain English, get the answers as tables,
+download them in eight formats, and explore ten ITIL dashboards.
 
-One computer runs the full tool (the **server**). Everyone else signs in to it with
-the username and password they were given.
+Everything about OneTouch is in **[documentation.md](documentation.md)**:
 
-## Branch history and checks
+- [Part 1: Using and running OneTouch](documentation.md#part-1-using-and-running-onetouch):
+  remote mode, running your own copy, running the server, sharing it, dashboards, accounts,
+  Claude Code helpers, branches and checks.
+- [Part 2: Every feature, in detail](documentation.md#part-2-every-feature-in-detail).
+- [Part 3: Building it from scratch](documentation.md#part-3-building-it-from-scratch),
+  with every file printed in full.
+- [Where each branch is](documentation.md#where-each-branch-is) and the
+  [history](documentation.md#history-how-the-real-repository-got-here).
 
-`documentation.md` rebuilds OneTouch from scratch, step by step, with every file printed in
-full, and shows where each branch sits. After any change run `npm run docs` to refresh it,
-and `npm run check` (about a second, no Docker or API key needed) before each commit.
-
-## Coding helpers (Claude Code)
-
-The repo includes two Claude Code subagents in `.claude/agents/`:
-
-- **onetouch-developer** builds features: it knows how OneTouch fits together, how to run
-  and test it, and the pitfalls this project has hit.
-- **onetouch-reviewer** reviews a diff or branch for this project's risks (sign-in and data
-  exposure, secrets, Claude API rules, setup that breaks on other machines). Read-only.
-
-In Claude Code, ask for them by name (e.g. "use onetouch-reviewer on my branch"), or see
-them with `/agents`.
-
-## Using OneTouch from a clone of this repo (remote mode)
-
-You don't need Docker, the data, or an API key. Your `localhost:8000` shows the tool
-and passes everything to the OneTouch server, where your account lives.
-
-1. Install [Node.js](https://nodejs.org) 18 or newer.
-2. In the cloned folder, run once:
-   ```
-   npm install
-   ```
-3. Ask whoever runs OneTouch for the **server address**, then start remote mode with it:
-   ```
-   npm run remote -- https://the-link-you-were-given.trycloudflare.com
-   ```
-   On the same network as the server you can use its network address instead,
-   e.g. `npm run remote -- http://192.168.5.106:8000`.
-4. Open **http://localhost:8000** and sign in with your own username and password.
-
-Keep the terminal open while you use it; press `Ctrl+C` to stop. You can put the address
-in a `.env` file as `ONETOUCH_SERVER=...` and then just run `npm run remote`.
-If port 8000 is busy, set `REMOTE_PORT=8100` (and open `localhost:8100`).
-
-You can also skip all of this and open the server address directly in your browser.
-
-## Running your own full copy (works without anyone else's computer)
-
-1. Install Docker Desktop and clone this repo.
-2. Copy `.env.example` to `.env`. Put an Anthropic API key in `ANTHROPIC_API_KEY`;
-   the other values can stay as they are for a local copy.
-3. Get the ServiceNow export (the six CSVs) from the team and put them in a `csv_data/`
-   folder. Without them the tool still starts and you can sign in, but every question
-   comes back empty. (Add them before the first start, or see "Reloading the data".)
-4. Run `docker compose up -d` and open http://localhost:8000.
-5. Sign in with your usual username and password. Everyone's accounts come with the
-   repo in `db/accounts.json` and are loaded automatically.
-
-**Getting account changes:** when someone is added, has their password reset, or is
-deactivated, the person who made the change exports and commits `db/accounts.json`.
-Pull, then restart your copy (`docker compose restart app`) to pick it up.
-
-**Reloading the data:** the CSVs are only loaded the first time the database starts.
-To load them later, `docker compose down -v` (this also clears your copy's sign-in
-sessions; accounts come back from `db/accounts.json`), then `docker compose up -d`.
-
-## Running the server
-
-Needs Docker Desktop, the CSV export in `csv_data/`, and a `.env` file
-(copy `.env.example` and fill in every value). Then:
-
+Before each commit: `npm run docs`, then `npm run check`.
 ```
-docker compose up -d
-```
-
-The tool is at http://localhost:8000. Only port 8000 is reachable from other computers;
-Postgres, Cube and Metabase only accept connections from the server itself.
-
-### Sharing it
-
-**Same network (office Wi-Fi or VPN).** Others open `http://<server's IP address>:8000`
-(find the IP with `ipconfig`). Nothing else to set up. Traffic is not encrypted, so
-only use this on a network you trust.
-
-**Over the internet (Cloudflare Tunnel).** Get permission first: this puts company data
-behind a public link.
-
-```
-docker compose --profile tunnel up -d tunnel     # start
-docker logs onetouch_tunnel                      # find the https://....trycloudflare.com link
-docker compose stop tunnel                       # stop sharing
-```
-
-The quick-tunnel link changes every time the tunnel starts, so send people the new one.
-For a permanent address, create a tunnel in a Cloudflare account (service:
-`http://app:8000`), put its token in `.env` as `TUNNEL_TOKEN`, and use
-`docker compose --profile tunnel-named up -d tunnel-named` instead.
-
-### Dashboards (Metabase)
-
-Ten ITIL dashboards appear in OneTouch's **Dashboards** tab. Open them from the
-**☰ Dashboards** drawer in its top-left corner:
-
-| Group | Dashboards |
-|---|---|
-| Overview | IT Operations Overview, Sites & Breweries |
-| Incidents & Problems | Service Desk, Problems & Major Incidents, Monitoring & Alerts, Workload & Channels |
-| Change | Change / CAB, Change Risk & Business Impact |
-| Requests | Requests, Automation & Self-service |
-
-To create them on a server:
-
-1. Fill in `METABASE_DB_PASSWORD`, `METABASE_ADMIN_EMAIL` and `METABASE_ADMIN_PASSWORD`
-   in `.env`. If you already set up Metabase yourself, use that admin login.
-2. Run `docker compose up -d` (creates the reporting views and Metabase's read-only user).
-3. Run:
-   ```
-   docker exec analytics_node_app node scripts/metabase-setup.mjs
-   ```
-
-Re-run step 3 any time; it rebuilds the dashboards in Metabase's "OneTouch ITIL"
-collection and never touches anything else. The charts, and which drawer group each
-dashboard sits in, are defined in `scripts/metabase-setup.mjs`; the data they read
-in `db/reporting-views.sql`.
-
-**Drilling down.** Click a bar, pie slice, line point, big number or blue table value
-to open a detail page for it: a record (incident, change, request), a team, a server or
-system, a site or brewery, a problem record, a catalog item, or a filtered list (e.g.
-"Incidents · Priority: P2 - High"). Detail pages link onward too; on a record, use the
-blue **Go to** row under it. OneTouch's toolbar shows where you are, with **← Back**.
-What each click opens is set by `click` / `links` on the charts in
-`scripts/metabase-setup.mjs`; the detail pages are its `DETAILS` list.
-
-Metabase itself is at http://localhost:3000 on the server only. The dashboards are
-public links that OneTouch passes through, so anyone with the link can view them.
-
-### Accounts
-
-Accounts live in the server's own Postgres database (`onetouch_auth`). Manage them on the server:
-
-```
-docker exec -it analytics_node_app node scripts/users.mjs list
-docker exec -it analytics_node_app node scripts/users.mjs add jsmith "Jane Smith"
-docker exec -it analytics_node_app node scripts/users.mjs reset-password jsmith
-docker exec -it analytics_node_app node scripts/users.mjs deactivate jsmith
-docker exec -it analytics_node_app node scripts/users.mjs activate jsmith
-```
-
-Many at once, from a CSV with the columns `Username, Display Name, Password` (PowerShell):
-
-```
-Get-Content people.csv | docker exec -i analytics_node_app node scripts/users.mjs import -
-```
-
-Never commit that CSV: it holds everyone's passwords.
-
-**Sharing accounts with clones.** After any change above, write the accounts file and commit it:
-
-```
-docker exec analytics_node_app node scripts/users.mjs export
-git add db/accounts.json
-git commit -m "Update accounts"
-```
-
-`db/accounts.json` holds usernames, display names and password *hashes*, never the
-passwords themselves. Every copy loads it on start: missing accounts are added, and an
-account is only overwritten by a more recent change, so an old file never undoes a newer
-password reset or deactivation.
-````
 
 ## Appendix C: images
 

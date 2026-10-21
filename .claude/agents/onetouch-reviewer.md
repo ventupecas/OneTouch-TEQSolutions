@@ -30,7 +30,7 @@ Start from the diff (`git diff`, `git diff main...HEAD`, or what you were pointe
 **4. Setup that breaks on other machines**
 - Shell scripts must keep LF line endings (`.gitattributes`); Windows checkouts convert otherwise.
 - Database objects needed on existing installs must be created by the re-runnable `db-setup` scripts, not only by Postgres's first-start init.
-- New npm dependencies need `package.json` and `package-lock.json` updated; the README should say when collaborators must rebuild (`docker compose up -d --build -V`).
+- New npm dependencies need `package.json` and `package-lock.json` updated; documentation.md (Part 1) should say when collaborators must rebuild (`docker compose up -d --build -V`).
 - Code that reads `process.env` at import time may run before `dotenv.config()`.
 
 **5. Data correctness**
