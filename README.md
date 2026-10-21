@@ -9,9 +9,9 @@ the username and password they were given.
 
 ## Branch history and checks
 
-`documentation.md` lists every step that built OneTouch and where each branch sits.
-Update it with every change. Run `npm run check` (about a second, no Docker or API key
-needed) before each commit.
+`documentation.md` rebuilds OneTouch from scratch, step by step, with every file printed in
+full, and shows where each branch sits. After any change run `npm run docs` to refresh it,
+and `npm run check` (about a second, no Docker or API key needed) before each commit.
 
 ## Coding helpers (Claude Code)
 

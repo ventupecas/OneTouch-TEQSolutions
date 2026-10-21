@@ -5,6 +5,7 @@
 // 1. `node --check` on every tracked .mjs / .js file (syntax only, nothing runs)
 // 2. `sh -n` on db/*.sh, and that they keep LF line endings
 // 3. `docker compose config -q` with .env.example, if Docker is installed
+// 4. documentation.md's appendix matches the code (scripts/build-docs.mjs --check)
 //
 // Exits non-zero if anything fails. Takes about a second.
 
@@ -35,6 +36,9 @@ console.log(`shell scripts: ${shFiles.length} checked for LF, ${shChecked} for s
 
 const compose = run('docker compose config', 'docker', ['compose', '--env-file', '.env.example', 'config', '-q']);
 console.log(`docker compose config: ${compose === null ? 'skipped (no docker)' : compose ? 'ok' : 'failed'}`);
+
+const docs = run('documentation.md', process.execPath, ['scripts/build-docs.mjs', '--check']);
+console.log(`documentation.md: ${docs ? 'up to date' : 'out of date'}`);
 
 if (failures.length) {
   console.error(`\n${failures.length} check(s) failed:\n\n${failures.join('\n\n')}`);
