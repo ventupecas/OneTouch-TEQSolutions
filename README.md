@@ -7,6 +7,12 @@ Ask questions about the ServiceNow export in plain English and download the resu
 One computer runs the full tool (the **server**). Everyone else signs in to it with
 the username and password they were given.
 
+## Branch history and checks
+
+`documentation.md` lists every step that built OneTouch and where each branch sits.
+Update it with every change. Run `npm run check` (about a second, no Docker or API key
+needed) before each commit.
+
 ## Coding helpers (Claude Code)
 
 The repo includes two Claude Code subagents in `.claude/agents/`:
