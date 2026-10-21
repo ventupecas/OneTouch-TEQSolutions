@@ -74,11 +74,14 @@
                             aria-controls="dashboard-drawer" aria-expanded="false" onclick="toggleDashboardDrawer()">
                         <span aria-hidden="true">☰</span> Dashboards
                     </button>
+                    <!-- Shown on the detail pages a click opens -->
+                    <button type="button" class="dashboard-back" id="dashboard-back" hidden onclick="dashboardBack()">← Back</button>
                     <div class="dashboard-current">
                         <span class="dashboard-current-group" id="dashboard-current-group"></span>
                         <span class="dashboard-current-name" id="dashboard-current-name"></span>
                         <span class="dashboard-current-desc" id="dashboard-current-desc"></span>
                     </div>
+                    <span class="dashboard-hint" id="dashboard-hint" hidden>Click a bar, slice, number or blue value for details</span>
                 </div>
                 <div class="dashboard-body">
                     <div class="dashboard-backdrop" id="dashboard-backdrop" onclick="toggleDashboardDrawer(false)"></div>

@@ -72,7 +72,10 @@ SELECT
     nullif(i.kb_article, '')      AS kb_article,
     nullif(i.opened_by_group, '') AS opened_by_group,
     i.short_description,
-    i.close_code = 'Solved (Work Around)' AS closed_with_workaround
+    i.close_code = 'Solved (Work Around)' AS closed_with_workaround,
+    -- for the incident record page (drill-down)
+    nullif(i.description, '') AS description,
+    nullif(i.close_notes, '') AS close_notes
 FROM public.incident i CROSS JOIN reporting.data_as_of a;
 
 -- ---------------------------------------------------------------------
@@ -115,7 +118,10 @@ SELECT
     round((extract(epoch FROM reporting.ts(c.planned_start_date) - reporting.ts(c.created)) / 86400)::numeric, 1) AS lead_days,
     nullif(c.incident, '') AS linked_incident,
     nullif(c.problem, '')  AS linked_problem,
-    nullif(c.project, '')  AS project
+    nullif(c.project, '')  AS project,
+    -- for the change record page (drill-down)
+    nullif(c.description, '')       AS description,
+    nullif(c.purpose_of_change, '') AS purpose_of_change
 FROM public.change_request c CROSS JOIN reporting.data_as_of a;
 
 -- One row per (change, brewery): a change can list several breweries,

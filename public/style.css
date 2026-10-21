@@ -170,6 +170,20 @@ body {
 .dashboard-current-group:not(:empty)::after { content: ' ›'; }
 .dashboard-current-name { font-weight: 600; font-size: 1rem; }
 .dashboard-current-desc { color: #718096; font-size: 0.85rem; }
+/* Back from a detail page that a click on a chart opened */
+.dashboard-back {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 12px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.dashboard-back:hover { background: var(--bg-primary); }
+.dashboard-hint { margin-left: auto; color: #a0aec0; font-size: 0.8rem; white-space: nowrap; }
 
 /* The drawer slides over the dashboard from the left */
 .dashboard-body { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; }
@@ -242,6 +256,9 @@ body {
 @media (max-width: 640px) {
     .dashboard-toolbar { padding: 10px 16px; }
     .dashboard-current-desc { display: none; }
+}
+@media (max-width: 1100px) {
+    .dashboard-hint { display: none; }
 }
 
 /* RESULT TABLES */
