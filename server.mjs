@@ -13,6 +13,8 @@ import {
 } from './business_logic.mjs';
 import { buildExport, validateExport, ExportUnavailableError } from './export.mjs';
 import * as auth from './auth.mjs';
+import * as stars from './stars.mjs';
+import { findTickets, ticketRecord, STARRABLE } from './tickets.mjs';
 import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
 
 dotenv.config();
@@ -192,7 +194,7 @@ async function requireLogin(req, res, next) {
   next();
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars'], requireLogin);
 
 // Who is signed in (the page shows their display name)
 app.get('/api/me', (req, res) => {
@@ -467,6 +469,72 @@ async function answerQuestion(conversation, userPrompt, res) {
   }
 }
 
+// =====================================================================
+// HOME PAGE: ticket search (see tickets.mjs) and each person's starred
+// tickets (see stars.mjs)
+// =====================================================================
+
+// { text, record } -> the tickets the text names; with record: true and a
+// single ticket found, also its full record
+app.post('/api/tickets/search', async (req, res) => {
+  const { text, record } = req.body || {};
+  if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'Type a ticket number to search for.' });
+  if (text.length > 20000) return res.status(400).json({ error: 'That is too much text to search; paste at most a few hundred ticket numbers.' });
+
+  try {
+    const result = await findTickets(text, runCubeQuery);
+    if (record && result.found.length === 1) {
+      // Without the full record the page still shows the ticket's summary row
+      result.record = await ticketRecord(result.found[0].number, runCubeQuery, {
+        cubeUrl: process.env.CUBE_API_URL || 'http://localhost:4000/cubejs-api/v1/load',
+        token: process.env.CUBE_API_TOKEN || 'super_secret_key_change_me_later',
+      }).catch(error => {
+        console.error(`🔎 Could not load the full record of ${result.found[0].number}:`, error.message);
+        return null;
+      });
+    }
+    console.log(`🔎 ${req.user.username} searched ${result.found.length} found, ${result.notFound.length} not found`);
+    res.json(result);
+  } catch (error) {
+    console.error('🔎 Ticket search failed:', error.message);
+    res.status(502).json({ error: `Could not search the tickets right now: ${error.message}` });
+  }
+});
+
+app.get('/api/stars', async (req, res) => {
+  try {
+    res.json({ stars: await stars.listStars(req.user.id) });
+  } catch (error) {
+    console.error('⭐ Could not list stars:', error.message);
+    res.status(503).json({ error: 'Your starred tickets could not be loaded right now.' });
+  }
+});
+
+app.put('/api/stars/:number', async (req, res) => {
+  const number = String(req.params.number).toUpperCase();
+  if (!STARRABLE.test(number)) return res.status(400).json({ error: 'Only incident, change, request and task numbers can be starred.' });
+  try {
+    if (!await stars.addStar(req.user.id, number)) {
+      return res.status(409).json({ error: `You can star at most ${stars.MAX_STARS.toLocaleString()} tickets. Unstar some first.` });
+    }
+    res.json({ ok: true, number });
+  } catch (error) {
+    console.error('⭐ Could not star:', error.message);
+    res.status(503).json({ error: 'That ticket could not be starred right now.' });
+  }
+});
+
+app.delete('/api/stars/:number', async (req, res) => {
+  const number = String(req.params.number).toUpperCase();
+  try {
+    await stars.removeStar(req.user.id, number);
+    res.json({ ok: true, number });
+  } catch (error) {
+    console.error('⭐ Could not unstar:', error.message);
+    res.status(503).json({ error: 'That ticket could not be unstarred right now.' });
+  }
+});
+
 // The tables shown in the chat -> a downloadable file (see export.mjs)
 app.post('/api/export', async (req, res) => {
   const problem = validateExport(req.body);
@@ -497,6 +565,7 @@ app.listen(port, () => {
 async function prepareAccounts(attempt = 1) {
   try {
     await auth.ensureSchema();
+    await stars.ensureStarsSchema();
   } catch (error) {
     const wait = Math.min(attempt * 2, 15);
     console.error(`🔐 Account database not reachable yet (${error.message}); retrying in ${wait}s`);

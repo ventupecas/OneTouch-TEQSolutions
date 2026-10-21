@@ -104,6 +104,26 @@ For a permanent address, create a tunnel in a Cloudflare account (service:
 `http://app:8000`), put its token in `.env` as `TUNNEL_TOKEN`, and use
 `docker compose --profile tunnel-named up -d tunnel-named` instead.
 
+### Home page and the AI assistant
+
+After signing in, people land on **Home** ("Welcome, *first name*!"), which has three searches:
+
+- **Find a ticket**: one INC, CHG, RITM or SCTASK number shows every field of that ticket, with
+  **Open in Dashboards** for incidents, changes and requests. A REQ number lists the requests in it.
+- **Find several tickets**: paste numbers separated by spaces, commas or new lines (up to 200).
+  The page lists them, says which weren't found, and offers **Star all** and a download.
+- **Starred tickets**: everything you've starred, newest first.
+
+A ☆ appears next to every ticket number in OneTouch: in these searches, in the AI assistant's
+tables, and in the Dashboards toolbar on an incident, change or request record. Stars are
+saved to each person's account (the `starred_tickets` table in `onetouch_auth`), so they
+follow you to any computer that signs in to the same server. A full copy of the tool keeps its
+own stars; they aren't in `db/accounts.json`.
+
+The **AI assistant** is the search bar in the header. Asking something opens the full
+conversation over the page; **Minimize** (or Escape) shrinks it back to the bar and keeps
+the conversation, which **Open chat** reopens.
+
 ### Dashboards (Metabase)
 
 Ten ITIL dashboards appear in OneTouch's **Dashboards** tab. Open them from the
