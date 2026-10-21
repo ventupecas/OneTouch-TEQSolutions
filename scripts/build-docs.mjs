@@ -1,8 +1,8 @@
-// Rebuilds the generated part of documentation.md: the appendix with every
+// Rebuilds the generated part of README.md: the appendix with every
 // source file's full contents, and the table of package versions. The
 // hand-written guide above it is left alone.
 //
-//   npm run docs              rewrite documentation.md
+//   npm run docs              rewrite README.md
 //   node scripts/build-docs.mjs --check   fail if it is out of date (npm run check does this)
 //
 // Every tracked file must be either in FILES (copied in full) or in SKIPPED
@@ -13,7 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 
-const DOC = 'documentation.md';
+const DOC = 'README.md';
 const BEGIN = '<!-- BEGIN GENERATED: do not edit below; run `npm run docs` -->';
 const END = '<!-- END GENERATED -->';
 
@@ -31,12 +31,12 @@ const FILES = [
   'onetouchsso.html', 'styles2.css',
   'scripts/metabase-setup.mjs', 'remote.mjs',
   '.claude/agents/onetouch-developer.md', '.claude/agents/onetouch-reviewer.md',
-  'scripts/check.mjs', 'scripts/build-docs.mjs', 'README.md',
+  'scripts/check.mjs', 'scripts/build-docs.mjs',
 ];
 
 // Not copied in, and why (shown in the appendix)
 const SKIPPED = {
-  'documentation.md': 'this file',
+  'README.md': 'this file',
   'package-lock.json': 'written by `npm install`; the versions it pins are in the table above',
   'db/accounts.json': "everyone's usernames and password hashes; make your own accounts instead (step 16)",
 };
