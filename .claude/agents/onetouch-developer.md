@@ -18,7 +18,7 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 | `public/` | The single-page UI (`index.html`, `app.js`, `style.css`); no build step |
 | `db/` | `init-auth.sh`, `init-reporting.sh`, `reporting-views.sql` (typed `reporting.*` views for Metabase), `accounts.json` |
 | `scripts/users.mjs` | Account admin CLI (add, import CSV, export, sync, ...) |
-| `scripts/metabase-setup.mjs` | Builds the three Metabase dashboards via its API; rerunnable |
+| `scripts/metabase-setup.mjs` | Builds the Metabase dashboards (the `DASHBOARDS` list, each with its drawer `group`) via Metabase's API; rerunnable. Writes `metabase-dashboards.json`, which the Dashboards tab's drawer reads |
 | `model/cubes/*.yml` | Cube data model over `analytics_db` |
 | `docker-compose.yml` | postgres, db-setup (runs `db/init-*.sh` on every `up`), cube, metabase, app, optional Cloudflare tunnels |
 

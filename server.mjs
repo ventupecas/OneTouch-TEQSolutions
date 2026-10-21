@@ -204,7 +204,10 @@ app.get('/api/dashboards', (_req, res) => {
   try {
     const { dashboards } = JSON.parse(readFileSync(METABASE_DASHBOARDS_FILE, 'utf8'));
     res.json({
-      dashboards: dashboards.map(d => ({ key: d.key, name: d.name, description: d.description, path: `/public/dashboard/${d.uuid}` })),
+      // `group` is the drawer heading; files from before groups existed get one heading
+      dashboards: dashboards.map(d => ({
+        key: d.key, group: d.group || 'Dashboards', name: d.name, description: d.description, path: `/public/dashboard/${d.uuid}`,
+      })),
     });
   } catch {
     res.json({ dashboards: [] });

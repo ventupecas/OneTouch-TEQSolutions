@@ -97,8 +97,17 @@ For a permanent address, create a tunnel in a Cloudflare account (service:
 
 ### Dashboards (Metabase)
 
-Three ITIL dashboards (Service Desk, Change / CAB, Requests) appear in OneTouch's
-**Dashboards** tab. To create them on a server:
+Ten ITIL dashboards appear in OneTouch's **Dashboards** tab. Open them from the
+**☰ Dashboards** drawer in its top-left corner:
+
+| Group | Dashboards |
+|---|---|
+| Overview | IT Operations Overview, Sites & Breweries |
+| Incidents & Problems | Service Desk, Problems & Major Incidents, Monitoring & Alerts, Workload & Channels |
+| Change | Change / CAB, Change Risk & Business Impact |
+| Requests | Requests, Automation & Self-service |
+
+To create them on a server:
 
 1. Fill in `METABASE_DB_PASSWORD`, `METABASE_ADMIN_EMAIL` and `METABASE_ADMIN_PASSWORD`
    in `.env`. If you already set up Metabase yourself, use that admin login.
@@ -109,8 +118,9 @@ Three ITIL dashboards (Service Desk, Change / CAB, Requests) appear in OneTouch'
    ```
 
 Re-run step 3 any time; it rebuilds the dashboards in Metabase's "OneTouch ITIL"
-collection and never touches anything else. The charts are defined in
-`scripts/metabase-setup.mjs`, and the data they read in `db/reporting-views.sql`.
+collection and never touches anything else. The charts, and which drawer group each
+dashboard sits in, are defined in `scripts/metabase-setup.mjs`; the data they read
+in `db/reporting-views.sql`.
 
 Metabase itself is at http://localhost:3000 on the server only. The dashboards are
 public links that OneTouch passes through, so anyone with the link can view them.

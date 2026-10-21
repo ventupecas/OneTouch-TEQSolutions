@@ -68,10 +68,31 @@
         <!-- DASHBOARD VIEW CONTAINER (METABASE) -->
         <section id="dashboard-view" class="view-panel">
             <div class="dashboard-container">
-                <!-- Filled in by app.js from /api/dashboards (built by scripts/metabase-setup.mjs) -->
-                <nav class="dashboard-picker" id="dashboard-picker" aria-label="Dashboards"></nav>
-                <p class="dashboard-message" id="dashboard-message">Loading dashboards…</p>
-                <iframe id="dashboard-frame" title="Dashboard" hidden></iframe>
+                <!-- Top-left: the drawer button and which dashboard is showing -->
+                <div class="dashboard-toolbar">
+                    <button type="button" class="drawer-toggle" id="dashboard-drawer-toggle"
+                            aria-controls="dashboard-drawer" aria-expanded="false" onclick="toggleDashboardDrawer()">
+                        <span aria-hidden="true">☰</span> Dashboards
+                    </button>
+                    <div class="dashboard-current">
+                        <span class="dashboard-current-group" id="dashboard-current-group"></span>
+                        <span class="dashboard-current-name" id="dashboard-current-name"></span>
+                        <span class="dashboard-current-desc" id="dashboard-current-desc"></span>
+                    </div>
+                </div>
+                <div class="dashboard-body">
+                    <div class="dashboard-backdrop" id="dashboard-backdrop" onclick="toggleDashboardDrawer(false)"></div>
+                    <!-- Filled in by app.js from /api/dashboards (built by scripts/metabase-setup.mjs) -->
+                    <aside class="dashboard-drawer" id="dashboard-drawer" aria-label="Dashboards">
+                        <div class="drawer-header">
+                            <span>Dashboards</span>
+                            <button type="button" class="drawer-close" onclick="toggleDashboardDrawer(false)" aria-label="Close">✕</button>
+                        </div>
+                        <nav id="dashboard-picker"></nav>
+                    </aside>
+                    <p class="dashboard-message" id="dashboard-message">Loading dashboards…</p>
+                    <iframe id="dashboard-frame" title="Dashboard" hidden></iframe>
+                </div>
             </div>
         </section>
     </main>

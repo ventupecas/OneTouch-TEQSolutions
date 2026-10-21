@@ -66,7 +66,13 @@ SELECT
          WHEN a.as_of - reporting.ts(i.created) < interval '3 days' THEN '2. 1-3 days'
          WHEN a.as_of - reporting.ts(i.created) < interval '7 days' THEN '3. 3-7 days'
          WHEN a.as_of - reporting.ts(i.created) < interval '30 days' THEN '4. 7-30 days'
-         ELSE '5. Over 30 days' END AS age_bucket
+         ELSE '5. Over 30 days' END AS age_bucket,
+    -- (columns below were added later; a view can only grow at the end)
+    nullif(i.problem, '')         AS problem,
+    nullif(i.kb_article, '')      AS kb_article,
+    nullif(i.opened_by_group, '') AS opened_by_group,
+    i.short_description,
+    i.close_code = 'Solved (Work Around)' AS closed_with_workaround
 FROM public.incident i CROSS JOIN reporting.data_as_of a;
 
 -- ---------------------------------------------------------------------
@@ -88,15 +94,48 @@ SELECT
     c.outage = 'Yes' AS has_outage,
     c.environment,
     c.owner_group,
-    c.configuration_item,
+    -- 'zzz' is a placeholder here too (about 600 changes): "no system recorded"
+    CASE WHEN c.configuration_item IN ('', 'zzz') THEN NULL ELSE c.configuration_item END AS configuration_item,
     c.short_description,
     nullif(c.close_code, '')   AS close_code,
     nullif(c.failure_code, '') AS failure_code,
     CASE c.close_code WHEN 'Successful' THEN true WHEN 'Unsuccessful' THEN false END AS succeeded,
     -- Planned to start within 7 days after the snapshot
     reporting.ts(c.planned_start_date) >= a.as_of
-        AND reporting.ts(c.planned_start_date) < a.as_of + interval '7 days' AS starts_next_7_days
+        AND reporting.ts(c.planned_start_date) < a.as_of + interval '7 days' AS starts_next_7_days,
+    -- (columns below were added later; a view can only grow at the end)
+    c.brewery = 'Yes'                AS affects_brewery,
+    nullif(c.brewery_locations, '')  AS brewery_locations,
+    c.sap_impact = 'Yes'             AS affects_sap,
+    c.sap_transport_required = 'Yes' AS needs_sap_transport,
+    c.process_failure = 'true'       AS process_failure,
+    -- Planned length of the change window
+    round((extract(epoch FROM reporting.ts(c.planned_end_date) - reporting.ts(c.planned_start_date)) / 3600)::numeric, 1) AS planned_hours,
+    -- How far ahead of its start the change was raised (negative: logged after it started)
+    round((extract(epoch FROM reporting.ts(c.planned_start_date) - reporting.ts(c.created)) / 86400)::numeric, 1) AS lead_days,
+    nullif(c.incident, '') AS linked_incident,
+    nullif(c.problem, '')  AS linked_problem,
+    nullif(c.project, '')  AS project
 FROM public.change_request c CROSS JOIN reporting.data_as_of a;
+
+-- One row per (change, brewery): a change can list several breweries,
+-- comma-separated, in brewery_locations
+CREATE OR REPLACE VIEW reporting.change_breweries AS
+SELECT
+    c.number,
+    trim(b.brewery) AS brewery,
+    c.created_at,
+    c.planned_start,
+    c.type,
+    c.state,
+    c.risk,
+    c.has_outage,
+    c.affects_sap,
+    c.environment,
+    c.short_description
+FROM reporting.changes c
+CROSS JOIN LATERAL regexp_split_to_table(c.brewery_locations, '\s*[,;]\s*') AS b(brewery)
+WHERE c.brewery_locations IS NOT NULL AND trim(b.brewery) <> '';
 
 -- ---------------------------------------------------------------------
 -- Requested items (RITMs)
@@ -117,7 +156,10 @@ SELECT
     round((extract(epoch FROM coalesce(reporting.ts(r.fulfilled_time), reporting.ts(r.closed)) - reporting.ts(r.opened)) / 3600)::numeric, 2)
         AS hours_to_fulfil,
     CASE WHEN r.state IN ('Open', 'Pending', 'Work in Progress')
-         THEN round((extract(epoch FROM a.as_of - reporting.ts(r.opened)) / 86400)::numeric, 1) END AS age_days
+         THEN round((extract(epoch FROM a.as_of - reporting.ts(r.opened)) / 86400)::numeric, 1) END AS age_days,
+    -- (columns below were added later; a view can only grow at the end)
+    nullif(r.order_guide, '') AS order_guide,
+    r.short_description
 FROM public.sc_req_item r CROSS JOIN reporting.data_as_of a;
 
 -- ---------------------------------------------------------------------
