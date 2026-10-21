@@ -387,7 +387,8 @@ body:not(.signed-out) .login-page { display: none; }
   align-content: start;
   justify-items: center;
   padding: 0 16px 28px;
-  background: #718aee;
+  /* Wheat photo filling the screen; the color shows while it loads */
+  background: #c8973f url("login-background.jpg") center / cover no-repeat;
   color: var(--ink);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   -webkit-text-size-adjust: 100%;
