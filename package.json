@@ -91,6 +91,7 @@
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
+    "check": "node scripts/check.mjs",
     "start": "node server.mjs",
     "users": "node scripts/users.mjs",
     "remote": "node remote.mjs"
