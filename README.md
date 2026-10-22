@@ -185,7 +185,7 @@ same address. Running `npm run share` is still a quick way to confirm it's up.
 | `It is not answering yet` | A new free link can take a minute or two to start working. Open it yourself before sending it. If it still fails after 5 minutes, run `npm run share -- --new`. |
 | People get "This site can't be reached" or a Cloudflare error page | Your computer is asleep or off, Docker isn't running, or they have an old link. Run `npm run share` and send the link it prints. |
 | `The permanent tunnel did not connect` | The token in `.env` is wrong or was deleted in Cloudflare. Copy it again (step 4 above). |
-| The permanent address shows "error code: 502", always or only sometimes | Something else is also running your tunnel, usually the Windows service that Cloudflare's own install command (`cloudflared.exe service install …`) creates. It can't reach `app:8000`, and Cloudflare splits visitors between it and Docker. Remove it in an **administrator** PowerShell: `& "C:\Program Files (x86)\cloudflared\cloudflared.exe" service uninstall`. The tunnel's page in the Cloudflare dashboard should then list a single connector. |
+| The permanent address shows "error code: 502", always or only sometimes | Something else is also running your tunnel: usually a container started by the dashboard's `docker run cloudflare/cloudflared … --token …` command, or the Windows service its `cloudflared.exe service install …` command creates. Those can't reach `app:8000`, and Cloudflare splits visitors between them and this project's tunnel. `npm run share` finds them on this computer and prints the command that removes each one: `docker rm -f <container name>` for a container, or, in an **administrator** PowerShell, `& "C:\Program Files (x86)\cloudflared\cloudflared.exe" service uninstall` for the service. The tunnel's **Connectors** list in the Cloudflare dashboard should show a single connector; one on another computer has to be stopped there. |
 | A question shows an error after about 100 seconds | Cloudflare ends any request that takes longer than 100 seconds. It's rare (answers usually take 3–5 seconds); ask again. |
 | Someone sees the old version after you change OneTouch | They press Ctrl+F5. Changes go live through the link as soon as they're running on your computer. |
 
@@ -10882,6 +10882,47 @@ function copyToClipboard(text) {
   return Boolean(tool) && spawnSync(tool, { input: text }).status === 0;
 }
 
+// The tunnel ID inside a token (base64 JSON: { a: account, t: tunnel, s: secret })
+function tunnelIdOf(tokenText) {
+  try {
+    return JSON.parse(Buffer.from(tokenText, 'base64').toString('utf8')).t || null;
+  } catch {
+    return null;
+  }
+}
+
+// Anything else on this computer running the same tunnel, such as the
+// `docker run cloudflare/cloudflared … --token …` command or the Windows
+// service from Cloudflare's install screen. Cloudflare splits visitors across
+// all of a tunnel's connectors, and those can't reach app:8000, so the
+// visitors sent to them get "error code: 502".
+function strayConnectors(tunnelId, ownContainer) {
+  const found = [];
+  const ids = docker(['ps', '-q'], { quiet: true }).stdout.split(/\s+/).filter(Boolean);
+  if (ids.length) {
+    const r = docker(['inspect', '-f', '{{.Name}}|{{join .Args " "}} {{join .Config.Env " "}}', ...ids], { quiet: true });
+    for (const line of r.stdout.split('\n').filter(Boolean)) {
+      const name = line.slice(1, line.indexOf('|'));
+      if (name === ownContainer) continue;
+      const tokens = line.match(/eyJ[A-Za-z0-9_=+/-]+/g) || [];
+      if (tokens.some(t => tunnelIdOf(t) === tunnelId)) found.push(`the Docker container "${name}". Remove it with:\n      docker rm -f ${name}`);
+    }
+  }
+  if (process.platform === 'win32' && spawnSync('sc', ['query', 'cloudflared'], { encoding: 'utf8' }).status === 0) {
+    found.push('the "cloudflared" Windows service. Remove it in an administrator PowerShell with:\n' +
+      '      & "C:\\Program Files (x86)\\cloudflared\\cloudflared.exe" service uninstall');
+  }
+  return found;
+}
+
+// A few more requests after the first success: if another connector (even one
+// on another computer) shares the tunnel, some of them fail
+async function failedChecks(url, tries = 6) {
+  let failed = 0;
+  for (let i = 0; i < tries; i++) if (!await reachableFromOutside(url)) failed++;
+  return failed;
+}
+
 // ---------------------------------------------------------------------
 
 if (docker(['info'], { quiet: true }).status !== 0) {
@@ -10923,6 +10964,8 @@ if (token) {
 
 if (link) console.log(`Checking ${link} works from the internet (a new link can take a minute or two)…`);
 const works = link ? await waitFor(() => reachableFromOutside(link), 180) : true;
+const failed = link && works ? await failedChecks(link) : 0;
+const strays = token ? strayConnectors(tunnelIdOf(token), tunnel.container) : [];
 const copied = link && copyToClipboard(link);
 
 console.log('\n' + '='.repeat(64));
@@ -10938,6 +10981,16 @@ console.log('People sign in there with their own username and password.');
 console.log(token
   ? 'This address never changes. It works whenever this computer is on with Docker running.'
   : 'The link stays the same until the tunnel restarts (this computer or Docker restarting).\nRun "npm run share" again after a restart to get the new link.');
+if (strays.length) {
+  console.log('\n⚠ Something else on this computer is also running your tunnel, so some');
+  console.log('  visitors get "error code: 502". Only this project\'s Docker setup should run it:');
+  for (const s of strays) console.log(`  - ${s}`);
+}
+if (failed) {
+  console.log(`\n⚠ ${failed} of 6 test visits failed. If nothing is listed above, another computer may be`);
+  console.log('  running your tunnel: check its "Connectors" in the Cloudflare dashboard (Zero Trust');
+  console.log('  → Networks → Tunnels) and remove any that are not this computer\'s Docker.');
+}
 console.log('='.repeat(64) + '\n');
 ```
 
