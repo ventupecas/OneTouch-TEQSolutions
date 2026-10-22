@@ -344,6 +344,62 @@ body {
 .star-btn.labelled.on { color: #975a16; background: #fefcbf; border-color: #ecc94b; }
 .dashboard-toolbar .star-btn.labelled { flex-shrink: 0; margin-left: auto; }
 
+/* TICKET ROWS IN AI ANSWERS: click to open the full record and related tickets */
+.result-table tbody tr.expandable { cursor: pointer; }
+.result-table tbody tr.expandable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.result-table tbody tr.expanded,
+.result-table tbody tr.expanded:nth-child(even) { background: #e6f6f1; }
+.expand-caret { display: inline-block; width: 1em; color: #a0aec0; transition: transform 0.15s; }
+tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
+/* The opened view: under its row, kept in sight when the table scrolls sideways */
+.result-table tbody tr.row-detail,
+.result-table tbody tr.row-detail:nth-child(even),
+.result-table tbody tr.row-detail:hover { background: #f7fafc; }
+.result-table tr.row-detail > td { padding: 0; border-bottom: 2px solid var(--accent); }
+.row-detail-body {
+    position: sticky;
+    left: 0;
+    box-sizing: border-box;
+    width: min(1100px, calc(100vw - 120px));
+    padding: 12px 16px 16px;
+    border-left: 3px solid var(--accent);
+}
+.row-detail-close {
+    float: right;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text);
+    cursor: pointer;
+}
+.row-detail-close:hover { background: var(--panel-bg); }
+/* A table with an opened row shows in full, instead of in a short scrolling box */
+.table-wrap:has(tr.row-detail) { max-height: none; }
+
+/* RELATED TICKETS: under an AI answer, and under a ticket's record on Home */
+.related { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.related-title { font-weight: 700; margin-bottom: 8px; }
+.related-loading { margin: 12px 0 0; color: #718096; font-size: 0.85rem; }
+.family { margin-bottom: 16px; padding: 12px 14px; background: var(--panel-bg); border: 1px solid var(--border); border-left: 3px solid #4299e1; border-radius: 6px; }
+.family-title { font-weight: 600; }
+.family-why { margin: 4px 0 8px; color: #4a5568; font-size: 0.87rem; line-height: 1.45; }
+.family-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 0 0 6px; font-size: 0.85rem; line-height: 1.5; }
+.same-label, .differ-label { font-weight: 700; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 7px; border-radius: 4px; }
+.same-label { background: #e6fffa; color: #0b7a5f; }
+.differ-label { background: #fffaf0; color: #b7791f; }
+.fact b { font-weight: 600; color: #4a5568; }
+.family-more { margin: 6px 0 0; color: #718096; font-size: 0.8rem; }
+.family .table-wrap { max-height: 320px; margin-top: 8px; }
+/* "Download all N families as" above the families */
+.related > .download-bar { margin: 0 0 12px; }
+/* The ticket (or tickets) the question was about, in each family */
+.result-table tbody tr.focus,
+.result-table tbody tr.focus:nth-child(even) { background: #ebf8ff; }
+.result-table tbody tr.focus td:first-child { box-shadow: inset 3px 0 0 #4299e1; }
+
 /* "Star all": under an AI answer's table, and above Ticket results */
 .star-all-bar { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
 .star-many {

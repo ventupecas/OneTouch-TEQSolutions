@@ -34,7 +34,7 @@ const FILES = [
   'scripts/check.mjs', 'scripts/build-docs.mjs',
   // Added later; at the end so the guide's links to B.1-B.36 keep their numbers
   'tickets.mjs', 'stars.mjs', 'scripts/share.mjs', 'scripts/warmup.mjs', 'scripts/warmup-questions.txt',
-  'seen.mjs',
+  'seen.mjs', 'relations.mjs',
 ];
 
 // Not copied in, and why (shown in the appendix)

@@ -305,6 +305,52 @@ tickets the answer lists (its ticket-number column), not related numbers in othe
 such as a task's parent request. It is one request however many tickets there are, and the
 2,000-star limit still applies: anything past it is left unstarred and a note says so.
 
+**🔗 Related tickets.** Under an AI answer, and under a ticket's record on Home, OneTouch
+lists the "families" those tickets belong to. These come from the links stored in the
+ServiceNow export; nothing is guessed:
+
+| Family | The link in the data | How common |
+|---|---|---|
+| Parent incident and its child incidents | `incident.parent_incident` | 2,080 child incidents under 514 parents (up to 212 children each; one level only) |
+| Bundle request and its child requests | `sc_req_item.parent` | 1,543 child requests under 974 bundles (e.g. "Start and Snooze Applications/Servers" → "Virtual Server - Stop") |
+| Requests ordered together | `sc_req_item.request` (the REQ) | 125 orders hold several requests (up to 18) |
+| A request and its catalog tasks | `sc_task.request_item` | 2,361 requests have several tasks (up to 7) |
+| A change and the incidents it fixes or caused | `change_request.incident`, `incident.caused_by_change` | 100 changes name the incident they fix; 6 incidents name the change that caused them |
+| Tickets under one problem record | `incident.problem`, `change_request.problem` | 64 problems, up to 870 incidents each (the PRB records themselves aren't in the export) |
+
+For each family it shows:
+- a plain-English line on what the link means (e.g. "a parent (master) incident groups
+  incidents raised for the same issue … so they are worked and resolved together")
+- **Same in all** — the values every member shares: state, priority or risk, team,
+  server / system, subcategory, catalog item, location, assignee, summary, opened time
+- **Different** — the fields where they differ, with how many have each value (e.g. "Team:
+  ACN-INFRA-CLOUD-LINUX (3), ACN-SAP-BASIS (3)", "Opened: Sep 1, 1:07 AM to 1:18 AM",
+  "Summary: 5 different summaries")
+- the members, each with its role (Parent, Child, Task, Incident it fixes, …). The
+  ticket you asked about is highlighted. Up to 25 are listed, but the comparison covers all.
+- **Download this family as** — the family in any of the download formats. The file has two
+  tables: **Members of *anchor*** (every member, not just the 25 shown: ticket, role, type,
+  summary, state, priority / risk, team, opened) and **Same or different in *anchor***
+  (each field, "Same in all *n*" or "Different", and the values with their counts). The
+  *anchor* is the family's parent, order, request, change or problem number. Table names
+  start that way so they stay distinct as Excel worksheet names, which are cut at 31
+  characters. When there are several families, **Download all *n* families as** at the
+  top puts all of them in one file. The file is named after the tickets it relates to,
+  e.g. `one-touch-related-to-inc1794145-2026-10-22.xlsx`.
+
+One ticket shows every family it is in. A list shows only the families that two or more of
+its tickets share, so a long list isn't buried. A ticket with no links shows nothing extra.
+The families also go to the AI with your next question, so follow-ups such as "show me the
+others in that family" work. The AI also knows these links directly: "child incidents of
+INC1813985", "the parent request of RITM0440458", and an incident's record shows its
+**Parent Incident** and **Problem Record**.
+
+In child incidents, the parent's server / system matches 94% of the time, the subcategory
+95%, the location 90%, the team 82%, the priority 75% and the state 99%. The summary
+text matches only 9% of the time, because each alert or report carries its own detail.
+Only about half the children were opened after their parent: the parent is the "master"
+someone picked to group them, not always the first.
+
 ### Dashboards (Metabase)
 
 Ten ITIL dashboards appear in OneTouch's **Dashboards** tab. Open them from the
@@ -542,6 +588,18 @@ last 500 such questions in memory; restarting it starts the list over.
 - **One record** with more than 4 fields (a ticket lookup) → a two-column field / value card.
 - **A list or breakdown** → a table with a row count above it. Long text (descriptions,
   notes, plans) is cut at 120 characters, with the full text on hover.
+- **Clickable ticket rows:** in a table that lists tickets, each row has a ▸ by its ticket
+  number. Click the row (or focus it and press Enter or Space) and a detailed view opens
+  under it:
+  - the ticket's **full record**: every field, ☆ Star, **Open in Dashboards** for incidents,
+    changes and requests, and a download
+  - its **🔗 related tickets**: each family, with what the members share and where they
+    differ, and the family downloads
+
+  Click the row again or **▴ Close** to fold it away. Several rows can be open at once.
+  While a row is open, the table shows in full instead of in a short scrolling box. The
+  star in a row stars without opening it. **Open in Dashboards**, or a ticket number
+  inside a family, closes the chat and shows that page.
 - **Counts across ticket types** → one table: the grouping column, one column per type,
   a Total column and a Total row. Without grouping, it's a big total plus a row per type.
 - **Lists across ticket types** → one titled table per type (25 rows each unless you
@@ -553,6 +611,9 @@ last 500 such questions in memory; restarting it starts the list over.
 - **How I read your question:** a collapsible list of every assumption Claude made (what
   "open" meant, which ticket types were included and why others were dropped, the exact
   dates used, values that were corrected).
+- **🔗 Related tickets:** when the answer's tickets have parents, children or other linked
+  tickets, the families they belong to, with what the members share and where they differ
+  (see [Home page and the AI assistant](#home-page-and-the-ai-assistant)).
 - **Star all:** when the answer lists two or more tickets, buttons to star them all, or all
   of one type (see [Home page and the AI assistant](#home-page-and-the-ai-assistant)).
   The tickets also go to Ticket results on Home.
@@ -668,7 +729,8 @@ Files are named `one-touch-<the question>-<date>.<format>`, e.g.
 `one-touch-how-many-open-p1s-2026-10-21.xlsx`. The date, and the "Generated" time inside
 the file (e.g. "Oct 21, 2026, 9:11 PM CDT"), are in the downloader's own time zone, which
 the browser sends with the request; without one they're in UTC, labelled as such. The home
-page's ticket lists and a single ticket's record download the same way. A result too large to export (over
+page's ticket lists and a single ticket's record download the same way, and so does each
+family under **🔗 Related tickets** (its members and the same / different comparison). A result too large to export (over
 2 million cells) is refused. While the file is being made, the button says "Preparing
 XLSX file…", then "Downloaded *file name*", or the error.
 
@@ -1173,6 +1235,13 @@ Check: `node --check business_logic.mjs` prints nothing.
 - `seen.mjs` ([B.42](#b42)): each person's Ticket results, every ticket they have been
   shown, in the `seen_tickets` table of `onetouch_auth`, with when and by which question
   (the 2,000 most recent per person).
+- `relations.mjs` ([B.43](#b43)): related tickets. Given ticket numbers, it finds their
+  families from the link columns (parent / child incidents, bundle / child requests, an
+  order's requests, a request's tasks, a change and its incidents, a problem record). It
+  says what each family's members share and where they differ, and `describeFamilies`
+  sums them up for Claude. The page calls `POST /api/tickets/related` with `{ numbers,
+  conversation }`; with `conversation: true`, the summary joins the conversation's
+  `pendingNote`, queued behind the answer and only for that same conversation.
 - `public/index.html` ([B.25](#b25)): the sign-in page, the header (logo and name, which go
   back to Home; the signed-in name; the Dashboards button; Sign out at the right), the Home tab (welcome, the AI assistant's card with an
   example question, Open chat and Delete chat, ticket results, starred tickets), the
@@ -1536,6 +1605,7 @@ Create each file at the path shown, with exactly this content. Files are in the 
 - [B.40 `scripts/warmup.mjs`](#b40)
 - [B.41 `scripts/warmup-questions.txt`](#b41)
 - [B.42 `seen.mjs`](#b42)
+- [B.43 `relations.mjs`](#b43)
 
 <a id="b1"></a>
 ### B.1 `.gitignore`
@@ -3303,7 +3373,7 @@ export const ENTITY_CATALOG = {
     dateRange: '2026-07-05 to 2026-09-01',
     dimensions: ['number', 'created', 'created_day', 'created_week', 'created_month', 'short_description', 'description', 'affected_user', 'assignment_group', 'assigned_to', 'problem', 'state', 'parent_incident', 'priority', 'impact', 'urgency', 'breach_reason', 'global_incident', 'knowledge_article_reference', 'category', 'subcategory', 'updated', 'was_p1', 'configuration_item', 'contact_type', 'reassignment_count', 'close_code', 'close_notes', 'cause_code', 'cause_sub_code', 'opened_by_group', 'location', 'reopen_count', 'caused_by_change', 'business_impact_outage', 'resolved', 'resolved_day', 'resolved_month', 'closed', 'closed_day', 'closed_month', 'responsibility_for_outage', 'on_hold_reason', 'work_notes', 'risk_register_number', 'tags', 'third_party_related_ticket', 'business_impact', 'downgrade_reason', 'downgrade_type', 'kb_article'],
     listColumns: ['number', 'created', 'priority', 'state', 'short_description', 'assignment_group', 'category', 'subcategory', 'location'],
-    detailColumns: ['number', 'created', 'updated', 'resolved', 'closed', 'priority', 'impact', 'urgency', 'state', 'on_hold_reason', 'short_description', 'description', 'category', 'subcategory', 'assignment_group', 'assigned_to', 'affected_user', 'location', 'configuration_item', 'contact_type', 'close_code', 'close_notes', 'cause_code', 'reassignment_count', 'reopen_count', 'caused_by_change', 'was_p1'],
+    detailColumns: ['number', 'created', 'updated', 'resolved', 'closed', 'priority', 'impact', 'urgency', 'state', 'on_hold_reason', 'short_description', 'description', 'category', 'subcategory', 'assignment_group', 'assigned_to', 'affected_user', 'location', 'configuration_item', 'contact_type', 'close_code', 'close_notes', 'cause_code', 'reassignment_count', 'reopen_count', 'caused_by_change', 'parent_incident', 'problem', 'was_p1'],
     enums: {
       state: ['New', 'In Progress', 'On Hold', 'Resolved', 'Closed'],
       priority: ['P1 - Critical', 'P2 - High', 'P3 - Average', 'P4 - Low'],
@@ -3382,7 +3452,7 @@ export const ENTITY_CATALOG = {
     dateRange: '2026-06-01 to 2026-09-01',
     dimensions: ['number', 'item', 'description', 'short_description', 'opened', 'opened_day', 'opened_week', 'opened_month', 'updated', 'closed', 'closed_month', 'stage', 'state', 'parent', 'request', 'requested_for', 'opened_by', 'approval', 'approval_history', 'approval_set', 'location', 'work_notes', 'fulfilled_time', 'order_guide'],
     listColumns: ['number', 'opened', 'item', 'state', 'stage', 'approval', 'short_description', 'location'],
-    detailColumns: ['number', 'request', 'opened', 'updated', 'closed', 'item', 'state', 'stage', 'approval', 'short_description', 'description', 'requested_for', 'opened_by', 'location', 'fulfilled_time'],
+    detailColumns: ['number', 'request', 'parent', 'opened', 'updated', 'closed', 'item', 'state', 'stage', 'approval', 'short_description', 'description', 'requested_for', 'opened_by', 'location', 'fulfilled_time'],
     enums: {
       state: ['Open', 'Pending', 'Fulfilled', 'Closed Complete', 'Closed Cancelled', 'Closed Incomplete', 'Closed Rejected', 'Unsatisfied Fulfillment'],
       stage: ['Completed', 'Request Completed', 'Fulfillment', 'Request Cancelled', 'Request Approved', 'Waiting for Approval', 'complete', 'Request Failed', 'operation_failed', 'Cancelled', 'request_approved', 'Deployment'],
@@ -3540,6 +3610,9 @@ ${cubes.map(c => {
 
 How they relate (ITIL mental model):
 - A REQ is an order; it contains one or more RITMs (sc_req_item.request = REQ number). Each RITM spawns SCTASKs (sc_task.request_item = RITM number) and may need approvals (ritm_approvals.parent = RITM number).
+- Parent and child incidents: incident.parent_incident = the parent (master) INC number. A parent incident groups child incidents raised for the same issue (for example several monitoring alerts about one fault); children usually share the parent's server/system, subcategory and state, and are resolved together. 2,080 child incidents point to 514 parents; there is one level only (a parent has no parent of its own). "children / child incidents of INC…" → filter incident.parent_incident equals that number. "parent of INC…" → look up that incident; its parent_incident column holds the parent. "master / parent incidents" → group by incident.parent_incident with incident.count, filter parent_incident set.
+- Problem records: incident.problem and change_request.problem hold a PRB number; every ticket linked to the same PRB shares that root cause investigation. The problem records themselves are not in the export.
+- Bundle requests: sc_req_item.parent = the parent RITM. A bundle request (e.g. "Start and Snooze Applications/Servers") is split into child RITMs, one per part of the work (e.g. "Virtual Server - Stop"). "child requests of RITM…" → filter sc_req_item.parent equals that number.
 - A CHG needs approvals (change_approvals.parent = CHG number). An incident can be linked to a change that caused it (incident.caused_by_change = CHG number) and a change can reference the incident it fixes (change_request.incident).
 - IMPORTANT: the cubes are NOT joined. Each entry in "queries" must use members from exactly one cube. When a question spans several ticket types, emit one entry per type (see C0); the server runs them side by side and merges the counts. Questions that need a row-level join between tables (e.g. "incidents caused by changes owned by team X") are still not possible; pick the cube the question is fundamentally about and state the limitation in assumptions.
 
@@ -3752,7 +3825,7 @@ User: "software requests waiting on approval from the security guys"
 → {"intent":"query","queries":[{"entity":"ritm_approvals","query":{"measures":[],"dimensions":["ritm_approvals.parent","ritm_approvals.assignment_group","ritm_approvals.approval","ritm_approvals.state","ritm_approvals.created","ritm_approvals.short_description"],"filters":[{"member":"ritm_approvals.short_description","operator":"contains","values":["Software"]},{"member":"ritm_approvals.assignment_group","operator":"contains","values":["Security"]},{"member":"ritm_approvals.state","operator":"equals","values":["Open"]}],"order":[{"member":"ritm_approvals.created","direction":"asc"}],"limit":50}}],"message":"Open RITM approval records for software requests sitting with a Security approval group, oldest first.","assumptions":["Used the approval-records table because the question is about a specific approver group","'software' matched on the approval short description"]}
 
 User: "INC1814467"
-→ {"intent":"query","queries":[{"entity":"incident","query":{"measures":[],"dimensions":["incident.number","incident.created","incident.updated","incident.resolved","incident.closed","incident.priority","incident.impact","incident.urgency","incident.state","incident.on_hold_reason","incident.short_description","incident.description","incident.category","incident.subcategory","incident.assignment_group","incident.assigned_to","incident.affected_user","incident.location","incident.configuration_item","incident.contact_type","incident.close_code","incident.close_notes","incident.cause_code","incident.reassignment_count","incident.reopen_count","incident.caused_by_change","incident.was_p1"],"filters":[{"member":"incident.number","operator":"equals","values":["INC1814467"]}],"order":[],"limit":1}}],"message":"Full details for incident INC1814467.","assumptions":[]}
+→ {"intent":"query","queries":[{"entity":"incident","query":{"measures":[],"dimensions":["incident.number","incident.created","incident.updated","incident.resolved","incident.closed","incident.priority","incident.impact","incident.urgency","incident.state","incident.on_hold_reason","incident.short_description","incident.description","incident.category","incident.subcategory","incident.assignment_group","incident.assigned_to","incident.affected_user","incident.location","incident.configuration_item","incident.contact_type","incident.close_code","incident.close_notes","incident.cause_code","incident.reassignment_count","incident.reopen_count","incident.caused_by_change","incident.parent_incident","incident.problem","incident.was_p1"],"filters":[{"member":"incident.number","operator":"equals","values":["INC1814467"]}],"order":[],"limit":1}}],"message":"Full details for incident INC1814467.","assumptions":[]}
 
 User: "anything prod scheduled for next week with downtime?"
 → {"intent":"query","queries":[{"entity":"change_request","query":{"measures":[],"dimensions":["change_request.number","change_request.created","change_request.type","change_request.sub_type","change_request.state","change_request.approval","change_request.risk","change_request.short_description","change_request.owner_group","change_request.planned_start_date","change_request.environment"],"filters":[{"member":"change_request.environment","operator":"equals","values":["Production"]},{"member":"change_request.outage","operator":"equals","values":["Yes"]},{"member":"change_request.planned_start_date","operator":"gte","values":["2026-09-07"]},{"member":"change_request.planned_start_date","operator":"lt","values":["2026-09-14"]}],"order":[{"member":"change_request.planned_start_date","direction":"asc"}],"limit":50}}],"message":"Production changes with a planned outage whose planned start falls in the week of 2026-09-07.","assumptions":["'next week' = Monday 2026-09-07 through Sunday 2026-09-13","'downtime' = outage Yes"]}
@@ -5377,6 +5450,7 @@ import * as auth from './auth.mjs';
 import * as stars from './stars.mjs';
 import * as seen from './seen.mjs';
 import { findTickets, ticketRecord, ticketSummaries, ticketNumbersIn, STARRABLE } from './tickets.mjs';
+import { relatedFamilies, describeFamilies } from './relations.mjs';
 import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
 
 dotenv.config();
@@ -5960,6 +6034,33 @@ app.post('/api/tickets/search', async (req, res) => {
   } catch (error) {
     console.error('🔎 Ticket search failed:', error.message);
     res.status(502).json({ error: `Could not search the tickets right now: ${error.message}` });
+  }
+});
+
+// { numbers, conversation } -> { families }: the parent/child, order, task,
+// change and problem families those tickets belong to (relations.mjs), with
+// what each family's members share and where they differ. conversation: true
+// (an AI answer's tickets) also tells Claude about them with the next question.
+app.post('/api/tickets/related', async (req, res) => {
+  const numbers = Array.isArray(req.body?.numbers) ? req.body.numbers.slice(0, 500).map(String) : [];
+  if (!numbers.length) return res.status(400).json({ error: 'No ticket numbers to look at.' });
+  try {
+    const families = await relatedFamilies(numbers, runCubeQuery);
+    if (req.body.conversation && families.length) {
+      // Queued behind the answer that showed these tickets, and only for that
+      // same conversation (not one started by "New chat" in the meantime)
+      const session = req.session;
+      const conversation = session.conversation;
+      session.queue = session.queue.then(() => {
+        if (session.conversation !== conversation) return;
+        const note = `Related tickets OneTouch showed the user under that answer: ${describeFamilies(families)}`;
+        conversation.pendingNote = conversation.pendingNote ? `${conversation.pendingNote} ${note}` : note;
+      });
+    }
+    res.json({ families });
+  } catch (error) {
+    console.error('🔗 Could not find related tickets:', error.message);
+    res.status(502).json({ error: `Could not look for related tickets right now: ${error.message}` });
   }
 });
 
@@ -6625,6 +6726,62 @@ body {
 }
 .star-btn.labelled.on { color: #975a16; background: #fefcbf; border-color: #ecc94b; }
 .dashboard-toolbar .star-btn.labelled { flex-shrink: 0; margin-left: auto; }
+
+/* TICKET ROWS IN AI ANSWERS: click to open the full record and related tickets */
+.result-table tbody tr.expandable { cursor: pointer; }
+.result-table tbody tr.expandable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.result-table tbody tr.expanded,
+.result-table tbody tr.expanded:nth-child(even) { background: #e6f6f1; }
+.expand-caret { display: inline-block; width: 1em; color: #a0aec0; transition: transform 0.15s; }
+tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
+/* The opened view: under its row, kept in sight when the table scrolls sideways */
+.result-table tbody tr.row-detail,
+.result-table tbody tr.row-detail:nth-child(even),
+.result-table tbody tr.row-detail:hover { background: #f7fafc; }
+.result-table tr.row-detail > td { padding: 0; border-bottom: 2px solid var(--accent); }
+.row-detail-body {
+    position: sticky;
+    left: 0;
+    box-sizing: border-box;
+    width: min(1100px, calc(100vw - 120px));
+    padding: 12px 16px 16px;
+    border-left: 3px solid var(--accent);
+}
+.row-detail-close {
+    float: right;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text);
+    cursor: pointer;
+}
+.row-detail-close:hover { background: var(--panel-bg); }
+/* A table with an opened row shows in full, instead of in a short scrolling box */
+.table-wrap:has(tr.row-detail) { max-height: none; }
+
+/* RELATED TICKETS: under an AI answer, and under a ticket's record on Home */
+.related { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.related-title { font-weight: 700; margin-bottom: 8px; }
+.related-loading { margin: 12px 0 0; color: #718096; font-size: 0.85rem; }
+.family { margin-bottom: 16px; padding: 12px 14px; background: var(--panel-bg); border: 1px solid var(--border); border-left: 3px solid #4299e1; border-radius: 6px; }
+.family-title { font-weight: 600; }
+.family-why { margin: 4px 0 8px; color: #4a5568; font-size: 0.87rem; line-height: 1.45; }
+.family-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 0 0 6px; font-size: 0.85rem; line-height: 1.5; }
+.same-label, .differ-label { font-weight: 700; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 7px; border-radius: 4px; }
+.same-label { background: #e6fffa; color: #0b7a5f; }
+.differ-label { background: #fffaf0; color: #b7791f; }
+.fact b { font-weight: 600; color: #4a5568; }
+.family-more { margin: 6px 0 0; color: #718096; font-size: 0.8rem; }
+.family .table-wrap { max-height: 320px; margin-top: 8px; }
+/* "Download all N families as" above the families */
+.related > .download-bar { margin: 0 0 12px; }
+/* The ticket (or tickets) the question was about, in each family */
+.result-table tbody tr.focus,
+.result-table tbody tr.focus:nth-child(even) { background: #ebf8ff; }
+.result-table tbody tr.focus td:first-child { box-shadow: inset 3px 0 0 #4299e1; }
 
 /* "Star all": under an AI answer's table, and above Ticket results */
 .star-all-bar { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
@@ -7590,6 +7747,7 @@ const RECORD_PAGES = { INC: 'incident-detail', CHG: 'change-detail', RITM: 'requ
 
 // Home page -> that ticket's record in the Dashboards tab
 async function openInDashboards(number) {
+    toggleAssistant(false); // opened from a ticket inside the chat: show the page behind it
     switchTab('dashboard');
     if (!await loadDashboards()) return;
     const key = RECORD_PAGES[(number.match(/^[A-Z]+/) || [])[0]];
@@ -7824,7 +7982,11 @@ async function sendPrompt() {
             }));
         }
 
-        appendMessage('ai-msg wide', html + answerTimingHtml(seconds, data.fromCache));
+        const answerId = appendMessage('ai-msg wide', html + answerTimingHtml(seconds, data.fromCache));
+
+        // Parent / child tickets and others linked to the ones in this answer, under it
+        const primary = answerTicketNumbers(data);
+        if (primary.length) showRelated(document.getElementById(answerId), primary, true);
 
         // The tickets in this answer pop up in Ticket results on Home
         if (data.shownTickets && data.shownTickets.length) ticketsShown(data.shownTickets);
@@ -7985,6 +8147,8 @@ const COLUMN_LABELS = {
     request: 'Parent Order (REQ)',
     request_item: 'Parent Request (RITM)',
     parent: 'Parent Ticket',
+    parent_incident: 'Parent Incident',
+    problem: 'Problem Record',
     sla_flag: 'SLA Breached',
     active: 'Still Active',
     fulfilled_time: 'Fulfilled',
@@ -8094,12 +8258,22 @@ function renderResults(rows, entity) {
         return `<div class="table-wrap"><table class="result-table detail"><tbody>${body}</tbody></table></div>`;
     }
 
-    // Everything else: a normal table with a header row
+    // Everything else: a normal table with a header row. A row with a ticket number
+    // opens, on click, into that ticket's full record and related tickets.
     const head = columns.map(c => {
         const cls = c.endsWith('.count') ? ' class="num"' : '';
         return `<th${cls}>${escapeHtml(columnLabel(c))}</th>`;
     }).join('');
-    const body = rows.map(r => `<tr>${columns.map(c => cellHtml(c, r[c], true)).join('')}</tr>`).join('');
+    const numberColumn = columns.find(c => c.endsWith('.number'));
+    const body = rows.map(r => {
+        const number = numberColumn && STARRABLE.test(String(r[numberColumn])) ? String(r[numberColumn]) : null;
+        if (!number) return `<tr>${columns.map(c => cellHtml(c, r[c], true)).join('')}</tr>`;
+        const cells = columns.map(c => c === numberColumn
+            ? `<td class="ticket-cell"><span class="expand-caret" aria-hidden="true">▸</span>${escapeHtml(number)}${starButtonHtml(number)}</td>`
+            : cellHtml(c, r[c], true)).join('');
+        return `<tr class="expandable" data-expand="${escapeHtml(number)}" tabindex="0" aria-expanded="false"` +
+            ` title="Click to see ${escapeHtml(number)}'s full record and related tickets">${cells}</tr>`;
+    }).join('');
     const caption = `${rows.length.toLocaleString()} ${rows.length === 1 ? 'row' : 'rows'}`;
 
     return `<div class="result-caption">${caption}</div>` +
@@ -8252,14 +8426,14 @@ const EXPORT_OPTIONS = [
     ]],
 ];
 
-function downloadBarHtml(exportId) {
+function downloadBarHtml(exportId, label = 'Download as') {
     const options = EXPORT_OPTIONS.map(([group, items]) =>
         `<optgroup label="${escapeHtml(group)}">` +
         items.map(([value, label]) => `<option value="${value}">${escapeHtml(label)}</option>`).join('') +
         `</optgroup>`
     ).join('');
     return `<div class="download-bar" id="${exportId}">` +
-        `<label for="${exportId}-format">Download as</label>` +
+        `<label for="${exportId}-format">${escapeHtml(label)}</label>` +
         `<select id="${exportId}-format">${options}</select>` +
         `<button type="button" onclick="downloadExport('${exportId}')">⬇ Download</button>` +
         `<span class="download-status" role="status"></span>` +
@@ -8624,10 +8798,10 @@ function formatStarredAt(iso) {
 }
 
 // Ticket numbers open the ticket; every row has a star. Rows whose number is
-// in `highlight` (e.g. the latest answer's tickets) are marked.
-function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set()) {
+// in `highlight` (e.g. the latest answer's tickets) get `highlightClass`.
+function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set(), highlightClass = 'fresh') {
     const head = columns.map(([label]) => `<th>${escapeHtml(label)}</th>`).join('');
-    const body = tickets.map(t => (highlight.has(t.number) ? '<tr class="fresh">' : '<tr>') + columns.map(([label, get], i) => {
+    const body = tickets.map(t => (highlight.has(t.number) ? `<tr class="${highlightClass}">` : '<tr>') + columns.map(([label, get], i) => {
         if (i === 0) {
             return `<td class="ticket-cell"><button type="button" class="ticket-link" data-ticket="${escapeHtml(t.number)}"` +
                 ` title="Open ${escapeHtml(t.number)}">${escapeHtml(t.number)}</button>${starButtonHtml(t.number)}</td>`;
@@ -8756,6 +8930,7 @@ function showTicketResults(quiet = false) {
 // Opening it counts as being shown, so it joins the list.
 function openTicketRecord(number) {
     openedRecord = number;
+    toggleAssistant(false); // clicked inside the chat (e.g. in a related family): show Home
     switchTab('home');
     setHomeMode('results');
     if (STARRABLE.test(number)) {
@@ -8768,8 +8943,8 @@ function openTicketRecord(number) {
     document.getElementById('home-view').scrollTop = 0;
 }
 
-function showOpenedRecord(number) {
-    return runHomeSearch('results', 'ticket-results', async () => {
+async function showOpenedRecord(number) {
+    await runHomeSearch('results', 'ticket-results', async () => {
         const data = await searchTickets(number, true);
         if (!data) return null;
         const back = '<div class="home-actions"><button type="button" class="home-action" onclick="closeTicketRecord()">← All ticket results</button></div>';
@@ -8777,6 +8952,122 @@ function showOpenedRecord(number) {
         if (data.found.length === 1) return back + ticketCardHtml(data.found[0], data.record);
         return back + ticketTableHtml(data.found);
     });
+    // Its parent / child tickets and other linked ones, under the record
+    const out = document.getElementById('ticket-results');
+    if (openedRecord === number && out.querySelector('.ticket-head')) showRelated(out, [number], false);
+}
+
+// =====================================================================
+// RELATED TICKETS: the families the server finds from the links in the data
+// (parent / child incidents, bundle and child requests, an order's requests,
+// a request's tasks, a change and its incidents, a problem record), with what
+// the members share and where they differ
+// =====================================================================
+
+const FAMILY_COLUMNS = [
+    ['Ticket', t => t.number],
+    ['Role', t => t.role],
+    ['Summary', t => t.summary],
+    ['State', t => t.state],
+    ['Priority / Risk', t => t.level],
+    ['Team', t => t.team],
+    ['Opened', t => t.opened ? formatValue('ticket.opened', t.opened) : ''],
+];
+
+// "Team ACN-INFRA-CLOUD-LINUX (3), ACN-SAP-BASIS (3)", "Opened Sep 1, 1:07 AM to 1:18 AM"
+function familyFact(fact) {
+    if (fact.range) return `${formatValue('ticket.opened', fact.range[0])} to ${formatValue('ticket.opened', fact.range[1])}`;
+    if (fact.note) return fact.note;
+    if (fact.values) {
+        return fact.values.map(v => `${v.value} (${v.count.toLocaleString()})`).join(', ') + (fact.others ? `, and ${fact.others.toLocaleString()} more` : '');
+    }
+    const value = fact.field === 'Opened' ? formatValue('ticket.opened', fact.value) : String(fact.value);
+    return value.length > 100 ? `${value.slice(0, 97)}…` : value;
+}
+
+const FAMILY_MEMBERS_SHOWN = 25; // listed on screen; downloads hold every member
+const FAMILY_EXPORT_COLUMNS = [...FAMILY_COLUMNS.slice(0, 2), ['Type', t => t.type], ...FAMILY_COLUMNS.slice(2)];
+
+// A family as download tables: every member, then what they share and where they differ.
+// Titles start with what the table is and the family's anchor number, because
+// Excel cuts worksheet names at 31 characters ("Members of PRB0051839 (96 tick…").
+function familyExportTables(f) {
+    return [
+        {
+            title: `Members of ${f.anchor} (${f.title})`,
+            columns: FAMILY_EXPORT_COLUMNS.map(([label]) => ({ label })),
+            rows: f.members.map(t => FAMILY_EXPORT_COLUMNS.map(([, get]) => String(get(t) || ''))),
+            footer: null,
+        },
+        {
+            title: `Same or different in ${f.anchor} (${f.title})`,
+            columns: [{ label: 'Field' }, { label: 'Same or different' }, { label: 'Value' }],
+            rows: [
+                ...f.same.map(fact => [fact.field, `Same in all ${f.total.toLocaleString()}`, familyFact(fact)]),
+                ...f.differ.map(fact => [fact.field, 'Different', familyFact(fact)]),
+            ],
+            footer: null,
+        },
+    ].filter(table => table.rows.length);
+}
+
+// "Related to INC1813970", or "Related to INC1, INC2, INC3 and 4 more"
+function relatedToLabel(focus) {
+    const list = [...focus];
+    return `Related to ${list.slice(0, 3).join(', ')}${list.length > 3 ? ` and ${list.length - 3} more` : ''}`;
+}
+
+// `focus`: the tickets the question or record was about, marked in each family
+function relatedHtml(families, focus) {
+    const about = relatedToLabel(focus);
+    // Several families: one file with all of them, besides each family's own
+    const all = families.length > 1
+        ? downloadBarHtml(registerExport({ title: `Related tickets: ${families.length} families`, question: about, tables: families.flatMap(familyExportTables) }),
+            `Download all ${families.length} families as`)
+        : '';
+    return '<div class="related"><div class="related-title">🔗 Related tickets</div>' + all + families.map(f => {
+        const facts = list => list.map(fact => `<span class="fact"><b>${escapeHtml(fact.field)}:</b> ${escapeHtml(familyFact(fact))}</span>`).join('');
+        const same = f.same.length
+            ? `<div class="family-line"><span class="same-label">Same in all ${f.total.toLocaleString()}</span>${facts(f.same)}</div>` : '';
+        const differ = f.differ.length
+            ? `<div class="family-line"><span class="differ-label">Different</span>${facts(f.differ)}</div>` : '';
+        const shown = f.members.slice(0, FAMILY_MEMBERS_SHOWN);
+        const more = f.members.length > shown.length
+            ? `<p class="family-more">Showing ${shown.length.toLocaleString()} of ${f.members.length.toLocaleString()}; the comparison above and the download cover all of them.</p>` : '';
+        const download = downloadBarHtml(registerExport({ title: f.title, question: about, tables: familyExportTables(f) }), 'Download this family as');
+        return `<section class="family"><div class="family-title">${escapeHtml(f.title)}</div>` +
+            `<p class="family-why">${escapeHtml(f.why)}</p>${same}${differ}` +
+            ticketTableHtml(shown, FAMILY_COLUMNS, focus, 'focus') + more + download + '</section>';
+    }).join('') + '</div>';
+}
+
+// Adds "Related tickets" to the end of `container` (an AI answer, or a record on
+// Home) once the server has looked; nothing at all if there are none.
+// conversation: true also tells the AI about them with the next question.
+async function showRelated(container, numbers, conversation) {
+    const slot = document.createElement('div');
+    slot.className = 'related-slot';
+    slot.innerHTML = '<p class="related-loading">🔗 Looking for related tickets…</p>';
+    container.appendChild(slot);
+    try {
+        const response = await fetch(`${API_BASE}/api/tickets/related`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ numbers, conversation }),
+        });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        if (!slot.isConnected) return; // the chat was cleared, or another record opened
+        if (!data.families.length) { slot.remove(); return; }
+        slot.innerHTML = relatedHtml(data.families, new Set(numbers));
+        // Keep the newest answer in view, as the chat does for new messages
+        const chatLog = document.getElementById('chat-log');
+        if (chatLog.contains(slot) && chatLog.lastElementChild === container) chatLog.scrollTop = chatLog.scrollHeight;
+    } catch (err) {
+        slot.remove();
+        console.error('Could not look for related tickets:', err);
+    }
 }
 
 function closeTicketRecord() {
@@ -8853,8 +9144,67 @@ document.addEventListener('click', e => {
     if (example) { askAssistant(example.dataset.example); return; }
 
     const record = e.target.closest('[data-open-dashboard]');
-    if (record) openInDashboards(record.dataset.openDashboard);
+    if (record) { openInDashboards(record.dataset.openDashboard); return; }
+
+    const close = e.target.closest('.row-detail-close');
+    if (close) { toggleTicketRow(close.closest('tr.row-detail').previousElementSibling); return; }
+
+    // A ticket's row in an AI answer: open (or fold away) its full record and
+    // related tickets. Buttons and menus inside the row keep their own jobs.
+    const row = e.target.closest('tr.expandable');
+    if (row && !e.target.closest('button, a, select, input, label')) toggleTicketRow(row);
 });
+
+// The same from the keyboard: Enter or Space on a focused ticket row
+document.addEventListener('keydown', e => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches?.('tr.expandable')) {
+        e.preventDefault();
+        toggleTicketRow(e.target);
+    }
+});
+
+// =====================================================================
+// TICKET ROWS IN AI ANSWERS: a click opens a detailed view under the row:
+// the ticket's full record, then its related tickets (families)
+// =====================================================================
+
+function toggleTicketRow(row) {
+    const open = row.nextElementSibling;
+    if (open && open.classList.contains('row-detail')) {
+        open.remove();
+        row.classList.remove('expanded');
+        row.setAttribute('aria-expanded', 'false');
+        return;
+    }
+    const number = row.dataset.expand;
+    const detail = document.createElement('tr');
+    detail.className = 'row-detail';
+    const cell = document.createElement('td');
+    cell.colSpan = row.cells.length;
+    cell.innerHTML = `<div class="row-detail-body"><button type="button" class="row-detail-close">▴ Close</button>` +
+        `<div class="row-detail-content"><p class="home-status">Loading ${escapeHtml(number)}…</p></div></div>`;
+    detail.appendChild(cell);
+    row.after(detail);
+    row.classList.add('expanded');
+    row.setAttribute('aria-expanded', 'true');
+    loadTicketDetail(cell.querySelector('.row-detail-content'), number);
+}
+
+async function loadTicketDetail(box, number) {
+    try {
+        const data = await searchTickets(number, true);
+        if (!data || !box.isConnected) return;
+        if (!data.found.length) {
+            box.innerHTML = `<p class="home-status">${escapeHtml(number)} is not in the data.</p>`;
+            return;
+        }
+        box.innerHTML = ticketCardHtml(data.found[0], data.record);
+        showRelated(box, [number], false);
+    } catch (err) {
+        if (box.isConnected) box.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        console.error(err);
+    }
+}
 
 // =====================================================================
 // START: a token from earlier in this tab skips the sign-in page; if it
@@ -10956,6 +11306,7 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 |---|---|
 | `server.mjs` | Express app (port 8000): sign-in routes, `/api/query` (one-shot translator with per-session conversation memory), `/api/export`, `/api/tickets/search` and `/api/stars` (home page), dashboards list, and a pass-through of Metabase public-dashboard pages |
 | `tickets.mjs` | Home page ticket search: parses INC/CHG/RITM/SCTASK/REQ numbers and builds its own Cube queries from them (never from model output); full records use Cube's `/meta` column list |
+| `relations.mjs` | Related tickets: from the link columns only (incident.parent_incident, sc_req_item.parent / request, sc_task.request_item, change_request.incident, incident.caused_by_change, *.problem), the families a ticket is in, with `same` / `differ` comparisons and every member (the page lists 25 but downloads all, via `familyExportTables` in app.js); one ticket gets all its families, a list only families 2+ of its tickets share. `POST /api/tickets/related` (conversation: true adds `describeFamilies` to Claude's pendingNote) |
 | `stars.mjs` | Each person's starred tickets, in `onetouch_auth` (`starred_tickets`, created on start); `addStars` stars many at once ("Star all", `PUT /api/stars`) up to `MAX_STARS` |
 | `seen.mjs` | Each person's "Ticket results": every ticket shown to them (`seen_tickets`, created on start). `/api/query` records the ticket numbers in each answer (`ticketNumbersIn`) before replying and returns them as `shownTickets`; `GET /api/seen-tickets` returns the list with summaries (`ticketSummaries`); `DELETE /api/seen-tickets` empties it ("Delete ticket results") |
 | `business_logic.mjs` | Everything Claude knows about the data: `ENTITY_CATALOG`, `buildSystemPrompt()` (sections A-E), `OUTPUT_SCHEMA`, and `normalizeAndValidate()`, which every Claude-built query passes through before Cube |
@@ -10963,7 +11314,7 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 | `export.mjs` | Tables -> pdf/docx/xlsx/csv/txt/rtf, and zip/7z bundles (7-Zip) |
 | `auth.mjs` | Accounts and sessions in the `onetouch_auth` Postgres DB (its own role `onetouch_app`); scrypt hashes; `db/accounts.json` export/sync |
 | `remote.mjs` | "Remote mode" for clones: serves `public/` on localhost and forwards `/api`, `/public`, `/app` to a OneTouch server |
-| `public/` | The single-page UI (`index.html`, `app.js`, `style.css`); no build step. Home has the AI assistant's card (example question, Open chat, Delete chat; the chat opens as a panel over the page), ticket results (a clicked ticket's record) and starred tickets; Dashboards is the other tab. Delete chat resets the server conversation and bumps `chatEpoch` so a late answer is dropped |
+| `public/` | The single-page UI (`index.html`, `app.js`, `style.css`); no build step. Home has the AI assistant's card (example question, Open chat, Delete chat; the chat opens as a panel over the page; ticket rows in its answers open in place into the record plus related tickets via `toggleTicketRow`), ticket results (a clicked ticket's record) and starred tickets; Dashboards is the other tab. Delete chat resets the server conversation and bumps `chatEpoch` so a late answer is dropped |
 | `db/` | `init-auth.sh`, `init-reporting.sh`, `reporting-views.sql` (typed `reporting.*` views for Metabase), `accounts.json` |
 | `scripts/users.mjs` | Account admin CLI (add, import CSV, export, sync, ...) |
 | `scripts/warmup.mjs` | `npm run warmup`: before a crowd, asks every question in `scripts/warmup-questions.txt` (so each is answered from the repeated-question cache) and opens every dashboard (filling Metabase's result cache); lists anything that failed |
@@ -11145,7 +11496,7 @@ const FILES = [
   'scripts/check.mjs', 'scripts/build-docs.mjs',
   // Added later; at the end so the guide's links to B.1-B.36 keep their numbers
   'tickets.mjs', 'stars.mjs', 'scripts/share.mjs', 'scripts/warmup.mjs', 'scripts/warmup-questions.txt',
-  'seen.mjs',
+  'seen.mjs', 'relations.mjs',
 ];
 
 // Not copied in, and why (shown in the appendix)
@@ -11327,9 +11678,10 @@ export function parseTicketNumbers(text) {
   return { wanted, ignored: [...new Set(ignored)].slice(0, 20) };
 }
 
-const prefixOf = number => number.match(/^[A-Z]+/)[0];
+export const prefixOf = number => number.match(/^[A-Z]+/)[0];
 
-function toTicket(prefix, row) {
+// One Cube row -> the summary the ticket tables show (also used by relations.mjs)
+export function toTicket(prefix, row) {
   const { cube, label, fields } = TICKET_KINDS[prefix];
   const value = key => (fields[key] ? row[`${cube}.${fields[key]}`] ?? '' : '');
   return {
@@ -12036,6 +12388,266 @@ export async function listSeen(userId) {
       WHERE user_id = $1 ORDER BY last_shown_at DESC, number`,
     [userId]);
   return rows.map(r => ({ number: r.number, shownAt: r.last_shown_at.toISOString(), question: r.question }));
+}
+```
+
+<a id="b43"></a>
+### B.43 `relations.mjs`
+
+```js
+// =====================================================================
+// RELATED TICKETS: the "families" a ticket belongs to, from the link columns
+// in the export (nothing guessed), and what each family's members have in
+// common and where they differ:
+//
+//   parent-incident  incident.parent_incident: a parent (master) incident and the
+//                    child incidents raised for the same issue (one level only)
+//   bundle-request   sc_req_item.parent: a bundle request and its child requests
+//   order            sc_req_item.request: requests ordered together in one REQ
+//   request-tasks    sc_task.request_item: a request and the tasks that fulfil it
+//   change-incident  change_request.incident (the incident a change fixes) and
+//                    incident.caused_by_change (incidents a change caused)
+//   problem          incident.problem / change_request.problem: tickets linked to
+//                    the same problem record (the PRB itself isn't in the export)
+//
+// One ticket gets every family it is in. A list of tickets gets only the
+// families that two or more of them share, so a long list isn't buried.
+// Every Cube query here is built from ticket numbers checked against
+// TICKET_NUMBER, never from model output.
+// =====================================================================
+
+import { TICKET_KINDS, toTicket, prefixOf } from './tickets.mjs';
+
+const TICKET_NUMBER = /^(INC|CHG|RITM|SCTASK)\d{7}$/;
+const MAX_TICKETS = 500;      // tickets looked at per request
+const MEMBER_LIMIT = 1000;    // members fetched per query (the largest problem has 870 incidents)
+const MAX_FAMILIES = 6;
+
+// Columns fetched besides the summary ones: the links, and the fields compared
+const EXTRA = {
+  INC: { system: 'configuration_item', subcategory: 'subcategory', location: 'location', parentIncident: 'parent_incident', problem: 'problem', causedByChange: 'caused_by_change' },
+  CHG: { system: 'configuration_item', fixesIncident: 'incident', problem: 'problem' },
+  RITM: { item: 'item', location: 'location', order: 'request', parentRequest: 'parent' },
+  SCTASK: { item: 'item', requestItem: 'request_item' },
+};
+
+// Compared across a family's members; each applies to some ticket types only.
+// (Each member's role already says its type, so type isn't compared.)
+const COMPARE = [
+  ['State', ['INC', 'CHG', 'RITM', 'SCTASK'], t => t.state],
+  ['Priority / risk', ['INC', 'CHG'], t => t.level],
+  ['Team', ['INC', 'CHG', 'SCTASK'], t => t.team],
+  ['Server / system', ['INC', 'CHG'], t => t.system],
+  ['Subcategory', ['INC'], t => t.subcategory],
+  ['Catalog item', ['RITM', 'SCTASK'], t => t.item],
+  ['Location', ['INC', 'RITM'], t => t.location],
+  ['Assigned to / requested for', ['INC', 'CHG', 'RITM', 'SCTASK'], t => t.person],
+];
+
+// "zzz" is the export's placeholder for "no server / system"
+const clean = v => {
+  const s = v === null || v === undefined ? '' : String(v).trim();
+  return s === 'zzz' ? '' : s;
+};
+
+// Tickets of one type matching every [column, values] filter, with their link columns
+async function queryTickets(prefix, filters, runQuery) {
+  if (filters.some(([, values]) => !values.length)) return [];
+  const { cube, fields } = TICKET_KINDS[prefix];
+  const columns = [...new Set(['number', ...Object.values(fields), ...Object.values(EXTRA[prefix])])];
+  const rows = await runQuery({
+    dimensions: columns.map(c => `${cube}.${c}`),
+    filters: filters.map(([column, values]) => ({ member: `${cube}.${column}`, operator: 'equals', values })),
+    order: { [`${cube}.number`]: 'asc' },
+    limit: MEMBER_LIMIT,
+  });
+  return rows.map(row => {
+    const t = toTicket(prefix, row);
+    for (const [key, column] of Object.entries(EXTRA[prefix])) t[key] = clean(row[`${cube}.${column}`]);
+    return t;
+  });
+}
+
+// What all members share, and where they differ (counts of each value)
+function compare(members) {
+  const same = [];
+  const differ = [];
+  for (const [field, kinds, get] of COMPARE) {
+    const present = members.filter(m => kinds.includes(m.kind));
+    if (present.length < 2) continue;
+    const counts = new Map();
+    for (const m of present) {
+      const v = clean(get(m)) || 'not set';
+      counts.set(v, (counts.get(v) || 0) + 1);
+    }
+    if (counts.size === 1) {
+      const [value] = counts.keys();
+      if (value !== 'not set') same.push({ field, value });
+    } else {
+      const values = [...counts].sort((a, b) => b[1] - a[1]).map(([value, count]) => ({ value, count }));
+      differ.push({ field, values: values.slice(0, 4), others: Math.max(values.length - 4, 0) });
+    }
+  }
+  const summaries = new Set(members.map(m => clean(m.summary)).filter(Boolean));
+  if (summaries.size === 1) same.push({ field: 'Summary', value: [...summaries][0] });
+  else if (summaries.size > 1) differ.push({ field: 'Summary', note: summaries.size === members.length ? 'each one is different' : `${summaries.size} different summaries` });
+  const opened = members.map(m => clean(m.opened)).filter(Boolean).sort();
+  if (opened.length > 1) {
+    if (opened[0] === opened.at(-1)) same.push({ field: 'Opened', value: opened[0] });
+    else differ.push({ field: 'Opened', range: [opened[0], opened.at(-1)] });
+  }
+  return { same, differ };
+}
+
+// A linked ticket that isn't in the export still gets a row, marked as such
+const missing = (number, type) => ({ number, kind: prefixOf(number), type, summary: 'Not in this export', state: '', level: '', team: '', person: '', opened: '', missing: true });
+
+function family(kind, anchor, title, why, members, wanted) {
+  const unique = [...new Map(members.map(m => [m.number, m])).values()];
+  const touched = unique.filter(m => wanted.has(m.number)).length;
+  const real = unique.filter(m => !m.missing);
+  // Members the question was about first, then the anchor, then by when they were opened
+  const ordered = [...unique].sort((a, b) =>
+    (wanted.has(b.number) - wanted.has(a.number)) || ((b.number === anchor) - (a.number === anchor)) || clean(a.opened).localeCompare(clean(b.opened)));
+  return {
+    kind, anchor, title, why, touched, total: unique.length,
+    // All of them (the page lists the first 25; downloads and the comparison use all)
+    members: ordered.map(({ number, kind: k, type, role, summary, state, level, team, opened, missing: gone }) =>
+      ({ number, kind: k, type, role, summary, state, level, team, opened, missing: Boolean(gone) })),
+    ...compare(real),
+  };
+}
+
+const plural = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
+const role = (t, label) => ({ ...t, role: label });
+
+export async function relatedFamilies(numbers, runQuery) {
+  const wantedList = [...new Set(numbers.map(n => String(n).toUpperCase()))].filter(n => TICKET_NUMBER.test(n)).slice(0, MAX_TICKETS);
+  if (!wantedList.length) return [];
+  const wanted = new Set(wantedList);
+  const single = wantedList.length === 1;
+  const of = prefix => wantedList.filter(n => prefixOf(n) === prefix);
+
+  // The tickets asked about, with their links
+  const [incs, chgs, ritms, tasks] = await Promise.all([
+    queryTickets('INC', [['number', of('INC')]], runQuery),
+    queryTickets('CHG', [['number', of('CHG')]], runQuery),
+    queryTickets('RITM', [['number', of('RITM')]], runQuery),
+    queryTickets('SCTASK', [['number', of('SCTASK')]], runQuery),
+  ]);
+
+  // Everything the families need, in one round of queries
+  const parentIncidents = [...new Set([...incs.map(t => t.parentIncident).filter(Boolean), ...incs.map(t => t.number)])];
+  const problems = [...new Set([...incs, ...chgs].map(t => t.problem).filter(Boolean))];
+  const changeNumbers = [...new Set([...chgs.map(t => t.number), ...incs.map(t => t.causedByChange).filter(Boolean)])];
+  const orders = [...new Set(ritms.map(t => t.order).filter(Boolean))];
+  const parentRequests = [...new Set([...ritms.map(t => t.parentRequest).filter(Boolean), ...ritms.map(t => t.number)])];
+  const requestItems = [...new Set([...ritms.map(t => t.number), ...tasks.map(t => t.requestItem).filter(Boolean)])];
+  const [childIncs, parentIncs, problemIncs, problemChgs, fixChanges, causedIncs, changes, fixedIncs,
+    orderRitms, childRitms, parentRitms, taskRitms, taskSiblings] = await Promise.all([
+    queryTickets('INC', [['parent_incident', parentIncidents]], runQuery),
+    queryTickets('INC', [['number', parentIncidents]], runQuery),
+    queryTickets('INC', [['problem', problems]], runQuery),
+    queryTickets('CHG', [['problem', problems]], runQuery),
+    queryTickets('CHG', [['incident', incs.map(t => t.number)]], runQuery),
+    queryTickets('INC', [['caused_by_change', changeNumbers]], runQuery),
+    queryTickets('CHG', [['number', changeNumbers]], runQuery),
+    queryTickets('INC', [['number', chgs.map(t => t.fixesIncident).filter(Boolean)]], runQuery),
+    queryTickets('RITM', [['request', orders]], runQuery),
+    queryTickets('RITM', [['parent', parentRequests]], runQuery),
+    queryTickets('RITM', [['number', parentRequests]], runQuery),
+    queryTickets('RITM', [['number', requestItems]], runQuery),
+    queryTickets('SCTASK', [['request_item', requestItems]], runQuery),
+  ]);
+  const byNumber = list => new Map(list.map(t => [t.number, t]));
+  const families = [];
+
+  // Parent incident and its children
+  const parentsByNumber = byNumber(parentIncs);
+  for (const p of parentIncidents) {
+    const children = childIncs.filter(c => c.parentIncident === p);
+    if (!children.length) continue;
+    const parent = parentsByNumber.get(p) || missing(p, 'Incident');
+    families.push(family('parent-incident', p,
+      `Parent incident ${p} and its ${plural(children.length, 'child incident', 'child incidents')}`,
+      `${p} is a parent (master) incident: it groups incidents raised for the same issue, such as several alerts or reports about one fault, so they are worked and resolved together.`,
+      [role(parent, 'Parent'), ...children.map(c => role(c, 'Child'))], wanted));
+  }
+
+  // Problem record
+  for (const prb of problems) {
+    const linked = [...problemIncs.filter(t => t.problem === prb).map(t => role(t, 'Incident')), ...problemChgs.filter(t => t.problem === prb).map(t => role(t, 'Change'))];
+    if (linked.length < 2) continue;
+    families.push(family('problem', prb,
+      `${plural(linked.length, 'ticket', 'tickets')} linked to problem ${prb}`,
+      `These tickets were all linked to problem ${prb}, the investigation into their shared root cause. The problem record itself isn't in this export.`,
+      linked, wanted));
+  }
+
+  // Change <-> incident: the incident a change fixes, and incidents it caused
+  const changesByNumber = byNumber([...changes, ...fixChanges]);
+  const fixedByNumber = byNumber(fixedIncs);
+  for (const c of new Set([...changeNumbers, ...fixChanges.map(t => t.number)])) {
+    const change = changesByNumber.get(c) || missing(c, 'Change');
+    const fixes = change.fixesIncident ? [fixedByNumber.get(change.fixesIncident) || incs.find(t => t.number === change.fixesIncident) || missing(change.fixesIncident, 'Incident')] : [];
+    const caused = causedIncs.filter(t => t.causedByChange === c);
+    if (!fixes.length && !caused.length) continue;
+    const parts = [fixes.length ? `raised to fix ${fixes[0].number}` : '', caused.length ? `the cause of ${plural(caused.length, 'incident', 'incidents')}` : ''].filter(Boolean);
+    families.push(family('change-incident', c,
+      `Change ${c}: ${parts.join(', and ')}`,
+      fixes.length && caused.length ? `${c} was raised to fix an incident, and other incidents name it as their cause.`
+        : fixes.length ? `${c} was raised to fix incident ${fixes[0].number}.` : `These incidents name change ${c} as their cause.`,
+      [role(change, 'Change'), ...fixes.map(t => role(t, 'Incident it fixes')), ...caused.map(t => role(t, 'Incident it caused'))], wanted));
+  }
+
+  // Requests ordered together
+  for (const order of orders) {
+    const together = orderRitms.filter(t => t.order === order);
+    if (together.length < 2) continue;
+    families.push(family('order', order,
+      `${plural(together.length, 'request', 'requests')} ordered together in ${order}`,
+      `${order} is one order (REQ); each request (RITM) in it is a separate item that was ordered at the same time.`,
+      together.map(t => role(t, 'Request')), wanted));
+  }
+
+  // Bundle request and its child requests
+  const parentRitmsByNumber = byNumber(parentRitms);
+  for (const p of parentRequests) {
+    const children = childRitms.filter(t => t.parentRequest === p);
+    if (!children.length) continue;
+    const parent = parentRitmsByNumber.get(p) || missing(p, 'Request');
+    families.push(family('bundle-request', p,
+      `Request ${p} and its ${plural(children.length, 'child request', 'child requests')}`,
+      `${p} is a bundle request; it was split into child requests, one for each part of the work (for example one per server to start or stop).`,
+      [role(parent, 'Parent request'), ...children.map(c => role(c, 'Child request'))], wanted));
+  }
+
+  // A request and the catalog tasks that fulfil it
+  const taskRitmsByNumber = byNumber(taskRitms);
+  for (const r of requestItems) {
+    const itsTasks = taskSiblings.filter(t => t.requestItem === r);
+    if (!itsTasks.length) continue;
+    const request = taskRitmsByNumber.get(r) || missing(r, 'Request');
+    families.push(family('request-tasks', r,
+      `Request ${r} and its ${plural(itsTasks.length, 'catalog task', 'catalog tasks')}`,
+      `Catalog tasks are the pieces of work that fulfil request ${r}; each is done by a fulfilment team.`,
+      [role(request, 'Request'), ...itsTasks.map(t => role(t, 'Task'))], wanted));
+  }
+
+  // One ticket: every family it is in. A list: families two or more of them share.
+  return families
+    .filter(f => (single ? f.touched >= 1 : f.touched >= 2))
+    .sort((a, b) => (b.touched - a.touched) || (b.total - a.total))
+    .slice(0, MAX_FAMILIES);
+}
+
+// One line per family, for Claude: what the next question can build on
+export function describeFamilies(families) {
+  return families.map(f => {
+    const same = f.same.filter(s => s.field !== 'Summary').map(s => `${s.field} ${s.value}`).join(', ');
+    const differ = f.differ.map(d => d.field).join(', ');
+    return `${f.title}${same ? `; all share ${same}` : ''}${differ ? `; they differ in ${differ}` : ''}.`;
+  }).join(' ');
 }
 ```
 

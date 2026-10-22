@@ -16,6 +16,7 @@ import * as auth from './auth.mjs';
 import * as stars from './stars.mjs';
 import * as seen from './seen.mjs';
 import { findTickets, ticketRecord, ticketSummaries, ticketNumbersIn, STARRABLE } from './tickets.mjs';
+import { relatedFamilies, describeFamilies } from './relations.mjs';
 import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
 
 dotenv.config();
@@ -599,6 +600,33 @@ app.post('/api/tickets/search', async (req, res) => {
   } catch (error) {
     console.error('🔎 Ticket search failed:', error.message);
     res.status(502).json({ error: `Could not search the tickets right now: ${error.message}` });
+  }
+});
+
+// { numbers, conversation } -> { families }: the parent/child, order, task,
+// change and problem families those tickets belong to (relations.mjs), with
+// what each family's members share and where they differ. conversation: true
+// (an AI answer's tickets) also tells Claude about them with the next question.
+app.post('/api/tickets/related', async (req, res) => {
+  const numbers = Array.isArray(req.body?.numbers) ? req.body.numbers.slice(0, 500).map(String) : [];
+  if (!numbers.length) return res.status(400).json({ error: 'No ticket numbers to look at.' });
+  try {
+    const families = await relatedFamilies(numbers, runCubeQuery);
+    if (req.body.conversation && families.length) {
+      // Queued behind the answer that showed these tickets, and only for that
+      // same conversation (not one started by "New chat" in the meantime)
+      const session = req.session;
+      const conversation = session.conversation;
+      session.queue = session.queue.then(() => {
+        if (session.conversation !== conversation) return;
+        const note = `Related tickets OneTouch showed the user under that answer: ${describeFamilies(families)}`;
+        conversation.pendingNote = conversation.pendingNote ? `${conversation.pendingNote} ${note}` : note;
+      });
+    }
+    res.json({ families });
+  } catch (error) {
+    console.error('🔗 Could not find related tickets:', error.message);
+    res.status(502).json({ error: `Could not look for related tickets right now: ${error.message}` });
   }
 });
 
