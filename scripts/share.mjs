@@ -98,6 +98,47 @@ function copyToClipboard(text) {
   return Boolean(tool) && spawnSync(tool, { input: text }).status === 0;
 }
 
+// The tunnel ID inside a token (base64 JSON: { a: account, t: tunnel, s: secret })
+function tunnelIdOf(tokenText) {
+  try {
+    return JSON.parse(Buffer.from(tokenText, 'base64').toString('utf8')).t || null;
+  } catch {
+    return null;
+  }
+}
+
+// Anything else on this computer running the same tunnel, such as the
+// `docker run cloudflare/cloudflared … --token …` command or the Windows
+// service from Cloudflare's install screen. Cloudflare splits visitors across
+// all of a tunnel's connectors, and those can't reach app:8000, so the
+// visitors sent to them get "error code: 502".
+function strayConnectors(tunnelId, ownContainer) {
+  const found = [];
+  const ids = docker(['ps', '-q'], { quiet: true }).stdout.split(/\s+/).filter(Boolean);
+  if (ids.length) {
+    const r = docker(['inspect', '-f', '{{.Name}}|{{join .Args " "}} {{join .Config.Env " "}}', ...ids], { quiet: true });
+    for (const line of r.stdout.split('\n').filter(Boolean)) {
+      const name = line.slice(1, line.indexOf('|'));
+      if (name === ownContainer) continue;
+      const tokens = line.match(/eyJ[A-Za-z0-9_=+/-]+/g) || [];
+      if (tokens.some(t => tunnelIdOf(t) === tunnelId)) found.push(`the Docker container "${name}". Remove it with:\n      docker rm -f ${name}`);
+    }
+  }
+  if (process.platform === 'win32' && spawnSync('sc', ['query', 'cloudflared'], { encoding: 'utf8' }).status === 0) {
+    found.push('the "cloudflared" Windows service. Remove it in an administrator PowerShell with:\n' +
+      '      & "C:\\Program Files (x86)\\cloudflared\\cloudflared.exe" service uninstall');
+  }
+  return found;
+}
+
+// A few more requests after the first success: if another connector (even one
+// on another computer) shares the tunnel, some of them fail
+async function failedChecks(url, tries = 6) {
+  let failed = 0;
+  for (let i = 0; i < tries; i++) if (!await reachableFromOutside(url)) failed++;
+  return failed;
+}
+
 // ---------------------------------------------------------------------
 
 if (docker(['info'], { quiet: true }).status !== 0) {
@@ -139,6 +180,8 @@ if (token) {
 
 if (link) console.log(`Checking ${link} works from the internet (a new link can take a minute or two)…`);
 const works = link ? await waitFor(() => reachableFromOutside(link), 180) : true;
+const failed = link && works ? await failedChecks(link) : 0;
+const strays = token ? strayConnectors(tunnelIdOf(token), tunnel.container) : [];
 const copied = link && copyToClipboard(link);
 
 console.log('\n' + '='.repeat(64));
@@ -154,4 +197,14 @@ console.log('People sign in there with their own username and password.');
 console.log(token
   ? 'This address never changes. It works whenever this computer is on with Docker running.'
   : 'The link stays the same until the tunnel restarts (this computer or Docker restarting).\nRun "npm run share" again after a restart to get the new link.');
+if (strays.length) {
+  console.log('\n⚠ Something else on this computer is also running your tunnel, so some');
+  console.log('  visitors get "error code: 502". Only this project\'s Docker setup should run it:');
+  for (const s of strays) console.log(`  - ${s}`);
+}
+if (failed) {
+  console.log(`\n⚠ ${failed} of 6 test visits failed. If nothing is listed above, another computer may be`);
+  console.log('  running your tunnel: check its "Connectors" in the Cloudflare dashboard (Zero Trust');
+  console.log('  → Networks → Tunnels) and remove any that are not this computer\'s Docker.');
+}
 console.log('='.repeat(64) + '\n');
