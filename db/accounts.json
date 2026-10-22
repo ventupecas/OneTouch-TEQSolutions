@@ -241,6 +241,13 @@
       "updatedAt": "2026-10-20T15:26:10.457Z"
     },
     {
+      "username": "warmup",
+      "displayName": "Warmup",
+      "passwordHash": "scrypt$16384$8$1$xKyh48f1cPMN1BYK5+diUA==$Bq9geE1oZWRi3azro0k0zc2GgJ+S2Ut47LRWbsJJgMDgeLEJHZ/l49SDbAywbowmo5FzhYKfglMKk/Ep/gtfJg==",
+      "active": true,
+      "updatedAt": "2026-10-22T19:48:04.410Z"
+    },
+    {
       "username": "ymartinez",
       "displayName": "Yelyiz Martinez",
       "passwordHash": "scrypt$16384$8$1$xChFfmgM0Eycz2vA2FaZwQ==$lYV/GUrQ+cZII+Jdxfh8Ht14KWUbwna0AjymIybd8b8cWxj4E0XiYqBujXLqKDV395x8RKQPtas2HuFCX2e96w==",

@@ -643,68 +643,100 @@ FROM reporting.requests GROUP BY 1 ORDER BY 2 DESC LIMIT 8`,
 // view can't hold links.
 // ---------------------------------------------------------------------
 
+// Filter suggestions: as people type in a filter box, Metabase offers the
+// values that exist (team names, ticket numbers, ...), so they can switch to
+// another team or ticket from the box itself. A filter's `values` say where
+// they come from: distinct([expression, view, condition?], ...) reads them
+// from the reporting views (one or several, merged); fixed(...) lists them.
+const distinct = (...sources) => ({
+  sql: sources.map(([expr, view, where]) =>
+    `SELECT DISTINCT ${expr} AS "Value" FROM reporting.${view} WHERE ${expr} IS NOT NULL${where ? ` AND ${where}` : ''}`,
+  ).join('\nUNION\n') + '\nORDER BY 1',
+});
+const fixed = (...values) => ({ list: values });
+const YES_NO = fixed('Yes', 'No');
+const OPEN_CLOSED = fixed('Open', 'Closed');
+
+// Expressions a filter matches on, shared by its condition and its suggestions
+const OPEN_OR_CLOSED_EXPR = "CASE WHEN is_open THEN 'Open' ELSE 'Closed' END";
+const AGE = 'substr(age_bucket, 4)';
+const HOUR = "to_char(created_at, 'HH24')";
+const WEEKDAY = "to_char(created_at, 'Dy')";
+const WAITING = "(CASE WHEN state = 'On Hold' THEN 'On hold: ' || coalesce(on_hold_reason, 'no reason given') ELSE state END)";
+const OPENED_BY = "coalesce(opened_by_group, 'Not recorded')";
+const RISK = "coalesce(nullif(risk, ''), 'Not set')";
+const ENVIRONMENT = "coalesce(environment, 'Not set')";
+const GUIDE = "coalesce(order_guide, 'Ordered directly (no guide)')";
+
 // Lists: every filter is optional; Metabase leaves out a [[...]] part when
-// its filter is empty. Each entry: [slug, label, SQL condition].
-const listParams = filters => filters.map(([slug, name]) => ({ slug, name }));
+// its filter is empty. Each entry: [slug, label, SQL condition, suggestions].
+const listParams = filters => filters.map(([slug, name, , values]) => ({ slug, name, values }));
 const listWhere = filters => `WHERE true\n${filters.map(([, , cond]) => `  [[AND ${cond}]]`).join('\n')}`;
-const OPEN_OR_CLOSED = slug => `CASE WHEN is_open THEN 'Open' ELSE 'Closed' END = {{${slug}}}`;
+const OPEN_OR_CLOSED = slug => `${OPEN_OR_CLOSED_EXPR} = {{${slug}}}`;
 
 const INCIDENT_FILTERS = [
-  ['status', 'Status', OPEN_OR_CLOSED('status')],
-  ['priority', 'Priority', 'priority = {{priority}}'],
-  ['subcategory', 'Subcategory', 'subcategory = {{subcategory}}'],
-  ['channel', 'Reported via', 'contact_type = {{channel}}'],
-  ['source', 'Source', 'source = {{source}}'],
-  ['age', 'Open for', 'is_open AND substr(age_bucket, 4) = {{age}}'],
-  ['older_than', 'Open at least (days)', 'age_days >= CAST({{older_than}} AS numeric)'],
-  ['hour', 'Hour of day', "to_char(created_at, 'HH24') = {{hour}}"],
-  ['weekday', 'Day of week', "to_char(created_at, 'Dy') = {{weekday}}"],
+  ['status', 'Status', OPEN_OR_CLOSED('status'), OPEN_CLOSED],
+  ['priority', 'Priority', 'priority = {{priority}}', distinct(['priority', 'incidents'])],
+  ['subcategory', 'Subcategory', 'subcategory = {{subcategory}}', distinct(['subcategory', 'incidents'])],
+  ['channel', 'Reported via', 'contact_type = {{channel}}', distinct(['contact_type', 'incidents'])],
+  ['source', 'Source', 'source = {{source}}', distinct(['source', 'incidents'])],
+  ['age', 'Open for', `is_open AND ${AGE} = {{age}}`, distinct([AGE, 'incidents', 'is_open'])],
+  ['older_than', 'Open at least (days)', 'age_days >= CAST({{older_than}} AS numeric)', fixed('1', '3', '7', '14', '30', '60', '90')],
+  ['hour', 'Hour of day', `${HOUR} = {{hour}}`, distinct([HOUR, 'incidents'])],
+  ['weekday', 'Day of week', `${WEEKDAY} = {{weekday}}`, fixed('Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun')],
   // Chart clicks send dates as 2026-08-17T00:00:00Z
-  ['date', 'Date', 'created_at::date = CAST(left({{date}}, 10) AS date)'],
-  ['team', 'Team', 'assignment_group = {{team}}'],
-  ['system', 'Server / system', 'configuration_item = {{system}}'],
-  ['site', 'Site', 'location = {{site}}'],
-  ['kb', 'Knowledge article', 'kb_article = {{kb}}'],
-  ['workaround', 'Closed with a workaround', "closed_with_workaround = ({{workaround}} = 'Yes')"],
-  ['reopened', 'Reopened', "(reopen_count > 0) = ({{reopened}} = 'Yes')"],
-  ['reassigned', 'Reassigned', "was_reassigned = ({{reassigned}} = 'Yes')"],
-  ['waiting', 'Status detail', "is_open AND (CASE WHEN state = 'On Hold' THEN 'On hold: ' || coalesce(on_hold_reason, 'no reason given') ELSE state END) = {{waiting}}"],
-  ['assignee', 'Assigned to', 'assigned_to = {{assignee}}'],
-  ['opened_by', 'Raised by', "coalesce(opened_by_group, 'Not recorded') = {{opened_by}}"],
+  ['date', 'Date', 'created_at::date = CAST(left({{date}}, 10) AS date)', distinct(["to_char(created_at, 'YYYY-MM-DD')", 'incidents'])],
+  ['team', 'Team', 'assignment_group = {{team}}', distinct(['assignment_group', 'incidents'])],
+  ['system', 'Server / system', 'configuration_item = {{system}}', distinct(['configuration_item', 'incidents'])],
+  ['site', 'Site', 'location = {{site}}', distinct(['location', 'incidents'])],
+  ['kb', 'Knowledge article', 'kb_article = {{kb}}', distinct(['kb_article', 'incidents'])],
+  ['workaround', 'Closed with a workaround', "closed_with_workaround = ({{workaround}} = 'Yes')", YES_NO],
+  ['reopened', 'Reopened', "(reopen_count > 0) = ({{reopened}} = 'Yes')", YES_NO],
+  ['reassigned', 'Reassigned', "was_reassigned = ({{reassigned}} = 'Yes')", YES_NO],
+  ['waiting', 'Status detail', `is_open AND ${WAITING} = {{waiting}}`, distinct([WAITING, 'incidents', 'is_open'])],
+  ['assignee', 'Assigned to', 'assigned_to = {{assignee}}', distinct(['assigned_to', 'incidents'])],
+  ['opened_by', 'Raised by', `${OPENED_BY} = {{opened_by}}`, distinct([OPENED_BY, 'incidents'])],
 ];
 
 const CHANGE_FILTERS = [
-  ['status', 'Status', OPEN_OR_CLOSED('status')],
-  ['type', 'Type', 'type = {{type}}'],
-  ['risk', 'Risk', "coalesce(nullif(risk, ''), 'Not set') = {{risk}}"],
-  ['category', 'Category', 'sub_type = {{category}}'],
-  ['environment', 'Environment', "coalesce(environment, 'Not set') = {{environment}}"],
-  ['outage', 'Outage', "has_outage = ({{outage}} = 'Yes')"],
-  ['approval', 'Approval', 'approval = {{approval}}'],
-  ['sap', 'Affects SAP', "affects_sap = ({{sap}} = 'Yes')"],
-  ['transport', 'Needs SAP transport', "needs_sap_transport = ({{transport}} = 'Yes')"],
-  ['brewery', 'Affects breweries', "affects_brewery = ({{brewery}} = 'Yes')"],
-  ['process_failure', 'Process failure', "process_failure = ({{process_failure}} = 'Yes')"],
-  ['urgent', 'Emergency or expedited', "is_emergency_or_expedited = ({{urgent}} = 'Yes')"],
-  ['starts_within', 'Starts within (days)', "state <> 'Canceled' AND planned_start >= (SELECT as_of FROM reporting.data_as_of) AND planned_start < (SELECT as_of FROM reporting.data_as_of) + make_interval(days => CAST({{starts_within}} AS int))"],
+  ['status', 'Status', OPEN_OR_CLOSED('status'), OPEN_CLOSED],
+  ['type', 'Type', 'type = {{type}}', distinct(['type', 'changes'])],
+  ['risk', 'Risk', `${RISK} = {{risk}}`, distinct([RISK, 'changes'])],
+  ['category', 'Category', 'sub_type = {{category}}', distinct(['sub_type', 'changes'])],
+  ['environment', 'Environment', `${ENVIRONMENT} = {{environment}}`, distinct([ENVIRONMENT, 'changes'])],
+  ['outage', 'Outage', "has_outage = ({{outage}} = 'Yes')", YES_NO],
+  ['approval', 'Approval', 'approval = {{approval}}', distinct(['approval', 'changes'])],
+  ['sap', 'Affects SAP', "affects_sap = ({{sap}} = 'Yes')", YES_NO],
+  ['transport', 'Needs SAP transport', "needs_sap_transport = ({{transport}} = 'Yes')", YES_NO],
+  ['brewery', 'Affects breweries', "affects_brewery = ({{brewery}} = 'Yes')", YES_NO],
+  ['process_failure', 'Process failure', "process_failure = ({{process_failure}} = 'Yes')", YES_NO],
+  ['urgent', 'Emergency or expedited', "is_emergency_or_expedited = ({{urgent}} = 'Yes')", YES_NO],
+  ['starts_within', 'Starts within (days)', "state <> 'Canceled' AND planned_start >= (SELECT as_of FROM reporting.data_as_of) AND planned_start < (SELECT as_of FROM reporting.data_as_of) + make_interval(days => CAST({{starts_within}} AS int))", fixed('1', '3', '7', '14', '30')],
 ];
 
 const REQUEST_FILTERS = [
-  ['status', 'Status', OPEN_OR_CLOSED('status')],
-  ['item', 'Catalog item', 'item = {{item}}'],
-  ['site', 'Site', 'location = {{site}}'],
-  ['approval', 'Approval', 'approval = {{approval}}'],
-  ['outcome', 'Outcome', "{{outcome}} = 'Rejected or cancelled' AND (approval = 'Rejected' OR state = 'Closed Cancelled')"],
-  ['guide', 'Order guide', "coalesce(order_guide, 'Ordered directly (no guide)') = {{guide}}"],
+  ['status', 'Status', OPEN_OR_CLOSED('status'), OPEN_CLOSED],
+  ['item', 'Catalog item', 'item = {{item}}', distinct(['item', 'requests'])],
+  ['site', 'Site', 'location = {{site}}', distinct(['location', 'requests'])],
+  ['approval', 'Approval', 'approval = {{approval}}', distinct(['approval', 'requests'])],
+  ['outcome', 'Outcome', "{{outcome}} = 'Rejected or cancelled' AND (approval = 'Rejected' OR state = 'Closed Cancelled')", fixed('Rejected or cancelled')],
+  ['guide', 'Order guide', `${GUIDE} = {{guide}}`, distinct([GUIDE, 'requests'])],
 ];
 
 const TASK_FILTERS = [
-  ['status', 'Status', OPEN_OR_CLOSED('status')],
-  ['team', 'Team', 'assignment_group = {{team}}'],
-  ['state', 'State', 'state = {{state}}'],
-  ['sla', 'SLA', "CASE WHEN sla_breached THEN 'Breached' ELSE 'Met' END = {{sla}}"],
-  ['item', 'Catalog item', 'item = {{item}}'],
+  ['status', 'Status', OPEN_OR_CLOSED('status'), OPEN_CLOSED],
+  ['team', 'Team', 'assignment_group = {{team}}', distinct(['assignment_group', 'catalog_tasks'])],
+  ['state', 'State', 'state = {{state}}', distinct(['state', 'catalog_tasks'])],
+  ['sla', 'SLA', "CASE WHEN sla_breached THEN 'Breached' ELSE 'Met' END = {{sla}}", fixed('Breached', 'Met')],
+  ['item', 'Catalog item', 'item = {{item}}', distinct(['item', 'catalog_tasks'])],
 ];
+
+// Single-item pages: the suggestions cover everything the page itself matches on
+const TEAM_VALUES = distinct(['assignment_group', 'incidents'], ['assignment_group', 'catalog_tasks'], ['owner_group', 'changes'], ['approver_group', 'approvals']);
+const SYSTEM_VALUES = distinct(['configuration_item', 'incidents'], ['configuration_item', 'changes']);
+const SITE_VALUES = distinct(['location', 'incidents'], ['location', 'requests'], ['brewery', 'change_breweries']);
+const PROBLEM_VALUES = distinct(['problem', 'incidents'], ['linked_problem', 'changes']);
+const ITEM_VALUES = distinct(['item', 'requests'], ['item', 'catalog_tasks']);
 
 // Full-width record view, and the clickable "Go to" row under it
 const RECORD = { display: 'object', w: 24, h: 12 };
@@ -714,7 +746,7 @@ const DETAILS = [
   {
     key: 'incident-detail',
     name: 'Incident',
-    params: [{ slug: 'number', name: 'Incident' }],
+    params: [{ slug: 'number', name: 'Incident', values: distinct(['number', 'incidents']) }],
     cards: [
       { name: 'Incident record', ...RECORD, h: 14, sql: `
 SELECT number AS "Incident", short_description AS "Summary", state AS "State", priority AS "Priority",
@@ -745,7 +777,7 @@ ORDER BY i.created_at DESC LIMIT 25`,
   {
     key: 'change-detail',
     name: 'Change',
-    params: [{ slug: 'number', name: 'Change' }],
+    params: [{ slug: 'number', name: 'Change', values: distinct(['number', 'changes']) }],
     cards: [
       { name: 'Change record', ...RECORD, h: 14, sql: `
 SELECT number AS "Change", short_description AS "Summary", type AS "Type", sub_type AS "Category", state AS "State",
@@ -783,7 +815,7 @@ SELECT brewery AS "Brewery" FROM reporting.change_breweries WHERE number = {{num
   {
     key: 'request-detail',
     name: 'Request',
-    params: [{ slug: 'number', name: 'Request' }],
+    params: [{ slug: 'number', name: 'Request', values: distinct(['number', 'requests']) }],
     cards: [
       { name: 'Request record', ...RECORD, sql: `
 SELECT number AS "Request", item AS "Catalog item", short_description AS "Summary", state AS "State", stage AS "Stage",
@@ -810,7 +842,7 @@ FROM reporting.approvals WHERE approval_for = 'Request' AND parent = {{number}} 
   {
     key: 'team-detail',
     name: 'Team',
-    params: [{ slug: 'team', name: 'Team' }],
+    params: [{ slug: 'team', name: 'Team', values: TEAM_VALUES }],
     cards: [
       { name: 'Open incidents', ...SCALAR, sql: `SELECT count(*) FILTER (WHERE is_open) AS "Open incidents" FROM reporting.incidents WHERE assignment_group = {{team}}` },
       { name: 'Average hours to resolve', ...SCALAR, sql: `SELECT round(avg(hours_to_resolve), 1) AS "Average hours to resolve" FROM reporting.incidents WHERE assignment_group = {{team}}` },
@@ -873,7 +905,7 @@ ORDER BY planned_start DESC NULLS LAST LIMIT 50`,
   {
     key: 'system-detail',
     name: 'Server / system',
-    params: [{ slug: 'system', name: 'Server / system' }],
+    params: [{ slug: 'system', name: 'Server / system', values: SYSTEM_VALUES }],
     cards: [
       { name: 'Incidents', ...SCALAR, sql: `SELECT count(*) AS "Incidents" FROM reporting.incidents WHERE configuration_item = {{system}}` },
       { name: 'From monitoring (%)', ...SCALAR, sql: `SELECT round(100.0 * avg((source = 'Monitoring alert')::int), 1) AS "From monitoring (%)" FROM reporting.incidents WHERE configuration_item = {{system}}` },
@@ -918,7 +950,7 @@ ORDER BY planned_start DESC NULLS LAST LIMIT 50`,
   {
     key: 'site-detail',
     name: 'Site',
-    params: [{ slug: 'site', name: 'Site' }],
+    params: [{ slug: 'site', name: 'Site', values: SITE_VALUES }],
     cards: [
       { name: 'Incidents', ...SCALAR, sql: `SELECT count(*) AS "Incidents" FROM reporting.incidents WHERE location = {{site}}` },
       { name: 'Open incidents', ...SCALAR, sql: `SELECT count(*) FILTER (WHERE is_open) AS "Open incidents" FROM reporting.incidents WHERE location = {{site}}` },
@@ -961,7 +993,7 @@ ORDER BY planned_start DESC NULLS LAST LIMIT 50`,
   {
     key: 'problem-detail',
     name: 'Problem',
-    params: [{ slug: 'problem', name: 'Problem' }],
+    params: [{ slug: 'problem', name: 'Problem', values: PROBLEM_VALUES }],
     cards: [
       { name: 'Linked incidents', ...SCALAR, sql: `SELECT count(*) AS "Linked incidents" FROM reporting.incidents WHERE problem = {{problem}}` },
       { name: 'Still open', ...SCALAR, sql: `SELECT count(*) FILTER (WHERE is_open) AS "Still open" FROM reporting.incidents WHERE problem = {{problem}}` },
@@ -1001,7 +1033,7 @@ ORDER BY planned_start DESC NULLS LAST`,
   {
     key: 'item-detail',
     name: 'Catalog item',
-    params: [{ slug: 'item', name: 'Catalog item' }],
+    params: [{ slug: 'item', name: 'Catalog item', values: ITEM_VALUES }],
     cards: [
       { name: 'Requests', ...SCALAR, sql: `SELECT count(*) AS "Requests" FROM reporting.requests WHERE item = {{item}}` },
       { name: 'Median hours to complete', ...SCALAR, sql: `
@@ -1280,6 +1312,9 @@ function checkDefinitions() {
   if (dupe) throw new Error(`Two dashboards use the key "${dupe}".`);
   const fake = new Map(all.map(def => [def.key, { def, uuid: 'check' }]));
   for (const def of all) {
+    for (const p of def.params || []) {
+      if (!p.values?.sql && !p.values?.list?.length) throw new Error(`"${def.name}": filter "${p.slug}" needs suggestions (distinct(...) or fixed(...)).`);
+    }
     for (const c of def.cards) {
       templateTags(c.sql, def);
       clickSettings(c, fake);
@@ -1293,6 +1328,30 @@ async function createShell(def, collectionId) {
   const dash = await api('POST', '/api/dashboard', { name: def.name, description: def.description || null, collection_id: collectionId });
   const { uuid } = await api('POST', `/api/dashboard/${dash.id}/public_link`);
   return { id: dash.id, uuid, def };
+}
+
+// A filter, with its suggestions: values read from the data become a small
+// query Metabase searches as people type; a fixed list is offered to pick from.
+// One value at a time, because each filter fills a single {{variable}}.
+async function filterParameter(p, def, databaseId, collectionId) {
+  const parameter = { id: `p_${p.slug}`, name: p.name, slug: p.slug, type: 'string/=', sectionId: 'string', isMultiSelect: false };
+  if (p.values.list) {
+    return { ...parameter, values_source_type: 'static-list', values_source_config: { values: p.values.list }, values_query_type: 'list' };
+  }
+  const source = await api('POST', '/api/card', {
+    name: `${def.name}: ${p.name} suggestions`,
+    description: `The values the "${p.name}" filter on "${def.name}" suggests as people type.`,
+    collection_id: collectionId,
+    display: 'table',
+    visualization_settings: {},
+    dataset_query: { type: 'native', native: { query: p.values.sql, 'template-tags': {} }, database: databaseId },
+  });
+  return {
+    ...parameter,
+    values_source_type: 'card',
+    values_source_config: { card_id: source.id, value_field: ['field', 'Value', { 'base-type': 'type/Text' }] },
+    values_query_type: 'search',
+  };
 }
 
 // Step 2: its cards, filters, and what clicking each card opens
@@ -1319,10 +1378,9 @@ async function fillDashboard(shell, databaseId, collectionId, shells) {
       })),
     });
   }
-  await api('PUT', `/api/dashboard/${shell.id}`, {
-    parameters: (def.params || []).map(p => ({ id: `p_${p.slug}`, name: p.name, slug: p.slug, type: 'string/=', sectionId: 'string' })),
-    dashcards,
-  });
+  const parameters = [];
+  for (const p of def.params || []) parameters.push(await filterParameter(p, def, databaseId, collectionId));
+  await api('PUT', `/api/dashboard/${shell.id}`, { parameters, dashcards });
   console.log(`Built "${def.name}"${def.params ? ' (detail page)' : ''}: ${def.cards.length} charts.`);
 }
 

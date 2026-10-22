@@ -14,7 +14,8 @@ import {
 import { buildExport, validateExport, ExportUnavailableError } from './export.mjs';
 import * as auth from './auth.mjs';
 import * as stars from './stars.mjs';
-import { findTickets, ticketRecord, STARRABLE } from './tickets.mjs';
+import * as seen from './seen.mjs';
+import { findTickets, ticketRecord, ticketSummaries, ticketNumbersIn, STARRABLE } from './tickets.mjs';
 import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
 
 dotenv.config();
@@ -194,7 +195,7 @@ async function requireLogin(req, res, next) {
   next();
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets'], requireLogin);
 
 // Who is signed in (the page shows their display name)
 app.get('/api/me', (req, res) => {
@@ -435,12 +436,12 @@ app.post('/api/query', async (req, res) => {
   // can't interleave if the user sends a second one before the first returns
   const session = req.session;
   const reply = queryReply(req, res);
-  const run = session.queue.then(() => answerQuestion(session.conversation, userPrompt, reply));
+  const run = session.queue.then(() => answerQuestion(session.conversation, userPrompt, reply, req.user));
   session.queue = run.catch(() => {});
   await run;
 });
 
-async function answerQuestion(conversation, userPrompt, reply) {
+async function answerQuestion(conversation, userPrompt, reply, user) {
   const started = Date.now();
   // Set once Claude's answer is in the conversation; from then on, whatever
   // happens to the query is reported to Claude with the next question
@@ -529,6 +530,15 @@ async function answerQuestion(conversation, userPrompt, reply) {
     // Only an answer that ran all the way through is worth reusing
     if (fresh && cacheKey) rememberAnswer(cacheKey, { ...fresh, explanation });
 
+    // The tickets in this answer join the person's "Ticket results" on Home.
+    // Saved before the answer goes out, so the page can show the list at once;
+    // a failure here only costs the list, never the answer.
+    const shownTickets = ticketNumbersIn(sections.flatMap(s => s.rows));
+    if (shownTickets.length) {
+      await seen.recordSeen(user.id, shownTickets, userPrompt)
+        .catch(error => console.error('🎫 Could not remember the shown tickets:', error.message));
+    }
+
     reply.send(200, {
       intent: 'query',
       // `entity` / `results` describe the single-type case; `sections` and
@@ -544,6 +554,8 @@ async function answerQuestion(conversation, userPrompt, reply) {
       // Why nothing (or part of it) was found; allEmpty means there's no table to show
       explanation,
       allEmpty: emptyQueries.length === verdict.queries.length,
+      // Ticket numbers in this answer (now in the person's Ticket results)
+      shownTickets,
       ...timing(),
     });
 
@@ -590,12 +602,64 @@ app.post('/api/tickets/search', async (req, res) => {
   }
 });
 
+// Every ticket this person has been shown, newest first, with each one's
+// summary, when it was shown, and the question that showed it
+app.get('/api/seen-tickets', async (req, res) => {
+  try {
+    const list = await seen.listSeen(req.user.id);
+    const summaries = await ticketSummaries(list.map(s => s.number), runCubeQuery);
+    res.json({ tickets: list.filter(s => summaries.has(s.number)).map(s => ({ ...summaries.get(s.number), shownAt: s.shownAt, question: s.question })) });
+  } catch (error) {
+    console.error('🎫 Could not list the shown tickets:', error.message);
+    res.status(503).json({ error: 'Your ticket results could not be loaded right now.' });
+  }
+});
+
+// "Delete ticket results": empties this person's list (their stars stay)
+app.delete('/api/seen-tickets', async (req, res) => {
+  try {
+    const deleted = await seen.clearSeen(req.user.id);
+    console.log(`🎫 ${req.user.username} deleted their ticket results (${deleted})`);
+    res.json({ ok: true, deleted });
+  } catch (error) {
+    console.error('🎫 Could not delete the ticket results:', error.message);
+    res.status(503).json({ error: 'Your ticket results could not be deleted right now.' });
+  }
+});
+
+// A ticket record someone opened (clicked a ticket number): it joins their Ticket results
+app.post('/api/seen-tickets', async (req, res) => {
+  const numbers = (Array.isArray(req.body?.numbers) ? req.body.numbers : []).map(n => String(n).toUpperCase()).filter(n => STARRABLE.test(n)).slice(0, 50);
+  if (!numbers.length) return res.status(400).json({ error: 'No ticket numbers to remember.' });
+  try {
+    await seen.recordSeen(req.user.id, numbers, null);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('🎫 Could not remember an opened ticket:', error.message);
+    res.status(503).json({ error: 'That ticket could not be added to your ticket results right now.' });
+  }
+});
+
 app.get('/api/stars', async (req, res) => {
   try {
     res.json({ stars: await stars.listStars(req.user.id) });
   } catch (error) {
     console.error('⭐ Could not list stars:', error.message);
     res.status(503).json({ error: 'Your starred tickets could not be loaded right now.' });
+  }
+});
+
+// "Star all": { numbers } -> { starred: the ones starred now, full: some didn't fit under the limit }
+app.put('/api/stars', async (req, res) => {
+  const requested = Array.isArray(req.body?.numbers) ? req.body.numbers : [];
+  const numbers = [...new Set(requested.map(n => String(n).toUpperCase()))].filter(n => STARRABLE.test(n)).slice(0, stars.MAX_STARS);
+  if (!numbers.length) return res.status(400).json({ error: 'Only incident, change, request and task numbers can be starred.' });
+  try {
+    const starred = await stars.addStars(req.user.id, numbers);
+    res.json({ starred, full: starred.length < numbers.length });
+  } catch (error) {
+    console.error('⭐ Could not star all:', error.message);
+    res.status(503).json({ error: 'Those tickets could not be starred right now.' });
   }
 });
 
@@ -655,6 +719,7 @@ async function prepareAccounts(attempt = 1) {
   try {
     await auth.ensureSchema();
     await stars.ensureStarsSchema();
+    await seen.ensureSeenSchema();
   } catch (error) {
     const wait = Math.min(attempt * 2, 15);
     console.error(`🔐 Account database not reachable yet (${error.message}); retrying in ${wait}s`);

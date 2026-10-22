@@ -132,6 +132,31 @@ export async function findTickets(text, runQuery) {
   return { found, notFound, ignored: parsed.ignored, tooMany: parsed.wanted.length > MAX_SEARCH_NUMBERS };
 }
 
+// Summaries for a list of exact ticket numbers (e.g. everything someone has
+// been shown), without the search's 200-number limit -> Map(number -> ticket)
+export async function ticketSummaries(numbers, runQuery) {
+  const byPrefix = new Map();
+  for (const n of new Set(numbers)) {
+    if (!STARRABLE.test(n)) continue;
+    const p = prefixOf(n);
+    if (!byPrefix.has(p)) byPrefix.set(p, []);
+    byPrefix.get(p).push(n);
+  }
+  const looked = await Promise.all([...byPrefix].map(([p, list]) => lookUp(p, list, runQuery)));
+  return new Map(looked.flat().map(t => [t.number, t]));
+}
+
+// The ticket numbers anywhere in a set of result rows, in the order they appear
+export function ticketNumbersIn(rows) {
+  const found = new Set();
+  for (const row of rows) {
+    for (const value of Object.values(row)) {
+      if (typeof value === 'string' && STARRABLE.test(value)) found.add(value);
+    }
+  }
+  return [...found];
+}
+
 // ---------------------------------------------------------------------
 // One ticket's full record: every column its cube has, leading with the
 // ones people look at first, and leaving out the empty ones

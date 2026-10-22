@@ -214,8 +214,10 @@ which is why Metabase keeps each chart's result (see [Dashboards](#dashboards-me
    ```
    npm run warmup
    ```
-   It asks for your OneTouch username and password, then asks every question in
+   It signs in as the **warmup** account (username `warmup`, password from
+   `WARMUP_PASSWORD` in `.env`, or it asks), then asks every question in
    `scripts/warmup-questions.txt` and opens every dashboard. That takes about a minute.
+   To use another account instead: `npm run warmup -- --user <username>`.
    Afterwards those questions answer instantly for everyone, provided they're asked with
    the same words (capitals, spacing and a closing "?" don't matter), and every dashboard
    opens from Metabase's cache. It ends with a list of anything that failed, so it doubles
@@ -229,29 +231,79 @@ which is why Metabase keeps each chart's result (see [Dashboards](#dashboards-me
    next UTC day; run the warm-up again then.
 
 Follow-up questions ("same but for changes") always go to Claude, so they take the usual
-few seconds. Keep the computer plugged in, awake and, if possible, on a wired connection.
+few seconds. The warm-up's answers list tickets like anyone's do, so they fill the Ticket
+results of the account it signs in as. That is why it has its own **warmup** account: the
+demo tickets land there, not in a real person's list.
+
+**The warmup account** was created with
+`docker exec -it analytics_node_app node scripts/users.mjs add warmup "Warmup"` and is in
+`db/accounts.json`, so full copies of OneTouch have it too. Its password is `warmup`, which
+anyone could guess, and OneTouch is on a public address. Anyone who tries it gets in and
+can ask the AI questions (each new question costs a little). After the presentation,
+consider `docker exec analytics_node_app node scripts/users.mjs deactivate warmup` (and
+`activate` before the next one), or a stronger password with `reset-password warmup` plus
+the same value in `WARMUP_PASSWORD`.
+
+Keep the computer plugged in, awake and, if possible, on a wired connection.
 Cloudflare serves the dashboards' 9.4 MB of program files from its own cache, so your upload
 speed matters less than you might expect.
 
 ### Home page and the AI assistant
 
-After signing in, people land on **Home** ("Welcome, *first name*!"), which has three searches:
+The header is one row: the OneTouch logo and name, the signed-in person's name, the
+**📈 Dashboards** button right next to it (green while the dashboards are showing), and
+**Sign out** at the right. Clicking the logo or the name **OneTouch** goes back to Home from
+anywhere, closing the AI chat or the dashboards drawer if one is open. On a phone,
+Dashboards moves to a second line.
 
-- **Find a ticket**: one INC, CHG, RITM or SCTASK number shows every field of that ticket, with
-  **Open in Dashboards** for incidents, changes and requests. A REQ number lists the requests in it.
-- **Find several tickets**: paste numbers separated by spaces, commas or new lines (up to 200).
-  The page lists them, says which weren't found, and offers **Star all** and a download.
-- **Starred tickets**: everything you've starred, newest first.
+After signing in, people land on **Home**: "Welcome, *first name*!" in the top-left corner,
+then the **💬 Any question about the data** card, then **Ticket results** and **Starred
+tickets** (everything you've starred, newest first).
 
-A ☆ appears next to every ticket number in OneTouch: in these searches, in the AI assistant's
+**The AI assistant** is reached from that card:
+
+- **Try: How many open incidents are there by priority?** asks that question and opens the
+  chat over the page with the answer. Ask anything else in plain English in the chat's own
+  box, including follow-ups.
+- **💬 Open chat** opens the chat, empty or with the conversation so far. Its label counts
+  the questions asked, e.g. **Open chat (3)**.
+- **🗑 Delete chat**, in the card and at the top of the chat, deletes the conversation. It
+  asks first, then the questions and answers disappear, the assistant forgets the
+  conversation, and the chat closes ("Chat deleted"). An answer still on its way is
+  dropped. **New chat**, next to **Ask Claude**, does the same but keeps the chat open.
+- **Minimize** (or Escape) closes the chat and keeps the conversation.
+
+**Ticket results** is every ticket the AI assistant has shown you, newest first. When an
+answer lists tickets, they appear at the top of the list automatically, highlighted, and a
+note says how many ("28 tickets from this answer are now in Ticket results on Home"). Each
+row shows the ticket's summary, when it was shown, and the question that showed it. A
+ticket shown again moves back to the top. The list is kept with your account (the
+`seen_tickets` table in `onetouch_auth`), so it is still there after a refresh, after
+signing out and in, and on another computer. Each person has their own list, holding the
+2,000 most recent tickets.
+
+Click a ticket number (in Ticket results or Starred tickets) to see that ticket's full
+record: every field, with **Open in Dashboards** for incidents, changes and requests, and
+**← All ticket results** to go back. A ticket opened this way also joins the list ("Opened
+from a ticket number"). The list downloads like any other table.
+
+**🗑 Delete ticket results** (at the right of the list's summary line) empties the list. It
+asks first, and the list is then gone on every computer. Starred tickets stay starred, and
+new answers start filling the list again.
+
+A ☆ appears next to every ticket number in OneTouch: in ticket results, in the AI assistant's
 tables, and in the Dashboards toolbar on an incident, change or request record. Stars are
 saved to each person's account (the `starred_tickets` table in `onetouch_auth`), so they
 follow you to any computer that signs in to the same server. A full copy of the tool keeps its
 own stars; they aren't in `db/accounts.json`.
 
-The **AI assistant** is the search bar in the header. Asking something opens the full
-conversation over the page; **Minimize** (or Escape) shrinks it back to the bar and keeps
-the conversation, which **Open chat** reopens.
+**Star all.** Ticket results, and every AI answer that lists two or more tickets, have a
+row of yellow buttons: **★ Star all 30 tickets**, plus one per type when the list mixes
+them (**★ Star all 28 changes**, **★ Star all 3 incidents**, **★ Star 1 request**, ...). Once
+they are all starred, a button reads "✓ 28 changes starred". In an AI answer, it stars the
+tickets the answer lists (its ticket-number column), not related numbers in other columns
+such as a task's parent request. It is one request however many tickets there are, and the
+2,000-star limit still applies: anything past it is left unstarred and a note says so.
 
 ### Dashboards (Metabase)
 
@@ -297,6 +349,8 @@ to open a detail page for it: a record (incident, change, request), a team, a se
 system, a site or brewery, a problem record, a catalog item, or a filtered list (e.g.
 "Incidents · Priority: P2 - High"). Detail pages link onward too; on a record, use the
 blue **Go to** row under it. OneTouch's toolbar shows where you are, with **← Back**.
+A detail page's filter boxes (top left) suggest values as you type, so you can switch to
+another team, ticket or item there. Clearing the last filter returns you to the dashboard.
 What each click opens is set by `click` / `links` on the charts in
 `scripts/metabase-setup.mjs`; the detail pages are its `DETAILS` list.
 
@@ -404,11 +458,13 @@ it in the tab's `sessionStorage`, so:
 
 ## 2.2 The page around the tabs
 
-- **Header:** the OneTouch logo and name, the signed-in person's display name (or their
-  username if they have none), the AI assistant's search bar, the **🏠 Home** and
-  **📈 Dashboards** tabs, and **Sign out**.
+- **Header:** one row with the OneTouch logo and name (click either to go back to Home), the
+  signed-in person's display name (or their username if they have none), the **📈 Dashboards**
+  button next to it, and **Sign out** at the right. There is no separate Home button; the
+  logo and name take its place.
 - **Home** is the first page after signing in: "Welcome, *first name*!" in the top-left
-  corner, then ticket search and starred tickets (see
+  corner, the AI assistant's card (an example question, **Open chat**, **Delete chat**),
+  then ticket results and starred tickets (see
   [Home page and the AI assistant](#home-page-and-the-ai-assistant) in Part 1).
 - **Greetings** use the first word of the display name: "Welcome, *first name*!" on Home
   and "Hello, *first name*!" at the top of the chat.
@@ -419,12 +475,13 @@ it in the tab's `sessionStorage`, so:
 
 ### Asking
 
-Type a question in the header's search bar and press **Enter** or click **Ask**. The
-full chat opens over the page with the answer; from there, ask follow-ups in its box
-(**Enter** or **Ask Claude**). **Minimize ▴** or Escape shrinks it back to the bar and
-keeps the conversation; **Open chat (*n*)** in the bar reopens it. If you send another
-question before the first answer arrives, it waits its turn: questions in one session
-always run in order.
+On Home, click **💬 Open chat** (or the example question) in the "Any question about the
+data" card. The chat opens over the page. Type a question in its box and press **Enter**
+or click **Ask Claude**. **Minimize ▴** or Escape closes it and keeps the conversation;
+**Open chat (*n*)** reopens it. **🗑 Delete chat** (at the top of the chat, or on Home)
+deletes the conversation after a confirmation, and Claude forgets it too. If you send
+another question before the first answer arrives, it waits its turn: questions in one
+session always run in order.
 
 **While it works**, a bubble shows each step as the server reaches it, with a running
 clock: "📨 Sending your question…", "🧠 Understanding your question…" (Claude), "📊 Getting
@@ -496,6 +553,9 @@ last 500 such questions in memory; restarting it starts the list over.
 - **How I read your question:** a collapsible list of every assumption Claude made (what
   "open" meant, which ticket types were included and why others were dropped, the exact
   dates used, values that were corrected).
+- **Star all:** when the answer lists two or more tickets, buttons to star them all, or all
+  of one type (see [Home page and the AI assistant](#home-page-and-the-ai-assistant)).
+  The tickets also go to Ticket results on Home.
 - **Download as:** see 2.5.
 
 ### What it understands
@@ -716,13 +776,29 @@ P2 - High") and shows **← Back**, which steps back one page.
 | Requests list | a chart about requests | matching requests with counts by item. Filters: status, catalog item, site, approval, outcome (rejected or cancelled), order guide |
 | Catalog tasks list | a chart about tasks | matching tasks with counts by team. Filters: status, team, state, SLA (breached or met), catalog item |
 
+**The filter boxes** at the top left of a detail page show what it's filtered on (e.g. **Team:
+ACN-SAP-BASIS**). Click one and type to see the values that exist: team names, systems,
+sites, ticket numbers, catalog items, priorities and so on. Typing matches anywhere in a value
+and ignores capitals, so "network" finds "TCS-Network-Data". Pick one and click **Update
+filter** to switch the page to it. Filters with only a few possible values (Open/Closed,
+Yes/No, days of the week, SLA met or breached) show the whole list to pick from. Each filter
+takes one value at a time.
+
+**Clearing filters.** The **×** in a filter box removes that filter. On a list with several
+filters the page stays, showing the broader list. When the last filter is cleared, the page
+has nothing left to show, so OneTouch goes back to the dashboard it was opened from and
+says "No filters left, so you're back on …". **← Back** then doesn't return to the empty page.
+
 **How it works.** Metabase listens only on the server itself, so OneTouch passes its
 public dashboard pages through (`/public/…`, `/app/…` and the public API, read-only, GET
 only). That way the tab works from localhost, the network address, the tunnel and
 remote mode alike. Metabase connects to the database as `metabase_reader`, which can read
 only the `reporting` views. The dashboards are public links: anyone who has a link can
 view that dashboard. `scripts/metabase-setup.mjs` checks every click target and filter
-before it changes anything in Metabase. Each run archives the previous dashboards and
+before it changes anything in Metabase, including that every filter says where its
+suggestions come from: `distinct(...)` for values read from the reporting views (each
+becomes a small "… suggestions" question that Metabase searches as people type), or
+`fixed(...)` for a short list. Each run archives the previous dashboards and
 creates new ones with new links, and `metabase-dashboards.json` is rewritten with them.
 
 ## 2.7 Accounts administration
@@ -1073,7 +1149,9 @@ Check: `node --check business_logic.mjs` prints nothing.
   - Every data route (`/api/query`, `/api/export`, `/api/conversation/reset`, `/api/me`,
     `/api/dashboards`, `/api/tickets/search`, `/api/stars`) needs a signed-in session.
   - `/api/tickets/search` → `tickets.mjs`; `/api/stars` (list, `PUT` to star, `DELETE`
-    to unstar) → `stars.mjs`.
+    to unstar, and `PUT /api/stars` with a list of numbers to star many at once) → `stars.mjs`. `/api/seen-tickets` (the person's Ticket results with
+    summaries; `POST` adds an opened record; `DELETE` empties the list) → `seen.mjs`. `/api/query` saves every ticket
+    number in an answer's rows there before replying, and lists them as `shownTickets`.
   - `/api/query`: question → Claude (streaming, with prompt caching, conversation memory
     per session, up to 40 turns) → validator → Cube, one query per table in parallel →
     empty-result explanation → JSON for the page. Questions in one session run one at a time.
@@ -1092,13 +1170,17 @@ Check: `node --check business_logic.mjs` prints nothing.
   for it, skipping empty ones.
 - `stars.mjs` ([B.38](#b38)): each person's starred tickets, in the `starred_tickets` table
   of `onetouch_auth` (at most 2,000 per person).
-- `public/index.html` ([B.25](#b25)): the sign-in page, the header with the AI assistant's
-  search bar, the Home tab (welcome, the three ticket searches), the Dashboards tab with its
-  drawer, and the chat panel the bar opens.
+- `seen.mjs` ([B.42](#b42)): each person's Ticket results, every ticket they have been
+  shown, in the `seen_tickets` table of `onetouch_auth`, with when and by which question
+  (the 2,000 most recent per person).
+- `public/index.html` ([B.25](#b25)): the sign-in page, the header (logo and name, which go
+  back to Home; the signed-in name; the Dashboards button; Sign out at the right), the Home tab (welcome, the AI assistant's card with an
+  example question, Open chat and Delete chat, ticket results, starred tickets), the
+  Dashboards tab with its drawer, and the chat panel.
 - `public/style.css` ([B.26](#b26)): the styling.
-- `public/app.js` ([B.27](#b27)): sign-in, the home page searches and stars, the AI
-  assistant bar and chat (sending questions, turning the results into tables with English
-  column names and readable values), "New chat", the download buttons, and the dashboard
+- `public/app.js` ([B.27](#b27)): sign-in, ticket results and stars, the AI assistant
+  chat (sending questions, turning the results into tables with English column names and
+  readable values, "New chat", "Delete chat"), the download buttons, and the dashboard
   drawer with drill-down, **← Back** and the toolbar star.
 - `public/site.webmanifest` ([B.28](#b28)): the app name and icons.
 - `onetouchsso.html` ([B.29](#b29)) and `styles2.css` ([B.30](#b30)): the design template
@@ -1453,6 +1535,7 @@ Create each file at the path shown, with exactly this content. Files are in the 
 - [B.39 `scripts/share.mjs`](#b39)
 - [B.40 `scripts/warmup.mjs`](#b40)
 - [B.41 `scripts/warmup-questions.txt`](#b41)
+- [B.42 `seen.mjs`](#b42)
 
 <a id="b1"></a>
 ### B.1 `.gitignore`
@@ -1660,6 +1743,10 @@ METABASE_ADMIN_PASSWORD=change_me_8plus_chars
 # `npm run share` prints. See "Sharing over the internet with Cloudflare" in README.md.
 TUNNEL_TOKEN=
 ONETOUCH_PUBLIC_URL=
+
+# Optional: the "warmup" account's password, so `npm run warmup` signs in without asking.
+# Create the account first: docker exec -it analytics_node_app node scripts/users.mjs add warmup "Warmup"
+WARMUP_PASSWORD=
 ```
 
 <a id="b5"></a>
@@ -5288,7 +5375,8 @@ import {
 import { buildExport, validateExport, ExportUnavailableError } from './export.mjs';
 import * as auth from './auth.mjs';
 import * as stars from './stars.mjs';
-import { findTickets, ticketRecord, STARRABLE } from './tickets.mjs';
+import * as seen from './seen.mjs';
+import { findTickets, ticketRecord, ticketSummaries, ticketNumbersIn, STARRABLE } from './tickets.mjs';
 import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
 
 dotenv.config();
@@ -5468,7 +5556,7 @@ async function requireLogin(req, res, next) {
   next();
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets'], requireLogin);
 
 // Who is signed in (the page shows their display name)
 app.get('/api/me', (req, res) => {
@@ -5709,12 +5797,12 @@ app.post('/api/query', async (req, res) => {
   // can't interleave if the user sends a second one before the first returns
   const session = req.session;
   const reply = queryReply(req, res);
-  const run = session.queue.then(() => answerQuestion(session.conversation, userPrompt, reply));
+  const run = session.queue.then(() => answerQuestion(session.conversation, userPrompt, reply, req.user));
   session.queue = run.catch(() => {});
   await run;
 });
 
-async function answerQuestion(conversation, userPrompt, reply) {
+async function answerQuestion(conversation, userPrompt, reply, user) {
   const started = Date.now();
   // Set once Claude's answer is in the conversation; from then on, whatever
   // happens to the query is reported to Claude with the next question
@@ -5803,6 +5891,15 @@ async function answerQuestion(conversation, userPrompt, reply) {
     // Only an answer that ran all the way through is worth reusing
     if (fresh && cacheKey) rememberAnswer(cacheKey, { ...fresh, explanation });
 
+    // The tickets in this answer join the person's "Ticket results" on Home.
+    // Saved before the answer goes out, so the page can show the list at once;
+    // a failure here only costs the list, never the answer.
+    const shownTickets = ticketNumbersIn(sections.flatMap(s => s.rows));
+    if (shownTickets.length) {
+      await seen.recordSeen(user.id, shownTickets, userPrompt)
+        .catch(error => console.error('🎫 Could not remember the shown tickets:', error.message));
+    }
+
     reply.send(200, {
       intent: 'query',
       // `entity` / `results` describe the single-type case; `sections` and
@@ -5818,6 +5915,8 @@ async function answerQuestion(conversation, userPrompt, reply) {
       // Why nothing (or part of it) was found; allEmpty means there's no table to show
       explanation,
       allEmpty: emptyQueries.length === verdict.queries.length,
+      // Ticket numbers in this answer (now in the person's Ticket results)
+      shownTickets,
       ...timing(),
     });
 
@@ -5864,12 +5963,64 @@ app.post('/api/tickets/search', async (req, res) => {
   }
 });
 
+// Every ticket this person has been shown, newest first, with each one's
+// summary, when it was shown, and the question that showed it
+app.get('/api/seen-tickets', async (req, res) => {
+  try {
+    const list = await seen.listSeen(req.user.id);
+    const summaries = await ticketSummaries(list.map(s => s.number), runCubeQuery);
+    res.json({ tickets: list.filter(s => summaries.has(s.number)).map(s => ({ ...summaries.get(s.number), shownAt: s.shownAt, question: s.question })) });
+  } catch (error) {
+    console.error('🎫 Could not list the shown tickets:', error.message);
+    res.status(503).json({ error: 'Your ticket results could not be loaded right now.' });
+  }
+});
+
+// "Delete ticket results": empties this person's list (their stars stay)
+app.delete('/api/seen-tickets', async (req, res) => {
+  try {
+    const deleted = await seen.clearSeen(req.user.id);
+    console.log(`🎫 ${req.user.username} deleted their ticket results (${deleted})`);
+    res.json({ ok: true, deleted });
+  } catch (error) {
+    console.error('🎫 Could not delete the ticket results:', error.message);
+    res.status(503).json({ error: 'Your ticket results could not be deleted right now.' });
+  }
+});
+
+// A ticket record someone opened (clicked a ticket number): it joins their Ticket results
+app.post('/api/seen-tickets', async (req, res) => {
+  const numbers = (Array.isArray(req.body?.numbers) ? req.body.numbers : []).map(n => String(n).toUpperCase()).filter(n => STARRABLE.test(n)).slice(0, 50);
+  if (!numbers.length) return res.status(400).json({ error: 'No ticket numbers to remember.' });
+  try {
+    await seen.recordSeen(req.user.id, numbers, null);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('🎫 Could not remember an opened ticket:', error.message);
+    res.status(503).json({ error: 'That ticket could not be added to your ticket results right now.' });
+  }
+});
+
 app.get('/api/stars', async (req, res) => {
   try {
     res.json({ stars: await stars.listStars(req.user.id) });
   } catch (error) {
     console.error('⭐ Could not list stars:', error.message);
     res.status(503).json({ error: 'Your starred tickets could not be loaded right now.' });
+  }
+});
+
+// "Star all": { numbers } -> { starred: the ones starred now, full: some didn't fit under the limit }
+app.put('/api/stars', async (req, res) => {
+  const requested = Array.isArray(req.body?.numbers) ? req.body.numbers : [];
+  const numbers = [...new Set(requested.map(n => String(n).toUpperCase()))].filter(n => STARRABLE.test(n)).slice(0, stars.MAX_STARS);
+  if (!numbers.length) return res.status(400).json({ error: 'Only incident, change, request and task numbers can be starred.' });
+  try {
+    const starred = await stars.addStars(req.user.id, numbers);
+    res.json({ starred, full: starred.length < numbers.length });
+  } catch (error) {
+    console.error('⭐ Could not star all:', error.message);
+    res.status(503).json({ error: 'Those tickets could not be starred right now.' });
   }
 });
 
@@ -5929,6 +6080,7 @@ async function prepareAccounts(attempt = 1) {
   try {
     await auth.ensureSchema();
     await stars.ensureStarsSchema();
+    await seen.ensureSeenSchema();
   } catch (error) {
     const wait = Math.min(attempt * 2, 15);
     console.error(`🔐 Account database not reachable yet (${error.message}); retrying in ${wait}s`);
@@ -6005,21 +6157,19 @@ prepareAccounts();
     </div>
 
     <header class="app-header">
-        <h1 class="app-title"><img src="android-chrome-192x192.png" alt="" class="app-logo"> OneTouch <span id="user-name" class="user-name"></span></h1>
-        <!-- AI ASSISTANT: a search bar until it's used; asking opens the full chat below it -->
-        <form class="assistant-bar" id="assistant-bar" role="search" onsubmit="event.preventDefault(); askFromBar();">
-            <span class="assistant-bar-icon" aria-hidden="true">💬</span>
-            <input type="text" id="assistant-bar-input" placeholder="Ask the AI assistant a data question…"
-                   aria-label="Ask the AI assistant" autocomplete="off" aria-controls="assistant-panel" aria-expanded="false">
-            <button type="button" class="assistant-resume" id="assistant-resume" hidden onclick="toggleAssistant(true)"
-                    title="Open your conversation">Open chat</button>
-            <button type="submit" class="assistant-bar-ask">Ask</button>
-        </form>
-        <nav class="tab-navigation">
-            <button class="tab-btn active" data-tab="home" onclick="switchTab('home')">🏠 Home</button>
-            <button class="tab-btn" data-tab="dashboard" onclick="switchTab('dashboard')">📈 Dashboards</button>
-            <button class="sign-out-btn" type="button" onclick="signOut()">Sign out</button>
-        </nav>
+        <!-- Top left: the logo and name (back to Home), who's signed in, and Dashboards -->
+        <div class="header-left">
+            <h1 class="app-title">
+                <button type="button" class="home-link" onclick="goHome()" title="Back to Home">
+                    <img src="android-chrome-192x192.png" alt="" class="app-logo"> OneTouch
+                </button>
+            </h1>
+            <span id="user-name" class="user-name"></span>
+            <nav class="tab-navigation">
+                <button class="tab-btn" data-tab="dashboard" onclick="switchTab('dashboard')">📈 Dashboards</button>
+            </nav>
+        </div>
+        <button class="sign-out-btn" type="button" onclick="signOut()">Sign out</button>
     </header>
 
     <main class="app-content">
@@ -6027,16 +6177,24 @@ prepareAccounts();
         <section id="home-view" class="view-panel active">
             <div class="home">
                 <h2 class="home-welcome" id="home-welcome">Welcome!</h2>
-                <p class="home-sub">Look up tickets and keep the ones you follow starred. To ask about the data, use the bar at the top.</p>
+                <!-- The AI assistant: an example question, and the open / delete chat buttons -->
+                <div class="search-guide">
+                    <div class="guide-card">
+                        <span class="guide-title">💬 Any question about the data</span>
+                        <span class="guide-text">In plain English. The AI assistant answers with a table you can download, and remembers the conversation for follow-ups.</span>
+                        <button type="button" class="guide-example" data-example="How many open incidents are there by priority?">How many open incidents are there by priority?</button>
+                        <div class="chat-controls">
+                            <button type="button" class="home-action" id="open-chat-btn" onclick="toggleAssistant(true)"
+                                    aria-controls="assistant-panel" aria-expanded="false">💬 Open chat</button>
+                            <button type="button" class="home-action danger" id="delete-chat-btn" hidden onclick="deleteChat()">🗑 Delete chat</button>
+                        </div>
+                    </div>
+                </div>
 
-                <div class="home-modes" role="tablist" aria-label="Ticket search">
-                    <button type="button" role="tab" class="home-mode active" data-mode="single" aria-selected="true" aria-controls="home-single" onclick="setHomeMode('single')">
-                        <span class="home-mode-name">🔎 Find a ticket</span>
-                        <span class="home-mode-desc">One ticket's full record</span>
-                    </button>
-                    <button type="button" role="tab" class="home-mode" data-mode="multiple" aria-selected="false" aria-controls="home-multiple" onclick="setHomeMode('multiple')">
-                        <span class="home-mode-name">📋 Find several tickets</span>
-                        <span class="home-mode-desc">Paste a list of numbers</span>
+                <div class="home-modes" role="tablist" aria-label="Your tickets">
+                    <button type="button" role="tab" class="home-mode active" data-mode="results" aria-selected="true" aria-controls="home-results" onclick="setHomeMode('results')">
+                        <span class="home-mode-name">🎫 Ticket results</span>
+                        <span class="home-mode-desc">Every ticket the AI assistant has shown you</span>
                     </button>
                     <button type="button" role="tab" class="home-mode" data-mode="starred" aria-selected="false" aria-controls="home-starred" onclick="setHomeMode('starred')">
                         <span class="home-mode-name">★ Starred tickets <span class="star-count" id="star-count">0</span></span>
@@ -6044,22 +6202,8 @@ prepareAccounts();
                     </button>
                 </div>
 
-                <div class="home-panel" id="home-single" role="tabpanel">
-                    <form class="home-search" onsubmit="event.preventDefault(); searchSingleTicket();">
-                        <input type="text" id="single-ticket-input" autocomplete="off" spellcheck="false" aria-label="Ticket number"
-                               placeholder="Ticket number, e.g. INC1814467, CHG1101321, RITM0440498 or SCTASK0595823">
-                        <button type="submit">Search</button>
-                    </form>
-                    <div class="home-result" id="single-ticket-result" aria-live="polite"></div>
-                </div>
-
-                <div class="home-panel" id="home-multiple" role="tabpanel" hidden>
-                    <form class="home-search multi" onsubmit="event.preventDefault(); searchManyTickets();">
-                        <textarea id="multi-ticket-input" rows="4" spellcheck="false" aria-label="Ticket numbers"
-                                  placeholder="Paste ticket numbers separated by spaces, commas or new lines. A REQ number brings up the requests in that order."></textarea>
-                        <button type="submit">Search</button>
-                    </form>
-                    <div class="home-result" id="multi-ticket-result" aria-live="polite"></div>
+                <div class="home-panel" id="home-results" role="tabpanel">
+                    <div class="home-result" id="ticket-results" aria-live="polite"></div>
                 </div>
 
                 <div class="home-panel" id="home-starred" role="tabpanel" hidden>
@@ -6109,7 +6253,10 @@ prepareAccounts();
         <section class="assistant-panel" id="assistant-panel" aria-label="AI Assistant">
             <div class="assistant-head">
                 <span class="assistant-title">💬 AI Assistant</span>
-                <button type="button" class="assistant-minimize" onclick="toggleAssistant(false)" title="Shrink back to the search bar (the conversation is kept)">Minimize ▴</button>
+                <div class="assistant-head-actions">
+                    <button type="button" class="assistant-delete" onclick="deleteChat()" title="Delete this conversation: its questions and answers disappear and the assistant forgets it">🗑 Delete chat</button>
+                    <button type="button" class="assistant-minimize" onclick="toggleAssistant(false)" title="Close the chat (the conversation is kept; Open chat on Home brings it back)">Minimize ▴</button>
+                </div>
             </div>
             <div class="chat-container">
                 <div class="chat-messages" id="chat-log">
@@ -6162,7 +6309,25 @@ body {
 }
 
 .app-header h1 { margin: 0; font-size: 1.25rem; }
-.app-title { display: flex; align-items: center; gap: 8px; }
+.app-title { display: flex; align-items: center; }
+/* The logo and "OneTouch": a button back to Home */
+.home-link {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: none;
+    border: none;
+    border-radius: 6px;
+    padding: 2px 4px 2px 0;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+/* Only with a mouse: on touch screens a tapped link would keep its hover color */
+@media (hover: hover) {
+    .home-link:hover { color: #c6f6e5; }
+}
+.home-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .app-logo { width: 28px; height: 28px; border-radius: 6px; }
 /* Signed-in person's name, next to the OneTouch title */
 .user-name {
@@ -6175,31 +6340,39 @@ body {
 }
 .user-name:empty { display: none; }
 
+/* Top left, one row: logo and name (Home), who's signed in, then Dashboards */
+.header-left { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; min-width: 0; }
+.tab-navigation { display: flex; }
 .tab-navigation .tab-btn {
     background: transparent;
-    border: none;
-    color: #a0aec0;
-    padding: 10px 15px;
+    border: 1px solid #4a5568;
+    border-radius: 6px;
+    color: #cbd5e0;
+    padding: 5px 12px;
     cursor: pointer;
-    font-size: 1rem;
+    font-size: 0.9rem;
     font-weight: 500;
+    white-space: nowrap;
 }
+.tab-navigation .tab-btn:hover { color: white; border-color: #a0aec0; }
 
-.tab-navigation .sign-out-btn {
+.sign-out-btn {
     background: transparent;
     border: 1px solid #4a5568;
     border-radius: 6px;
     color: #cbd5e0;
     padding: 6px 12px;
-    margin-left: 10px;
     cursor: pointer;
     font-size: 0.9rem;
+    flex-shrink: 0;
 }
-.tab-navigation .sign-out-btn:hover { color: white; border-color: #a0aec0; }
+.sign-out-btn:hover { color: white; border-color: #a0aec0; }
 
+/* While the dashboards are showing */
 .tab-navigation .tab-btn.active {
     color: white;
-    border-bottom: 2px solid var(--accent);
+    background: var(--accent);
+    border-color: var(--accent);
 }
 
 .app-content { flex: 1; position: relative; overflow: hidden; }
@@ -6213,49 +6386,6 @@ body {
 
 .view-panel.active { display: flex; }
 
-/* AI ASSISTANT BAR: a search box in the header until it's used */
-.assistant-bar {
-    flex: 1 1 360px;
-    max-width: 640px;
-    min-width: 0;
-    box-sizing: border-box;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    background: #2d3748;
-    border: 1px solid #4a5568;
-    border-radius: 999px;
-    padding: 4px 4px 4px 14px;
-    transition: border-color 0.15s, background 0.15s;
-}
-.assistant-bar:focus-within { border-color: var(--accent); background: #273141; }
-.assistant-bar-icon { font-size: 0.95rem; }
-/* width 0: the box takes the space left over, instead of its built-in default width */
-.assistant-bar input {
-    flex: 1;
-    width: 0;
-    min-width: 0;
-    background: transparent;
-    border: none;
-    color: white;
-    font: inherit;
-    font-size: 0.95rem;
-    padding: 6px 4px;
-}
-.assistant-bar input::placeholder { color: #a0aec0; }
-.assistant-bar input:focus { outline: none; }
-.assistant-bar button {
-    border: none;
-    border-radius: 999px;
-    padding: 6px 14px;
-    font-size: 0.85rem;
-    font-weight: 600;
-    cursor: pointer;
-    white-space: nowrap;
-}
-.assistant-bar-ask { background: var(--accent); color: white; }
-.assistant-resume { background: #4a5568; color: white; }
-.assistant-resume:hover { background: #718096; }
 
 /* The full conversation, dropped down over whichever page is showing */
 .assistant-backdrop {
@@ -6302,7 +6432,9 @@ body {
     border-bottom: 1px solid var(--border);
     font-weight: 700;
 }
-.assistant-minimize {
+.assistant-head-actions { display: flex; gap: 8px; }
+.assistant-minimize,
+.assistant-delete {
     background: transparent;
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -6313,6 +6445,8 @@ body {
     cursor: pointer;
 }
 .assistant-minimize:hover { background: var(--bg-primary); }
+.assistant-delete { color: #c53030; }
+.assistant-delete:hover { background: #fff5f5; border-color: #feb2b2; }
 .assistant-panel .chat-container {
     flex: 1;
     min-height: 0;
@@ -6323,10 +6457,8 @@ body {
     border-radius: 0;
 }
 
-/* Narrow screens: the bar takes its own row under the title and tabs */
 @media (max-width: 900px) {
-    .app-header { flex-wrap: wrap; padding: 10px 16px; }
-    .assistant-bar { order: 3; flex-basis: 100%; max-width: none; }
+    .app-header { padding: 10px 16px; }
 }
 
 /* HOME PAGE: the welcome sits in the page's top-left corner */
@@ -6337,13 +6469,54 @@ body {
     padding: 24px 24px 40px;
     box-sizing: border-box;
 }
-.home-welcome { margin: 0; font-size: 1.6rem; }
-.home-sub { margin: 4px 0 20px; color: #718096; }
+.home-welcome { margin: 0 0 12px; font-size: 1.6rem; }
+
+/* The AI assistant's card: what it does, an example question, open / delete chat */
+.search-guide {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+    max-width: 720px;
+}
+.guide-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+}
+.guide-title { font-weight: 700; }
+.guide-text { font-size: 0.87rem; color: #4a5568; line-height: 1.45; }
+.guide-example {
+    align-self: flex-start;
+    max-width: 100%;
+    margin-top: 2px;
+    background: #f3fbf8;
+    border: 1px dashed var(--accent);
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: #0b7a5f;
+    font: inherit;
+    font-size: 0.85rem;
+    text-align: left;
+    cursor: pointer;
+    overflow-wrap: anywhere;
+}
+.guide-example::before { content: 'Try: '; color: #718096; }
+.guide-example:hover { background: #e6f6f1; border-style: solid; }
+.chat-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.home-action.danger { color: #c53030; }
+.home-action.danger:hover { background: #fff5f5; border-color: #feb2b2; }
+
 .home-modes {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
     margin-bottom: 16px;
+    max-width: 720px;
 }
 .home-mode {
     display: flex;
@@ -6378,36 +6551,19 @@ body {
     border-radius: 8px;
     padding: 16px;
 }
-.home-search { display: flex; gap: 10px; align-items: stretch; }
-.home-search input,
-.home-search textarea {
-    flex: 1;
-    min-width: 0;
-    padding: 12px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    font: inherit;
-    font-size: 1rem;
-}
-.home-search textarea { resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 0.92rem; }
-.home-search input:focus,
-.home-search textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.15); }
-.home-search button {
-    background: var(--accent);
-    color: white;
-    border: none;
-    padding: 0 24px;
-    border-radius: 6px;
-    cursor: pointer;
-    font-weight: 600;
-    font-size: 0.95rem;
-}
-.home-search.multi button { align-self: flex-start; padding: 12px 24px; }
-.home-result:not(:empty) { margin-top: 14px; }
-#home-starred .home-result { margin-top: 0; }
 .home-status { margin: 0 0 10px; color: #4a5568; line-height: 1.5; }
+.home-status:last-child { margin-bottom: 0; }
 .home-status.error { color: #c53030; }
-.home-actions { margin: 0 0 10px; }
+.home-actions { margin: 0 0 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+/* Ticket results: the summary line, with Delete ticket results at its right */
+.results-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; }
+.results-head .home-status { flex: 1 1 320px; margin-bottom: 0; }
+.results-head .home-action { flex-shrink: 0; }
+/* Ticket results: the rows from the latest answer */
+.result-table tbody tr.fresh,
+.result-table tbody tr.fresh:nth-child(even) { background: #fefcbf; }
+.result-table tbody tr.fresh:hover { background: #faf089; }
+.fresh-key { background: #fefcbf; border-radius: 4px; padding: 1px 6px; }
 .home-action {
     background: transparent;
     border: 1px solid var(--border);
@@ -6470,6 +6626,22 @@ body {
 .star-btn.labelled.on { color: #975a16; background: #fefcbf; border-color: #ecc94b; }
 .dashboard-toolbar .star-btn.labelled { flex-shrink: 0; margin-left: auto; }
 
+/* "Star all": under an AI answer's table, and above Ticket results */
+.star-all-bar { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.star-many {
+    background: #fffff0;
+    border: 1px solid #ecc94b;
+    border-radius: 6px;
+    padding: 5px 10px;
+    color: #975a16;
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.star-many:hover:not(:disabled) { background: #fefcbf; }
+.star-many:disabled { background: transparent; border-color: var(--border); color: #718096; cursor: default; }
+
 .toast {
     position: fixed;
     left: 50%;
@@ -6489,12 +6661,8 @@ body {
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
 @media (max-width: 700px) {
-    .assistant-bar-icon { display: none; }
-    .assistant-bar { padding-left: 12px; }
     .home { padding: 16px 16px 32px; }
     .home-modes { grid-template-columns: minmax(0, 1fr); }
-    .home-search:not(.multi) { flex-direction: column; }
-    .home-search button { padding: 10px 24px; }
 }
 
 /* CHAT AREA ARCHITECTURE */
@@ -7112,7 +7280,6 @@ function showApp(signedIn) {
     if (signedIn) {
         switchTab('home');
         loadStars();
-        focusHomeSearch();
     } else {
         document.getElementById('login-email').focus();
     }
@@ -7129,7 +7296,7 @@ function setCurrentUser(user) {
     document.getElementById('user-name').textContent = currentUserName;
     renderGreetings();
     // Each person's home page opens on the search they used last
-    if (currentUsername) setHomeMode(rememberedHomeMode(), false);
+    if (currentUsername) setHomeMode(rememberedHomeMode());
 }
 
 // Just the first name: "Cassidy Sotelo" -> "Welcome, Cassidy!" on the home
@@ -7220,12 +7387,17 @@ function handleUnauthorized(response) {
 
 const WELCOME_HTML = document.getElementById('chat-log').innerHTML;
 
+// Bumped whenever the chat is cleared, so an answer still on its way for the
+// old conversation is dropped instead of landing in the new one
+let chatEpoch = 0;
+
 // Back to just the greeting (with the signed-in person's name)
 function clearChat() {
+    chatEpoch += 1;
     document.getElementById('chat-log').innerHTML = WELCOME_HTML;
     forgetRemovedExports();
     renderGreetings();
-    updateAssistantBar();
+    updateChatControls();
 }
 
 async function resetConversation() {
@@ -7244,19 +7416,45 @@ async function newChat() {
     document.getElementById('user-prompt').focus();
 }
 
-// Tabs: Home and Dashboards (the AI assistant lives in the header's bar)
+// "Delete chat": after a confirmation, the questions and answers disappear,
+// Claude forgets the conversation, and the chat closes
+async function deleteChat() {
+    if (!document.querySelector('#chat-log .user-msg')) {
+        toggleAssistant(false);
+        return;
+    }
+    if (!confirm('Delete this chat? Its questions and answers disappear, and the AI assistant forgets the conversation.')) return;
+    clearChat();
+    toggleAssistant(false);
+    await resetConversation();
+    showToast('Chat deleted');
+}
+
+// The logo and the name "OneTouch": back to Home from anywhere, closing
+// whatever is open on top (the chat, the dashboards drawer)
+function goHome() {
+    toggleAssistant(false);
+    toggleDashboardDrawer(false);
+    switchTab('home');
+    document.getElementById('home-view').scrollTop = 0;
+}
+
+// Pages: Home (the logo) and Dashboards (its button); the AI assistant opens over either
 function switchTab(viewName) {
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === viewName));
     document.querySelectorAll('.view-panel').forEach(panel => panel.classList.toggle('active', panel.id === `${viewName}-view`));
     if (viewName === 'dashboard') loadDashboards();
     // Stars may have changed elsewhere (the chat, a dashboard, another computer)
-    if (viewName === 'home' && homeMode === 'starred') showStarred();
+    if (viewName === 'home') {
+        if (homeMode === 'starred') showStarred();
+        else showTicketResults(true);
+    }
 }
 
 // =====================================================================
-// AI ASSISTANT: a search bar in the header. Asking a question (or "Open
-// chat") opens the full conversation over the page; Minimize shrinks it
-// back to the bar and keeps the conversation.
+// AI ASSISTANT: the chat opens over the page from Home's "Any question about
+// the data" card (Open chat, or its example question). Minimize closes it and
+// keeps the conversation; Delete chat removes it.
 // =====================================================================
 
 function assistantOpen() {
@@ -7269,36 +7467,30 @@ function toggleAssistant(open) {
     const willOpen = typeof open === 'boolean' ? open : !assistantOpen();
     panel.classList.toggle('open', willOpen);
     document.getElementById('assistant-backdrop').classList.toggle('open', willOpen);
-    document.getElementById('assistant-bar-input').setAttribute('aria-expanded', String(willOpen));
+    document.getElementById('open-chat-btn').setAttribute('aria-expanded', String(willOpen));
     if (willOpen) {
         const chatLog = document.getElementById('chat-log');
         chatLog.scrollTop = chatLog.scrollHeight;
         document.getElementById('user-prompt').focus();
     } else if (panel.contains(document.activeElement)) {
-        document.getElementById('assistant-bar-input').focus();
+        document.getElementById('open-chat-btn').focus();
     }
-    updateAssistantBar();
+    updateChatControls();
 }
 
-// The bar's question goes to the chat, which opens to show the answer
-function askFromBar() {
-    const bar = document.getElementById('assistant-bar-input');
-    const question = bar.value.trim();
-    bar.value = '';
+// Asks a question as if typed into the chat, opening it to show the answer
+function askAssistant(question) {
     toggleAssistant(true);
-    if (!question) return;
     document.getElementById('user-prompt').value = question;
     sendPrompt();
 }
 
-// While minimized with a conversation going, the bar offers to reopen it
-function updateAssistantBar() {
+// Home's chat buttons: Open chat says how many questions the conversation has,
+// and Delete chat appears once there is something to delete
+function updateChatControls() {
     const asked = document.querySelectorAll('#chat-log .user-msg').length;
-    const resume = document.getElementById('assistant-resume');
-    resume.hidden = !asked || assistantOpen();
-    resume.textContent = `Open chat (${asked})`;
-    document.getElementById('assistant-bar-input').placeholder = asked
-        ? 'Ask a follow-up question…' : 'Ask the AI assistant a data question…';
+    document.getElementById('open-chat-btn').textContent = asked ? `💬 Open chat (${asked})` : '💬 Open chat';
+    document.getElementById('delete-chat-btn').hidden = !asked;
 }
 
 // =====================================================================
@@ -7484,6 +7676,18 @@ function followDashboardFrame() {
         if (main !== currentMainDashboard) markCurrentDashboard(main);
         else setDashboardHeading(main.group, main.name, main.description || '', false);
     } else if (detail) {
+        // Every filter cleared (the × in the filter box): the page has nothing to
+        // show, so go back to the dashboard it was opened from. replace(), so ← Back
+        // doesn't return to the empty page.
+        const values = new URLSearchParams(where.search);
+        if (!detail.params.some(p => values.get(p.slug))) {
+            const home = currentMainDashboard || [...dashboardPages.main.values()][0];
+            if (home) {
+                frame.contentWindow.location.replace(`${API_BASE}${home.path}#bordered=false&titled=false`);
+                showToast(`No filters left, so you're back on ${home.name}`);
+                return;
+            }
+        }
         setDashboardHeading(currentMainDashboard ? currentMainDashboard.name : '', detailPageLabel(detail, where.search), '', true);
     }
 
@@ -7544,6 +7748,7 @@ async function sendPrompt() {
 
     // Shows each step while the answer is worked out, with a running clock
     const progress = startQueryProgress();
+    const epoch = chatEpoch;
 
     try {
         // text/event-stream: the server reports each step as it happens
@@ -7560,6 +7765,7 @@ async function sendPrompt() {
 
         const data = await readQueryResponse(response, stage => progress.step(stage));
         const seconds = progress.finish();
+        if (epoch !== chatEpoch) return; // the chat was deleted or restarted meanwhile
 
         if (data.memoryReset) {
             appendMessage('system-msg', 'This conversation got long, so Claude started fresh. Earlier questions are no longer remembered.');
@@ -7605,6 +7811,9 @@ async function sendPrompt() {
                 `</ul></details>`;
         }
 
+        // Star every ticket the answer lists, or all of one type
+        html += starAllHtml(answerTicketNumbers(data));
+
         // Offer the same tables as a download in any of the export formats
         const tables = buildExportTables(data);
         if (tables.length) {
@@ -7617,8 +7826,12 @@ async function sendPrompt() {
 
         appendMessage('ai-msg wide', html + answerTimingHtml(seconds, data.fromCache));
 
+        // The tickets in this answer pop up in Ticket results on Home
+        if (data.shownTickets && data.shownTickets.length) ticketsShown(data.shownTickets);
+
     } catch (err) {
         progress.finish();
+        if (epoch !== chatEpoch) return;
         appendMessage('ai-msg', `❌ Could not reach the OneTouch server, or the answer was cut off. Please try again.`);
         console.error(err);
     }
@@ -7669,7 +7882,7 @@ function startQueryProgress() {
         finish() {
             clearInterval(timer);
             bubble.remove();
-            updateAssistantBar();
+            updateChatControls();
             return (performance.now() - started) / 1000;
         },
     };
@@ -8121,7 +8334,7 @@ function appendMessage(cssClass, text) {
     
     chatLog.appendChild(msgBlock);
     chatLog.scrollTop = chatLog.scrollHeight; // Keep log automatically scrolled to bottom
-    updateAssistantBar();
+    updateChatControls();
     return uniqueId;
 }
 
@@ -8190,7 +8403,100 @@ function paintStar(button) {
 
 function refreshStarButtons() {
     document.querySelectorAll('.star-btn[data-star]').forEach(paintStar);
+    document.querySelectorAll('.star-many').forEach(paintStarMany);
     document.getElementById('star-count').textContent = starredTickets.size.toLocaleString();
+}
+
+// ---------------------------------------------------------------------
+// "Star all": every ticket in a list, or all of one type in it
+// ---------------------------------------------------------------------
+
+const KIND_NOUNS = { INC: ['incident', 'incidents'], CHG: ['change', 'changes'], RITM: ['request', 'requests'], SCTASK: ['catalog task', 'catalog tasks'] };
+const kindOf = number => (number.match(/^[A-Z]+/) || [''])[0];
+
+// The bar: "★ Star all 30 tickets", then one button per type when the list mixes
+// types. Nothing for fewer than two tickets (each row has its own star).
+function starAllHtml(numbers) {
+    const list = [...new Set(numbers)].filter(n => STARRABLE.test(n));
+    if (list.length < 2) return '';
+    const byKind = new Map();
+    for (const n of list) {
+        if (!byKind.has(kindOf(n))) byKind.set(kindOf(n), []);
+        byKind.get(kindOf(n)).push(n);
+    }
+    const buttons = [starManyButtonHtml(list, byKind.size === 1 ? kindOf(list[0]) : '')];
+    if (byKind.size > 1) for (const [kind, nums] of byKind) buttons.push(starManyButtonHtml(nums, kind));
+    return `<div class="star-all-bar">${buttons.join('')}</div>`;
+}
+
+// "28 changes", "1 incident", "30 tickets"
+function starManyWhat(numbers, kind) {
+    const nouns = KIND_NOUNS[kind] || ['ticket', 'tickets'];
+    return `${numbers.length.toLocaleString()} ${nouns[numbers.length === 1 ? 0 : 1]}`;
+}
+
+// "★ Star all 28 changes", or once they all are, "✓ 28 changes starred"
+function starManyState(numbers, kind) {
+    const what = starManyWhat(numbers, kind);
+    const done = numbers.every(n => starredTickets.has(n));
+    return { done, text: done ? `✓ ${what} starred` : (numbers.length === 1 ? `★ Star ${what}` : `★ Star all ${what}`) };
+}
+
+// The numbers are ticket numbers (checked by starAllHtml), so they need no escaping
+function starManyButtonHtml(numbers, kind) {
+    const s = starManyState(numbers, kind);
+    return `<button type="button" class="star-many" data-star-many="${numbers.join(',')}" data-kind="${kind}"${s.done ? ' disabled' : ''}>${escapeHtml(s.text)}</button>`;
+}
+
+function paintStarMany(button) {
+    const s = starManyState(button.dataset.starMany.split(','), button.dataset.kind);
+    button.textContent = s.text;
+    button.disabled = s.done;
+}
+
+// Stars them in one request; the screen changes at once, and back if the server says no
+async function starMany(numbers, what) {
+    const toAdd = numbers.filter(n => STARRABLE.test(n) && !starredTickets.has(n));
+    if (!toAdd.length) return;
+    const now = new Date().toISOString();
+    for (const n of toAdd) starredTickets.set(n, now);
+    refreshStarButtons();
+    try {
+        const response = await fetch(`${API_BASE}/api/stars`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ numbers: toAdd }),
+        });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        const starred = new Set(data.starred);
+        const leftOut = toAdd.filter(n => !starred.has(n));
+        for (const n of leftOut) starredTickets.delete(n);
+        refreshStarButtons();
+        showToast(leftOut.length
+            ? `★ Starred ${(toAdd.length - leftOut.length).toLocaleString()}; ${leftOut.length.toLocaleString()} more would pass the limit of 2,000 starred tickets. Unstar some first.`
+            : `★ Starred ${what}`);
+    } catch (err) {
+        for (const n of toAdd) starredTickets.delete(n);
+        refreshStarButtons();
+        showToast(`❌ ${err.message}`);
+    }
+}
+
+// The tickets an AI answer is about: its ticket-number column, not related
+// numbers in other columns (e.g. a task's parent request)
+function answerTicketNumbers(data) {
+    const sections = data.sections && data.sections.length ? data.sections : [{ rows: data.results || [] }];
+    const numbers = [];
+    for (const s of sections) {
+        for (const row of s.rows) {
+            for (const [member, value] of Object.entries(row)) {
+                if (member.endsWith('.number') && STARRABLE.test(String(value))) numbers.push(String(value));
+            }
+        }
+    }
+    return numbers;
 }
 
 // Changes on screen at once, and back again if the server says no
@@ -8220,13 +8526,6 @@ async function setStarred(number, on) {
     }
 }
 
-async function starAll(numbers) {
-    for (const number of numbers) {
-        if (!await setStarred(number, true)) return;
-    }
-    showToast(`★ Starred ${numbers.length.toLocaleString()} ${numbers.length === 1 ? 'ticket' : 'tickets'}`);
-}
-
 // A short message at the bottom of the screen
 let toastTimer = null;
 function showToast(message) {
@@ -8245,24 +8544,26 @@ function showToast(message) {
 }
 
 // =====================================================================
-// HOME PAGE: find one ticket, several tickets, or your starred ones
+// HOME PAGE: the latest ticket search from the search bar, and your
+// starred tickets
 // =====================================================================
 
-const HOME_MODES = ['single', 'multiple', 'starred'];
-let homeMode = 'single';
+const HOME_MODES = ['results', 'starred'];
+let homeMode = 'results';
 // Each search bumps its counter, so an older, slower answer can't replace a newer one
-const homeRuns = { single: 0, multiple: 0, starred: 0 };
+const homeRuns = { results: 0, starred: 0 };
 
-// The search each person used last, remembered in this browser
+// The list each person had open last, remembered in this browser
 function homeModeKey() {
     return `onetouch-home-mode:${currentUsername}`;
 }
 function rememberedHomeMode() {
-    try { return localStorage.getItem(homeModeKey()) || 'single'; } catch { return 'single'; }
+    try { return localStorage.getItem(homeModeKey()) || 'results'; } catch { return 'results'; }
 }
 
-function setHomeMode(mode, focus = true) {
-    if (!HOME_MODES.includes(mode)) mode = 'single';
+// Shows one of Home's lists and loads it (quiet: refresh it without a "Loading…")
+function setHomeMode(mode, quiet = false) {
+    if (!HOME_MODES.includes(mode)) mode = 'results';
     homeMode = mode;
     document.querySelectorAll('.home-mode').forEach(b => {
         const on = b.dataset.mode === mode;
@@ -8274,25 +8575,19 @@ function setHomeMode(mode, focus = true) {
         try { localStorage.setItem(homeModeKey(), mode); } catch { /* not remembered; that's fine */ }
     }
     if (mode === 'starred') showStarred();
-    if (focus) focusHomeSearch();
-}
-
-function focusHomeSearch() {
-    const field = { single: 'single-ticket-input', multiple: 'multi-ticket-input' }[homeMode];
-    if (field) document.getElementById(field).focus();
+    else showTicketResults(quiet);
 }
 
 // Signing out leaves nothing of this person's on the page
 function resetHome() {
     for (const m of HOME_MODES) homeRuns[m] += 1;
-    document.getElementById('single-ticket-input').value = '';
-    document.getElementById('multi-ticket-input').value = '';
-    for (const id of ['single-ticket-result', 'multi-ticket-result', 'starred-result']) {
-        document.getElementById(id).innerHTML = '';
-    }
+    latestShown = new Set();
+    openedRecord = null;
+    document.getElementById('ticket-results').innerHTML = NO_TICKET_RESULTS_HTML;
+    document.getElementById('starred-result').innerHTML = '';
     starredTickets.clear();
     refreshStarButtons();
-    setHomeMode('single', false);
+    setHomeMode('results');
     forgetRemovedExports();
 }
 
@@ -8328,10 +8623,11 @@ function formatStarredAt(iso) {
         ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
 }
 
-// Ticket numbers open the ticket; every row has a star
-function ticketTableHtml(tickets, columns = TICKET_COLUMNS) {
+// Ticket numbers open the ticket; every row has a star. Rows whose number is
+// in `highlight` (e.g. the latest answer's tickets) are marked.
+function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set()) {
     const head = columns.map(([label]) => `<th>${escapeHtml(label)}</th>`).join('');
-    const body = tickets.map(t => '<tr>' + columns.map(([label, get], i) => {
+    const body = tickets.map(t => (highlight.has(t.number) ? '<tr class="fresh">' : '<tr>') + columns.map(([label, get], i) => {
         if (i === 0) {
             return `<td class="ticket-cell"><button type="button" class="ticket-link" data-ticket="${escapeHtml(t.number)}"` +
                 ` title="Open ${escapeHtml(t.number)}">${escapeHtml(t.number)}</button>${starButtonHtml(t.number)}</td>`;
@@ -8388,22 +8684,13 @@ function ticketCardHtml(t, record) {
     return html;
 }
 
-// "Found 12 tickets. Not found: INC1234567. Left out (not ticket numbers): hello"
-function searchSummaryHtml(data) {
-    const parts = [`Found ${data.found.length.toLocaleString()} ${data.found.length === 1 ? 'ticket' : 'tickets'}.`];
-    if (data.notFound.length) parts.push(`Not found: ${data.notFound.join(', ')}.`);
-    if (data.ignored.length) parts.push(`Left out (not ticket numbers): ${data.ignored.join(', ')}.`);
-    if (data.tooMany) parts.push('Only the first 200 numbers were searched.');
-    return `<p class="home-status">${escapeHtml(parts.join(' '))}</p>`;
-}
 
-const TICKET_EXAMPLES = 'Ticket numbers look like INC1814467, CHG1101321, RITM0440498, SCTASK0595823 or REQ0428071.';
-
-// Runs one search into one result box, showing progress and errors there
-async function runHomeSearch(mode, outId, work) {
+// Runs one search into one result box, showing progress and errors there.
+// quiet: keep what's showing until the new content is ready (background refresh).
+async function runHomeSearch(mode, outId, work, quiet = false) {
     const run = ++homeRuns[mode];
     const out = document.getElementById(outId);
-    out.innerHTML = '<p class="home-status">Searching…</p>';
+    if (!quiet) out.innerHTML = '<p class="home-status">Loading…</p>';
     try {
         const html = await work();
         if (run !== homeRuns[mode] || html === null) return;
@@ -8416,36 +8703,113 @@ async function runHomeSearch(mode, outId, work) {
     forgetRemovedExports();
 }
 
-function searchSingleTicket(number) {
-    const input = document.getElementById('single-ticket-input');
-    if (number) input.value = number;
-    const text = input.value.trim();
-    if (!text) return;
-    return runHomeSearch('single', 'single-ticket-result', async () => {
-        const data = await searchTickets(text, true);
+// =====================================================================
+// TICKET RESULTS: every ticket the person has been shown, newest first: the
+// tickets in the AI assistant's answers (the server records them as it
+// answers) and records they opened. Kept with their account, so the list is
+// there after a refresh, signing out, or on another computer.
+// =====================================================================
+
+const NO_TICKET_RESULTS_HTML = '<p class="home-status">Tickets in the AI assistant\'s answers show up here automatically, ' +
+    'and stay here after you refresh or sign out. Click a ticket number to see its full record.</p>';
+
+let latestShown = new Set(); // the latest answer's tickets, highlighted in the list
+let openedRecord = null;     // a ticket whose full record is showing instead of the list
+
+const SHOWN_COLUMNS = [
+    ['Shown', t => formatShownAt(t.shownAt)],
+    ['From', t => t.question || 'Opened from a ticket number'],
+];
+
+// "Oct 22, 1:05 PM"
+function formatShownAt(iso) {
+    const d = iso ? new Date(iso) : null;
+    return d && !Number.isNaN(d.getTime())
+        ? d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+}
+
+// The list (or the record someone opened). quiet: refresh without a "Loading…".
+function showTicketResults(quiet = false) {
+    const out = document.getElementById('ticket-results');
+    if (!sessionTokenValue) { out.innerHTML = NO_TICKET_RESULTS_HTML; return; }
+    if (openedRecord) return showOpenedRecord(openedRecord);
+    return runHomeSearch('results', 'ticket-results', async () => {
+        const response = await fetch(`${API_BASE}/api/seen-tickets`, { headers: authHeaders() });
+        if (handleUnauthorized(response)) return null;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        const tickets = data.tickets || [];
+        if (!tickets.length) return NO_TICKET_RESULTS_HTML;
+        const columns = [...TICKET_COLUMNS, ...SHOWN_COLUMNS];
+        const fresh = tickets.filter(t => latestShown.has(t.number)).length;
+        return '<div class="results-head">' +
+            `<p class="home-status">${tickets.length.toLocaleString()} ${tickets.length === 1 ? 'ticket' : 'tickets'} shown to you, newest first. ` +
+            (fresh ? `<span class="fresh-key">Highlighted: the ${fresh.toLocaleString()} from your latest question.</span> ` : '') +
+            'Click a ticket number to see its full record.</p>' +
+            `<button type="button" class="home-action danger" onclick="deleteTicketResults(${tickets.length})">🗑 Delete ticket results</button></div>` +
+            starAllHtml(tickets.map(t => t.number)) +
+            ticketTableHtml(tickets, columns, latestShown) + ticketDownloadHtml(tickets, 'Ticket results', columns);
+    }, quiet);
+}
+
+// A ticket number someone clicked: its full record, with the way back to the list.
+// Opening it counts as being shown, so it joins the list.
+function openTicketRecord(number) {
+    openedRecord = number;
+    switchTab('home');
+    setHomeMode('results');
+    if (STARRABLE.test(number)) {
+        fetch(`${API_BASE}/api/seen-tickets`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ numbers: [number] }),
+        }).catch(err => console.error('Could not add the ticket to Ticket results:', err));
+    }
+    document.getElementById('home-view').scrollTop = 0;
+}
+
+function showOpenedRecord(number) {
+    return runHomeSearch('results', 'ticket-results', async () => {
+        const data = await searchTickets(number, true);
         if (!data) return null;
-        if (!data.found.length) {
-            return `<p class="home-status">No ticket matches “${escapeHtml(text)}”. ${TICKET_EXAMPLES}</p>`;
-        }
-        if (data.found.length === 1) return ticketCardHtml(data.found[0], data.record);
-        // A REQ, or a bare number that fits several types, brings up more than one
-        return `<p class="home-status">${data.found.length.toLocaleString()} tickets match “${escapeHtml(text)}”. Click one to see its full record.</p>` +
-            ticketTableHtml(data.found);
+        const back = '<div class="home-actions"><button type="button" class="home-action" onclick="closeTicketRecord()">← All ticket results</button></div>';
+        if (!data.found.length) return back + `<p class="home-status">${escapeHtml(number)} is not in the data.</p>`;
+        if (data.found.length === 1) return back + ticketCardHtml(data.found[0], data.record);
+        return back + ticketTableHtml(data.found);
     });
 }
 
-function searchManyTickets() {
-    const text = document.getElementById('multi-ticket-input').value.trim();
-    if (!text) return;
-    return runHomeSearch('multiple', 'multi-ticket-result', async () => {
-        const data = await searchTickets(text);
-        if (!data) return null;
-        if (!data.found.length) return searchSummaryHtml(data) + `<p class="home-status">${TICKET_EXAMPLES}</p>`;
-        const numbers = data.found.map(t => t.number).filter(n => STARRABLE.test(n));
-        return searchSummaryHtml(data) +
-            `<div class="home-actions"><button type="button" class="home-action" data-star-all="${escapeHtml(numbers.join(','))}">★ Star all ${numbers.length.toLocaleString()}</button></div>` +
-            ticketTableHtml(data.found) + ticketDownloadHtml(data.found, 'Ticket search');
-    });
+function closeTicketRecord() {
+    openedRecord = null;
+    showTicketResults();
+}
+
+// "Delete ticket results": after a confirmation, the whole list goes, on every
+// computer. Stars are separate and stay; new answers fill the list again.
+async function deleteTicketResults(count) {
+    const what = `${count.toLocaleString()} ${count === 1 ? 'ticket' : 'tickets'}`;
+    if (!confirm(`Delete your ticket results? The list of ${what} is cleared on every computer you use. Your starred tickets stay starred.`)) return;
+    try {
+        const response = await fetch(`${API_BASE}/api/seen-tickets`, { method: 'DELETE', headers: authHeaders() });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        latestShown = new Set();
+        openedRecord = null;
+        await showTicketResults();
+        showToast('Ticket results deleted');
+    } catch (err) {
+        showToast(`❌ ${err.message}`);
+    }
+}
+
+// An AI answer showed these tickets (the server has already saved them): they
+// go to the top of Ticket results, highlighted, and Home shows that list
+function ticketsShown(numbers) {
+    latestShown = new Set(numbers);
+    openedRecord = null;
+    setHomeMode('results', true);
+    showToast(`🎫 ${numbers.length.toLocaleString()} ${numbers.length === 1 ? 'ticket' : 'tickets'} from this answer ${numbers.length === 1 ? 'is' : 'are'} now in Ticket results on Home`);
 }
 
 // Newest star first. Unstarring here leaves the row (with an empty star) until
@@ -8455,7 +8819,7 @@ function showStarred() {
         await loadStars();
         const numbers = [...starredTickets.keys()];
         if (!numbers.length) {
-            return '<p class="home-status">No starred tickets yet. Click ☆ next to any ticket number: in a search here, ' +
+            return '<p class="home-status">No starred tickets yet. Click ☆ next to any ticket number: in your ticket results, ' +
                 'in the AI assistant\'s answers, or on an incident, change or request record in Dashboards. ' +
                 'Your stars are saved to your account, so they are here on any computer you sign in from.</p>';
         }
@@ -8474,19 +8838,22 @@ document.addEventListener('click', e => {
     const star = e.target.closest('.star-btn[data-star]');
     if (star) { setStarred(star.dataset.star, !starredTickets.has(star.dataset.star)); return; }
 
-    const ticket = e.target.closest('[data-ticket]');
-    if (ticket) {
-        switchTab('home');
-        setHomeMode('single', false);
-        searchSingleTicket(ticket.dataset.ticket);
+    const many = e.target.closest('.star-many');
+    if (many) {
+        const numbers = many.dataset.starMany.split(',');
+        starMany(numbers, starManyWhat(numbers, many.dataset.kind));
         return;
     }
 
-    const record = e.target.closest('[data-open-dashboard]');
-    if (record) { openInDashboards(record.dataset.openDashboard); return; }
+    const ticket = e.target.closest('[data-ticket]');
+    if (ticket) { openTicketRecord(ticket.dataset.ticket); return; }
 
-    const all = e.target.closest('[data-star-all]');
-    if (all && all.dataset.starAll) starAll(all.dataset.starAll.split(','));
+    // Home's example question is asked in the chat
+    const example = e.target.closest('[data-example]');
+    if (example) { askAssistant(example.dataset.example); return; }
+
+    const record = e.target.closest('[data-open-dashboard]');
+    if (record) openInDashboards(record.dataset.openDashboard);
 });
 
 // =====================================================================
@@ -8494,6 +8861,7 @@ document.addEventListener('click', e => {
 // has expired, the first API call returns 401 and brings the page back
 // =====================================================================
 
+document.getElementById('ticket-results').innerHTML = NO_TICKET_RESULTS_HTML;
 showApp(Boolean(sessionTokenValue));
 loadCurrentUser();
 
@@ -9679,68 +10047,100 @@ FROM reporting.requests GROUP BY 1 ORDER BY 2 DESC LIMIT 8`,
 // view can't hold links.
 // ---------------------------------------------------------------------
 
+// Filter suggestions: as people type in a filter box, Metabase offers the
+// values that exist (team names, ticket numbers, ...), so they can switch to
+// another team or ticket from the box itself. A filter's `values` say where
+// they come from: distinct([expression, view, condition?], ...) reads them
+// from the reporting views (one or several, merged); fixed(...) lists them.
+const distinct = (...sources) => ({
+  sql: sources.map(([expr, view, where]) =>
+    `SELECT DISTINCT ${expr} AS "Value" FROM reporting.${view} WHERE ${expr} IS NOT NULL${where ? ` AND ${where}` : ''}`,
+  ).join('\nUNION\n') + '\nORDER BY 1',
+});
+const fixed = (...values) => ({ list: values });
+const YES_NO = fixed('Yes', 'No');
+const OPEN_CLOSED = fixed('Open', 'Closed');
+
+// Expressions a filter matches on, shared by its condition and its suggestions
+const OPEN_OR_CLOSED_EXPR = "CASE WHEN is_open THEN 'Open' ELSE 'Closed' END";
+const AGE = 'substr(age_bucket, 4)';
+const HOUR = "to_char(created_at, 'HH24')";
+const WEEKDAY = "to_char(created_at, 'Dy')";
+const WAITING = "(CASE WHEN state = 'On Hold' THEN 'On hold: ' || coalesce(on_hold_reason, 'no reason given') ELSE state END)";
+const OPENED_BY = "coalesce(opened_by_group, 'Not recorded')";
+const RISK = "coalesce(nullif(risk, ''), 'Not set')";
+const ENVIRONMENT = "coalesce(environment, 'Not set')";
+const GUIDE = "coalesce(order_guide, 'Ordered directly (no guide)')";
+
 // Lists: every filter is optional; Metabase leaves out a [[...]] part when
-// its filter is empty. Each entry: [slug, label, SQL condition].
-const listParams = filters => filters.map(([slug, name]) => ({ slug, name }));
+// its filter is empty. Each entry: [slug, label, SQL condition, suggestions].
+const listParams = filters => filters.map(([slug, name, , values]) => ({ slug, name, values }));
 const listWhere = filters => `WHERE true\n${filters.map(([, , cond]) => `  [[AND ${cond}]]`).join('\n')}`;
-const OPEN_OR_CLOSED = slug => `CASE WHEN is_open THEN 'Open' ELSE 'Closed' END = {{${slug}}}`;
+const OPEN_OR_CLOSED = slug => `${OPEN_OR_CLOSED_EXPR} = {{${slug}}}`;
 
 const INCIDENT_FILTERS = [
-  ['status', 'Status', OPEN_OR_CLOSED('status')],
-  ['priority', 'Priority', 'priority = {{priority}}'],
-  ['subcategory', 'Subcategory', 'subcategory = {{subcategory}}'],
-  ['channel', 'Reported via', 'contact_type = {{channel}}'],
-  ['source', 'Source', 'source = {{source}}'],
-  ['age', 'Open for', 'is_open AND substr(age_bucket, 4) = {{age}}'],
-  ['older_than', 'Open at least (days)', 'age_days >= CAST({{older_than}} AS numeric)'],
-  ['hour', 'Hour of day', "to_char(created_at, 'HH24') = {{hour}}"],
-  ['weekday', 'Day of week', "to_char(created_at, 'Dy') = {{weekday}}"],
+  ['status', 'Status', OPEN_OR_CLOSED('status'), OPEN_CLOSED],
+  ['priority', 'Priority', 'priority = {{priority}}', distinct(['priority', 'incidents'])],
+  ['subcategory', 'Subcategory', 'subcategory = {{subcategory}}', distinct(['subcategory', 'incidents'])],
+  ['channel', 'Reported via', 'contact_type = {{channel}}', distinct(['contact_type', 'incidents'])],
+  ['source', 'Source', 'source = {{source}}', distinct(['source', 'incidents'])],
+  ['age', 'Open for', `is_open AND ${AGE} = {{age}}`, distinct([AGE, 'incidents', 'is_open'])],
+  ['older_than', 'Open at least (days)', 'age_days >= CAST({{older_than}} AS numeric)', fixed('1', '3', '7', '14', '30', '60', '90')],
+  ['hour', 'Hour of day', `${HOUR} = {{hour}}`, distinct([HOUR, 'incidents'])],
+  ['weekday', 'Day of week', `${WEEKDAY} = {{weekday}}`, fixed('Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun')],
   // Chart clicks send dates as 2026-08-17T00:00:00Z
-  ['date', 'Date', 'created_at::date = CAST(left({{date}}, 10) AS date)'],
-  ['team', 'Team', 'assignment_group = {{team}}'],
-  ['system', 'Server / system', 'configuration_item = {{system}}'],
-  ['site', 'Site', 'location = {{site}}'],
-  ['kb', 'Knowledge article', 'kb_article = {{kb}}'],
-  ['workaround', 'Closed with a workaround', "closed_with_workaround = ({{workaround}} = 'Yes')"],
-  ['reopened', 'Reopened', "(reopen_count > 0) = ({{reopened}} = 'Yes')"],
-  ['reassigned', 'Reassigned', "was_reassigned = ({{reassigned}} = 'Yes')"],
-  ['waiting', 'Status detail', "is_open AND (CASE WHEN state = 'On Hold' THEN 'On hold: ' || coalesce(on_hold_reason, 'no reason given') ELSE state END) = {{waiting}}"],
-  ['assignee', 'Assigned to', 'assigned_to = {{assignee}}'],
-  ['opened_by', 'Raised by', "coalesce(opened_by_group, 'Not recorded') = {{opened_by}}"],
+  ['date', 'Date', 'created_at::date = CAST(left({{date}}, 10) AS date)', distinct(["to_char(created_at, 'YYYY-MM-DD')", 'incidents'])],
+  ['team', 'Team', 'assignment_group = {{team}}', distinct(['assignment_group', 'incidents'])],
+  ['system', 'Server / system', 'configuration_item = {{system}}', distinct(['configuration_item', 'incidents'])],
+  ['site', 'Site', 'location = {{site}}', distinct(['location', 'incidents'])],
+  ['kb', 'Knowledge article', 'kb_article = {{kb}}', distinct(['kb_article', 'incidents'])],
+  ['workaround', 'Closed with a workaround', "closed_with_workaround = ({{workaround}} = 'Yes')", YES_NO],
+  ['reopened', 'Reopened', "(reopen_count > 0) = ({{reopened}} = 'Yes')", YES_NO],
+  ['reassigned', 'Reassigned', "was_reassigned = ({{reassigned}} = 'Yes')", YES_NO],
+  ['waiting', 'Status detail', `is_open AND ${WAITING} = {{waiting}}`, distinct([WAITING, 'incidents', 'is_open'])],
+  ['assignee', 'Assigned to', 'assigned_to = {{assignee}}', distinct(['assigned_to', 'incidents'])],
+  ['opened_by', 'Raised by', `${OPENED_BY} = {{opened_by}}`, distinct([OPENED_BY, 'incidents'])],
 ];
 
 const CHANGE_FILTERS = [
-  ['status', 'Status', OPEN_OR_CLOSED('status')],
-  ['type', 'Type', 'type = {{type}}'],
-  ['risk', 'Risk', "coalesce(nullif(risk, ''), 'Not set') = {{risk}}"],
-  ['category', 'Category', 'sub_type = {{category}}'],
-  ['environment', 'Environment', "coalesce(environment, 'Not set') = {{environment}}"],
-  ['outage', 'Outage', "has_outage = ({{outage}} = 'Yes')"],
-  ['approval', 'Approval', 'approval = {{approval}}'],
-  ['sap', 'Affects SAP', "affects_sap = ({{sap}} = 'Yes')"],
-  ['transport', 'Needs SAP transport', "needs_sap_transport = ({{transport}} = 'Yes')"],
-  ['brewery', 'Affects breweries', "affects_brewery = ({{brewery}} = 'Yes')"],
-  ['process_failure', 'Process failure', "process_failure = ({{process_failure}} = 'Yes')"],
-  ['urgent', 'Emergency or expedited', "is_emergency_or_expedited = ({{urgent}} = 'Yes')"],
-  ['starts_within', 'Starts within (days)', "state <> 'Canceled' AND planned_start >= (SELECT as_of FROM reporting.data_as_of) AND planned_start < (SELECT as_of FROM reporting.data_as_of) + make_interval(days => CAST({{starts_within}} AS int))"],
+  ['status', 'Status', OPEN_OR_CLOSED('status'), OPEN_CLOSED],
+  ['type', 'Type', 'type = {{type}}', distinct(['type', 'changes'])],
+  ['risk', 'Risk', `${RISK} = {{risk}}`, distinct([RISK, 'changes'])],
+  ['category', 'Category', 'sub_type = {{category}}', distinct(['sub_type', 'changes'])],
+  ['environment', 'Environment', `${ENVIRONMENT} = {{environment}}`, distinct([ENVIRONMENT, 'changes'])],
+  ['outage', 'Outage', "has_outage = ({{outage}} = 'Yes')", YES_NO],
+  ['approval', 'Approval', 'approval = {{approval}}', distinct(['approval', 'changes'])],
+  ['sap', 'Affects SAP', "affects_sap = ({{sap}} = 'Yes')", YES_NO],
+  ['transport', 'Needs SAP transport', "needs_sap_transport = ({{transport}} = 'Yes')", YES_NO],
+  ['brewery', 'Affects breweries', "affects_brewery = ({{brewery}} = 'Yes')", YES_NO],
+  ['process_failure', 'Process failure', "process_failure = ({{process_failure}} = 'Yes')", YES_NO],
+  ['urgent', 'Emergency or expedited', "is_emergency_or_expedited = ({{urgent}} = 'Yes')", YES_NO],
+  ['starts_within', 'Starts within (days)', "state <> 'Canceled' AND planned_start >= (SELECT as_of FROM reporting.data_as_of) AND planned_start < (SELECT as_of FROM reporting.data_as_of) + make_interval(days => CAST({{starts_within}} AS int))", fixed('1', '3', '7', '14', '30')],
 ];
 
 const REQUEST_FILTERS = [
-  ['status', 'Status', OPEN_OR_CLOSED('status')],
-  ['item', 'Catalog item', 'item = {{item}}'],
-  ['site', 'Site', 'location = {{site}}'],
-  ['approval', 'Approval', 'approval = {{approval}}'],
-  ['outcome', 'Outcome', "{{outcome}} = 'Rejected or cancelled' AND (approval = 'Rejected' OR state = 'Closed Cancelled')"],
-  ['guide', 'Order guide', "coalesce(order_guide, 'Ordered directly (no guide)') = {{guide}}"],
+  ['status', 'Status', OPEN_OR_CLOSED('status'), OPEN_CLOSED],
+  ['item', 'Catalog item', 'item = {{item}}', distinct(['item', 'requests'])],
+  ['site', 'Site', 'location = {{site}}', distinct(['location', 'requests'])],
+  ['approval', 'Approval', 'approval = {{approval}}', distinct(['approval', 'requests'])],
+  ['outcome', 'Outcome', "{{outcome}} = 'Rejected or cancelled' AND (approval = 'Rejected' OR state = 'Closed Cancelled')", fixed('Rejected or cancelled')],
+  ['guide', 'Order guide', `${GUIDE} = {{guide}}`, distinct([GUIDE, 'requests'])],
 ];
 
 const TASK_FILTERS = [
-  ['status', 'Status', OPEN_OR_CLOSED('status')],
-  ['team', 'Team', 'assignment_group = {{team}}'],
-  ['state', 'State', 'state = {{state}}'],
-  ['sla', 'SLA', "CASE WHEN sla_breached THEN 'Breached' ELSE 'Met' END = {{sla}}"],
-  ['item', 'Catalog item', 'item = {{item}}'],
+  ['status', 'Status', OPEN_OR_CLOSED('status'), OPEN_CLOSED],
+  ['team', 'Team', 'assignment_group = {{team}}', distinct(['assignment_group', 'catalog_tasks'])],
+  ['state', 'State', 'state = {{state}}', distinct(['state', 'catalog_tasks'])],
+  ['sla', 'SLA', "CASE WHEN sla_breached THEN 'Breached' ELSE 'Met' END = {{sla}}", fixed('Breached', 'Met')],
+  ['item', 'Catalog item', 'item = {{item}}', distinct(['item', 'catalog_tasks'])],
 ];
+
+// Single-item pages: the suggestions cover everything the page itself matches on
+const TEAM_VALUES = distinct(['assignment_group', 'incidents'], ['assignment_group', 'catalog_tasks'], ['owner_group', 'changes'], ['approver_group', 'approvals']);
+const SYSTEM_VALUES = distinct(['configuration_item', 'incidents'], ['configuration_item', 'changes']);
+const SITE_VALUES = distinct(['location', 'incidents'], ['location', 'requests'], ['brewery', 'change_breweries']);
+const PROBLEM_VALUES = distinct(['problem', 'incidents'], ['linked_problem', 'changes']);
+const ITEM_VALUES = distinct(['item', 'requests'], ['item', 'catalog_tasks']);
 
 // Full-width record view, and the clickable "Go to" row under it
 const RECORD = { display: 'object', w: 24, h: 12 };
@@ -9750,7 +10150,7 @@ const DETAILS = [
   {
     key: 'incident-detail',
     name: 'Incident',
-    params: [{ slug: 'number', name: 'Incident' }],
+    params: [{ slug: 'number', name: 'Incident', values: distinct(['number', 'incidents']) }],
     cards: [
       { name: 'Incident record', ...RECORD, h: 14, sql: `
 SELECT number AS "Incident", short_description AS "Summary", state AS "State", priority AS "Priority",
@@ -9781,7 +10181,7 @@ ORDER BY i.created_at DESC LIMIT 25`,
   {
     key: 'change-detail',
     name: 'Change',
-    params: [{ slug: 'number', name: 'Change' }],
+    params: [{ slug: 'number', name: 'Change', values: distinct(['number', 'changes']) }],
     cards: [
       { name: 'Change record', ...RECORD, h: 14, sql: `
 SELECT number AS "Change", short_description AS "Summary", type AS "Type", sub_type AS "Category", state AS "State",
@@ -9819,7 +10219,7 @@ SELECT brewery AS "Brewery" FROM reporting.change_breweries WHERE number = {{num
   {
     key: 'request-detail',
     name: 'Request',
-    params: [{ slug: 'number', name: 'Request' }],
+    params: [{ slug: 'number', name: 'Request', values: distinct(['number', 'requests']) }],
     cards: [
       { name: 'Request record', ...RECORD, sql: `
 SELECT number AS "Request", item AS "Catalog item", short_description AS "Summary", state AS "State", stage AS "Stage",
@@ -9846,7 +10246,7 @@ FROM reporting.approvals WHERE approval_for = 'Request' AND parent = {{number}} 
   {
     key: 'team-detail',
     name: 'Team',
-    params: [{ slug: 'team', name: 'Team' }],
+    params: [{ slug: 'team', name: 'Team', values: TEAM_VALUES }],
     cards: [
       { name: 'Open incidents', ...SCALAR, sql: `SELECT count(*) FILTER (WHERE is_open) AS "Open incidents" FROM reporting.incidents WHERE assignment_group = {{team}}` },
       { name: 'Average hours to resolve', ...SCALAR, sql: `SELECT round(avg(hours_to_resolve), 1) AS "Average hours to resolve" FROM reporting.incidents WHERE assignment_group = {{team}}` },
@@ -9909,7 +10309,7 @@ ORDER BY planned_start DESC NULLS LAST LIMIT 50`,
   {
     key: 'system-detail',
     name: 'Server / system',
-    params: [{ slug: 'system', name: 'Server / system' }],
+    params: [{ slug: 'system', name: 'Server / system', values: SYSTEM_VALUES }],
     cards: [
       { name: 'Incidents', ...SCALAR, sql: `SELECT count(*) AS "Incidents" FROM reporting.incidents WHERE configuration_item = {{system}}` },
       { name: 'From monitoring (%)', ...SCALAR, sql: `SELECT round(100.0 * avg((source = 'Monitoring alert')::int), 1) AS "From monitoring (%)" FROM reporting.incidents WHERE configuration_item = {{system}}` },
@@ -9954,7 +10354,7 @@ ORDER BY planned_start DESC NULLS LAST LIMIT 50`,
   {
     key: 'site-detail',
     name: 'Site',
-    params: [{ slug: 'site', name: 'Site' }],
+    params: [{ slug: 'site', name: 'Site', values: SITE_VALUES }],
     cards: [
       { name: 'Incidents', ...SCALAR, sql: `SELECT count(*) AS "Incidents" FROM reporting.incidents WHERE location = {{site}}` },
       { name: 'Open incidents', ...SCALAR, sql: `SELECT count(*) FILTER (WHERE is_open) AS "Open incidents" FROM reporting.incidents WHERE location = {{site}}` },
@@ -9997,7 +10397,7 @@ ORDER BY planned_start DESC NULLS LAST LIMIT 50`,
   {
     key: 'problem-detail',
     name: 'Problem',
-    params: [{ slug: 'problem', name: 'Problem' }],
+    params: [{ slug: 'problem', name: 'Problem', values: PROBLEM_VALUES }],
     cards: [
       { name: 'Linked incidents', ...SCALAR, sql: `SELECT count(*) AS "Linked incidents" FROM reporting.incidents WHERE problem = {{problem}}` },
       { name: 'Still open', ...SCALAR, sql: `SELECT count(*) FILTER (WHERE is_open) AS "Still open" FROM reporting.incidents WHERE problem = {{problem}}` },
@@ -10037,7 +10437,7 @@ ORDER BY planned_start DESC NULLS LAST`,
   {
     key: 'item-detail',
     name: 'Catalog item',
-    params: [{ slug: 'item', name: 'Catalog item' }],
+    params: [{ slug: 'item', name: 'Catalog item', values: ITEM_VALUES }],
     cards: [
       { name: 'Requests', ...SCALAR, sql: `SELECT count(*) AS "Requests" FROM reporting.requests WHERE item = {{item}}` },
       { name: 'Median hours to complete', ...SCALAR, sql: `
@@ -10316,6 +10716,9 @@ function checkDefinitions() {
   if (dupe) throw new Error(`Two dashboards use the key "${dupe}".`);
   const fake = new Map(all.map(def => [def.key, { def, uuid: 'check' }]));
   for (const def of all) {
+    for (const p of def.params || []) {
+      if (!p.values?.sql && !p.values?.list?.length) throw new Error(`"${def.name}": filter "${p.slug}" needs suggestions (distinct(...) or fixed(...)).`);
+    }
     for (const c of def.cards) {
       templateTags(c.sql, def);
       clickSettings(c, fake);
@@ -10329,6 +10732,30 @@ async function createShell(def, collectionId) {
   const dash = await api('POST', '/api/dashboard', { name: def.name, description: def.description || null, collection_id: collectionId });
   const { uuid } = await api('POST', `/api/dashboard/${dash.id}/public_link`);
   return { id: dash.id, uuid, def };
+}
+
+// A filter, with its suggestions: values read from the data become a small
+// query Metabase searches as people type; a fixed list is offered to pick from.
+// One value at a time, because each filter fills a single {{variable}}.
+async function filterParameter(p, def, databaseId, collectionId) {
+  const parameter = { id: `p_${p.slug}`, name: p.name, slug: p.slug, type: 'string/=', sectionId: 'string', isMultiSelect: false };
+  if (p.values.list) {
+    return { ...parameter, values_source_type: 'static-list', values_source_config: { values: p.values.list }, values_query_type: 'list' };
+  }
+  const source = await api('POST', '/api/card', {
+    name: `${def.name}: ${p.name} suggestions`,
+    description: `The values the "${p.name}" filter on "${def.name}" suggests as people type.`,
+    collection_id: collectionId,
+    display: 'table',
+    visualization_settings: {},
+    dataset_query: { type: 'native', native: { query: p.values.sql, 'template-tags': {} }, database: databaseId },
+  });
+  return {
+    ...parameter,
+    values_source_type: 'card',
+    values_source_config: { card_id: source.id, value_field: ['field', 'Value', { 'base-type': 'type/Text' }] },
+    values_query_type: 'search',
+  };
 }
 
 // Step 2: its cards, filters, and what clicking each card opens
@@ -10355,10 +10782,9 @@ async function fillDashboard(shell, databaseId, collectionId, shells) {
       })),
     });
   }
-  await api('PUT', `/api/dashboard/${shell.id}`, {
-    parameters: (def.params || []).map(p => ({ id: `p_${p.slug}`, name: p.name, slug: p.slug, type: 'string/=', sectionId: 'string' })),
-    dashcards,
-  });
+  const parameters = [];
+  for (const p of def.params || []) parameters.push(await filterParameter(p, def, databaseId, collectionId));
+  await api('PUT', `/api/dashboard/${shell.id}`, { parameters, dashcards });
   console.log(`Built "${def.name}"${def.params ? ' (detail page)' : ''}: ${def.cards.length} charts.`);
 }
 
@@ -10530,18 +10956,19 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 |---|---|
 | `server.mjs` | Express app (port 8000): sign-in routes, `/api/query` (one-shot translator with per-session conversation memory), `/api/export`, `/api/tickets/search` and `/api/stars` (home page), dashboards list, and a pass-through of Metabase public-dashboard pages |
 | `tickets.mjs` | Home page ticket search: parses INC/CHG/RITM/SCTASK/REQ numbers and builds its own Cube queries from them (never from model output); full records use Cube's `/meta` column list |
-| `stars.mjs` | Each person's starred tickets, in `onetouch_auth` (`starred_tickets`, created on start) |
+| `stars.mjs` | Each person's starred tickets, in `onetouch_auth` (`starred_tickets`, created on start); `addStars` stars many at once ("Star all", `PUT /api/stars`) up to `MAX_STARS` |
+| `seen.mjs` | Each person's "Ticket results": every ticket shown to them (`seen_tickets`, created on start). `/api/query` records the ticket numbers in each answer (`ticketNumbersIn`) before replying and returns them as `shownTickets`; `GET /api/seen-tickets` returns the list with summaries (`ticketSummaries`); `DELETE /api/seen-tickets` empties it ("Delete ticket results") |
 | `business_logic.mjs` | Everything Claude knows about the data: `ENTITY_CATALOG`, `buildSystemPrompt()` (sections A-E), `OUTPUT_SCHEMA`, and `normalizeAndValidate()`, which every Claude-built query passes through before Cube |
 | `empty_results.mjs` | When a query returns nothing: re-runs it minus one filter at a time, then Claude explains why |
 | `export.mjs` | Tables -> pdf/docx/xlsx/csv/txt/rtf, and zip/7z bundles (7-Zip) |
 | `auth.mjs` | Accounts and sessions in the `onetouch_auth` Postgres DB (its own role `onetouch_app`); scrypt hashes; `db/accounts.json` export/sync |
 | `remote.mjs` | "Remote mode" for clones: serves `public/` on localhost and forwards `/api`, `/public`, `/app` to a OneTouch server |
-| `public/` | The single-page UI (`index.html`, `app.js`, `style.css`); no build step. Home (ticket searches, stars) and Dashboards tabs; the AI chat is a header search bar that opens into a panel |
+| `public/` | The single-page UI (`index.html`, `app.js`, `style.css`); no build step. Home has the AI assistant's card (example question, Open chat, Delete chat; the chat opens as a panel over the page), ticket results (a clicked ticket's record) and starred tickets; Dashboards is the other tab. Delete chat resets the server conversation and bumps `chatEpoch` so a late answer is dropped |
 | `db/` | `init-auth.sh`, `init-reporting.sh`, `reporting-views.sql` (typed `reporting.*` views for Metabase), `accounts.json` |
 | `scripts/users.mjs` | Account admin CLI (add, import CSV, export, sync, ...) |
 | `scripts/warmup.mjs` | `npm run warmup`: before a crowd, asks every question in `scripts/warmup-questions.txt` (so each is answered from the repeated-question cache) and opens every dashboard (filling Metabase's result cache); lists anything that failed |
 | `scripts/share.mjs` | `npm run share`: starts the stack and a Cloudflare tunnel (free, or permanent with `TUNNEL_TOKEN`), checks the link from outside via public DNS, prints and copies it; `--new`, `--stop` |
-| `scripts/metabase-setup.mjs` | Builds the Metabase dashboards (the `DASHBOARDS` list, each with its drawer `group`) and the drill-down pages clicks open (`DETAILS`; each chart's `click` / table's `links` say where a click goes) via Metabase's API; checks every link before changing anything; rerunnable. Writes `metabase-dashboards.json`, which the Dashboards tab reads |
+| `scripts/metabase-setup.mjs` | Builds the Metabase dashboards (the `DASHBOARDS` list, each with its drawer `group`) and the drill-down pages clicks open (`DETAILS`; each chart's `click` / table's `links` say where a click goes) via Metabase's API; every filter needs suggestions (`distinct(...)` from the reporting views, or `fixed(...)`); turns on result caching (`--cache-only` does just that); checks every link and filter before changing anything; rerunnable (new links each run). Writes `metabase-dashboards.json`, which the Dashboards tab reads; `public/app.js` returns to the main dashboard when a detail page's filters are all cleared |
 | `model/cubes/*.yml` | Cube data model over `analytics_db` |
 | `docker-compose.yml` | postgres, db-setup (runs `db/init-*.sh` on every `up`), cube, metabase, app, optional Cloudflare tunnels |
 
@@ -10718,6 +11145,7 @@ const FILES = [
   'scripts/check.mjs', 'scripts/build-docs.mjs',
   // Added later; at the end so the guide's links to B.1-B.36 keep their numbers
   'tickets.mjs', 'stars.mjs', 'scripts/share.mjs', 'scripts/warmup.mjs', 'scripts/warmup-questions.txt',
+  'seen.mjs',
 ];
 
 // Not copied in, and why (shown in the appendix)
@@ -10976,6 +11404,31 @@ export async function findTickets(text, runQuery) {
   return { found, notFound, ignored: parsed.ignored, tooMany: parsed.wanted.length > MAX_SEARCH_NUMBERS };
 }
 
+// Summaries for a list of exact ticket numbers (e.g. everything someone has
+// been shown), without the search's 200-number limit -> Map(number -> ticket)
+export async function ticketSummaries(numbers, runQuery) {
+  const byPrefix = new Map();
+  for (const n of new Set(numbers)) {
+    if (!STARRABLE.test(n)) continue;
+    const p = prefixOf(n);
+    if (!byPrefix.has(p)) byPrefix.set(p, []);
+    byPrefix.get(p).push(n);
+  }
+  const looked = await Promise.all([...byPrefix].map(([p, list]) => lookUp(p, list, runQuery)));
+  return new Map(looked.flat().map(t => [t.number, t]));
+}
+
+// The ticket numbers anywhere in a set of result rows, in the order they appear
+export function ticketNumbersIn(rows) {
+  const found = new Set();
+  for (const row of rows) {
+    for (const value of Object.values(row)) {
+      if (typeof value === 'string' && STARRABLE.test(value)) found.add(value);
+    }
+  }
+  return [...found];
+}
+
 // ---------------------------------------------------------------------
 // One ticket's full record: every column its cube has, leading with the
 // ones people look at first, and leaving out the empty ones
@@ -11065,6 +11518,26 @@ export async function addStar(userId, number) {
   if (rows.length) return true;
   const existing = await pool.query('SELECT 1 FROM starred_tickets WHERE user_id = $1 AND number = $2', [userId, number]);
   return existing.rows.length > 0;
+}
+
+// "Star all": stars as many of these as fit under MAX_STARS, in the order given.
+// -> the ones that are starred now (any missing from it didn't fit)
+export async function addStars(userId, numbers) {
+  const { rows: [{ count }] } = await pool.query(
+    'SELECT count(*)::int AS count FROM starred_tickets WHERE user_id = $1', [userId]);
+  const room = Math.max(MAX_STARS - count, 0);
+  if (room) {
+    await pool.query(
+      `INSERT INTO starred_tickets (user_id, number)
+       SELECT $1, u.number FROM unnest($2::text[]) WITH ORDINALITY AS u(number, i)
+        WHERE NOT EXISTS (SELECT 1 FROM starred_tickets s WHERE s.user_id = $1 AND s.number = u.number)
+        ORDER BY u.i LIMIT $3
+       ON CONFLICT DO NOTHING`,
+      [userId, numbers, room]);
+  }
+  const { rows } = await pool.query(
+    'SELECT number FROM starred_tickets WHERE user_id = $1 AND number = ANY($2::text[])', [userId, numbers]);
+  return rows.map(r => r.number);
 }
 
 export async function removeStar(userId, number) {
@@ -11300,15 +11773,17 @@ console.log('='.repeat(64) + '\n');
 //
 //   npm run warmup                         this computer's OneTouch (localhost)
 //   npm run warmup -- https://onetouch.fyi  another OneTouch server
+//   ... -- --user jsmith                    sign in as someone else (asks for the password)
 //   ... -- --user jsmith --password-stdin   password from stdin instead of a prompt
 //
-// It signs in as you (it asks for your username and password). Run it on the
-// day itself, and don't restart OneTouch afterwards: a restart forgets the
+// It signs in as the "warmup" account, with WARMUP_PASSWORD from .env (or asks
+// for the password), so the demo tickets its answers list land in that
+// account's Ticket results rather than a real person's. Run it on the day
+// itself, and don't restart OneTouch afterwards: a restart forgets the
 // remembered questions, and they are tied to the date.
 
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 
@@ -11317,6 +11792,8 @@ dotenv.config({ quiet: true });
 
 const base = (process.argv.slice(2).find(a => /^https?:\/\//.test(a)) || `http://localhost:${process.env.APP_PORT || 8000}`).replace(/\/+$/, '');
 const QUESTIONS_FILE = 'scripts/warmup-questions.txt';
+// The account the warm-up signs in as (create it with: users.mjs add warmup "Warmup")
+const WARMUP_USER = 'warmup';
 const secs = ms => `${(ms / 1000).toFixed(1)} s`;
 
 function stop(message) {
@@ -11356,16 +11833,16 @@ async function readStdin() {
   return data.replace(/\r?\n$/, '');
 }
 
-// Asks for the username and password; or --user <name> --password-stdin (for scripts)
+// The "warmup" account (password: WARMUP_PASSWORD in .env, or asked for);
+// --user <name> signs in as someone else, --password-stdin reads the password from stdin
 async function signIn() {
   const args = process.argv.slice(2);
-  let username = args.includes('--user') ? args[args.indexOf('--user') + 1] : '';
-  if (!username) {
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    username = (await rl.question('OneTouch username: ')).trim();
-    rl.close();
-  }
-  const password = args.includes('--password-stdin') ? await readStdin() : await promptHidden('Password: ');
+  const username = args.includes('--user') ? args[args.indexOf('--user') + 1] : WARMUP_USER;
+  let password;
+  if (args.includes('--password-stdin')) password = await readStdin();
+  else if (username === WARMUP_USER && process.env.WARMUP_PASSWORD) password = process.env.WARMUP_PASSWORD;
+  else password = await promptHidden(`Password for ${username}: `);
+  console.log(`Signing in as ${username}.`);
   const r = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
   const data = await r.json().catch(() => ({}));
   if (!data.token) stop(data.error || `Sign-in failed (${r.status}).`);
@@ -11499,6 +11976,67 @@ Show me changes owned by the TCS-ServiceDesk-L1-NA-WE team
 
 # Outside the data's dates: Claude says what the export covers
 How many incidents were opened in January 2026?
+```
+
+<a id="b42"></a>
+### B.42 `seen.mjs`
+
+```js
+// =====================================================================
+// SHOWN TICKETS: every ticket each person has been shown (in the AI
+// assistant's answers, or opened as a record), kept with their account in
+// the onetouch_auth database, so Home's "Ticket results" survives a refresh,
+// signing out, and another computer
+// =====================================================================
+
+import { pool } from './auth.mjs';
+
+// The most recent ones are kept; older ones drop off
+export const MAX_SEEN = 2000;
+
+// Safe to run every start (after auth.ensureSchema, which creates users)
+export async function ensureSeenSchema() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS seen_tickets (
+      user_id        integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      number         text NOT NULL,
+      last_shown_at  timestamptz NOT NULL DEFAULT now(),
+      question       text,
+      PRIMARY KEY (user_id, number)
+    );
+    CREATE INDEX IF NOT EXISTS seen_tickets_recent_idx ON seen_tickets (user_id, last_shown_at DESC);
+  `);
+}
+
+// Records that these tickets were just shown, with the question that showed
+// them (null: opened directly). Shown again, a ticket moves back to the top.
+export async function recordSeen(userId, numbers, question = null) {
+  if (!numbers.length) return;
+  await pool.query(
+    `INSERT INTO seen_tickets (user_id, number, question)
+     SELECT $1, n, $3 FROM unnest($2::text[]) AS n
+     ON CONFLICT (user_id, number) DO UPDATE SET last_shown_at = now(), question = EXCLUDED.question`,
+    [userId, numbers, question]);
+  await pool.query(
+    `DELETE FROM seen_tickets WHERE user_id = $1 AND number NOT IN (
+       SELECT number FROM seen_tickets WHERE user_id = $1 ORDER BY last_shown_at DESC, number LIMIT $2)`,
+    [userId, MAX_SEEN]);
+}
+
+// "Delete ticket results": the person's whole list (their stars are separate). -> how many
+export async function clearSeen(userId) {
+  const { rowCount } = await pool.query('DELETE FROM seen_tickets WHERE user_id = $1', [userId]);
+  return rowCount;
+}
+
+// Newest first
+export async function listSeen(userId) {
+  const { rows } = await pool.query(
+    `SELECT number, last_shown_at, question FROM seen_tickets
+      WHERE user_id = $1 ORDER BY last_shown_at DESC, number`,
+    [userId]);
+  return rows.map(r => ({ number: r.number, shownAt: r.last_shown_at.toISOString(), question: r.question }));
+}
 ```
 
 ## Appendix C: images
