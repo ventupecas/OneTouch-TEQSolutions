@@ -43,24 +43,64 @@
 
     <header class="app-header">
         <h1 class="app-title"><img src="android-chrome-192x192.png" alt="" class="app-logo"> OneTouch <span id="user-name" class="user-name"></span></h1>
+        <!-- AI ASSISTANT: a search bar until it's used; asking opens the full chat below it -->
+        <form class="assistant-bar" id="assistant-bar" role="search" onsubmit="event.preventDefault(); askFromBar();">
+            <span class="assistant-bar-icon" aria-hidden="true">💬</span>
+            <input type="text" id="assistant-bar-input" placeholder="Ask the AI assistant a data question…"
+                   aria-label="Ask the AI assistant" autocomplete="off" aria-controls="assistant-panel" aria-expanded="false">
+            <button type="button" class="assistant-resume" id="assistant-resume" hidden onclick="toggleAssistant(true)"
+                    title="Open your conversation">Open chat</button>
+            <button type="submit" class="assistant-bar-ask">Ask</button>
+        </form>
         <nav class="tab-navigation">
-            <button class="tab-btn active" onclick="switchTab('chat')">💬 AI Assistant</button>
-            <button class="tab-btn" onclick="switchTab('dashboard')">📈 Dashboards</button>
+            <button class="tab-btn active" data-tab="home" onclick="switchTab('home')">🏠 Home</button>
+            <button class="tab-btn" data-tab="dashboard" onclick="switchTab('dashboard')">📈 Dashboards</button>
             <button class="sign-out-btn" type="button" onclick="signOut()">Sign out</button>
         </nav>
     </header>
 
     <main class="app-content">
-        <!-- CHAT VIEW CONTAINER -->
-        <section id="chat-view" class="view-panel active">
-            <div class="chat-container">
-                <div class="chat-messages" id="chat-log">
-                    <div class="msg system-msg" id="welcome-msg">Hello!</div>
+        <!-- HOME: welcome, ticket search and starred tickets -->
+        <section id="home-view" class="view-panel active">
+            <div class="home">
+                <h2 class="home-welcome" id="home-welcome">Welcome!</h2>
+                <p class="home-sub">Look up tickets and keep the ones you follow starred. To ask about the data, use the bar at the top.</p>
+
+                <div class="home-modes" role="tablist" aria-label="Ticket search">
+                    <button type="button" role="tab" class="home-mode active" data-mode="single" aria-selected="true" aria-controls="home-single" onclick="setHomeMode('single')">
+                        <span class="home-mode-name">🔎 Find a ticket</span>
+                        <span class="home-mode-desc">One ticket's full record</span>
+                    </button>
+                    <button type="button" role="tab" class="home-mode" data-mode="multiple" aria-selected="false" aria-controls="home-multiple" onclick="setHomeMode('multiple')">
+                        <span class="home-mode-name">📋 Find several tickets</span>
+                        <span class="home-mode-desc">Paste a list of numbers</span>
+                    </button>
+                    <button type="button" role="tab" class="home-mode" data-mode="starred" aria-selected="false" aria-controls="home-starred" onclick="setHomeMode('starred')">
+                        <span class="home-mode-name">★ Starred tickets <span class="star-count" id="star-count">0</span></span>
+                        <span class="home-mode-desc">Saved to your account</span>
+                    </button>
                 </div>
-                <div class="chat-input-area">
-                    <input type="text" id="user-prompt" placeholder="Ask a data question..." onkeydown="if(event.key === 'Enter') sendPrompt()">
-                    <button id="send-btn" onclick="sendPrompt()">Ask Claude</button>
-                    <button id="new-chat-btn" type="button" onclick="newChat()" title="Start over: Claude forgets this conversation">New chat</button>
+
+                <div class="home-panel" id="home-single" role="tabpanel">
+                    <form class="home-search" onsubmit="event.preventDefault(); searchSingleTicket();">
+                        <input type="text" id="single-ticket-input" autocomplete="off" spellcheck="false" aria-label="Ticket number"
+                               placeholder="Ticket number, e.g. INC1814467, CHG1101321, RITM0440498 or SCTASK0595823">
+                        <button type="submit">Search</button>
+                    </form>
+                    <div class="home-result" id="single-ticket-result" aria-live="polite"></div>
+                </div>
+
+                <div class="home-panel" id="home-multiple" role="tabpanel" hidden>
+                    <form class="home-search multi" onsubmit="event.preventDefault(); searchManyTickets();">
+                        <textarea id="multi-ticket-input" rows="4" spellcheck="false" aria-label="Ticket numbers"
+                                  placeholder="Paste ticket numbers separated by spaces, commas or new lines. A REQ number brings up the requests in that order."></textarea>
+                        <button type="submit">Search</button>
+                    </form>
+                    <div class="home-result" id="multi-ticket-result" aria-live="polite"></div>
+                </div>
+
+                <div class="home-panel" id="home-starred" role="tabpanel" hidden>
+                    <div class="home-result" id="starred-result" aria-live="polite"></div>
                 </div>
             </div>
         </section>
@@ -81,6 +121,8 @@
                         <span class="dashboard-current-name" id="dashboard-current-name"></span>
                         <span class="dashboard-current-desc" id="dashboard-current-desc"></span>
                     </div>
+                    <!-- On an incident, change or request record: star it -->
+                    <button type="button" class="star-btn labelled" id="dashboard-star" hidden></button>
                     <span class="dashboard-hint" id="dashboard-hint" hidden>Click a bar, slice, number or blue value for details</span>
                 </div>
                 <div class="dashboard-body">
@@ -95,6 +137,25 @@
                     </aside>
                     <p class="dashboard-message" id="dashboard-message">Loading dashboards…</p>
                     <iframe id="dashboard-frame" title="Dashboard" hidden></iframe>
+                </div>
+            </div>
+        </section>
+
+        <!-- AI ASSISTANT, opened from the bar in the header; floats over any page -->
+        <div class="assistant-backdrop" id="assistant-backdrop" onclick="toggleAssistant(false)"></div>
+        <section class="assistant-panel" id="assistant-panel" aria-label="AI Assistant">
+            <div class="assistant-head">
+                <span class="assistant-title">💬 AI Assistant</span>
+                <button type="button" class="assistant-minimize" onclick="toggleAssistant(false)" title="Shrink back to the search bar (the conversation is kept)">Minimize ▴</button>
+            </div>
+            <div class="chat-container">
+                <div class="chat-messages" id="chat-log">
+                    <div class="msg system-msg" id="welcome-msg">Hello!</div>
+                </div>
+                <div class="chat-input-area">
+                    <input type="text" id="user-prompt" placeholder="Ask a data question..." onkeydown="if(event.key === 'Enter') sendPrompt()">
+                    <button id="send-btn" onclick="sendPrompt()">Ask Claude</button>
+                    <button id="new-chat-btn" type="button" onclick="newChat()" title="Start over: Claude forgets this conversation">New chat</button>
                 </div>
             </div>
         </section>

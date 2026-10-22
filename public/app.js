@@ -30,21 +30,37 @@ function showLoginError(message) {
     document.getElementById('login-error').textContent = message || '';
 }
 
+// Signed in: the home page, with this person's starred tickets
 function showApp(signedIn) {
     document.body.classList.toggle('signed-out', !signedIn);
-    if (signedIn) document.getElementById('user-prompt').focus();
-    else document.getElementById('login-email').focus();
+    if (signedIn) {
+        switchTab('home');
+        loadStars();
+        focusHomeSearch();
+    } else {
+        document.getElementById('login-email').focus();
+    }
 }
 
-// The signed-in person's name, shown in the header and the chat greeting
+// The signed-in person's name, shown in the header and the greetings
 // (their display name, or their username if they don't have one)
 let currentUserName = '';
+let currentUsername = '';
 
 function setCurrentUser(user) {
     currentUserName = user ? (user.displayName || user.username || '') : '';
+    currentUsername = user ? (user.username || '') : '';
     document.getElementById('user-name').textContent = currentUserName;
-    // The greeting uses just the first name: "Cassidy Sotelo" -> "Hello, Cassidy!"
+    renderGreetings();
+    // Each person's home page opens on the search they used last
+    if (currentUsername) setHomeMode(rememberedHomeMode(), false);
+}
+
+// Just the first name: "Cassidy Sotelo" -> "Welcome, Cassidy!" on the home
+// page and "Hello, Cassidy!" at the top of the chat
+function renderGreetings() {
     const firstName = currentUserName.trim().split(/\s+/)[0];
+    document.getElementById('home-welcome').textContent = firstName ? `Welcome, ${firstName}!` : 'Welcome!';
     const welcome = document.getElementById('welcome-msg');
     if (welcome) welcome.textContent = firstName ? `Hello, ${firstName}!` : 'Hello!';
 }
@@ -103,9 +119,12 @@ function signOut(message) {
     }
     sessionTokenValue = null;
     saveToken(null);
-    // The next person to sign in on this computer must not see this person's chat
+    // The next person to sign in on this computer must not see this person's
+    // chat, searches or stars
+    toggleAssistant(false);
     clearChat();
     setCurrentUser(null);
+    resetHome();
     showLoginError(typeof message === 'string' ? message : '');
     showApp(false);
 }
@@ -128,8 +147,9 @@ const WELCOME_HTML = document.getElementById('chat-log').innerHTML;
 // Back to just the greeting (with the signed-in person's name)
 function clearChat() {
     document.getElementById('chat-log').innerHTML = WELCOME_HTML;
-    exportPayloads.clear();
-    setCurrentUser(currentUserName ? { displayName: currentUserName } : null);
+    forgetRemovedExports();
+    renderGreetings();
+    updateAssistantBar();
 }
 
 async function resetConversation() {
@@ -148,22 +168,61 @@ async function newChat() {
     document.getElementById('user-prompt').focus();
 }
 
-// A token from earlier in this tab skips the sign-in page; if it has
-// expired, the first API call returns 401 and brings the page back
-showApp(Boolean(sessionTokenValue));
-loadCurrentUser();
-
-// A reload empties the chat on screen, so Claude forgets it too
-resetConversation();
-
-// Tab Views Toggling Module
+// Tabs: Home and Dashboards (the AI assistant lives in the header's bar)
 function switchTab(viewName) {
-    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-    document.querySelectorAll('.view-panel').forEach(panel => panel.classList.remove('active'));
-
-    event.target.classList.add('active');
-    document.getElementById(`${viewName}-view`).classList.add('active');
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === viewName));
+    document.querySelectorAll('.view-panel').forEach(panel => panel.classList.toggle('active', panel.id === `${viewName}-view`));
     if (viewName === 'dashboard') loadDashboards();
+    // Stars may have changed elsewhere (the chat, a dashboard, another computer)
+    if (viewName === 'home' && homeMode === 'starred') showStarred();
+}
+
+// =====================================================================
+// AI ASSISTANT: a search bar in the header. Asking a question (or "Open
+// chat") opens the full conversation over the page; Minimize shrinks it
+// back to the bar and keeps the conversation.
+// =====================================================================
+
+function assistantOpen() {
+    return document.getElementById('assistant-panel').classList.contains('open');
+}
+
+// Opens or closes the conversation (no argument: the opposite of now)
+function toggleAssistant(open) {
+    const panel = document.getElementById('assistant-panel');
+    const willOpen = typeof open === 'boolean' ? open : !assistantOpen();
+    panel.classList.toggle('open', willOpen);
+    document.getElementById('assistant-backdrop').classList.toggle('open', willOpen);
+    document.getElementById('assistant-bar-input').setAttribute('aria-expanded', String(willOpen));
+    if (willOpen) {
+        const chatLog = document.getElementById('chat-log');
+        chatLog.scrollTop = chatLog.scrollHeight;
+        document.getElementById('user-prompt').focus();
+    } else if (panel.contains(document.activeElement)) {
+        document.getElementById('assistant-bar-input').focus();
+    }
+    updateAssistantBar();
+}
+
+// The bar's question goes to the chat, which opens to show the answer
+function askFromBar() {
+    const bar = document.getElementById('assistant-bar-input');
+    const question = bar.value.trim();
+    bar.value = '';
+    toggleAssistant(true);
+    if (!question) return;
+    document.getElementById('user-prompt').value = question;
+    sendPrompt();
+}
+
+// While minimized with a conversation going, the bar offers to reopen it
+function updateAssistantBar() {
+    const asked = document.querySelectorAll('#chat-log .user-msg').length;
+    const resume = document.getElementById('assistant-resume');
+    resume.hidden = !asked || assistantOpen();
+    resume.textContent = `Open chat (${asked})`;
+    document.getElementById('assistant-bar-input').placeholder = asked
+        ? 'Ask a follow-up question…' : 'Ask the AI assistant a data question…';
 }
 
 // =====================================================================
@@ -171,7 +230,6 @@ function switchTab(viewName) {
 // shown through the OneTouch server (so they work from any address)
 // =====================================================================
 
-let dashboardsLoaded = false;
 const LAST_DASHBOARD_KEY = 'onetouch-dashboard';
 
 // Every page the frame can show, by its public id: the drawer's dashboards,
@@ -188,13 +246,25 @@ function rememberDashboard(key) {
     try { localStorage.setItem(LAST_DASHBOARD_KEY, key); } catch { /* not remembered; that's fine */ }
 }
 
-async function loadDashboards() {
-    if (dashboardsLoaded) return;
+// Loads the drawer once; resolves true when the dashboards are there.
+// Shared, so the tab and "Open in Dashboards" never load it twice.
+let dashboardsLoading = null;
+function loadDashboards() {
+    if (!dashboardsLoading) {
+        dashboardsLoading = buildDashboards().then(ok => {
+            if (!ok) dashboardsLoading = null; // try again next time
+            return ok;
+        });
+    }
+    return dashboardsLoading;
+}
+
+async function buildDashboards() {
     const picker = document.getElementById('dashboard-picker');
     const message = document.getElementById('dashboard-message');
     try {
         const response = await fetch(`${API_BASE}/api/dashboards`, { headers: authHeaders() });
-        if (handleUnauthorized(response)) return;
+        if (handleUnauthorized(response)) return false;
         const { dashboards, details = [] } = await response.json();
         for (const d of dashboards) dashboardPages.main.set(pageId(d.path), d);
         for (const d of details) dashboardPages.details.set(pageId(d.path), d);
@@ -202,7 +272,7 @@ async function loadDashboards() {
             message.textContent = 'No dashboards yet. Whoever runs this OneTouch server can create them with: ' +
                 'docker exec analytics_node_app node scripts/metabase-setup.mjs';
             document.getElementById('dashboard-drawer-toggle').hidden = true;
-            return;
+            return false;
         }
 
         // The drawer: one heading per group, dashboards in the order the server lists them
@@ -234,17 +304,54 @@ async function loadDashboards() {
             }
             picker.appendChild(section);
         }
-        dashboardsLoaded = true;
 
         const remembered = dashboards.find(d => d.key === rememberedDashboard());
         showDashboard(remembered || dashboards[0]);
         // First visit: open the drawer so people see everything that's there
         if (!remembered) toggleDashboardDrawer(true);
+        return true;
     } catch (err) {
         message.textContent = 'Could not load the dashboards. Please try again.';
         console.error(err);
+        return false;
     }
 }
+
+// The record pages a ticket number can open (built by scripts/metabase-setup.mjs)
+const RECORD_PAGES = { INC: 'incident-detail', CHG: 'change-detail', RITM: 'request-detail' };
+
+// Home page -> that ticket's record in the Dashboards tab
+async function openInDashboards(number) {
+    switchTab('dashboard');
+    if (!await loadDashboards()) return;
+    const key = RECORD_PAGES[(number.match(/^[A-Z]+/) || [])[0]];
+    const page = [...dashboardPages.details.values()].find(d => d.key === key);
+    if (!page) return;
+    toggleDashboardDrawer(false);
+    openDashboardPath(`${page.path}?number=${encodeURIComponent(number)}#titled=false&bordered=false`);
+}
+
+// Moves the frame to a page the way a click inside it would, so ← Back
+// returns to the dashboard underneath. A frame still loading its first
+// dashboard moves once that has loaded.
+let pendingFramePath = null;
+function frameHasPage() {
+    try {
+        return Boolean(pageId(document.getElementById('dashboard-frame').contentWindow.location.pathname));
+    } catch { return false; }
+}
+function openDashboardPath(path) {
+    if (frameHasPage()) document.getElementById('dashboard-frame').contentWindow.location.assign(`${API_BASE}${path}`);
+    else pendingFramePath = path;
+}
+document.getElementById('dashboard-frame').addEventListener('load', () => {
+    if (!pendingFramePath || !frameHasPage()) return;
+    const path = pendingFramePath;
+    pendingFramePath = null;
+    // Not during the load event itself: a page moved before it has finished
+    // loading replaces its history entry, and ← Back would then leave OneTouch
+    setTimeout(() => document.getElementById('dashboard-frame').contentWindow.location.assign(`${API_BASE}${path}`), 50);
+});
 
 function showDashboard(dashboard) {
     markCurrentDashboard(dashboard);
@@ -303,6 +410,16 @@ function followDashboardFrame() {
     } else if (detail) {
         setDashboardHeading(currentMainDashboard ? currentMainDashboard.name : '', detailPageLabel(detail, where.search), '', true);
     }
+
+    // An incident, change or request record can be starred from the toolbar
+    const star = document.getElementById('dashboard-star');
+    const number = detail && detail.params.some(p => p.slug === 'number')
+        ? String(new URLSearchParams(where.search).get('number') || '').toUpperCase() : '';
+    star.hidden = !STARRABLE.test(number);
+    if (!star.hidden) {
+        star.dataset.star = number;
+        paintStar(star);
+    }
 }
 setInterval(followDashboardFrame, 400);
 document.getElementById('dashboard-frame').addEventListener('load', followDashboardFrame);
@@ -329,10 +446,11 @@ function toggleDashboardDrawer(open) {
     }
 }
 
+// Escape closes whatever is open on top: the conversation, then the drawer
 document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && document.getElementById('dashboard-drawer').classList.contains('open')) {
-        toggleDashboardDrawer(false);
-    }
+    if (e.key !== 'Escape') return;
+    if (assistantOpen()) toggleAssistant(false);
+    else if (document.getElementById('dashboard-drawer').classList.contains('open')) toggleDashboardDrawer(false);
 });
 
 // Asynchronous Chat Workflow Engine
@@ -574,7 +692,8 @@ function cellHtml(member, raw, truncate) {
     if (truncate && LONG_TEXT.has(column) && text.length > 120) {
         return `<td${cls} title="${escapeHtml(text)}">${escapeHtml(text.slice(0, 117))}…</td>`;
     }
-    return `<td${cls}>${escapeHtml(text)}</td>`;
+    // A ticket number gets a star next to it
+    return `<td${cls}>${escapeHtml(text)}${starFor(raw)}</td>`;
 }
 
 function renderResults(rows, entity) {
@@ -596,7 +715,7 @@ function renderResults(rows, entity) {
             const { column } = splitMember(c);
             const text = formatValue(c, rows[0][c]);
             const cls = LONG_TEXT.has(column) ? ' class="long"' : '';
-            return `<tr><th>${escapeHtml(columnLabel(c))}</th><td${cls}>${escapeHtml(text)}</td></tr>`;
+            return `<tr><th>${escapeHtml(columnLabel(c))}</th><td${cls}>${escapeHtml(text)}${starFor(rows[0][c])}</td></tr>`;
         }).join('');
         return `<div class="table-wrap"><table class="result-table detail"><tbody>${body}</tbody></table></div>`;
     }
@@ -667,6 +786,13 @@ function registerExport(payload) {
     const id = 'export-' + (++exportCounter);
     exportPayloads.set(id, payload);
     return id;
+}
+
+// Downloads whose bar is gone (chat cleared, a newer search) are dropped
+function forgetRemovedExports() {
+    for (const id of exportPayloads.keys()) {
+        if (!document.getElementById(id)) exportPayloads.delete(id);
+    }
 }
 
 // Values as the user reads them, except counts stay real numbers so
@@ -833,5 +959,381 @@ function appendMessage(cssClass, text) {
     
     chatLog.appendChild(msgBlock);
     chatLog.scrollTop = chatLog.scrollHeight; // Keep log automatically scrolled to bottom
+    updateAssistantBar();
     return uniqueId;
 }
+
+// =====================================================================
+// STARRED TICKETS: kept with each person's account on the server, so they
+// follow them to any computer. Any ticket number shown anywhere (search
+// results, the assistant's tables, a dashboard record) can be starred.
+// =====================================================================
+
+const STARRABLE = /^(INC|CHG|RITM|SCTASK)\d{7}$/;
+const starredTickets = new Map(); // number -> when it was starred, newest first
+let starsLoading = null;
+
+// Fetches this person's stars (again); everything already on screen is repainted
+function loadStars() {
+    if (!sessionTokenValue) return Promise.resolve();
+    if (!starsLoading) {
+        const token = sessionTokenValue;
+        starsLoading = (async () => {
+            try {
+                const response = await fetch(`${API_BASE}/api/stars`, { headers: authHeaders() });
+                if (handleUnauthorized(response)) return;
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+                if (token !== sessionTokenValue) return; // signed out meanwhile
+                starredTickets.clear();
+                for (const s of data.stars) starredTickets.set(s.number, s.starredAt);
+                refreshStarButtons();
+            } catch (err) {
+                console.error('Could not load starred tickets:', err);
+            } finally {
+                starsLoading = null;
+            }
+        })();
+    }
+    return starsLoading;
+}
+
+function starFace(on, labelled) {
+    return (on ? '★' : '☆') + (labelled ? (on ? ' Starred' : ' Star') : '');
+}
+
+function starButtonHtml(number, labelled = false) {
+    const on = starredTickets.has(number);
+    const label = `${on ? 'Unstar' : 'Star'} ${number}`;
+    return `<button type="button" class="star-btn${labelled ? ' labelled' : ''}${on ? ' on' : ''}" data-star="${escapeHtml(number)}"` +
+        ` aria-pressed="${on}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">${starFace(on, labelled)}</button>`;
+}
+
+// A star after a value, if the value is a ticket number
+function starFor(raw) {
+    const value = String(raw ?? '');
+    return STARRABLE.test(value) ? starButtonHtml(value) : '';
+}
+
+function paintStar(button) {
+    const number = button.dataset.star;
+    const on = starredTickets.has(number);
+    const label = `${on ? 'Unstar' : 'Star'} ${number}`;
+    button.textContent = starFace(on, button.classList.contains('labelled'));
+    button.classList.toggle('on', on);
+    button.setAttribute('aria-pressed', String(on));
+    button.title = label;
+    button.setAttribute('aria-label', label);
+}
+
+function refreshStarButtons() {
+    document.querySelectorAll('.star-btn[data-star]').forEach(paintStar);
+    document.getElementById('star-count').textContent = starredTickets.size.toLocaleString();
+}
+
+// Changes on screen at once, and back again if the server says no
+async function setStarred(number, on) {
+    if (!STARRABLE.test(number) || starredTickets.has(number) === on) return true;
+    const before = starredTickets.get(number);
+    if (on) starredTickets.set(number, new Date().toISOString());
+    else starredTickets.delete(number);
+    refreshStarButtons();
+    try {
+        const response = await fetch(`${API_BASE}/api/stars/${encodeURIComponent(number)}`, {
+            method: on ? 'PUT' : 'DELETE',
+            headers: authHeaders(),
+        });
+        if (handleUnauthorized(response)) return false;
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.error || `The server answered ${response.status}.`);
+        }
+        return true;
+    } catch (err) {
+        if (on) starredTickets.delete(number);
+        else starredTickets.set(number, before);
+        refreshStarButtons();
+        showToast(`❌ ${err.message}`);
+        return false;
+    }
+}
+
+async function starAll(numbers) {
+    for (const number of numbers) {
+        if (!await setStarred(number, true)) return;
+    }
+    showToast(`★ Starred ${numbers.length.toLocaleString()} ${numbers.length === 1 ? 'ticket' : 'tickets'}`);
+}
+
+// A short message at the bottom of the screen
+let toastTimer = null;
+function showToast(message) {
+    let toast = document.getElementById('toast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'toast';
+        toast.className = 'toast';
+        toast.setAttribute('role', 'status');
+        document.body.appendChild(toast);
+    }
+    toast.textContent = message;
+    toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 4000);
+}
+
+// =====================================================================
+// HOME PAGE: find one ticket, several tickets, or your starred ones
+// =====================================================================
+
+const HOME_MODES = ['single', 'multiple', 'starred'];
+let homeMode = 'single';
+// Each search bumps its counter, so an older, slower answer can't replace a newer one
+const homeRuns = { single: 0, multiple: 0, starred: 0 };
+
+// The search each person used last, remembered in this browser
+function homeModeKey() {
+    return `onetouch-home-mode:${currentUsername}`;
+}
+function rememberedHomeMode() {
+    try { return localStorage.getItem(homeModeKey()) || 'single'; } catch { return 'single'; }
+}
+
+function setHomeMode(mode, focus = true) {
+    if (!HOME_MODES.includes(mode)) mode = 'single';
+    homeMode = mode;
+    document.querySelectorAll('.home-mode').forEach(b => {
+        const on = b.dataset.mode === mode;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-selected', String(on));
+    });
+    for (const m of HOME_MODES) document.getElementById(`home-${m}`).hidden = m !== mode;
+    if (currentUsername) {
+        try { localStorage.setItem(homeModeKey(), mode); } catch { /* not remembered; that's fine */ }
+    }
+    if (mode === 'starred') showStarred();
+    if (focus) focusHomeSearch();
+}
+
+function focusHomeSearch() {
+    const field = { single: 'single-ticket-input', multiple: 'multi-ticket-input' }[homeMode];
+    if (field) document.getElementById(field).focus();
+}
+
+// Signing out leaves nothing of this person's on the page
+function resetHome() {
+    for (const m of HOME_MODES) homeRuns[m] += 1;
+    document.getElementById('single-ticket-input').value = '';
+    document.getElementById('multi-ticket-input').value = '';
+    for (const id of ['single-ticket-result', 'multi-ticket-result', 'starred-result']) {
+        document.getElementById(id).innerHTML = '';
+    }
+    starredTickets.clear();
+    refreshStarButtons();
+    setHomeMode('single', false);
+    forgetRemovedExports();
+}
+
+// -> { found, notFound, ignored, tooMany, record? }, or null if the session ended
+async function searchTickets(text, record = false) {
+    const response = await fetch(`${API_BASE}/api/tickets/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ text, record }),
+    });
+    if (handleUnauthorized(response)) return null;
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+    return data;
+}
+
+// The columns of every ticket list; the getters give the text people read
+const TICKET_COLUMNS = [
+    ['Ticket', t => t.number],
+    ['Type', t => t.type],
+    ['Summary', t => t.summary],
+    ['State', t => t.state],
+    ['Priority / Risk', t => t.level],
+    ['Team', t => t.team],
+    ['Assigned To / Requested For', t => t.person],
+    ['Opened', t => t.opened ? formatValue('ticket.opened', t.opened) : ''],
+];
+const STARRED_COLUMN = ['Starred', t => formatStarredAt(starredTickets.get(t.number))];
+
+function formatStarredAt(iso) {
+    const d = iso ? new Date(iso) : null;
+    return d && !Number.isNaN(d.getTime())
+        ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+}
+
+// Ticket numbers open the ticket; every row has a star
+function ticketTableHtml(tickets, columns = TICKET_COLUMNS) {
+    const head = columns.map(([label]) => `<th>${escapeHtml(label)}</th>`).join('');
+    const body = tickets.map(t => '<tr>' + columns.map(([label, get], i) => {
+        if (i === 0) {
+            return `<td class="ticket-cell"><button type="button" class="ticket-link" data-ticket="${escapeHtml(t.number)}"` +
+                ` title="Open ${escapeHtml(t.number)}">${escapeHtml(t.number)}</button>${starButtonHtml(t.number)}</td>`;
+        }
+        const text = String(get(t) || '');
+        if (label === 'Summary' && text.length > 120) {
+            return `<td title="${escapeHtml(text)}">${escapeHtml(text.slice(0, 117))}…</td>`;
+        }
+        return `<td>${escapeHtml(text || '—')}</td>`;
+    }).join('') + '</tr>').join('');
+    return `<div class="table-wrap"><table class="result-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+function ticketDownloadHtml(tickets, title, columns = TICKET_COLUMNS) {
+    return downloadBarHtml(registerExport({
+        title,
+        tables: [{
+            title: null,
+            columns: columns.map(([label]) => ({ label })),
+            rows: tickets.map(t => columns.map(([, get]) => String(get(t) || ''))),
+            footer: null,
+        }],
+    }));
+}
+
+// One ticket: its heading, a star, a link to its dashboard record, and every field it has
+function ticketCardHtml(t, record) {
+    const dashboardButton = RECORD_PAGES[t.kind]
+        ? `<button type="button" class="home-action" data-open-dashboard="${escapeHtml(t.number)}">Open in Dashboards ↗</button>` : '';
+    let html = `<div class="ticket-head">` +
+        `<span class="ticket-type">${escapeHtml(t.type)}</span>` +
+        `<span class="ticket-number">${escapeHtml(t.number)}</span>` +
+        starButtonHtml(t.number, true) + dashboardButton +
+        `</div>` +
+        (t.summary ? `<div class="ticket-summary">${escapeHtml(t.summary)}</div>` : '');
+
+    if (!record) return html + ticketTableHtml([t]) + ticketDownloadHtml([t], t.number);
+
+    const fields = Object.entries(record.fields);
+    const body = fields.map(([member, value]) => {
+        const cls = LONG_TEXT.has(splitMember(member).column) ? ' class="long"' : '';
+        return `<tr><th>${escapeHtml(columnLabel(member))}</th><td${cls}>${escapeHtml(formatValue(member, value))}${starFor(value)}</td></tr>`;
+    }).join('');
+    html += `<div class="table-wrap tall"><table class="result-table detail"><tbody>${body}</tbody></table></div>`;
+    html += downloadBarHtml(registerExport({
+        title: `${t.type} ${t.number}`,
+        tables: [{
+            title: null,
+            columns: [{ label: 'Field' }, { label: 'Value' }],
+            rows: fields.map(([member, value]) => [columnLabel(member), String(exportValue(member, value))]),
+            footer: null,
+        }],
+    }));
+    return html;
+}
+
+// "Found 12 tickets. Not found: INC1234567. Left out (not ticket numbers): hello"
+function searchSummaryHtml(data) {
+    const parts = [`Found ${data.found.length.toLocaleString()} ${data.found.length === 1 ? 'ticket' : 'tickets'}.`];
+    if (data.notFound.length) parts.push(`Not found: ${data.notFound.join(', ')}.`);
+    if (data.ignored.length) parts.push(`Left out (not ticket numbers): ${data.ignored.join(', ')}.`);
+    if (data.tooMany) parts.push('Only the first 200 numbers were searched.');
+    return `<p class="home-status">${escapeHtml(parts.join(' '))}</p>`;
+}
+
+const TICKET_EXAMPLES = 'Ticket numbers look like INC1814467, CHG1101321, RITM0440498, SCTASK0595823 or REQ0428071.';
+
+// Runs one search into one result box, showing progress and errors there
+async function runHomeSearch(mode, outId, work) {
+    const run = ++homeRuns[mode];
+    const out = document.getElementById(outId);
+    out.innerHTML = '<p class="home-status">Searching…</p>';
+    try {
+        const html = await work();
+        if (run !== homeRuns[mode] || html === null) return;
+        out.innerHTML = html;
+    } catch (err) {
+        if (run !== homeRuns[mode]) return;
+        out.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        console.error(err);
+    }
+    forgetRemovedExports();
+}
+
+function searchSingleTicket(number) {
+    const input = document.getElementById('single-ticket-input');
+    if (number) input.value = number;
+    const text = input.value.trim();
+    if (!text) return;
+    return runHomeSearch('single', 'single-ticket-result', async () => {
+        const data = await searchTickets(text, true);
+        if (!data) return null;
+        if (!data.found.length) {
+            return `<p class="home-status">No ticket matches “${escapeHtml(text)}”. ${TICKET_EXAMPLES}</p>`;
+        }
+        if (data.found.length === 1) return ticketCardHtml(data.found[0], data.record);
+        // A REQ, or a bare number that fits several types, brings up more than one
+        return `<p class="home-status">${data.found.length.toLocaleString()} tickets match “${escapeHtml(text)}”. Click one to see its full record.</p>` +
+            ticketTableHtml(data.found);
+    });
+}
+
+function searchManyTickets() {
+    const text = document.getElementById('multi-ticket-input').value.trim();
+    if (!text) return;
+    return runHomeSearch('multiple', 'multi-ticket-result', async () => {
+        const data = await searchTickets(text);
+        if (!data) return null;
+        if (!data.found.length) return searchSummaryHtml(data) + `<p class="home-status">${TICKET_EXAMPLES}</p>`;
+        const numbers = data.found.map(t => t.number).filter(n => STARRABLE.test(n));
+        return searchSummaryHtml(data) +
+            `<div class="home-actions"><button type="button" class="home-action" data-star-all="${escapeHtml(numbers.join(','))}">★ Star all ${numbers.length.toLocaleString()}</button></div>` +
+            ticketTableHtml(data.found) + ticketDownloadHtml(data.found, 'Ticket search');
+    });
+}
+
+// Newest star first. Unstarring here leaves the row (with an empty star) until
+// the list is opened again, so a slip of the mouse is easy to undo.
+function showStarred() {
+    return runHomeSearch('starred', 'starred-result', async () => {
+        await loadStars();
+        const numbers = [...starredTickets.keys()];
+        if (!numbers.length) {
+            return '<p class="home-status">No starred tickets yet. Click ☆ next to any ticket number: in a search here, ' +
+                'in the AI assistant\'s answers, or on an incident, change or request record in Dashboards. ' +
+                'Your stars are saved to your account, so they are here on any computer you sign in from.</p>';
+        }
+        const data = await searchTickets(numbers.join(' '));
+        if (!data) return null;
+        const columns = [...TICKET_COLUMNS, STARRED_COLUMN];
+        const missing = data.notFound.length
+            ? `<p class="home-status">Not in the data any more: ${escapeHtml(data.notFound.join(', '))}</p>` : '';
+        return `<p class="home-status">${numbers.length.toLocaleString()} starred ${numbers.length === 1 ? 'ticket' : 'tickets'}, newest first.</p>` +
+            ticketTableHtml(data.found, columns) + missing + ticketDownloadHtml(data.found, 'Starred tickets', columns);
+    });
+}
+
+// One listener for every star, ticket link and record button, wherever it was drawn
+document.addEventListener('click', e => {
+    const star = e.target.closest('.star-btn[data-star]');
+    if (star) { setStarred(star.dataset.star, !starredTickets.has(star.dataset.star)); return; }
+
+    const ticket = e.target.closest('[data-ticket]');
+    if (ticket) {
+        switchTab('home');
+        setHomeMode('single', false);
+        searchSingleTicket(ticket.dataset.ticket);
+        return;
+    }
+
+    const record = e.target.closest('[data-open-dashboard]');
+    if (record) { openInDashboards(record.dataset.openDashboard); return; }
+
+    const all = e.target.closest('[data-star-all]');
+    if (all && all.dataset.starAll) starAll(all.dataset.starAll.split(','));
+});
+
+// =====================================================================
+// START: a token from earlier in this tab skips the sign-in page; if it
+// has expired, the first API call returns 401 and brings the page back
+// =====================================================================
+
+showApp(Boolean(sessionTokenValue));
+loadCurrentUser();
+
+// A reload empties the chat on screen, so Claude forgets it too
+resetConversation();
