@@ -466,41 +466,37 @@ async function sendPrompt() {
     appendMessage('user-msg', userPromptText);
     inputField.value = '';
 
-    // Append standard generic loading sequence notification
-    const loadingId = appendMessage('ai-msg', '🤖 Thinking and querying Cube.dev...');
+    // Shows each step while the answer is worked out, with a running clock
+    const progress = startQueryProgress();
 
-               try {
-        // 🎯 FIX: Explicitly relative route path
+    try {
+        // text/event-stream: the server reports each step as it happens
         const response = await fetch(`${API_BASE}/api/query`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...authHeaders() },
             body: JSON.stringify({ userPrompt: userPromptText })
         });
 
-        console.log("THIS IS THE RESPONSE FROM THE SERVER:", response.status, response.statusText);
-
         if (handleUnauthorized(response)) {
-            document.getElementById(loadingId).remove();
+            progress.finish();
             return;
         }
 
-        const data = await response.json();
-
-
-        document.getElementById(loadingId).remove(); // Clear loading block
+        const data = await readQueryResponse(response, stage => progress.step(stage));
+        const seconds = progress.finish();
 
         if (data.memoryReset) {
             appendMessage('system-msg', 'This conversation got long, so Claude started fresh. Earlier questions are no longer remembered.');
         }
 
         if (data.error) {
-            appendMessage('ai-msg', `❌ Error: ${data.error}`);
+            appendMessage('ai-msg', `❌ Error: ${escapeHtml(data.error)}`);
             return;
         }
 
         // Clarification or unsupported question: show the explanation only
         if (data.intent === 'clarify' || data.intent === 'unsupported') {
-            appendMessage('ai-msg', `🙋 ${escapeHtml(data.message || 'I need a little more detail to run that.')}`);
+            appendMessage('ai-msg', `🙋 ${escapeHtml(data.message || 'I need a little more detail to run that.')}` + answerTimingHtml(seconds, data.fromCache));
             return;
         }
 
@@ -543,13 +539,102 @@ async function sendPrompt() {
             }));
         }
 
-        appendMessage('ai-msg wide', html);
+        appendMessage('ai-msg wide', html + answerTimingHtml(seconds, data.fromCache));
 
     } catch (err) {
-        document.getElementById(loadingId).remove();
-        appendMessage('ai-msg', `❌ Could not talk to backend server orchestration framework.`);
+        progress.finish();
+        appendMessage('ai-msg', `❌ Could not reach the OneTouch server, or the answer was cut off. Please try again.`);
         console.error(err);
     }
+}
+
+// =====================================================================
+// PROGRESS: what the server is doing with the question, step by step
+// =====================================================================
+
+// [while it runs, once it's done]
+const QUERY_STEPS = {
+    sending: ['📨 Sending your question…', 'Sent your question'],
+    understanding: ['🧠 Understanding your question…', 'Understood your question'],
+    cached: ['⚡ Asked before: reusing that answer…', 'Reused the earlier answer (no AI wait)'],
+    querying: ['📊 Getting the data…', 'Got the data'],
+    explaining: ['🔎 Nothing matched; working out why…', 'Worked out why'],
+};
+
+// A chat bubble listing finished steps (with how long each took) and the
+// current one with a running clock. finish() removes it and returns the total seconds.
+function startQueryProgress() {
+    const started = performance.now();
+    const steps = []; // { stage, at }
+    const id = appendMessage('ai-msg query-progress', '');
+    const bubble = document.getElementById(id);
+    const secs = ms => `${(ms / 1000).toFixed(1)} s`;
+
+    function render() {
+        const now = performance.now();
+        bubble.innerHTML = steps.map((s, i) => {
+            const end = steps[i + 1] ? steps[i + 1].at : now;
+            return i < steps.length - 1
+                ? `<div class="progress-done">✓ ${escapeHtml(QUERY_STEPS[s.stage][1])} <span class="progress-time">${secs(end - s.at)}</span></div>`
+                : `<div class="progress-current">${escapeHtml(QUERY_STEPS[s.stage][0])} <span class="progress-time">${secs(now - started)}</span></div>`;
+        }).join('');
+    }
+
+    function step(stage) {
+        if (!QUERY_STEPS[stage] || steps.some(s => s.stage === stage)) return;
+        steps.push({ stage, at: performance.now() });
+        render();
+    }
+
+    step('sending');
+    const timer = setInterval(render, 100);
+    return {
+        step,
+        finish() {
+            clearInterval(timer);
+            bubble.remove();
+            updateAssistantBar();
+            return (performance.now() - started) / 1000;
+        },
+    };
+}
+
+// The server's answer: server-sent events, a "progress" event per step and then
+// the "result". A refusal before the question starts (e.g. a 400) is plain JSON.
+async function readQueryResponse(response, onStep) {
+    if (!(response.headers.get('Content-Type') || '').includes('text/event-stream')) {
+        return response.json();
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let result = null;
+    for (;;) {
+        const { value, done } = await reader.read();
+        if (value) buffer += decoder.decode(value, { stream: true });
+        // Events end with a blank line
+        let end;
+        while ((end = buffer.indexOf('\n\n')) !== -1) {
+            const block = buffer.slice(0, end);
+            buffer = buffer.slice(end + 2);
+            const name = (block.match(/^event: (.*)$/m) || [])[1];
+            const data = (block.match(/^data: (.*)$/m) || [])[1];
+            if (!data) continue;
+            if (name === 'progress') onStep(JSON.parse(data).stage);
+            else if (name === 'result') result = JSON.parse(data);
+        }
+        if (done) break;
+    }
+    if (!result) throw new Error('The answer was cut off.');
+    return result;
+}
+
+// "Answered in 2.8 s", or for a repeated question "⚡ Answered in 0.2 s …"
+function answerTimingHtml(seconds, fromCache) {
+    const time = `${seconds.toFixed(1)} s`;
+    return fromCache
+        ? `<div class="result-timing">⚡ Answered in ${time}: this question was asked before, so the AI step was skipped</div>`
+        : `<div class="result-timing">Answered in ${time}</div>`;
 }
 
 // Escape text that came from the server or the model before inserting as HTML

@@ -58,6 +58,13 @@ app.use(['/api', '/public', '/app'], express.raw({ type: () => true, limit: '25m
       const v = upstream.headers.get(h);
       if (v) res.set(h, v);
     }
+    // A question's progress steps (server-sent events) go on as they arrive,
+    // so the chat shows them live; everything else is passed on whole
+    if ((upstream.headers.get('content-type') || '').includes('text/event-stream')) {
+      res.flushHeaders();
+      for await (const chunk of upstream.body) res.write(chunk);
+      return res.end();
+    }
     res.send(Buffer.from(await upstream.arrayBuffer()));
   } catch (err) {
     console.error(`Could not reach ${target}: ${err.message}`);
