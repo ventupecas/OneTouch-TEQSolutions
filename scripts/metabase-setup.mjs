@@ -1326,6 +1326,19 @@ async function fillDashboard(shell, databaseId, collectionId, shells) {
   console.log(`Built "${def.name}"${def.params ? ' (detail page)' : ''}: ${def.cards.length} charts.`);
 }
 
+// Keep chart results instead of recalculating them for every viewer: the data
+// never changes, and 30 people opening one dashboard at once otherwise means
+// 30 copies of every query. The free edition only has the "adaptive" policy
+// (results kept for multiplier × how long the query took), so the multiplier
+// is huge: a 0.05 s chart stays about 14 hours, a 1 s chart about 11 days.
+const CACHE_MULTIPLIER = 1_000_000;
+
+async function enableCaching() {
+  await api('PUT', '/api/setting/enable-query-caching', { value: true });
+  await api('PUT', '/api/cache', { model: 'root', model_id: 0, strategy: { type: 'ttl', multiplier: CACHE_MULTIPLIER, min_duration_ms: 0 } });
+  console.log('Chart results are cached (open each dashboard once to fill the cache; npm run warmup does all of them).');
+}
+
 // ---------------------------------------------------------------------
 
 async function main() {
@@ -1333,10 +1346,18 @@ async function main() {
     throw new Error('Set METABASE_ADMIN_EMAIL, METABASE_ADMIN_PASSWORD and METABASE_DB_PASSWORD in .env, ' +
       'then run `docker compose up -d` so the app container sees them.');
   }
+  // --cache-only: just switch result caching on, leaving the dashboards (and their links) as they are
+  if (process.argv.includes('--cache-only')) {
+    await waitForMetabase();
+    await signIn();
+    await enableCaching();
+    return;
+  }
   checkDefinitions();
   await waitForMetabase();
   await signIn();
   await api('PUT', '/api/setting/enable-public-sharing', { value: true });
+  await enableCaching();
   const databaseId = await connectDatabase();
   const collectionId = await freshCollection();
 

@@ -1,0 +1,38 @@
+# Questions `npm run warmup` asks before a presentation, one per line.
+# Each becomes instant for everyone afterwards when asked with the same words
+# (capitals, spacing and a closing "?" don't matter). Lines starting with # are
+# skipped. The data runs from June 2026 (incidents from early July) to 1 September
+# 2026, so name months rather than saying "last month".
+
+# Incidents
+How many open incidents are there by priority?
+Which assignment groups have the most open incidents?
+List the P1 incidents opened in August 2026
+How many incidents were opened each week in August 2026?
+What are the most common incident subcategories?
+Which servers or systems have the most incidents?
+How many incidents were reopened?
+Show me incident INC1814467
+
+# Changes
+How many changes are there by type?
+How many changes were created in August 2026 by risk?
+List the emergency changes
+Which changes caused incidents?
+Show me change CHG1101321
+
+# Requests and catalog tasks
+What are the top 5 most requested catalog items?
+How many requests were opened each month?
+Show open catalog tasks that breached SLA
+Which teams have the most open catalog tasks?
+
+# Across ticket types
+How many incidents, changes and requests were opened in August 2026?
+How many requests and incidents were opened each week in August 2026?
+
+# Nothing found: OneTouch works out why and says so
+Show me changes owned by the TCS-ServiceDesk-L1-NA-WE team
+
+# Outside the data's dates: Claude says what the export covers
+How many incidents were opened in January 2026?
