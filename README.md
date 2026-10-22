@@ -90,19 +90,107 @@ Postgres, Cube and Metabase only accept connections from the server itself.
 (find the IP with `ipconfig`). There's nothing else to set up. Traffic is not encrypted,
 so use this only on a network you trust.
 
-**Over the internet (Cloudflare Tunnel).** Get permission first: this puts company data
-behind a public link.
+**Over the internet.** Get permission first: this puts company data behind a public link.
+One command starts OneTouch if needed, starts a Cloudflare Tunnel, checks the link works,
+and copies it to your clipboard:
 
 ```
-docker compose --profile tunnel up -d tunnel     # start
-docker logs onetouch_tunnel                      # find the https://....trycloudflare.com link
-docker compose stop tunnel                       # stop sharing
+npm run share
 ```
 
-The quick-tunnel link changes every time the tunnel starts, so send people the new one.
-For a permanent address, create a tunnel in a Cloudflare account (service:
-`http://app:8000`), put its token in `.env` as `TUNNEL_TOKEN`, and use
-`docker compose --profile tunnel-named up -d tunnel-named` instead.
+The next section covers the one-time setup, what to do every time you start your computer,
+and how to get a link that never changes.
+
+### Sharing over the internet with Cloudflare
+
+**How it works.** A small program in Docker (the `onetouch_tunnel` container) connects
+out from your computer to Cloudflare. Cloudflare gives you a public `https://` link and
+passes visitors through to OneTouch on port 8000. There are no router or firewall changes,
+and the people you share with install nothing: they open the link and sign in with their
+own username and password. Everything works through it: sign-in, the home page searches
+and stars, the AI assistant, downloads, and the dashboards with drill-down.
+
+It only works while **your computer is on and awake, with Docker Desktop running**.
+
+#### One-time setup
+
+1. Install [Node.js](https://nodejs.org) 18 or newer, and run `npm install` once in the
+   project folder. This is what runs `npm run share`.
+2. In **Docker Desktop → Settings → General**, turn on **Start Docker Desktop when you
+   sign in to your computer**. OneTouch and the tunnel then start again by themselves
+   after a restart.
+3. In **Windows Settings → System → Power & battery → Screen, sleep & hibernate
+   timeouts**, set **When plugged in, put my device to sleep after** to **Never**, and keep
+   the computer plugged in. The screen can still turn off; only sleep stops the link.
+4. Get the OK from whoever owns the ServiceNow data.
+
+#### Every time you start your computer
+
+1. Sign in to Windows and wait for Docker Desktop to finish starting (it says **Engine
+   running**).
+2. Open a terminal in the project folder (in VS Code: **Terminal → New Terminal**) and run:
+   ```
+   npm run share
+   ```
+3. Wait for **OneTouch is shared at: https://….trycloudflare.com**. The link is already on
+   your clipboard: paste it to the people who use OneTouch. Before it prints the link, the
+   command checks that the link works from the internet, so it's safe to send.
+
+Why this is needed: the free link is new every time the tunnel starts, and the tunnel
+restarts whenever your computer or Docker does. `npm run share` finds the current link,
+and starts anything that didn't come back on its own. It's safe to run at any time; if
+nothing restarted, it just shows the same link again.
+
+| Command | What it does |
+|---|---|
+| `npm run share` | Start sharing, or show the current link |
+| `npm run share -- --new` | Replace the link with a new one (the old one stops working, e.g. to cut off people who had it) |
+| `npm run share -- --stop` | Stop sharing; OneTouch keeps running on this computer |
+
+Without Node.js, the same thing by hand: `docker compose --profile tunnel up -d tunnel`,
+then `docker logs onetouch_tunnel` (the last `https://….trycloudflare.com` line is the
+current link), and `docker compose stop tunnel` to stop.
+
+#### A link that never changes (optional, about $10 a year)
+
+A named tunnel keeps one address, e.g. `https://onetouch.your-domain.com`, through
+restarts, so you never resend it. It needs a free Cloudflare account and a domain.
+
+1. Create a free account at [dash.cloudflare.com](https://dash.cloudflare.com).
+2. Buy a domain in **Domain Registration → Register Domains** (a `.com` is about $10 a
+   year). Bought there, it's connected to your account automatically.
+3. Go to **Zero Trust → Networks → Tunnels → Create a tunnel**, choose **Cloudflared**,
+   and name it `onetouch`. If Zero Trust asks you to pick a plan first, choose **Free**
+   (it may ask for a card even though it's $0).
+4. On the install screen choose **Docker**, and copy only the long token that follows
+   `--token`. Don't run the command it shows.
+5. Add a public hostname (newer screens call it a *published application route*):
+   subdomain `onetouch`, your domain, service type **HTTP**, URL `app:8000`. Save.
+6. Add both lines to `.env`:
+   ```
+   TUNNEL_TOKEN=the-token-you-copied
+   ONETOUCH_PUBLIC_URL=https://onetouch.your-domain.com
+   ```
+7. Run `npm run share`. With a token in `.env` it starts the permanent tunnel instead of
+   the free one (and stops the free one), then prints your address once it's connected.
+
+After that, a restart needs nothing from you: the tunnel comes back with Docker on the
+same address. Running `npm run share` is still a quick way to confirm it's up.
+
+#### If something goes wrong
+
+| What you see | What to do |
+|---|---|
+| `Docker is not running` | Open Docker Desktop, wait for **Engine running**, and run `npm run share` again. |
+| `It is not answering yet` | A new free link can take a minute or two to start working. Open it yourself before sending it. If it still fails after 5 minutes, run `npm run share -- --new`. |
+| People get "This site can't be reached" or a Cloudflare error page | Your computer is asleep or off, Docker isn't running, or they have an old link. Run `npm run share` and send the link it prints. |
+| `The permanent tunnel did not connect` | The token in `.env` is wrong or was deleted in Cloudflare. Copy it again (step 4 above). |
+| A question shows an error after about 100 seconds | Cloudflare ends any request that takes longer than 100 seconds. It's rare (answers usually take 3–5 seconds); ask again. |
+| Someone sees the old version after you change OneTouch | They press Ctrl+F5. Changes go live through the link as soon as they're running on your computer. |
+
+**Limits.** Free links are a Cloudflare testing feature with no uptime promise; they're
+fine for a team. Anyone with the link reaches the sign-in page, and only people with an
+account in OneTouch can get past it.
 
 ### Home page and the AI assistant
 
@@ -264,8 +352,13 @@ it in the tab's `sessionStorage`, so:
 ## 2.2 The page around the tabs
 
 - **Header:** the OneTouch logo and name, the signed-in person's display name (or their
-  username if they have none), the **💬 AI Assistant** and **📈 Dashboards** tabs, and **Sign out**.
-- **Greeting:** the chat opens with "Hello, *first name*!", using the first word of the display name.
+  username if they have none), the AI assistant's search bar, the **🏠 Home** and
+  **📈 Dashboards** tabs, and **Sign out**.
+- **Home** is the first page after signing in: "Welcome, *first name*!" in the top-left
+  corner, then ticket search and starred tickets (see
+  [Home page and the AI assistant](#home-page-and-the-ai-assistant) in Part 1).
+- **Greetings** use the first word of the display name: "Welcome, *first name*!" on Home
+  and "Hello, *first name*!" at the top of the chat.
 - **Icons:** favicons, an Apple touch icon and a web-app manifest, so OneTouch can be
   pinned to a phone's home screen as "One Touch".
 
@@ -273,7 +366,10 @@ it in the tab's `sessionStorage`, so:
 
 ### Asking
 
-Type a question in the box and press **Enter** or click **Ask Claude**. While it works, a
+Type a question in the header's search bar and press **Enter** or click **Ask**. The
+full chat opens over the page with the answer; from there, ask follow-ups in its box
+(**Enter** or **Ask Claude**). **Minimize ▴** or Escape shrinks it back to the bar and
+keeps the conversation; **Open chat (*n*)** in the bar reopens it. While Claude works, a
 bubble shows "🤖 Thinking and querying Cube.dev...". If you send another question before
 the first answer arrives, it waits its turn: questions in one session always run in order.
 
@@ -439,7 +535,10 @@ except that long text is never cut and counts stay real numbers.
 | ZIP (.zip) / 7-Zip (.7z) | All six formats above in one archive. |
 
 Files are named `one-touch-<the question>-<date>.<format>`, e.g.
-`one-touch-how-many-open-p1s-2026-10-21.xlsx`. A result too large to export (over
+`one-touch-how-many-open-p1s-2026-10-21.xlsx`. The date, and the "Generated" time inside
+the file (e.g. "Oct 21, 2026, 9:11 PM CDT"), are in the downloader's own time zone, which
+the browser sends with the request; without one they're in UTC, labelled as such. The home
+page's ticket lists and a single ticket's record download the same way. A result too large to export (over
 2 million cells) is refused. While the file is being made, the button says "Preparing
 XLSX file…", then "Downloaded *file name*", or the error.
 
@@ -899,21 +998,31 @@ Check: `node --check business_logic.mjs` prints nothing.
   - `POST /api/login` and `/api/logout`. Wrong passwords are also limited to 20 per
     address per 15 minutes; through the tunnel the real address comes from Cloudflare.
   - Every data route (`/api/query`, `/api/export`, `/api/conversation/reset`, `/api/me`,
-    `/api/dashboards`) needs a signed-in session.
+    `/api/dashboards`, `/api/tickets/search`, `/api/stars`) needs a signed-in session.
+  - `/api/tickets/search` → `tickets.mjs`; `/api/stars` (list, `PUT` to star, `DELETE`
+    to unstar) → `stars.mjs`.
   - `/api/query`: question → Claude (streaming, with prompt caching, conversation memory
     per session, up to 40 turns) → validator → Cube, one query per table in parallel →
     empty-result explanation → JSON for the page. Questions in one session run one at a time.
   - `/api/export` → `export.mjs`.
   - Passes Metabase's public dashboard pages through, so the Dashboards tab works wherever
     OneTouch does.
-  - On start it creates the account tables, loads `db/accounts.json`, and retries until
-    Postgres is ready.
-- `public/index.html` ([B.25](#b25)): the sign-in page, the chat tab and the Dashboards
-  tab with its drawer.
+  - On start it creates the account and starred-ticket tables, loads `db/accounts.json`,
+    and retries until Postgres is ready.
+- `tickets.mjs` ([B.37](#b37)): the home page's ticket search. It finds INC, CHG, RITM,
+  SCTASK and REQ numbers in whatever was typed and builds its own Cube queries from them
+  (never from Claude's output). A single ticket's full record lists every column Cube has
+  for it, skipping empty ones.
+- `stars.mjs` ([B.38](#b38)): each person's starred tickets, in the `starred_tickets` table
+  of `onetouch_auth` (at most 2,000 per person).
+- `public/index.html` ([B.25](#b25)): the sign-in page, the header with the AI assistant's
+  search bar, the Home tab (welcome, the three ticket searches), the Dashboards tab with its
+  drawer, and the chat panel the bar opens.
 - `public/style.css` ([B.26](#b26)): the styling.
-- `public/app.js` ([B.27](#b27)): sign-in, the chat (sending questions, turning the
-  results into tables with English column names and readable values), "New chat", the
-  download buttons, and the dashboard drawer with drill-down and **← Back**.
+- `public/app.js` ([B.27](#b27)): sign-in, the home page searches and stars, the AI
+  assistant bar and chat (sending questions, turning the results into tables with English
+  column names and readable values), "New chat", the download buttons, and the dashboard
+  drawer with drill-down, **← Back** and the toolbar star.
 - `public/site.webmanifest` ([B.28](#b28)): the app name and icons.
 - `onetouchsso.html` ([B.29](#b29)) and `styles2.css` ([B.30](#b30)): the design template
   the sign-in page was built from. Nothing loads them, but they are in the repository.
@@ -929,6 +1038,9 @@ Check: `node --check business_logic.mjs` prints nothing.
    and the four-square Microsoft logo as `public/microsoftlogo.png` (square). The
    repository also has unused copies at the top level: `molsoncoorslogo.png`,
    `microsoftlogo.png` and `microsoftlogo (1).png`. They are optional.
+3. **Background.** A wide photo (the repository uses a wheat field) saved as
+   `public/login-background.jpg` fills the sign-in page behind the box. Without it the
+   page shows a plain golden background.
 
 The page works without the images; they only leave broken-image boxes.
 
@@ -1016,14 +1128,13 @@ use `REMOTE_PORT=8100`.
 - **Same network:** others open `http://<server IP>:8000` (find the IP with `ipconfig`).
   This isn't encrypted, so use it only on a trusted network.
 - **Over the internet (get permission first; it puts company data behind a public link):**
-  ```
-  docker compose --profile tunnel up -d tunnel
-  docker logs onetouch_tunnel          # shows the https://....trycloudflare.com link
-  docker compose stop tunnel
-  ```
-  The link changes on every start. For a permanent one, create a tunnel in a Cloudflare
-  account pointing at `http://app:8000`, put its token in `.env` as `TUNNEL_TOKEN`, and
-  run `docker compose --profile tunnel-named up -d tunnel-named`.
+  create `scripts/share.mjs` ([B.39](#b39)) and run `npm run share`. It starts OneTouch
+  if needed, starts the Cloudflare tunnel from `docker-compose.yml`, waits until the link
+  works from the internet, prints it and copies it to the clipboard. `--new` replaces the
+  link and `--stop` stops sharing. The free link changes whenever the tunnel restarts, so
+  run it again after every restart. With `TUNNEL_TOKEN` in `.env` it runs the permanent
+  tunnel instead. [Sharing over the internet with Cloudflare](#sharing-over-the-internet-with-cloudflare)
+  in Part 1 has the full setup.
 
 ## Step 20: Claude Code helpers
 
@@ -1257,6 +1368,9 @@ Create each file at the path shown, with exactly this content. Files are in the 
 - [B.34 `.claude/agents/onetouch-reviewer.md`](#b34)
 - [B.35 `scripts/check.mjs`](#b35)
 - [B.36 `scripts/build-docs.mjs`](#b36)
+- [B.37 `tickets.mjs`](#b37)
+- [B.38 `stars.mjs`](#b38)
+- [B.39 `scripts/share.mjs`](#b39)
 
 <a id="b1"></a>
 ### B.1 `.gitignore`
@@ -1410,7 +1524,8 @@ desktop.ini
     "docs": "node scripts/build-docs.mjs",
     "start": "node server.mjs",
     "users": "node scripts/users.mjs",
-    "remote": "node remote.mjs"
+    "remote": "node remote.mjs",
+    "share": "node scripts/share.mjs"
   },
   "repository": {
     "type": "git",
@@ -1456,6 +1571,12 @@ AUTH_DB_PASSWORD=change_me_long_random_string
 METABASE_DB_PASSWORD=change_me_long_random_string
 METABASE_ADMIN_EMAIL=you@example.com
 METABASE_ADMIN_PASSWORD=change_me_8plus_chars
+
+# Optional: permanent Cloudflare link. The token from the tunnel you create in the
+# Cloudflare dashboard (route it to http://app:8000), and the address you gave it, which
+# `npm run share` prints. See "Sharing over the internet with Cloudflare" in README.md.
+TUNNEL_TOKEN=
+ONETOUCH_PUBLIC_URL=
 ```
 
 <a id="b5"></a>
@@ -4090,15 +4211,30 @@ function cellText(value) {
   return String(value);
 }
 
-function generatedLine() {
-  return `Generated ${new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}`;
+// The downloader's time zone, which the browser sends, so dates read in their
+// own clock time; the server's would be UTC inside Docker. Unknown or missing: UTC.
+function exportTimeZone(payload) {
+  try {
+    return new Intl.DateTimeFormat('en-US', { timeZone: String(payload.timeZone || '') }).resolvedOptions().timeZone;
+  } catch {
+    return 'UTC';
+  }
+}
+
+// "Generated Oct 21, 2026, 9:01 PM CDT"
+function generatedLine(payload) {
+  const when = new Date().toLocaleString('en-US', {
+    timeZone: exportTimeZone(payload),
+    month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
+  });
+  return `Generated ${when}`;
 }
 
 // Heading lines that open every document: title, the question, the date
 function headerLines(payload) {
   const lines = [payload.title || 'One Touch export'];
   if (payload.question) lines.push(`Question: ${payload.question}`);
-  lines.push(generatedLine());
+  lines.push(generatedLine(payload));
   return lines;
 }
 
@@ -4113,8 +4249,11 @@ export function exportFileName(payload) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 60) || 'results';
-  const date = new Date().toISOString().slice(0, 10);
-  return `one-touch-${slug}-${date}`;
+  // Today's date where the downloader is (late evening in Chicago is already tomorrow in UTC)
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: exportTimeZone(payload), year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date()).map(p => [p.type, p.value]));
+  return `one-touch-${slug}-${parts.year}-${parts.month}-${parts.day}`;
 }
 
 // ---------------------------------------------------------------------
@@ -5065,6 +5204,8 @@ import {
 } from './business_logic.mjs';
 import { buildExport, validateExport, ExportUnavailableError } from './export.mjs';
 import * as auth from './auth.mjs';
+import * as stars from './stars.mjs';
+import { findTickets, ticketRecord, STARRABLE } from './tickets.mjs';
 import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
 
 dotenv.config();
@@ -5244,7 +5385,7 @@ async function requireLogin(req, res, next) {
   next();
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars'], requireLogin);
 
 // Who is signed in (the page shows their display name)
 app.get('/api/me', (req, res) => {
@@ -5519,6 +5660,72 @@ async function answerQuestion(conversation, userPrompt, res) {
   }
 }
 
+// =====================================================================
+// HOME PAGE: ticket search (see tickets.mjs) and each person's starred
+// tickets (see stars.mjs)
+// =====================================================================
+
+// { text, record } -> the tickets the text names; with record: true and a
+// single ticket found, also its full record
+app.post('/api/tickets/search', async (req, res) => {
+  const { text, record } = req.body || {};
+  if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'Type a ticket number to search for.' });
+  if (text.length > 20000) return res.status(400).json({ error: 'That is too much text to search; paste at most a few hundred ticket numbers.' });
+
+  try {
+    const result = await findTickets(text, runCubeQuery);
+    if (record && result.found.length === 1) {
+      // Without the full record the page still shows the ticket's summary row
+      result.record = await ticketRecord(result.found[0].number, runCubeQuery, {
+        cubeUrl: process.env.CUBE_API_URL || 'http://localhost:4000/cubejs-api/v1/load',
+        token: process.env.CUBE_API_TOKEN || 'super_secret_key_change_me_later',
+      }).catch(error => {
+        console.error(`🔎 Could not load the full record of ${result.found[0].number}:`, error.message);
+        return null;
+      });
+    }
+    console.log(`🔎 ${req.user.username} searched ${result.found.length} found, ${result.notFound.length} not found`);
+    res.json(result);
+  } catch (error) {
+    console.error('🔎 Ticket search failed:', error.message);
+    res.status(502).json({ error: `Could not search the tickets right now: ${error.message}` });
+  }
+});
+
+app.get('/api/stars', async (req, res) => {
+  try {
+    res.json({ stars: await stars.listStars(req.user.id) });
+  } catch (error) {
+    console.error('⭐ Could not list stars:', error.message);
+    res.status(503).json({ error: 'Your starred tickets could not be loaded right now.' });
+  }
+});
+
+app.put('/api/stars/:number', async (req, res) => {
+  const number = String(req.params.number).toUpperCase();
+  if (!STARRABLE.test(number)) return res.status(400).json({ error: 'Only incident, change, request and task numbers can be starred.' });
+  try {
+    if (!await stars.addStar(req.user.id, number)) {
+      return res.status(409).json({ error: `You can star at most ${stars.MAX_STARS.toLocaleString()} tickets. Unstar some first.` });
+    }
+    res.json({ ok: true, number });
+  } catch (error) {
+    console.error('⭐ Could not star:', error.message);
+    res.status(503).json({ error: 'That ticket could not be starred right now.' });
+  }
+});
+
+app.delete('/api/stars/:number', async (req, res) => {
+  const number = String(req.params.number).toUpperCase();
+  try {
+    await stars.removeStar(req.user.id, number);
+    res.json({ ok: true, number });
+  } catch (error) {
+    console.error('⭐ Could not unstar:', error.message);
+    res.status(503).json({ error: 'That ticket could not be unstarred right now.' });
+  }
+});
+
 // The tables shown in the chat -> a downloadable file (see export.mjs)
 app.post('/api/export', async (req, res) => {
   const problem = validateExport(req.body);
@@ -5549,6 +5756,7 @@ app.listen(port, () => {
 async function prepareAccounts(attempt = 1) {
   try {
     await auth.ensureSchema();
+    await stars.ensureStarsSchema();
   } catch (error) {
     const wait = Math.min(attempt * 2, 15);
     console.error(`🔐 Account database not reachable yet (${error.message}); retrying in ${wait}s`);
@@ -5626,24 +5834,64 @@ prepareAccounts();
 
     <header class="app-header">
         <h1 class="app-title"><img src="android-chrome-192x192.png" alt="" class="app-logo"> OneTouch <span id="user-name" class="user-name"></span></h1>
+        <!-- AI ASSISTANT: a search bar until it's used; asking opens the full chat below it -->
+        <form class="assistant-bar" id="assistant-bar" role="search" onsubmit="event.preventDefault(); askFromBar();">
+            <span class="assistant-bar-icon" aria-hidden="true">💬</span>
+            <input type="text" id="assistant-bar-input" placeholder="Ask the AI assistant a data question…"
+                   aria-label="Ask the AI assistant" autocomplete="off" aria-controls="assistant-panel" aria-expanded="false">
+            <button type="button" class="assistant-resume" id="assistant-resume" hidden onclick="toggleAssistant(true)"
+                    title="Open your conversation">Open chat</button>
+            <button type="submit" class="assistant-bar-ask">Ask</button>
+        </form>
         <nav class="tab-navigation">
-            <button class="tab-btn active" onclick="switchTab('chat')">💬 AI Assistant</button>
-            <button class="tab-btn" onclick="switchTab('dashboard')">📈 Dashboards</button>
+            <button class="tab-btn active" data-tab="home" onclick="switchTab('home')">🏠 Home</button>
+            <button class="tab-btn" data-tab="dashboard" onclick="switchTab('dashboard')">📈 Dashboards</button>
             <button class="sign-out-btn" type="button" onclick="signOut()">Sign out</button>
         </nav>
     </header>
 
     <main class="app-content">
-        <!-- CHAT VIEW CONTAINER -->
-        <section id="chat-view" class="view-panel active">
-            <div class="chat-container">
-                <div class="chat-messages" id="chat-log">
-                    <div class="msg system-msg" id="welcome-msg">Hello!</div>
+        <!-- HOME: welcome, ticket search and starred tickets -->
+        <section id="home-view" class="view-panel active">
+            <div class="home">
+                <h2 class="home-welcome" id="home-welcome">Welcome!</h2>
+                <p class="home-sub">Look up tickets and keep the ones you follow starred. To ask about the data, use the bar at the top.</p>
+
+                <div class="home-modes" role="tablist" aria-label="Ticket search">
+                    <button type="button" role="tab" class="home-mode active" data-mode="single" aria-selected="true" aria-controls="home-single" onclick="setHomeMode('single')">
+                        <span class="home-mode-name">🔎 Find a ticket</span>
+                        <span class="home-mode-desc">One ticket's full record</span>
+                    </button>
+                    <button type="button" role="tab" class="home-mode" data-mode="multiple" aria-selected="false" aria-controls="home-multiple" onclick="setHomeMode('multiple')">
+                        <span class="home-mode-name">📋 Find several tickets</span>
+                        <span class="home-mode-desc">Paste a list of numbers</span>
+                    </button>
+                    <button type="button" role="tab" class="home-mode" data-mode="starred" aria-selected="false" aria-controls="home-starred" onclick="setHomeMode('starred')">
+                        <span class="home-mode-name">★ Starred tickets <span class="star-count" id="star-count">0</span></span>
+                        <span class="home-mode-desc">Saved to your account</span>
+                    </button>
                 </div>
-                <div class="chat-input-area">
-                    <input type="text" id="user-prompt" placeholder="Ask a data question..." onkeydown="if(event.key === 'Enter') sendPrompt()">
-                    <button id="send-btn" onclick="sendPrompt()">Ask Claude</button>
-                    <button id="new-chat-btn" type="button" onclick="newChat()" title="Start over: Claude forgets this conversation">New chat</button>
+
+                <div class="home-panel" id="home-single" role="tabpanel">
+                    <form class="home-search" onsubmit="event.preventDefault(); searchSingleTicket();">
+                        <input type="text" id="single-ticket-input" autocomplete="off" spellcheck="false" aria-label="Ticket number"
+                               placeholder="Ticket number, e.g. INC1814467, CHG1101321, RITM0440498 or SCTASK0595823">
+                        <button type="submit">Search</button>
+                    </form>
+                    <div class="home-result" id="single-ticket-result" aria-live="polite"></div>
+                </div>
+
+                <div class="home-panel" id="home-multiple" role="tabpanel" hidden>
+                    <form class="home-search multi" onsubmit="event.preventDefault(); searchManyTickets();">
+                        <textarea id="multi-ticket-input" rows="4" spellcheck="false" aria-label="Ticket numbers"
+                                  placeholder="Paste ticket numbers separated by spaces, commas or new lines. A REQ number brings up the requests in that order."></textarea>
+                        <button type="submit">Search</button>
+                    </form>
+                    <div class="home-result" id="multi-ticket-result" aria-live="polite"></div>
+                </div>
+
+                <div class="home-panel" id="home-starred" role="tabpanel" hidden>
+                    <div class="home-result" id="starred-result" aria-live="polite"></div>
                 </div>
             </div>
         </section>
@@ -5664,6 +5912,8 @@ prepareAccounts();
                         <span class="dashboard-current-name" id="dashboard-current-name"></span>
                         <span class="dashboard-current-desc" id="dashboard-current-desc"></span>
                     </div>
+                    <!-- On an incident, change or request record: star it -->
+                    <button type="button" class="star-btn labelled" id="dashboard-star" hidden></button>
                     <span class="dashboard-hint" id="dashboard-hint" hidden>Click a bar, slice, number or blue value for details</span>
                 </div>
                 <div class="dashboard-body">
@@ -5678,6 +5928,25 @@ prepareAccounts();
                     </aside>
                     <p class="dashboard-message" id="dashboard-message">Loading dashboards…</p>
                     <iframe id="dashboard-frame" title="Dashboard" hidden></iframe>
+                </div>
+            </div>
+        </section>
+
+        <!-- AI ASSISTANT, opened from the bar in the header; floats over any page -->
+        <div class="assistant-backdrop" id="assistant-backdrop" onclick="toggleAssistant(false)"></div>
+        <section class="assistant-panel" id="assistant-panel" aria-label="AI Assistant">
+            <div class="assistant-head">
+                <span class="assistant-title">💬 AI Assistant</span>
+                <button type="button" class="assistant-minimize" onclick="toggleAssistant(false)" title="Shrink back to the search bar (the conversation is kept)">Minimize ▴</button>
+            </div>
+            <div class="chat-container">
+                <div class="chat-messages" id="chat-log">
+                    <div class="msg system-msg" id="welcome-msg">Hello!</div>
+                </div>
+                <div class="chat-input-area">
+                    <input type="text" id="user-prompt" placeholder="Ask a data question..." onkeydown="if(event.key === 'Enter') sendPrompt()">
+                    <button id="send-btn" onclick="sendPrompt()">Ask Claude</button>
+                    <button id="new-chat-btn" type="button" onclick="newChat()" title="Start over: Claude forgets this conversation">New chat</button>
                 </div>
             </div>
         </section>
@@ -5717,6 +5986,7 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 16px;
 }
 
 .app-header h1 { margin: 0; font-size: 1.25rem; }
@@ -5770,6 +6040,290 @@ body {
 }
 
 .view-panel.active { display: flex; }
+
+/* AI ASSISTANT BAR: a search box in the header until it's used */
+.assistant-bar {
+    flex: 1 1 360px;
+    max-width: 640px;
+    min-width: 0;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #2d3748;
+    border: 1px solid #4a5568;
+    border-radius: 999px;
+    padding: 4px 4px 4px 14px;
+    transition: border-color 0.15s, background 0.15s;
+}
+.assistant-bar:focus-within { border-color: var(--accent); background: #273141; }
+.assistant-bar-icon { font-size: 0.95rem; }
+/* width 0: the box takes the space left over, instead of its built-in default width */
+.assistant-bar input {
+    flex: 1;
+    width: 0;
+    min-width: 0;
+    background: transparent;
+    border: none;
+    color: white;
+    font: inherit;
+    font-size: 0.95rem;
+    padding: 6px 4px;
+}
+.assistant-bar input::placeholder { color: #a0aec0; }
+.assistant-bar input:focus { outline: none; }
+.assistant-bar button {
+    border: none;
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.assistant-bar-ask { background: var(--accent); color: white; }
+.assistant-resume { background: #4a5568; color: white; }
+.assistant-resume:hover { background: #718096; }
+
+/* The full conversation, dropped down over whichever page is showing */
+.assistant-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(26, 32, 44, 0.35);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s;
+    z-index: 10;
+}
+.assistant-backdrop.open { opacity: 1; pointer-events: auto; }
+.assistant-panel {
+    position: absolute;
+    top: 12px;
+    bottom: 16px;
+    left: 50%;
+    width: min(1200px, calc(100% - 32px));
+    display: flex;
+    flex-direction: column;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.22);
+    overflow: hidden;
+    z-index: 11;
+    opacity: 0;
+    transform: translate(-50%, -12px);
+    visibility: hidden;
+    /* Hidden only after the fade, but visible (and focusable) at once on open */
+    transition: opacity 0.15s, transform 0.15s, visibility 0s linear 0.15s;
+}
+.assistant-panel.open {
+    opacity: 1;
+    transform: translate(-50%, 0);
+    visibility: visible;
+    transition: opacity 0.15s, transform 0.15s, visibility 0s;
+}
+.assistant-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    font-weight: 700;
+}
+.assistant-minimize {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text);
+    cursor: pointer;
+}
+.assistant-minimize:hover { background: var(--bg-primary); }
+.assistant-panel .chat-container {
+    flex: 1;
+    min-height: 0;
+    max-width: none;
+    height: auto;
+    margin: 0;
+    border: none;
+    border-radius: 0;
+}
+
+/* Narrow screens: the bar takes its own row under the title and tabs */
+@media (max-width: 900px) {
+    .app-header { flex-wrap: wrap; padding: 10px 16px; }
+    .assistant-bar { order: 3; flex-basis: 100%; max-width: none; }
+}
+
+/* HOME PAGE: the welcome sits in the page's top-left corner */
+#home-view { overflow-y: auto; }
+.home {
+    width: 100%;
+    max-width: 1400px;
+    padding: 24px 24px 40px;
+    box-sizing: border-box;
+}
+.home-welcome { margin: 0; font-size: 1.6rem; }
+.home-sub { margin: 4px 0 20px; color: #718096; }
+.home-modes {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+}
+.home-mode {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    text-align: left;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    color: var(--text);
+    cursor: pointer;
+    font: inherit;
+}
+.home-mode:hover { border-color: #a0aec0; }
+.home-mode.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: #f3fbf8; }
+.home-mode-name { font-weight: 700; }
+.home-mode-desc { font-size: 0.82rem; color: #718096; }
+.star-count {
+    display: inline-block;
+    min-width: 1.4em;
+    padding: 0 6px;
+    margin-left: 4px;
+    border-radius: 999px;
+    background: #edf2f7;
+    font-size: 0.78rem;
+    text-align: center;
+}
+.home-panel {
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+}
+.home-search { display: flex; gap: 10px; align-items: stretch; }
+.home-search input,
+.home-search textarea {
+    flex: 1;
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font: inherit;
+    font-size: 1rem;
+}
+.home-search textarea { resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 0.92rem; }
+.home-search input:focus,
+.home-search textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.15); }
+.home-search button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 0 24px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+.home-search.multi button { align-self: flex-start; padding: 12px 24px; }
+.home-result:not(:empty) { margin-top: 14px; }
+#home-starred .home-result { margin-top: 0; }
+.home-status { margin: 0 0 10px; color: #4a5568; line-height: 1.5; }
+.home-status.error { color: #c53030; }
+.home-actions { margin: 0 0 10px; }
+.home-action {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text);
+    cursor: pointer;
+}
+.home-action:hover { background: var(--bg-primary); }
+.table-wrap.tall { max-height: 640px; }
+
+/* One ticket's heading: type, number, star, link to its dashboard record */
+.ticket-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.ticket-type {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #718096;
+}
+.ticket-number { font-size: 1.3rem; font-weight: 700; }
+.ticket-summary { margin: 6px 0 12px; color: #4a5568; }
+.ticket-cell { white-space: nowrap; }
+.ticket-link {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    font-weight: 600;
+    color: #2b6cb0;
+    cursor: pointer;
+}
+.ticket-link:hover { text-decoration: underline; }
+
+/* STARS: next to any ticket number, wherever it shows */
+.star-btn {
+    background: none;
+    border: none;
+    padding: 0 4px;
+    margin-left: 4px;
+    font-size: 1.05rem;
+    line-height: 1;
+    color: #a0aec0;
+    cursor: pointer;
+    vertical-align: baseline;
+}
+.star-btn:hover { color: #d69e2e; }
+.star-btn.on { color: #d69e2e; }
+.star-btn.labelled {
+    margin-left: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text);
+}
+.star-btn.labelled.on { color: #975a16; background: #fefcbf; border-color: #ecc94b; }
+.dashboard-toolbar .star-btn.labelled { flex-shrink: 0; margin-left: auto; }
+
+.toast {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    transform: translate(-50%, 20px);
+    background: #1a202c;
+    color: white;
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s, transform 0.2s;
+    z-index: 50;
+    max-width: calc(100% - 32px);
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+@media (max-width: 700px) {
+    .assistant-bar-icon { display: none; }
+    .assistant-bar { padding-left: 12px; }
+    .home { padding: 16px 16px 32px; }
+    .home-modes { grid-template-columns: minmax(0, 1fr); }
+    .home-search:not(.multi) { flex-direction: column; }
+    .home-search button { padding: 10px 24px; }
+}
 
 /* CHAT AREA ARCHITECTURE */
 .chat-container {
@@ -6081,7 +6635,8 @@ body:not(.signed-out) .login-page { display: none; }
   align-content: start;
   justify-items: center;
   padding: 0 16px 28px;
-  background: #718aee;
+  /* Wheat photo filling the screen; the color shows while it loads */
+  background: #c8973f url("login-background.jpg") center / cover no-repeat;
   color: var(--ink);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   -webkit-text-size-adjust: 100%;
@@ -6371,21 +6926,37 @@ function showLoginError(message) {
     document.getElementById('login-error').textContent = message || '';
 }
 
+// Signed in: the home page, with this person's starred tickets
 function showApp(signedIn) {
     document.body.classList.toggle('signed-out', !signedIn);
-    if (signedIn) document.getElementById('user-prompt').focus();
-    else document.getElementById('login-email').focus();
+    if (signedIn) {
+        switchTab('home');
+        loadStars();
+        focusHomeSearch();
+    } else {
+        document.getElementById('login-email').focus();
+    }
 }
 
-// The signed-in person's name, shown in the header and the chat greeting
+// The signed-in person's name, shown in the header and the greetings
 // (their display name, or their username if they don't have one)
 let currentUserName = '';
+let currentUsername = '';
 
 function setCurrentUser(user) {
     currentUserName = user ? (user.displayName || user.username || '') : '';
+    currentUsername = user ? (user.username || '') : '';
     document.getElementById('user-name').textContent = currentUserName;
-    // The greeting uses just the first name: "Cassidy Sotelo" -> "Hello, Cassidy!"
+    renderGreetings();
+    // Each person's home page opens on the search they used last
+    if (currentUsername) setHomeMode(rememberedHomeMode(), false);
+}
+
+// Just the first name: "Cassidy Sotelo" -> "Welcome, Cassidy!" on the home
+// page and "Hello, Cassidy!" at the top of the chat
+function renderGreetings() {
     const firstName = currentUserName.trim().split(/\s+/)[0];
+    document.getElementById('home-welcome').textContent = firstName ? `Welcome, ${firstName}!` : 'Welcome!';
     const welcome = document.getElementById('welcome-msg');
     if (welcome) welcome.textContent = firstName ? `Hello, ${firstName}!` : 'Hello!';
 }
@@ -6444,9 +7015,12 @@ function signOut(message) {
     }
     sessionTokenValue = null;
     saveToken(null);
-    // The next person to sign in on this computer must not see this person's chat
+    // The next person to sign in on this computer must not see this person's
+    // chat, searches or stars
+    toggleAssistant(false);
     clearChat();
     setCurrentUser(null);
+    resetHome();
     showLoginError(typeof message === 'string' ? message : '');
     showApp(false);
 }
@@ -6469,8 +7043,9 @@ const WELCOME_HTML = document.getElementById('chat-log').innerHTML;
 // Back to just the greeting (with the signed-in person's name)
 function clearChat() {
     document.getElementById('chat-log').innerHTML = WELCOME_HTML;
-    exportPayloads.clear();
-    setCurrentUser(currentUserName ? { displayName: currentUserName } : null);
+    forgetRemovedExports();
+    renderGreetings();
+    updateAssistantBar();
 }
 
 async function resetConversation() {
@@ -6489,22 +7064,61 @@ async function newChat() {
     document.getElementById('user-prompt').focus();
 }
 
-// A token from earlier in this tab skips the sign-in page; if it has
-// expired, the first API call returns 401 and brings the page back
-showApp(Boolean(sessionTokenValue));
-loadCurrentUser();
-
-// A reload empties the chat on screen, so Claude forgets it too
-resetConversation();
-
-// Tab Views Toggling Module
+// Tabs: Home and Dashboards (the AI assistant lives in the header's bar)
 function switchTab(viewName) {
-    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-    document.querySelectorAll('.view-panel').forEach(panel => panel.classList.remove('active'));
-
-    event.target.classList.add('active');
-    document.getElementById(`${viewName}-view`).classList.add('active');
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === viewName));
+    document.querySelectorAll('.view-panel').forEach(panel => panel.classList.toggle('active', panel.id === `${viewName}-view`));
     if (viewName === 'dashboard') loadDashboards();
+    // Stars may have changed elsewhere (the chat, a dashboard, another computer)
+    if (viewName === 'home' && homeMode === 'starred') showStarred();
+}
+
+// =====================================================================
+// AI ASSISTANT: a search bar in the header. Asking a question (or "Open
+// chat") opens the full conversation over the page; Minimize shrinks it
+// back to the bar and keeps the conversation.
+// =====================================================================
+
+function assistantOpen() {
+    return document.getElementById('assistant-panel').classList.contains('open');
+}
+
+// Opens or closes the conversation (no argument: the opposite of now)
+function toggleAssistant(open) {
+    const panel = document.getElementById('assistant-panel');
+    const willOpen = typeof open === 'boolean' ? open : !assistantOpen();
+    panel.classList.toggle('open', willOpen);
+    document.getElementById('assistant-backdrop').classList.toggle('open', willOpen);
+    document.getElementById('assistant-bar-input').setAttribute('aria-expanded', String(willOpen));
+    if (willOpen) {
+        const chatLog = document.getElementById('chat-log');
+        chatLog.scrollTop = chatLog.scrollHeight;
+        document.getElementById('user-prompt').focus();
+    } else if (panel.contains(document.activeElement)) {
+        document.getElementById('assistant-bar-input').focus();
+    }
+    updateAssistantBar();
+}
+
+// The bar's question goes to the chat, which opens to show the answer
+function askFromBar() {
+    const bar = document.getElementById('assistant-bar-input');
+    const question = bar.value.trim();
+    bar.value = '';
+    toggleAssistant(true);
+    if (!question) return;
+    document.getElementById('user-prompt').value = question;
+    sendPrompt();
+}
+
+// While minimized with a conversation going, the bar offers to reopen it
+function updateAssistantBar() {
+    const asked = document.querySelectorAll('#chat-log .user-msg').length;
+    const resume = document.getElementById('assistant-resume');
+    resume.hidden = !asked || assistantOpen();
+    resume.textContent = `Open chat (${asked})`;
+    document.getElementById('assistant-bar-input').placeholder = asked
+        ? 'Ask a follow-up question…' : 'Ask the AI assistant a data question…';
 }
 
 // =====================================================================
@@ -6512,7 +7126,6 @@ function switchTab(viewName) {
 // shown through the OneTouch server (so they work from any address)
 // =====================================================================
 
-let dashboardsLoaded = false;
 const LAST_DASHBOARD_KEY = 'onetouch-dashboard';
 
 // Every page the frame can show, by its public id: the drawer's dashboards,
@@ -6529,13 +7142,25 @@ function rememberDashboard(key) {
     try { localStorage.setItem(LAST_DASHBOARD_KEY, key); } catch { /* not remembered; that's fine */ }
 }
 
-async function loadDashboards() {
-    if (dashboardsLoaded) return;
+// Loads the drawer once; resolves true when the dashboards are there.
+// Shared, so the tab and "Open in Dashboards" never load it twice.
+let dashboardsLoading = null;
+function loadDashboards() {
+    if (!dashboardsLoading) {
+        dashboardsLoading = buildDashboards().then(ok => {
+            if (!ok) dashboardsLoading = null; // try again next time
+            return ok;
+        });
+    }
+    return dashboardsLoading;
+}
+
+async function buildDashboards() {
     const picker = document.getElementById('dashboard-picker');
     const message = document.getElementById('dashboard-message');
     try {
         const response = await fetch(`${API_BASE}/api/dashboards`, { headers: authHeaders() });
-        if (handleUnauthorized(response)) return;
+        if (handleUnauthorized(response)) return false;
         const { dashboards, details = [] } = await response.json();
         for (const d of dashboards) dashboardPages.main.set(pageId(d.path), d);
         for (const d of details) dashboardPages.details.set(pageId(d.path), d);
@@ -6543,7 +7168,7 @@ async function loadDashboards() {
             message.textContent = 'No dashboards yet. Whoever runs this OneTouch server can create them with: ' +
                 'docker exec analytics_node_app node scripts/metabase-setup.mjs';
             document.getElementById('dashboard-drawer-toggle').hidden = true;
-            return;
+            return false;
         }
 
         // The drawer: one heading per group, dashboards in the order the server lists them
@@ -6575,17 +7200,54 @@ async function loadDashboards() {
             }
             picker.appendChild(section);
         }
-        dashboardsLoaded = true;
 
         const remembered = dashboards.find(d => d.key === rememberedDashboard());
         showDashboard(remembered || dashboards[0]);
         // First visit: open the drawer so people see everything that's there
         if (!remembered) toggleDashboardDrawer(true);
+        return true;
     } catch (err) {
         message.textContent = 'Could not load the dashboards. Please try again.';
         console.error(err);
+        return false;
     }
 }
+
+// The record pages a ticket number can open (built by scripts/metabase-setup.mjs)
+const RECORD_PAGES = { INC: 'incident-detail', CHG: 'change-detail', RITM: 'request-detail' };
+
+// Home page -> that ticket's record in the Dashboards tab
+async function openInDashboards(number) {
+    switchTab('dashboard');
+    if (!await loadDashboards()) return;
+    const key = RECORD_PAGES[(number.match(/^[A-Z]+/) || [])[0]];
+    const page = [...dashboardPages.details.values()].find(d => d.key === key);
+    if (!page) return;
+    toggleDashboardDrawer(false);
+    openDashboardPath(`${page.path}?number=${encodeURIComponent(number)}#titled=false&bordered=false`);
+}
+
+// Moves the frame to a page the way a click inside it would, so ← Back
+// returns to the dashboard underneath. A frame still loading its first
+// dashboard moves once that has loaded.
+let pendingFramePath = null;
+function frameHasPage() {
+    try {
+        return Boolean(pageId(document.getElementById('dashboard-frame').contentWindow.location.pathname));
+    } catch { return false; }
+}
+function openDashboardPath(path) {
+    if (frameHasPage()) document.getElementById('dashboard-frame').contentWindow.location.assign(`${API_BASE}${path}`);
+    else pendingFramePath = path;
+}
+document.getElementById('dashboard-frame').addEventListener('load', () => {
+    if (!pendingFramePath || !frameHasPage()) return;
+    const path = pendingFramePath;
+    pendingFramePath = null;
+    // Not during the load event itself: a page moved before it has finished
+    // loading replaces its history entry, and ← Back would then leave OneTouch
+    setTimeout(() => document.getElementById('dashboard-frame').contentWindow.location.assign(`${API_BASE}${path}`), 50);
+});
 
 function showDashboard(dashboard) {
     markCurrentDashboard(dashboard);
@@ -6644,6 +7306,16 @@ function followDashboardFrame() {
     } else if (detail) {
         setDashboardHeading(currentMainDashboard ? currentMainDashboard.name : '', detailPageLabel(detail, where.search), '', true);
     }
+
+    // An incident, change or request record can be starred from the toolbar
+    const star = document.getElementById('dashboard-star');
+    const number = detail && detail.params.some(p => p.slug === 'number')
+        ? String(new URLSearchParams(where.search).get('number') || '').toUpperCase() : '';
+    star.hidden = !STARRABLE.test(number);
+    if (!star.hidden) {
+        star.dataset.star = number;
+        paintStar(star);
+    }
 }
 setInterval(followDashboardFrame, 400);
 document.getElementById('dashboard-frame').addEventListener('load', followDashboardFrame);
@@ -6670,10 +7342,11 @@ function toggleDashboardDrawer(open) {
     }
 }
 
+// Escape closes whatever is open on top: the conversation, then the drawer
 document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && document.getElementById('dashboard-drawer').classList.contains('open')) {
-        toggleDashboardDrawer(false);
-    }
+    if (e.key !== 'Escape') return;
+    if (assistantOpen()) toggleAssistant(false);
+    else if (document.getElementById('dashboard-drawer').classList.contains('open')) toggleDashboardDrawer(false);
 });
 
 // Asynchronous Chat Workflow Engine
@@ -6915,7 +7588,8 @@ function cellHtml(member, raw, truncate) {
     if (truncate && LONG_TEXT.has(column) && text.length > 120) {
         return `<td${cls} title="${escapeHtml(text)}">${escapeHtml(text.slice(0, 117))}…</td>`;
     }
-    return `<td${cls}>${escapeHtml(text)}</td>`;
+    // A ticket number gets a star next to it
+    return `<td${cls}>${escapeHtml(text)}${starFor(raw)}</td>`;
 }
 
 function renderResults(rows, entity) {
@@ -6937,7 +7611,7 @@ function renderResults(rows, entity) {
             const { column } = splitMember(c);
             const text = formatValue(c, rows[0][c]);
             const cls = LONG_TEXT.has(column) ? ' class="long"' : '';
-            return `<tr><th>${escapeHtml(columnLabel(c))}</th><td${cls}>${escapeHtml(text)}</td></tr>`;
+            return `<tr><th>${escapeHtml(columnLabel(c))}</th><td${cls}>${escapeHtml(text)}${starFor(rows[0][c])}</td></tr>`;
         }).join('');
         return `<div class="table-wrap"><table class="result-table detail"><tbody>${body}</tbody></table></div>`;
     }
@@ -7008,6 +7682,13 @@ function registerExport(payload) {
     const id = 'export-' + (++exportCounter);
     exportPayloads.set(id, payload);
     return id;
+}
+
+// Downloads whose bar is gone (chat cleared, a newer search) are dropped
+function forgetRemovedExports() {
+    for (const id of exportPayloads.keys()) {
+        if (!document.getElementById(id)) exportPayloads.delete(id);
+    }
 }
 
 // Values as the user reads them, except counts stay real numbers so
@@ -7123,7 +7804,8 @@ async function downloadExport(exportId) {
         const response = await fetch(`${API_BASE}/api/export`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...authHeaders() },
-            body: JSON.stringify({ ...payload, format }),
+            // The browser's time zone: the file's "Generated" time and date use it
+            body: JSON.stringify({ ...payload, format, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
         });
         if (handleUnauthorized(response)) {
             status.textContent = '';
@@ -7174,8 +7856,384 @@ function appendMessage(cssClass, text) {
     
     chatLog.appendChild(msgBlock);
     chatLog.scrollTop = chatLog.scrollHeight; // Keep log automatically scrolled to bottom
+    updateAssistantBar();
     return uniqueId;
 }
+
+// =====================================================================
+// STARRED TICKETS: kept with each person's account on the server, so they
+// follow them to any computer. Any ticket number shown anywhere (search
+// results, the assistant's tables, a dashboard record) can be starred.
+// =====================================================================
+
+const STARRABLE = /^(INC|CHG|RITM|SCTASK)\d{7}$/;
+const starredTickets = new Map(); // number -> when it was starred, newest first
+let starsLoading = null;
+
+// Fetches this person's stars (again); everything already on screen is repainted
+function loadStars() {
+    if (!sessionTokenValue) return Promise.resolve();
+    if (!starsLoading) {
+        const token = sessionTokenValue;
+        starsLoading = (async () => {
+            try {
+                const response = await fetch(`${API_BASE}/api/stars`, { headers: authHeaders() });
+                if (handleUnauthorized(response)) return;
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+                if (token !== sessionTokenValue) return; // signed out meanwhile
+                starredTickets.clear();
+                for (const s of data.stars) starredTickets.set(s.number, s.starredAt);
+                refreshStarButtons();
+            } catch (err) {
+                console.error('Could not load starred tickets:', err);
+            } finally {
+                starsLoading = null;
+            }
+        })();
+    }
+    return starsLoading;
+}
+
+function starFace(on, labelled) {
+    return (on ? '★' : '☆') + (labelled ? (on ? ' Starred' : ' Star') : '');
+}
+
+function starButtonHtml(number, labelled = false) {
+    const on = starredTickets.has(number);
+    const label = `${on ? 'Unstar' : 'Star'} ${number}`;
+    return `<button type="button" class="star-btn${labelled ? ' labelled' : ''}${on ? ' on' : ''}" data-star="${escapeHtml(number)}"` +
+        ` aria-pressed="${on}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">${starFace(on, labelled)}</button>`;
+}
+
+// A star after a value, if the value is a ticket number
+function starFor(raw) {
+    const value = String(raw ?? '');
+    return STARRABLE.test(value) ? starButtonHtml(value) : '';
+}
+
+function paintStar(button) {
+    const number = button.dataset.star;
+    const on = starredTickets.has(number);
+    const label = `${on ? 'Unstar' : 'Star'} ${number}`;
+    button.textContent = starFace(on, button.classList.contains('labelled'));
+    button.classList.toggle('on', on);
+    button.setAttribute('aria-pressed', String(on));
+    button.title = label;
+    button.setAttribute('aria-label', label);
+}
+
+function refreshStarButtons() {
+    document.querySelectorAll('.star-btn[data-star]').forEach(paintStar);
+    document.getElementById('star-count').textContent = starredTickets.size.toLocaleString();
+}
+
+// Changes on screen at once, and back again if the server says no
+async function setStarred(number, on) {
+    if (!STARRABLE.test(number) || starredTickets.has(number) === on) return true;
+    const before = starredTickets.get(number);
+    if (on) starredTickets.set(number, new Date().toISOString());
+    else starredTickets.delete(number);
+    refreshStarButtons();
+    try {
+        const response = await fetch(`${API_BASE}/api/stars/${encodeURIComponent(number)}`, {
+            method: on ? 'PUT' : 'DELETE',
+            headers: authHeaders(),
+        });
+        if (handleUnauthorized(response)) return false;
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.error || `The server answered ${response.status}.`);
+        }
+        return true;
+    } catch (err) {
+        if (on) starredTickets.delete(number);
+        else starredTickets.set(number, before);
+        refreshStarButtons();
+        showToast(`❌ ${err.message}`);
+        return false;
+    }
+}
+
+async function starAll(numbers) {
+    for (const number of numbers) {
+        if (!await setStarred(number, true)) return;
+    }
+    showToast(`★ Starred ${numbers.length.toLocaleString()} ${numbers.length === 1 ? 'ticket' : 'tickets'}`);
+}
+
+// A short message at the bottom of the screen
+let toastTimer = null;
+function showToast(message) {
+    let toast = document.getElementById('toast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'toast';
+        toast.className = 'toast';
+        toast.setAttribute('role', 'status');
+        document.body.appendChild(toast);
+    }
+    toast.textContent = message;
+    toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 4000);
+}
+
+// =====================================================================
+// HOME PAGE: find one ticket, several tickets, or your starred ones
+// =====================================================================
+
+const HOME_MODES = ['single', 'multiple', 'starred'];
+let homeMode = 'single';
+// Each search bumps its counter, so an older, slower answer can't replace a newer one
+const homeRuns = { single: 0, multiple: 0, starred: 0 };
+
+// The search each person used last, remembered in this browser
+function homeModeKey() {
+    return `onetouch-home-mode:${currentUsername}`;
+}
+function rememberedHomeMode() {
+    try { return localStorage.getItem(homeModeKey()) || 'single'; } catch { return 'single'; }
+}
+
+function setHomeMode(mode, focus = true) {
+    if (!HOME_MODES.includes(mode)) mode = 'single';
+    homeMode = mode;
+    document.querySelectorAll('.home-mode').forEach(b => {
+        const on = b.dataset.mode === mode;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-selected', String(on));
+    });
+    for (const m of HOME_MODES) document.getElementById(`home-${m}`).hidden = m !== mode;
+    if (currentUsername) {
+        try { localStorage.setItem(homeModeKey(), mode); } catch { /* not remembered; that's fine */ }
+    }
+    if (mode === 'starred') showStarred();
+    if (focus) focusHomeSearch();
+}
+
+function focusHomeSearch() {
+    const field = { single: 'single-ticket-input', multiple: 'multi-ticket-input' }[homeMode];
+    if (field) document.getElementById(field).focus();
+}
+
+// Signing out leaves nothing of this person's on the page
+function resetHome() {
+    for (const m of HOME_MODES) homeRuns[m] += 1;
+    document.getElementById('single-ticket-input').value = '';
+    document.getElementById('multi-ticket-input').value = '';
+    for (const id of ['single-ticket-result', 'multi-ticket-result', 'starred-result']) {
+        document.getElementById(id).innerHTML = '';
+    }
+    starredTickets.clear();
+    refreshStarButtons();
+    setHomeMode('single', false);
+    forgetRemovedExports();
+}
+
+// -> { found, notFound, ignored, tooMany, record? }, or null if the session ended
+async function searchTickets(text, record = false) {
+    const response = await fetch(`${API_BASE}/api/tickets/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ text, record }),
+    });
+    if (handleUnauthorized(response)) return null;
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+    return data;
+}
+
+// The columns of every ticket list; the getters give the text people read
+const TICKET_COLUMNS = [
+    ['Ticket', t => t.number],
+    ['Type', t => t.type],
+    ['Summary', t => t.summary],
+    ['State', t => t.state],
+    ['Priority / Risk', t => t.level],
+    ['Team', t => t.team],
+    ['Assigned To / Requested For', t => t.person],
+    ['Opened', t => t.opened ? formatValue('ticket.opened', t.opened) : ''],
+];
+const STARRED_COLUMN = ['Starred', t => formatStarredAt(starredTickets.get(t.number))];
+
+function formatStarredAt(iso) {
+    const d = iso ? new Date(iso) : null;
+    return d && !Number.isNaN(d.getTime())
+        ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+}
+
+// Ticket numbers open the ticket; every row has a star
+function ticketTableHtml(tickets, columns = TICKET_COLUMNS) {
+    const head = columns.map(([label]) => `<th>${escapeHtml(label)}</th>`).join('');
+    const body = tickets.map(t => '<tr>' + columns.map(([label, get], i) => {
+        if (i === 0) {
+            return `<td class="ticket-cell"><button type="button" class="ticket-link" data-ticket="${escapeHtml(t.number)}"` +
+                ` title="Open ${escapeHtml(t.number)}">${escapeHtml(t.number)}</button>${starButtonHtml(t.number)}</td>`;
+        }
+        const text = String(get(t) || '');
+        if (label === 'Summary' && text.length > 120) {
+            return `<td title="${escapeHtml(text)}">${escapeHtml(text.slice(0, 117))}…</td>`;
+        }
+        return `<td>${escapeHtml(text || '—')}</td>`;
+    }).join('') + '</tr>').join('');
+    return `<div class="table-wrap"><table class="result-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+function ticketDownloadHtml(tickets, title, columns = TICKET_COLUMNS) {
+    return downloadBarHtml(registerExport({
+        title,
+        tables: [{
+            title: null,
+            columns: columns.map(([label]) => ({ label })),
+            rows: tickets.map(t => columns.map(([, get]) => String(get(t) || ''))),
+            footer: null,
+        }],
+    }));
+}
+
+// One ticket: its heading, a star, a link to its dashboard record, and every field it has
+function ticketCardHtml(t, record) {
+    const dashboardButton = RECORD_PAGES[t.kind]
+        ? `<button type="button" class="home-action" data-open-dashboard="${escapeHtml(t.number)}">Open in Dashboards ↗</button>` : '';
+    let html = `<div class="ticket-head">` +
+        `<span class="ticket-type">${escapeHtml(t.type)}</span>` +
+        `<span class="ticket-number">${escapeHtml(t.number)}</span>` +
+        starButtonHtml(t.number, true) + dashboardButton +
+        `</div>` +
+        (t.summary ? `<div class="ticket-summary">${escapeHtml(t.summary)}</div>` : '');
+
+    if (!record) return html + ticketTableHtml([t]) + ticketDownloadHtml([t], t.number);
+
+    const fields = Object.entries(record.fields);
+    const body = fields.map(([member, value]) => {
+        const cls = LONG_TEXT.has(splitMember(member).column) ? ' class="long"' : '';
+        return `<tr><th>${escapeHtml(columnLabel(member))}</th><td${cls}>${escapeHtml(formatValue(member, value))}${starFor(value)}</td></tr>`;
+    }).join('');
+    html += `<div class="table-wrap tall"><table class="result-table detail"><tbody>${body}</tbody></table></div>`;
+    html += downloadBarHtml(registerExport({
+        title: `${t.type} ${t.number}`,
+        tables: [{
+            title: null,
+            columns: [{ label: 'Field' }, { label: 'Value' }],
+            rows: fields.map(([member, value]) => [columnLabel(member), String(exportValue(member, value))]),
+            footer: null,
+        }],
+    }));
+    return html;
+}
+
+// "Found 12 tickets. Not found: INC1234567. Left out (not ticket numbers): hello"
+function searchSummaryHtml(data) {
+    const parts = [`Found ${data.found.length.toLocaleString()} ${data.found.length === 1 ? 'ticket' : 'tickets'}.`];
+    if (data.notFound.length) parts.push(`Not found: ${data.notFound.join(', ')}.`);
+    if (data.ignored.length) parts.push(`Left out (not ticket numbers): ${data.ignored.join(', ')}.`);
+    if (data.tooMany) parts.push('Only the first 200 numbers were searched.');
+    return `<p class="home-status">${escapeHtml(parts.join(' '))}</p>`;
+}
+
+const TICKET_EXAMPLES = 'Ticket numbers look like INC1814467, CHG1101321, RITM0440498, SCTASK0595823 or REQ0428071.';
+
+// Runs one search into one result box, showing progress and errors there
+async function runHomeSearch(mode, outId, work) {
+    const run = ++homeRuns[mode];
+    const out = document.getElementById(outId);
+    out.innerHTML = '<p class="home-status">Searching…</p>';
+    try {
+        const html = await work();
+        if (run !== homeRuns[mode] || html === null) return;
+        out.innerHTML = html;
+    } catch (err) {
+        if (run !== homeRuns[mode]) return;
+        out.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        console.error(err);
+    }
+    forgetRemovedExports();
+}
+
+function searchSingleTicket(number) {
+    const input = document.getElementById('single-ticket-input');
+    if (number) input.value = number;
+    const text = input.value.trim();
+    if (!text) return;
+    return runHomeSearch('single', 'single-ticket-result', async () => {
+        const data = await searchTickets(text, true);
+        if (!data) return null;
+        if (!data.found.length) {
+            return `<p class="home-status">No ticket matches “${escapeHtml(text)}”. ${TICKET_EXAMPLES}</p>`;
+        }
+        if (data.found.length === 1) return ticketCardHtml(data.found[0], data.record);
+        // A REQ, or a bare number that fits several types, brings up more than one
+        return `<p class="home-status">${data.found.length.toLocaleString()} tickets match “${escapeHtml(text)}”. Click one to see its full record.</p>` +
+            ticketTableHtml(data.found);
+    });
+}
+
+function searchManyTickets() {
+    const text = document.getElementById('multi-ticket-input').value.trim();
+    if (!text) return;
+    return runHomeSearch('multiple', 'multi-ticket-result', async () => {
+        const data = await searchTickets(text);
+        if (!data) return null;
+        if (!data.found.length) return searchSummaryHtml(data) + `<p class="home-status">${TICKET_EXAMPLES}</p>`;
+        const numbers = data.found.map(t => t.number).filter(n => STARRABLE.test(n));
+        return searchSummaryHtml(data) +
+            `<div class="home-actions"><button type="button" class="home-action" data-star-all="${escapeHtml(numbers.join(','))}">★ Star all ${numbers.length.toLocaleString()}</button></div>` +
+            ticketTableHtml(data.found) + ticketDownloadHtml(data.found, 'Ticket search');
+    });
+}
+
+// Newest star first. Unstarring here leaves the row (with an empty star) until
+// the list is opened again, so a slip of the mouse is easy to undo.
+function showStarred() {
+    return runHomeSearch('starred', 'starred-result', async () => {
+        await loadStars();
+        const numbers = [...starredTickets.keys()];
+        if (!numbers.length) {
+            return '<p class="home-status">No starred tickets yet. Click ☆ next to any ticket number: in a search here, ' +
+                'in the AI assistant\'s answers, or on an incident, change or request record in Dashboards. ' +
+                'Your stars are saved to your account, so they are here on any computer you sign in from.</p>';
+        }
+        const data = await searchTickets(numbers.join(' '));
+        if (!data) return null;
+        const columns = [...TICKET_COLUMNS, STARRED_COLUMN];
+        const missing = data.notFound.length
+            ? `<p class="home-status">Not in the data any more: ${escapeHtml(data.notFound.join(', '))}</p>` : '';
+        return `<p class="home-status">${numbers.length.toLocaleString()} starred ${numbers.length === 1 ? 'ticket' : 'tickets'}, newest first.</p>` +
+            ticketTableHtml(data.found, columns) + missing + ticketDownloadHtml(data.found, 'Starred tickets', columns);
+    });
+}
+
+// One listener for every star, ticket link and record button, wherever it was drawn
+document.addEventListener('click', e => {
+    const star = e.target.closest('.star-btn[data-star]');
+    if (star) { setStarred(star.dataset.star, !starredTickets.has(star.dataset.star)); return; }
+
+    const ticket = e.target.closest('[data-ticket]');
+    if (ticket) {
+        switchTab('home');
+        setHomeMode('single', false);
+        searchSingleTicket(ticket.dataset.ticket);
+        return;
+    }
+
+    const record = e.target.closest('[data-open-dashboard]');
+    if (record) { openInDashboards(record.dataset.openDashboard); return; }
+
+    const all = e.target.closest('[data-star-all]');
+    if (all && all.dataset.starAll) starAll(all.dataset.starAll.split(','));
+});
+
+// =====================================================================
+// START: a token from earlier in this tab skips the sign-in page; if it
+// has expired, the first API call returns 401 and brings the page back
+// =====================================================================
+
+showApp(Boolean(sessionTokenValue));
+loadCurrentUser();
+
+// A reload empties the chat on screen, so Claude forgets it too
+resetConversation();
 ```
 
 <a id="b28"></a>
@@ -9177,15 +10235,18 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 
 | File | Role |
 |---|---|
-| `server.mjs` | Express app (port 8000): sign-in routes, `/api/query` (one-shot translator with per-session conversation memory), `/api/export`, dashboards list, and a pass-through of Metabase public-dashboard pages |
+| `server.mjs` | Express app (port 8000): sign-in routes, `/api/query` (one-shot translator with per-session conversation memory), `/api/export`, `/api/tickets/search` and `/api/stars` (home page), dashboards list, and a pass-through of Metabase public-dashboard pages |
+| `tickets.mjs` | Home page ticket search: parses INC/CHG/RITM/SCTASK/REQ numbers and builds its own Cube queries from them (never from model output); full records use Cube's `/meta` column list |
+| `stars.mjs` | Each person's starred tickets, in `onetouch_auth` (`starred_tickets`, created on start) |
 | `business_logic.mjs` | Everything Claude knows about the data: `ENTITY_CATALOG`, `buildSystemPrompt()` (sections A-E), `OUTPUT_SCHEMA`, and `normalizeAndValidate()`, which every Claude-built query passes through before Cube |
 | `empty_results.mjs` | When a query returns nothing: re-runs it minus one filter at a time, then Claude explains why |
 | `export.mjs` | Tables -> pdf/docx/xlsx/csv/txt/rtf, and zip/7z bundles (7-Zip) |
 | `auth.mjs` | Accounts and sessions in the `onetouch_auth` Postgres DB (its own role `onetouch_app`); scrypt hashes; `db/accounts.json` export/sync |
 | `remote.mjs` | "Remote mode" for clones: serves `public/` on localhost and forwards `/api`, `/public`, `/app` to a OneTouch server |
-| `public/` | The single-page UI (`index.html`, `app.js`, `style.css`); no build step |
+| `public/` | The single-page UI (`index.html`, `app.js`, `style.css`); no build step. Home (ticket searches, stars) and Dashboards tabs; the AI chat is a header search bar that opens into a panel |
 | `db/` | `init-auth.sh`, `init-reporting.sh`, `reporting-views.sql` (typed `reporting.*` views for Metabase), `accounts.json` |
 | `scripts/users.mjs` | Account admin CLI (add, import CSV, export, sync, ...) |
+| `scripts/share.mjs` | `npm run share`: starts the stack and a Cloudflare tunnel (free, or permanent with `TUNNEL_TOKEN`), checks the link from outside via public DNS, prints and copies it; `--new`, `--stop` |
 | `scripts/metabase-setup.mjs` | Builds the Metabase dashboards (the `DASHBOARDS` list, each with its drawer `group`) and the drill-down pages clicks open (`DETAILS`; each chart's `click` / table's `links` say where a click goes) via Metabase's API; checks every link before changing anything; rerunnable. Writes `metabase-dashboards.json`, which the Dashboards tab reads |
 | `model/cubes/*.yml` | Cube data model over `analytics_db` |
 | `docker-compose.yml` | postgres, db-setup (runs `db/init-*.sh` on every `up`), cube, metabase, app, optional Cloudflare tunnels |
@@ -9360,6 +10421,8 @@ const FILES = [
   'scripts/metabase-setup.mjs', 'remote.mjs',
   '.claude/agents/onetouch-developer.md', '.claude/agents/onetouch-reviewer.md',
   'scripts/check.mjs', 'scripts/build-docs.mjs',
+  // Added later; at the end so the guide's links to B.1-B.36 keep their numbers
+  'tickets.mjs', 'stars.mjs', 'scripts/share.mjs',
 ];
 
 // Not copied in, and why (shown in the appendix)
@@ -9379,6 +10442,7 @@ const IMAGES = {
   'public/android-chrome-512x512.png': 'app icon, 512×512',
   'public/molsoncoorslogo.png': 'Molson Coors logo above the sign-in box, 320×143',
   'public/microsoftlogo.png': 'Microsoft logo on the "Microsoft Entra ID" button, 447×447',
+  'public/login-background.jpg': 'wheat-field photo filling the sign-in page behind the box',
   'molsoncoorslogo.png': 'unused copy of public/molsoncoorslogo.png',
   'microsoftlogo.png': 'unused copy of the Microsoft logo, 447×447',
   'microsoftlogo (1).png': 'unused copy of public/microsoftlogo.png',
@@ -9479,6 +10543,403 @@ if (process.argv.includes('--check')) {
 }
 ```
 
+<a id="b37"></a>
+### B.37 `tickets.mjs`
+
+```js
+// =====================================================================
+// TICKET LOOKUP: the home page's ticket search and the starred list.
+// Every Cube query here is built by this file from numbers that matched
+// TICKET_PATTERN, never from model output, so nothing unchecked reaches Cube.
+// =====================================================================
+
+// What each prefix is, which cube holds it, and which of its columns fill
+// the summary table (summary / state / level / team / person / opened)
+export const TICKET_KINDS = {
+  INC: {
+    cube: 'incident', label: 'Incident',
+    fields: { summary: 'short_description', state: 'state', level: 'priority', team: 'assignment_group', person: 'assigned_to', opened: 'created' },
+    lead: ['number', 'short_description', 'state', 'priority', 'assignment_group', 'assigned_to', 'created', 'resolved', 'closed', 'configuration_item', 'location', 'category', 'subcategory', 'contact_type'],
+  },
+  CHG: {
+    cube: 'change_request', label: 'Change',
+    fields: { summary: 'short_description', state: 'state', level: 'risk', team: 'owner_group', person: 'requested_by', opened: 'created' },
+    lead: ['number', 'short_description', 'state', 'type', 'risk', 'approval', 'owner_group', 'requested_by', 'created', 'planned_start_date', 'planned_end_date', 'configuration_item', 'environment'],
+  },
+  RITM: {
+    cube: 'sc_req_item', label: 'Request',
+    // Requests have no team or priority; the catalog item stands in for a missing summary
+    fields: { summary: 'short_description', item: 'item', state: 'state', person: 'requested_for', opened: 'opened', parent: 'request' },
+    lead: ['number', 'short_description', 'item', 'state', 'stage', 'approval', 'requested_for', 'opened_by', 'opened', 'closed', 'request', 'location'],
+  },
+  SCTASK: {
+    cube: 'sc_task', label: 'Catalog task',
+    fields: { summary: 'short_description', state: 'state', team: 'assignment_group', person: 'assigned_to', opened: 'created', parent: 'request_item' },
+    lead: ['number', 'short_description', 'state', 'assignment_group', 'assigned_to', 'created', 'sla_flag', 'request_item', 'request', 'item'],
+  },
+};
+
+// A REQ is an order: searching one brings up the requests (RITMs) inside it
+const ORDER_PREFIX = 'REQ';
+
+// "INC1814467", "inc 1814467", "CHG-1100215", or a bare "1814467" (tried as every type)
+const TICKET_PATTERN = /\b(INC|CHG|RITM|SCTASK|REQ)?[\s-]?(\d{7})\b/gi;
+// What can be starred: one ticket, not an order
+export const STARRABLE = /^(INC|CHG|RITM|SCTASK)\d{7}$/;
+
+export const MAX_SEARCH_NUMBERS = 200;
+
+// Text -> { wanted: [{ input, candidates }], ignored: [words that aren't ticket numbers] }
+export function parseTicketNumbers(text) {
+  const wanted = [];
+  const seen = new Set();
+  for (const [, prefix, digits] of String(text).matchAll(TICKET_PATTERN)) {
+    const input = prefix ? prefix.toUpperCase() + digits : digits;
+    if (seen.has(input)) continue;
+    seen.add(input);
+    const prefixes = prefix ? [prefix.toUpperCase()] : [...Object.keys(TICKET_KINDS), ORDER_PREFIX];
+    wanted.push({ input, candidates: prefixes.map(p => p + digits) });
+  }
+  const ignored = String(text).replace(TICKET_PATTERN, ' ').split(/[\s,;|]+/).filter(w => /[a-z0-9]/i.test(w));
+  return { wanted, ignored: [...new Set(ignored)].slice(0, 20) };
+}
+
+const prefixOf = number => number.match(/^[A-Z]+/)[0];
+
+function toTicket(prefix, row) {
+  const { cube, label, fields } = TICKET_KINDS[prefix];
+  const value = key => (fields[key] ? row[`${cube}.${fields[key]}`] ?? '' : '');
+  return {
+    number: row[`${cube}.number`],
+    kind: prefix,
+    type: label,
+    summary: value('summary') || value('item'),
+    state: value('state'),
+    level: value('level'),
+    team: value('team'),
+    person: value('person'),
+    opened: value('opened'),
+    parent: value('parent'),
+  };
+}
+
+// The summary rows for some numbers of one type (or the RITMs of some REQs)
+async function lookUp(prefix, numbers, runQuery) {
+  const kind = TICKET_KINDS[prefix === ORDER_PREFIX ? 'RITM' : prefix];
+  const filterColumn = prefix === ORDER_PREFIX ? 'request' : 'number';
+  const dimensions = [...new Set(['number', ...Object.values(kind.fields)])].map(c => `${kind.cube}.${c}`);
+  const rows = await runQuery({
+    dimensions,
+    filters: [{ member: `${kind.cube}.${filterColumn}`, operator: 'equals', values: numbers }],
+    order: { [`${kind.cube}.number`]: 'asc' },
+    limit: 5000,
+  });
+  return rows.map(r => toTicket(prefix === ORDER_PREFIX ? 'RITM' : prefix, r));
+}
+
+// Text with ticket numbers -> the tickets found, in the order they were asked for.
+// -> { found: [ticket], notFound: [input], ignored: [word], tooMany: bool }
+export async function findTickets(text, runQuery) {
+  const parsed = parseTicketNumbers(text);
+  const wanted = parsed.wanted.slice(0, MAX_SEARCH_NUMBERS);
+
+  const byPrefix = new Map();
+  for (const w of wanted) {
+    for (const n of w.candidates) {
+      const p = prefixOf(n);
+      if (!byPrefix.has(p)) byPrefix.set(p, []);
+      byPrefix.get(p).push(n);
+    }
+  }
+  const looked = await Promise.all([...byPrefix].map(async ([p, numbers]) => [p, await lookUp(p, numbers, runQuery)]));
+
+  const byNumber = new Map();
+  const byOrder = new Map();
+  for (const [p, tickets] of looked) {
+    for (const t of tickets) {
+      if (p === ORDER_PREFIX) {
+        if (!byOrder.has(t.parent)) byOrder.set(t.parent, []);
+        byOrder.get(t.parent).push(t);
+      } else {
+        byNumber.set(t.number, t);
+      }
+    }
+  }
+
+  const found = [];
+  const notFound = [];
+  const listed = new Set();
+  for (const w of wanted) {
+    const hits = w.candidates.flatMap(n => byNumber.get(n) || byOrder.get(n) || []);
+    if (!hits.length) notFound.push(w.input);
+    for (const t of hits) {
+      if (listed.has(t.number)) continue;
+      listed.add(t.number);
+      found.push(t);
+    }
+  }
+  return { found, notFound, ignored: parsed.ignored, tooMany: parsed.wanted.length > MAX_SEARCH_NUMBERS };
+}
+
+// ---------------------------------------------------------------------
+// One ticket's full record: every column its cube has, leading with the
+// ones people look at first, and leaving out the empty ones
+// ---------------------------------------------------------------------
+
+let cubeColumns = null; // Promise<Map<cube, [member]>>, from Cube's /meta
+
+function loadCubeColumns(cubeUrl, token) {
+  if (!cubeColumns) {
+    cubeColumns = (async () => {
+      const response = await fetch(cubeUrl.replace(/\/load$/, '/meta'), { headers: { Authorization: token } });
+      if (!response.ok) throw new Error(`Cube /meta answered ${response.status}`);
+      const { cubes } = await response.json();
+      return new Map(cubes.map(c => [c.name, c.dimensions.map(d => d.name)
+        // created_day / opened_week / planned_start_month repeat a date already shown in full
+        .filter(name => !/_(day|week|month)$/.test(name))]));
+    })();
+    cubeColumns.catch(() => { cubeColumns = null; }); // try again next time
+  }
+  return cubeColumns;
+}
+
+export async function ticketRecord(number, runQuery, { cubeUrl, token }) {
+  const prefix = prefixOf(number);
+  const kind = TICKET_KINDS[prefix];
+  if (!kind) return null;
+  const members = (await loadCubeColumns(cubeUrl, token)).get(kind.cube) || [];
+  const lead = kind.lead.map(c => `${kind.cube}.${c}`).filter(m => members.includes(m));
+  const ordered = [...lead, ...members.filter(m => !lead.includes(m))];
+
+  const [row] = await runQuery({
+    dimensions: ordered,
+    filters: [{ member: `${kind.cube}.number`, operator: 'equals', values: [number] }],
+    limit: 1,
+  });
+  if (!row) return null;
+  const fields = {};
+  for (const m of ordered) {
+    const v = row[m];
+    if (v !== null && v !== undefined && String(v).trim() !== '') fields[m] = v;
+  }
+  return { cube: kind.cube, fields };
+}
+```
+
+<a id="b38"></a>
+### B.38 `stars.mjs`
+
+```js
+// =====================================================================
+// STARRED TICKETS: each person's starred tickets, kept with their account
+// in the onetouch_auth database, so they follow them to any computer
+// =====================================================================
+
+import { pool } from './auth.mjs';
+
+// Plenty for a watch list; stops one account filling the table
+export const MAX_STARS = 2000;
+
+// Safe to run every start (after auth.ensureSchema, which creates users)
+export async function ensureStarsSchema() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS starred_tickets (
+      user_id     integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      number      text NOT NULL,
+      starred_at  timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (user_id, number)
+    );
+  `);
+}
+
+// Newest first
+export async function listStars(userId) {
+  const { rows } = await pool.query(
+    'SELECT number, starred_at FROM starred_tickets WHERE user_id = $1 ORDER BY starred_at DESC, number',
+    [userId]);
+  return rows.map(r => ({ number: r.number, starredAt: r.starred_at.toISOString() }));
+}
+
+// -> true if starred (or already was), false if the list is full
+export async function addStar(userId, number) {
+  const { rows } = await pool.query(
+    `INSERT INTO starred_tickets (user_id, number)
+     SELECT $1, $2 WHERE (SELECT count(*) FROM starred_tickets WHERE user_id = $1) < $3
+     ON CONFLICT DO NOTHING RETURNING number`,
+    [userId, number, MAX_STARS]);
+  if (rows.length) return true;
+  const existing = await pool.query('SELECT 1 FROM starred_tickets WHERE user_id = $1 AND number = $2', [userId, number]);
+  return existing.rows.length > 0;
+}
+
+export async function removeStar(userId, number) {
+  await pool.query('DELETE FROM starred_tickets WHERE user_id = $1 AND number = $2', [userId, number]);
+}
+```
+
+<a id="b39"></a>
+### B.39 `scripts/share.mjs`
+
+```js
+// Shares OneTouch over the internet through a Cloudflare Tunnel, in one command:
+// starts OneTouch if it isn't running, starts the tunnel, checks the link works,
+// and prints it (and copies it to the clipboard). Safe to run any time, e.g.
+// after restarting the computer, when the free link has changed.
+//
+//   npm run share            start sharing, or show the current link
+//   npm run share -- --new   get a fresh free link (restarts the tunnel)
+//   npm run share -- --stop  stop sharing (OneTouch keeps running on this computer)
+//
+// With TUNNEL_TOKEN in .env it runs the permanent tunnel instead of the free
+// one; put its address in .env as ONETOUCH_PUBLIC_URL to have it printed.
+
+import { spawnSync } from 'node:child_process';
+import { Resolver } from 'node:dns/promises';
+import https from 'node:https';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import dotenv from 'dotenv';
+
+// Run from the project folder, wherever it was started from
+process.chdir(path.join(path.dirname(fileURLToPath(import.meta.url)), '..'));
+dotenv.config({ quiet: true });
+
+const args = process.argv.slice(2);
+const token = (process.env.TUNNEL_TOKEN || '').trim();
+const publicUrl = (process.env.ONETOUCH_PUBLIC_URL || '').trim();
+const localUrl = `http://localhost:${process.env.APP_PORT || 8000}/`;
+const QUICK = { profile: 'tunnel', service: 'tunnel', container: 'onetouch_tunnel' };
+const NAMED = { profile: 'tunnel-named', service: 'tunnel-named', container: 'onetouch_tunnel_named' };
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Docker's own progress messages go straight to the screen
+function docker(dockerArgs, { quiet = false } = {}) {
+  const r = spawnSync('docker', dockerArgs, { encoding: 'utf8', stdio: quiet ? 'pipe' : 'inherit' });
+  if (r.error?.code === 'ENOENT') stop('Docker is not installed (the "docker" command was not found).');
+  return r;
+}
+
+function stop(message) {
+  console.error(`\n❌ ${message}\n`);
+  process.exit(1);
+}
+
+// Retries `test` every second or two until it returns something, or gives up after `seconds`
+async function waitFor(test, seconds) {
+  const deadline = Date.now() + seconds * 1000;
+  while (Date.now() < deadline) {
+    const result = await test();
+    if (result) return result;
+    await sleep(1500);
+  }
+  return null;
+}
+
+// What the tunnel container has logged since it last started
+function logsSinceStart(container) {
+  const started = docker(['inspect', '-f', '{{.State.StartedAt}}', container], { quiet: true }).stdout.trim();
+  const r = docker(['logs', '--since', started, container], { quiet: true });
+  return `${r.stdout}${r.stderr}`; // cloudflared logs to stderr
+}
+
+async function reachable(url) {
+  try {
+    return (await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(10000) })).status < 500;
+  } catch {
+    return false;
+  }
+}
+
+// Checks the public link the way someone elsewhere reaches it: looked up through
+// public DNS servers, because this computer's own DNS cache can keep saying
+// "not found" for minutes after a new link has started working. If public DNS
+// can't be reached at all (some networks block it), the normal lookup is used.
+const publicDns = new Resolver({ timeout: 5000, tries: 1 });
+publicDns.setServers(['1.1.1.1', '8.8.8.8']);
+
+function reachableFromOutside(url) {
+  return new Promise(resolve => {
+    const lookup = (host, options, callback) => publicDns.resolve4(host).then(
+      addresses => options.all ? callback(null, addresses.map(address => ({ address, family: 4 }))) : callback(null, addresses[0], 4),
+      error => callback(error));
+    const request = https.get(url, { lookup, timeout: 10000 }, response => {
+      response.resume();
+      resolve(response.statusCode < 500);
+    });
+    request.on('timeout', () => request.destroy(new Error('timed out')));
+    request.on('error', error => {
+      const dnsBlocked = ['ETIMEOUT', 'ECONNREFUSED'].includes(error.code) && error.syscall === 'queryA';
+      if (dnsBlocked) reachable(url).then(resolve);
+      else resolve(false);
+    });
+  });
+}
+
+function copyToClipboard(text) {
+  const tool = process.platform === 'win32' ? 'clip' : process.platform === 'darwin' ? 'pbcopy' : null;
+  return Boolean(tool) && spawnSync(tool, { input: text }).status === 0;
+}
+
+// ---------------------------------------------------------------------
+
+if (docker(['info'], { quiet: true }).status !== 0) {
+  stop('Docker is not running. Open Docker Desktop, wait until it says "Engine running", then run this again.');
+}
+
+if (args.includes('--stop')) {
+  docker(['compose', '--profile', QUICK.profile, '--profile', NAMED.profile, 'stop', QUICK.service, NAMED.service]);
+  console.log('\nStopped sharing. OneTouch still runs on this computer at ' + localUrl + '\n');
+  process.exit(0);
+}
+
+console.log('Starting OneTouch (nothing changes if it is already running)…');
+if (docker(['compose', 'up', '-d']).status !== 0) stop('OneTouch did not start; see the messages above.');
+if (!await waitFor(() => reachable(localUrl), 180)) {
+  stop(`OneTouch did not answer at ${localUrl}. Check it with: docker logs --tail 30 analytics_node_app`);
+}
+
+const tunnel = token ? NAMED : QUICK;
+const other = token ? QUICK : NAMED;
+// Only one tunnel at a time
+docker(['compose', '--profile', other.profile, 'stop', other.service], { quiet: true });
+
+console.log(`Starting the ${token ? 'permanent' : 'free'} Cloudflare tunnel…`);
+const fresh = args.includes('--new') ? ['--force-recreate'] : [];
+if (docker(['compose', '--profile', tunnel.profile, 'up', '-d', ...fresh, tunnel.service]).status !== 0) {
+  stop('The tunnel did not start; see the messages above.');
+}
+
+let link;
+if (token) {
+  const connected = await waitFor(() => /Registered tunnel connection/.test(logsSinceStart(tunnel.container)), 60);
+  if (!connected) stop(`The permanent tunnel did not connect. Check the token in .env, and see: docker logs --tail 30 ${tunnel.container}`);
+  link = publicUrl || null;
+} else {
+  link = await waitFor(() => (logsSinceStart(tunnel.container).match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/g) || []).pop(), 60);
+  if (!link) stop(`Cloudflare did not hand out a link. Try again with: npm run share -- --new   (details: docker logs --tail 30 ${tunnel.container})`);
+}
+
+if (link) console.log(`Checking ${link} works from the internet (a new link can take a minute or two)…`);
+const works = link ? await waitFor(() => reachableFromOutside(link), 180) : true;
+const copied = link && copyToClipboard(link);
+
+console.log('\n' + '='.repeat(64));
+if (link) {
+  console.log(`OneTouch is shared at:\n\n    ${link}\n`);
+  if (copied) console.log('(Copied to your clipboard.)');
+  if (!works) console.log('It is not answering yet; give it a minute before sending it out.');
+} else {
+  console.log('The permanent tunnel is connected. Put its address in .env as');
+  console.log('ONETOUCH_PUBLIC_URL=https://... to have it printed here.');
+}
+console.log('People sign in there with their own username and password.');
+console.log(token
+  ? 'This address never changes. It works whenever this computer is on with Docker running.'
+  : 'The link stays the same until the tunnel restarts (this computer or Docker restarting).\nRun "npm run share" again after a restart to get the new link.');
+console.log('='.repeat(64) + '\n');
+```
+
 ## Appendix C: images
 
 Make or download an image with the same name and size (step 14). The SHA-256 lets you check a copy against the original.
@@ -9493,6 +10954,7 @@ Make or download an image with the same name and size (step 14). The SHA-256 let
 | `public/android-chrome-512x512.png` | app icon, 512×512 | 56,975 | `892dc6ece74849f2…` |
 | `public/molsoncoorslogo.png` | Molson Coors logo above the sign-in box, 320×143 | 17,266 | `3337f757109fc033…` |
 | `public/microsoftlogo.png` | Microsoft logo on the "Microsoft Entra ID" button, 447×447 | 2,317 | `20479b072c51b6c4…` |
+| `public/login-background.jpg` | wheat-field photo filling the sign-in page behind the box | 4,306,193 | `08413dbddeada9ff…` |
 | `molsoncoorslogo.png` | unused copy of public/molsoncoorslogo.png | 17,266 | `3337f757109fc033…` |
 | `microsoftlogo.png` | unused copy of the Microsoft logo, 447×447 | 1,273 | `d08ad38884617b08…` |
 | `microsoftlogo (1).png` | unused copy of public/microsoftlogo.png | 2,317 | `20479b072c51b6c4…` |
