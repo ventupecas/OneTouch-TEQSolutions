@@ -95,7 +95,8 @@
     "docs": "node scripts/build-docs.mjs",
     "start": "node server.mjs",
     "users": "node scripts/users.mjs",
-    "remote": "node remote.mjs"
+    "remote": "node remote.mjs",
+    "share": "node scripts/share.mjs"
   },
   "repository": {
     "type": "git",

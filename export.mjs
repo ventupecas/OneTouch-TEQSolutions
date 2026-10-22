@@ -82,15 +82,30 @@ function cellText(value) {
   return String(value);
 }
 
-function generatedLine() {
-  return `Generated ${new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}`;
+// The downloader's time zone, which the browser sends, so dates read in their
+// own clock time; the server's would be UTC inside Docker. Unknown or missing: UTC.
+function exportTimeZone(payload) {
+  try {
+    return new Intl.DateTimeFormat('en-US', { timeZone: String(payload.timeZone || '') }).resolvedOptions().timeZone;
+  } catch {
+    return 'UTC';
+  }
+}
+
+// "Generated Oct 21, 2026, 9:01 PM CDT"
+function generatedLine(payload) {
+  const when = new Date().toLocaleString('en-US', {
+    timeZone: exportTimeZone(payload),
+    month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
+  });
+  return `Generated ${when}`;
 }
 
 // Heading lines that open every document: title, the question, the date
 function headerLines(payload) {
   const lines = [payload.title || 'One Touch export'];
   if (payload.question) lines.push(`Question: ${payload.question}`);
-  lines.push(generatedLine());
+  lines.push(generatedLine(payload));
   return lines;
 }
 
@@ -105,8 +120,11 @@ export function exportFileName(payload) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 60) || 'results';
-  const date = new Date().toISOString().slice(0, 10);
-  return `one-touch-${slug}-${date}`;
+  // Today's date where the downloader is (late evening in Chicago is already tomorrow in UTC)
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: exportTimeZone(payload), year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date()).map(p => [p.type, p.value]));
+  return `one-touch-${slug}-${parts.year}-${parts.month}-${parts.day}`;
 }
 
 // ---------------------------------------------------------------------

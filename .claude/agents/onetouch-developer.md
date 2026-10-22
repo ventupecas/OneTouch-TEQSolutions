@@ -20,6 +20,7 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 | `public/` | The single-page UI (`index.html`, `app.js`, `style.css`); no build step. Home (ticket searches, stars) and Dashboards tabs; the AI chat is a header search bar that opens into a panel |
 | `db/` | `init-auth.sh`, `init-reporting.sh`, `reporting-views.sql` (typed `reporting.*` views for Metabase), `accounts.json` |
 | `scripts/users.mjs` | Account admin CLI (add, import CSV, export, sync, ...) |
+| `scripts/share.mjs` | `npm run share`: starts the stack and a Cloudflare tunnel (free, or permanent with `TUNNEL_TOKEN`), checks the link from outside via public DNS, prints and copies it; `--new`, `--stop` |
 | `scripts/metabase-setup.mjs` | Builds the Metabase dashboards (the `DASHBOARDS` list, each with its drawer `group`) and the drill-down pages clicks open (`DETAILS`; each chart's `click` / table's `links` say where a click goes) via Metabase's API; checks every link before changing anything; rerunnable. Writes `metabase-dashboards.json`, which the Dashboards tab reads |
 | `model/cubes/*.yml` | Cube data model over `analytics_db` |
 | `docker-compose.yml` | postgres, db-setup (runs `db/init-*.sh` on every `up`), cube, metabase, app, optional Cloudflare tunnels |

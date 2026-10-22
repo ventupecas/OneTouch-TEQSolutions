@@ -908,7 +908,8 @@ async function downloadExport(exportId) {
         const response = await fetch(`${API_BASE}/api/export`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...authHeaders() },
-            body: JSON.stringify({ ...payload, format }),
+            // The browser's time zone: the file's "Generated" time and date use it
+            body: JSON.stringify({ ...payload, format, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
         });
         if (handleUnauthorized(response)) {
             status.textContent = '';

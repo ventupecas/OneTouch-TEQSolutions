@@ -32,6 +32,8 @@ const FILES = [
   'scripts/metabase-setup.mjs', 'remote.mjs',
   '.claude/agents/onetouch-developer.md', '.claude/agents/onetouch-reviewer.md',
   'scripts/check.mjs', 'scripts/build-docs.mjs',
+  // Added later; at the end so the guide's links to B.1-B.36 keep their numbers
+  'tickets.mjs', 'stars.mjs', 'scripts/share.mjs',
 ];
 
 // Not copied in, and why (shown in the appendix)
@@ -51,6 +53,7 @@ const IMAGES = {
   'public/android-chrome-512x512.png': 'app icon, 512×512',
   'public/molsoncoorslogo.png': 'Molson Coors logo above the sign-in box, 320×143',
   'public/microsoftlogo.png': 'Microsoft logo on the "Microsoft Entra ID" button, 447×447',
+  'public/login-background.jpg': 'wheat-field photo filling the sign-in page behind the box',
   'molsoncoorslogo.png': 'unused copy of public/molsoncoorslogo.png',
   'microsoftlogo.png': 'unused copy of the Microsoft logo, 447×447',
   'microsoftlogo (1).png': 'unused copy of public/microsoftlogo.png',
