@@ -334,7 +334,65 @@ async function translateToQuery(conversation, userPrompt) {
   conversation.turns += 1;
   conversation.pendingNote = null;
 
-  return { parsed, usage: message.usage, memoryReset };
+  return { parsed, usage: message.usage, memoryReset, userTurn, content: message.content };
+}
+
+// =====================================================================
+// REPEATED QUESTIONS: the data never changes, so a question that opens a
+// conversation and has been asked before (by anyone) reuses Claude's
+// translation from then: it answers in a fraction of a second instead of
+// a few. Follow-ups depend on the conversation, so they always go to Claude.
+// A reused translation still goes through normalizeAndValidate every time.
+// =====================================================================
+
+const ANSWER_CACHE_SIZE = 500;
+// key -> { userTurn, content, parsed, explanation }; Map order = least recently used first
+const answerCache = new Map();
+
+// Same question = same words, ignoring capitals, spacing and the closing "?",
+// asked on the same "today" (the turn Claude saw carries the date) of the same model
+function answerCacheKey(conversation, userPrompt) {
+  if (conversation.messages.length || conversation.pendingNote) return null;
+  const question = userPrompt.toLowerCase().replace(/\s+/g, ' ').trim().replace(/[\s?.!]+$/, '');
+  if (!question) return null;
+  return JSON.stringify([CLAUDE_MODEL, referenceToday().toISOString().slice(0, 10), question]);
+}
+
+function cachedAnswer(key) {
+  const entry = key && answerCache.get(key);
+  if (entry) { answerCache.delete(key); answerCache.set(key, entry); } // now the most recently used
+  return entry || null;
+}
+
+function rememberAnswer(key, entry) {
+  answerCache.set(key, entry);
+  if (answerCache.size > ANSWER_CACHE_SIZE) answerCache.delete(answerCache.keys().next().value);
+}
+
+// =====================================================================
+// PROGRESS: a page that asks for text/event-stream gets each step as it
+// happens ("understanding", "querying", ...) and then the answer, so the
+// chat can show what's going on. Anything else gets the plain JSON answer.
+// =====================================================================
+
+function queryReply(req, res) {
+  const streaming = (req.get('Accept') || '').includes('text/event-stream');
+  if (streaming) {
+    // no-transform / X-Accel-Buffering: proxies (Cloudflare included) pass each step on at once
+    res.set({ 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'X-Accel-Buffering': 'no' });
+    res.flushHeaders();
+  }
+  const event = (name, data) => res.write(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
+  return {
+    progress(stage) {
+      if (streaming) event('progress', { stage });
+    },
+    send(status, body) {
+      if (!streaming) return res.status(status).json(body);
+      event('result', { status, ...body });
+      res.end();
+    },
+  };
 }
 
 // One line for Claude about what the last answer's queries returned
@@ -376,28 +434,48 @@ app.post('/api/query', async (req, res) => {
   // Questions from one session run in order, so the conversation history
   // can't interleave if the user sends a second one before the first returns
   const session = req.session;
-  const run = session.queue.then(() => answerQuestion(session.conversation, userPrompt, res));
+  const reply = queryReply(req, res);
+  const run = session.queue.then(() => answerQuestion(session.conversation, userPrompt, reply));
   session.queue = run.catch(() => {});
   await run;
 });
 
-async function answerQuestion(conversation, userPrompt, res) {
+async function answerQuestion(conversation, userPrompt, reply) {
+  const started = Date.now();
   // Set once Claude's answer is in the conversation; from then on, whatever
   // happens to the query is reported to Claude with the next question
   let remembered = false;
+  const cacheKey = answerCacheKey(conversation, userPrompt);
+  const cached = cachedAnswer(cacheKey);
 
   try {
     console.log(`\n💬 Processing prompt: "${userPrompt}" (turn ${conversation.turns + 1})`);
 
-    const { parsed, usage, memoryReset } = await translateToQuery(conversation, userPrompt);
+    let parsed, memoryReset = false, fresh = null;
+    if (cached) {
+      // The conversation gets the original question and Claude's original reply,
+      // so follow-ups build on exactly the history Claude produced
+      reply.progress('cached');
+      conversation.messages.push(cached.userTurn, { role: 'assistant', content: cached.content });
+      conversation.turns += 1;
+      parsed = cached.parsed;
+      console.log('⚡ Asked before: reusing the earlier translation (no Claude call)');
+    } else {
+      reply.progress('understanding');
+      const t = await translateToQuery(conversation, userPrompt);
+      ({ parsed, memoryReset } = t);
+      fresh = { userTurn: t.userTurn, content: t.content, parsed };
+      console.log(`🧠 tokens in=${t.usage.input_tokens} cached=${t.usage.cache_read_input_tokens ?? 0} out=${t.usage.output_tokens}`);
+    }
     remembered = true;
-    console.log(`🧠 tokens in=${usage.input_tokens} cached=${usage.cache_read_input_tokens ?? 0} out=${usage.output_tokens}`);
+    // Timing and whether Claude was skipped, for the page's "Answered in …" line
+    const timing = () => ({ elapsedMs: Date.now() - started, fromCache: Boolean(cached) });
 
     const verdict = normalizeAndValidate(parsed);
     if (!verdict.ok) {
       console.warn('⚠️ Rejected by validator:', verdict.error, JSON.stringify(parsed));
       conversation.pendingNote = `it was rejected before running: ${verdict.error}`;
-      return res.status(400).json({
+      return reply.send(400, {
         error: `I couldn't map that question onto the data: ${verdict.error}`,
         aiInterpretation: parsed,
       });
@@ -406,42 +484,52 @@ async function answerQuestion(conversation, userPrompt, res) {
     if (verdict.intent !== 'query') {
       // clarify / unsupported: nothing to run, hand the explanation back
       console.log(`🙋 ${verdict.intent}: ${verdict.message}`);
-      return res.json({
+      if (fresh && cacheKey) rememberAnswer(cacheKey, fresh);
+      return reply.send(200, {
         intent: verdict.intent,
         message: verdict.message,
         assumptions: verdict.assumptions,
         memoryReset,
         sections: [],
         results: [],
+        ...timing(),
       });
     }
 
     // One Cube query per ticket type, run side by side
+    reply.progress('querying');
     for (const q of verdict.queries) console.log(`🤖 Cube query [${q.entity}]:`, JSON.stringify(q.cubeQuery));
     const sections = await Promise.all(verdict.queries.map(async q => ({
       entity: q.entity,
       rows: await runCubeQuery(q.cubeQuery),
     })));
     // Nothing found: work out why (which filter emptied it, what dates the data
-    // covers) and have Claude say so plainly, instead of a bare "no records"
+    // covers) and have Claude say so plainly, instead of a bare "no records".
+    // A repeated question reuses the explanation it got the first time.
     const emptyQueries = verdict.queries.filter((_, i) => isEmptyResult(sections[i].rows));
-    let explanation = null;
-    if (emptyQueries.length) {
+    let explanation = cached?.explanation ?? null;
+    if (emptyQueries.length && !explanation) {
+      reply.progress('explaining');
       try {
         const facts = (await Promise.all(emptyQueries.map(q => diagnoseEmpty(q.entity, q.cubeQuery, runCubeQuery)))).flat();
         console.log('🔎 Empty result facts:\n   ' + facts.join('\n   '));
         explanation = await explainEmpty({ anthropic, model: CLAUDE_MODEL, question: userPrompt, searchedFor: verdict.message, facts });
         console.log(`🔎 Explained: ${explanation}`);
+        if (cached) cached.explanation = explanation;
       } catch (error) {
         console.error('🔎 Could not diagnose the empty result:', error.message);
       }
     }
+    if (!emptyQueries.length) explanation = null;
     conversation.pendingNote = describeResults(sections) + (explanation ? ` What the user was told about the empty result: ${explanation}` : '');
 
     // Counts across several ticket types become one table with a total column
     const combined = verdict.merge ? combineResults(verdict.merge, verdict.queries, sections) : null;
 
-    res.json({
+    // Only an answer that ran all the way through is worth reusing
+    if (fresh && cacheKey) rememberAnswer(cacheKey, { ...fresh, explanation });
+
+    reply.send(200, {
       intent: 'query',
       // `entity` / `results` describe the single-type case; `sections` and
       // `combined` describe questions that spanned several ticket types
@@ -456,16 +544,17 @@ async function answerQuestion(conversation, userPrompt, res) {
       // Why nothing (or part of it) was found; allEmpty means there's no table to show
       explanation,
       allEmpty: emptyQueries.length === verdict.queries.length,
+      ...timing(),
     });
 
   } catch (error) {
     if (remembered) conversation.pendingNote = `it failed when run: ${error.message}`;
     if (error instanceof Anthropic.APIError) {
       console.error(`📋 Claude API error ${error.status}:`, error.message);
-      return res.status(502).json({ error: `Claude API error (${error.status}): ${error.message}` });
+      return reply.send(502, { error: `Claude API error (${error.status}): ${error.message}` });
     }
     console.error('📋 Execution Failure Context:', error);
-    res.status(500).json({ error: `Server pipeline failed: ${error.message}` });
+    reply.send(500, { error: `Server pipeline failed: ${error.message}` });
   }
 }
 

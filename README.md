@@ -370,14 +370,31 @@ it in the tab's `sessionStorage`, so:
 Type a question in the header's search bar and press **Enter** or click **Ask**. The
 full chat opens over the page with the answer; from there, ask follow-ups in its box
 (**Enter** or **Ask Claude**). **Minimize ▴** or Escape shrinks it back to the bar and
-keeps the conversation; **Open chat (*n*)** in the bar reopens it. While Claude works, a
-bubble shows "🤖 Thinking and querying Cube.dev...". If you send another question before
-the first answer arrives, it waits its turn: questions in one session always run in order.
+keeps the conversation; **Open chat (*n*)** in the bar reopens it. If you send another
+question before the first answer arrives, it waits its turn: questions in one session
+always run in order.
+
+**While it works**, a bubble shows each step as the server reaches it, with a running
+clock: "📨 Sending your question…", "🧠 Understanding your question…" (Claude), "📊 Getting
+the data…" (Cube), and for an empty result "🔎 Nothing matched; working out why…".
+Finished steps stay listed with a ✓ and how long they took. Under each answer, a small line
+says how long it took ("Answered in 2.9 s"). A new question usually takes 2–5 seconds,
+almost all of it Claude; the data itself comes back in under a tenth of a second.
+
+**Repeated questions are instant.** The data never changes, so when a question that
+starts a conversation has been asked before, by anyone, OneTouch reuses Claude's earlier
+translation (and, for an empty result, its explanation) and answers in about 0.1 seconds.
+The bubble then shows "⚡ Asked before: reusing that answer…" and the answer says "⚡ Answered
+in 0.1 s: this question was asked before". "The same question" means the same words,
+ignoring capitals, spacing and a closing "?", asked about the same "today". Follow-up
+questions depend on the conversation, so they always go to Claude. The server keeps the
+last 500 such questions in memory; restarting it starts the list over.
 
 ### What happens to a question
 
-1. **Claude translates it** (model `claude-sonnet-5-5` unless `CLAUDE_MODEL` says
-   otherwise) into a structured JSON answer whose shape the API enforces: an `intent`, up
+1. **Claude translates it**, unless it is a repeated question (see above), in which case
+   the earlier translation is reused and the steps below still run. The model is
+   `claude-sonnet-5-5` unless `CLAUDE_MODEL` says otherwise, and it returns a structured JSON answer whose shape the API enforces: an `intent`, up
    to one query per table, a one-sentence restatement, and the list of assumptions made.
    The instructions (`business_logic.mjs`) describe the six tables, every column, the
    exact values coded columns hold, ITIL vocabulary, and worked examples. They are sent
@@ -686,7 +703,9 @@ analytics side (Cube, Metabase, Claude's queries) can read the accounts.
 `npm run remote -- <server address>` (`remote.mjs`) serves the page from your own clone
 and forwards `/api`, `/public` and `/app` to the server. It forwards only the
 `Authorization`, `Content-Type` and `Accept` headers, waits up to 5 minutes for an
-answer, and passes request bodies up to 25 MB (large downloads). On start it checks that the server answers, and
+answer, and passes request bodies up to 25 MB (large downloads). A question's progress
+steps are passed on as they arrive, so the chat shows them live; everything else is passed
+on once it's complete. On start it checks that the server answers, and
 it warns if the address is wrong. If port 8000 is taken, it says so and suggests
 `REMOTE_PORT`.
 
@@ -705,6 +724,7 @@ inside the data. Leave it empty to use the real date.
 |---|---|
 | 💬 | A question arrived, with its turn number |
 | 🧠 | Claude's token use: input, cached, output |
+| ⚡ | A repeated question answered without Claude (its earlier translation reused) |
 | 🤖 | Each Cube query that ran |
 | 🙋 | A clarify or unsupported answer |
 | 🔎 | Empty-result facts and the explanation given |
@@ -1005,6 +1025,10 @@ Check: `node --check business_logic.mjs` prints nothing.
   - `/api/query`: question → Claude (streaming, with prompt caching, conversation memory
     per session, up to 40 turns) → validator → Cube, one query per table in parallel →
     empty-result explanation → JSON for the page. Questions in one session run one at a time.
+    A page that asks for `text/event-stream` gets a `progress` event per step (`understanding`,
+    `cached`, `querying`, `explaining`) and then a `result` event. A question that opens a
+    conversation and was asked before reuses the earlier translation (kept in memory, up to
+    500), so it skips Claude; the reused answer still goes through the validator.
   - `/api/export` → `export.mjs`.
   - Passes Metabase's public dashboard pages through, so the Dashboards tab works wherever
     OneTouch does.
@@ -5526,7 +5550,65 @@ async function translateToQuery(conversation, userPrompt) {
   conversation.turns += 1;
   conversation.pendingNote = null;
 
-  return { parsed, usage: message.usage, memoryReset };
+  return { parsed, usage: message.usage, memoryReset, userTurn, content: message.content };
+}
+
+// =====================================================================
+// REPEATED QUESTIONS: the data never changes, so a question that opens a
+// conversation and has been asked before (by anyone) reuses Claude's
+// translation from then: it answers in a fraction of a second instead of
+// a few. Follow-ups depend on the conversation, so they always go to Claude.
+// A reused translation still goes through normalizeAndValidate every time.
+// =====================================================================
+
+const ANSWER_CACHE_SIZE = 500;
+// key -> { userTurn, content, parsed, explanation }; Map order = least recently used first
+const answerCache = new Map();
+
+// Same question = same words, ignoring capitals, spacing and the closing "?",
+// asked on the same "today" (the turn Claude saw carries the date) of the same model
+function answerCacheKey(conversation, userPrompt) {
+  if (conversation.messages.length || conversation.pendingNote) return null;
+  const question = userPrompt.toLowerCase().replace(/\s+/g, ' ').trim().replace(/[\s?.!]+$/, '');
+  if (!question) return null;
+  return JSON.stringify([CLAUDE_MODEL, referenceToday().toISOString().slice(0, 10), question]);
+}
+
+function cachedAnswer(key) {
+  const entry = key && answerCache.get(key);
+  if (entry) { answerCache.delete(key); answerCache.set(key, entry); } // now the most recently used
+  return entry || null;
+}
+
+function rememberAnswer(key, entry) {
+  answerCache.set(key, entry);
+  if (answerCache.size > ANSWER_CACHE_SIZE) answerCache.delete(answerCache.keys().next().value);
+}
+
+// =====================================================================
+// PROGRESS: a page that asks for text/event-stream gets each step as it
+// happens ("understanding", "querying", ...) and then the answer, so the
+// chat can show what's going on. Anything else gets the plain JSON answer.
+// =====================================================================
+
+function queryReply(req, res) {
+  const streaming = (req.get('Accept') || '').includes('text/event-stream');
+  if (streaming) {
+    // no-transform / X-Accel-Buffering: proxies (Cloudflare included) pass each step on at once
+    res.set({ 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'X-Accel-Buffering': 'no' });
+    res.flushHeaders();
+  }
+  const event = (name, data) => res.write(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
+  return {
+    progress(stage) {
+      if (streaming) event('progress', { stage });
+    },
+    send(status, body) {
+      if (!streaming) return res.status(status).json(body);
+      event('result', { status, ...body });
+      res.end();
+    },
+  };
 }
 
 // One line for Claude about what the last answer's queries returned
@@ -5568,28 +5650,48 @@ app.post('/api/query', async (req, res) => {
   // Questions from one session run in order, so the conversation history
   // can't interleave if the user sends a second one before the first returns
   const session = req.session;
-  const run = session.queue.then(() => answerQuestion(session.conversation, userPrompt, res));
+  const reply = queryReply(req, res);
+  const run = session.queue.then(() => answerQuestion(session.conversation, userPrompt, reply));
   session.queue = run.catch(() => {});
   await run;
 });
 
-async function answerQuestion(conversation, userPrompt, res) {
+async function answerQuestion(conversation, userPrompt, reply) {
+  const started = Date.now();
   // Set once Claude's answer is in the conversation; from then on, whatever
   // happens to the query is reported to Claude with the next question
   let remembered = false;
+  const cacheKey = answerCacheKey(conversation, userPrompt);
+  const cached = cachedAnswer(cacheKey);
 
   try {
     console.log(`\n💬 Processing prompt: "${userPrompt}" (turn ${conversation.turns + 1})`);
 
-    const { parsed, usage, memoryReset } = await translateToQuery(conversation, userPrompt);
+    let parsed, memoryReset = false, fresh = null;
+    if (cached) {
+      // The conversation gets the original question and Claude's original reply,
+      // so follow-ups build on exactly the history Claude produced
+      reply.progress('cached');
+      conversation.messages.push(cached.userTurn, { role: 'assistant', content: cached.content });
+      conversation.turns += 1;
+      parsed = cached.parsed;
+      console.log('⚡ Asked before: reusing the earlier translation (no Claude call)');
+    } else {
+      reply.progress('understanding');
+      const t = await translateToQuery(conversation, userPrompt);
+      ({ parsed, memoryReset } = t);
+      fresh = { userTurn: t.userTurn, content: t.content, parsed };
+      console.log(`🧠 tokens in=${t.usage.input_tokens} cached=${t.usage.cache_read_input_tokens ?? 0} out=${t.usage.output_tokens}`);
+    }
     remembered = true;
-    console.log(`🧠 tokens in=${usage.input_tokens} cached=${usage.cache_read_input_tokens ?? 0} out=${usage.output_tokens}`);
+    // Timing and whether Claude was skipped, for the page's "Answered in …" line
+    const timing = () => ({ elapsedMs: Date.now() - started, fromCache: Boolean(cached) });
 
     const verdict = normalizeAndValidate(parsed);
     if (!verdict.ok) {
       console.warn('⚠️ Rejected by validator:', verdict.error, JSON.stringify(parsed));
       conversation.pendingNote = `it was rejected before running: ${verdict.error}`;
-      return res.status(400).json({
+      return reply.send(400, {
         error: `I couldn't map that question onto the data: ${verdict.error}`,
         aiInterpretation: parsed,
       });
@@ -5598,42 +5700,52 @@ async function answerQuestion(conversation, userPrompt, res) {
     if (verdict.intent !== 'query') {
       // clarify / unsupported: nothing to run, hand the explanation back
       console.log(`🙋 ${verdict.intent}: ${verdict.message}`);
-      return res.json({
+      if (fresh && cacheKey) rememberAnswer(cacheKey, fresh);
+      return reply.send(200, {
         intent: verdict.intent,
         message: verdict.message,
         assumptions: verdict.assumptions,
         memoryReset,
         sections: [],
         results: [],
+        ...timing(),
       });
     }
 
     // One Cube query per ticket type, run side by side
+    reply.progress('querying');
     for (const q of verdict.queries) console.log(`🤖 Cube query [${q.entity}]:`, JSON.stringify(q.cubeQuery));
     const sections = await Promise.all(verdict.queries.map(async q => ({
       entity: q.entity,
       rows: await runCubeQuery(q.cubeQuery),
     })));
     // Nothing found: work out why (which filter emptied it, what dates the data
-    // covers) and have Claude say so plainly, instead of a bare "no records"
+    // covers) and have Claude say so plainly, instead of a bare "no records".
+    // A repeated question reuses the explanation it got the first time.
     const emptyQueries = verdict.queries.filter((_, i) => isEmptyResult(sections[i].rows));
-    let explanation = null;
-    if (emptyQueries.length) {
+    let explanation = cached?.explanation ?? null;
+    if (emptyQueries.length && !explanation) {
+      reply.progress('explaining');
       try {
         const facts = (await Promise.all(emptyQueries.map(q => diagnoseEmpty(q.entity, q.cubeQuery, runCubeQuery)))).flat();
         console.log('🔎 Empty result facts:\n   ' + facts.join('\n   '));
         explanation = await explainEmpty({ anthropic, model: CLAUDE_MODEL, question: userPrompt, searchedFor: verdict.message, facts });
         console.log(`🔎 Explained: ${explanation}`);
+        if (cached) cached.explanation = explanation;
       } catch (error) {
         console.error('🔎 Could not diagnose the empty result:', error.message);
       }
     }
+    if (!emptyQueries.length) explanation = null;
     conversation.pendingNote = describeResults(sections) + (explanation ? ` What the user was told about the empty result: ${explanation}` : '');
 
     // Counts across several ticket types become one table with a total column
     const combined = verdict.merge ? combineResults(verdict.merge, verdict.queries, sections) : null;
 
-    res.json({
+    // Only an answer that ran all the way through is worth reusing
+    if (fresh && cacheKey) rememberAnswer(cacheKey, { ...fresh, explanation });
+
+    reply.send(200, {
       intent: 'query',
       // `entity` / `results` describe the single-type case; `sections` and
       // `combined` describe questions that spanned several ticket types
@@ -5648,16 +5760,17 @@ async function answerQuestion(conversation, userPrompt, res) {
       // Why nothing (or part of it) was found; allEmpty means there's no table to show
       explanation,
       allEmpty: emptyQueries.length === verdict.queries.length,
+      ...timing(),
     });
 
   } catch (error) {
     if (remembered) conversation.pendingNote = `it failed when run: ${error.message}`;
     if (error instanceof Anthropic.APIError) {
       console.error(`📋 Claude API error ${error.status}:`, error.message);
-      return res.status(502).json({ error: `Claude API error (${error.status}): ${error.message}` });
+      return reply.send(502, { error: `Claude API error (${error.status}): ${error.message}` });
     }
     console.error('📋 Execution Failure Context:', error);
-    res.status(500).json({ error: `Server pipeline failed: ${error.message}` });
+    reply.send(500, { error: `Server pipeline failed: ${error.message}` });
   }
 }
 
@@ -6510,8 +6623,16 @@ body {
     .dashboard-hint { display: none; }
 }
 
+/* While a question is being answered: finished steps above the current one */
+.query-progress { min-width: 260px; }
+.progress-done { color: #718096; font-size: 0.85rem; }
+.progress-current { font-weight: 600; }
+.progress-time { margin-left: 6px; color: #a0aec0; font-size: 0.8rem; font-weight: 400; font-variant-numeric: tabular-nums; }
+
 /* RESULT TABLES */
 .ai-msg.wide { max-width: 100%; width: 100%; box-sizing: border-box; }
+/* "Answered in 2.8 s" under each answer */
+.result-timing { margin-top: 8px; color: #a0aec0; font-size: 0.78rem; }
 
 .result-title { font-weight: 600; margin-bottom: 8px; }
 .result-caption { font-size: 0.8rem; color: #718096; margin-bottom: 4px; }
@@ -7363,41 +7484,37 @@ async function sendPrompt() {
     appendMessage('user-msg', userPromptText);
     inputField.value = '';
 
-    // Append standard generic loading sequence notification
-    const loadingId = appendMessage('ai-msg', '🤖 Thinking and querying Cube.dev...');
+    // Shows each step while the answer is worked out, with a running clock
+    const progress = startQueryProgress();
 
-               try {
-        // 🎯 FIX: Explicitly relative route path
+    try {
+        // text/event-stream: the server reports each step as it happens
         const response = await fetch(`${API_BASE}/api/query`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...authHeaders() },
             body: JSON.stringify({ userPrompt: userPromptText })
         });
 
-        console.log("THIS IS THE RESPONSE FROM THE SERVER:", response.status, response.statusText);
-
         if (handleUnauthorized(response)) {
-            document.getElementById(loadingId).remove();
+            progress.finish();
             return;
         }
 
-        const data = await response.json();
-
-
-        document.getElementById(loadingId).remove(); // Clear loading block
+        const data = await readQueryResponse(response, stage => progress.step(stage));
+        const seconds = progress.finish();
 
         if (data.memoryReset) {
             appendMessage('system-msg', 'This conversation got long, so Claude started fresh. Earlier questions are no longer remembered.');
         }
 
         if (data.error) {
-            appendMessage('ai-msg', `❌ Error: ${data.error}`);
+            appendMessage('ai-msg', `❌ Error: ${escapeHtml(data.error)}`);
             return;
         }
 
         // Clarification or unsupported question: show the explanation only
         if (data.intent === 'clarify' || data.intent === 'unsupported') {
-            appendMessage('ai-msg', `🙋 ${escapeHtml(data.message || 'I need a little more detail to run that.')}`);
+            appendMessage('ai-msg', `🙋 ${escapeHtml(data.message || 'I need a little more detail to run that.')}` + answerTimingHtml(seconds, data.fromCache));
             return;
         }
 
@@ -7440,13 +7557,102 @@ async function sendPrompt() {
             }));
         }
 
-        appendMessage('ai-msg wide', html);
+        appendMessage('ai-msg wide', html + answerTimingHtml(seconds, data.fromCache));
 
     } catch (err) {
-        document.getElementById(loadingId).remove();
-        appendMessage('ai-msg', `❌ Could not talk to backend server orchestration framework.`);
+        progress.finish();
+        appendMessage('ai-msg', `❌ Could not reach the OneTouch server, or the answer was cut off. Please try again.`);
         console.error(err);
     }
+}
+
+// =====================================================================
+// PROGRESS: what the server is doing with the question, step by step
+// =====================================================================
+
+// [while it runs, once it's done]
+const QUERY_STEPS = {
+    sending: ['📨 Sending your question…', 'Sent your question'],
+    understanding: ['🧠 Understanding your question…', 'Understood your question'],
+    cached: ['⚡ Asked before: reusing that answer…', 'Reused the earlier answer (no AI wait)'],
+    querying: ['📊 Getting the data…', 'Got the data'],
+    explaining: ['🔎 Nothing matched; working out why…', 'Worked out why'],
+};
+
+// A chat bubble listing finished steps (with how long each took) and the
+// current one with a running clock. finish() removes it and returns the total seconds.
+function startQueryProgress() {
+    const started = performance.now();
+    const steps = []; // { stage, at }
+    const id = appendMessage('ai-msg query-progress', '');
+    const bubble = document.getElementById(id);
+    const secs = ms => `${(ms / 1000).toFixed(1)} s`;
+
+    function render() {
+        const now = performance.now();
+        bubble.innerHTML = steps.map((s, i) => {
+            const end = steps[i + 1] ? steps[i + 1].at : now;
+            return i < steps.length - 1
+                ? `<div class="progress-done">✓ ${escapeHtml(QUERY_STEPS[s.stage][1])} <span class="progress-time">${secs(end - s.at)}</span></div>`
+                : `<div class="progress-current">${escapeHtml(QUERY_STEPS[s.stage][0])} <span class="progress-time">${secs(now - started)}</span></div>`;
+        }).join('');
+    }
+
+    function step(stage) {
+        if (!QUERY_STEPS[stage] || steps.some(s => s.stage === stage)) return;
+        steps.push({ stage, at: performance.now() });
+        render();
+    }
+
+    step('sending');
+    const timer = setInterval(render, 100);
+    return {
+        step,
+        finish() {
+            clearInterval(timer);
+            bubble.remove();
+            updateAssistantBar();
+            return (performance.now() - started) / 1000;
+        },
+    };
+}
+
+// The server's answer: server-sent events, a "progress" event per step and then
+// the "result". A refusal before the question starts (e.g. a 400) is plain JSON.
+async function readQueryResponse(response, onStep) {
+    if (!(response.headers.get('Content-Type') || '').includes('text/event-stream')) {
+        return response.json();
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let result = null;
+    for (;;) {
+        const { value, done } = await reader.read();
+        if (value) buffer += decoder.decode(value, { stream: true });
+        // Events end with a blank line
+        let end;
+        while ((end = buffer.indexOf('\n\n')) !== -1) {
+            const block = buffer.slice(0, end);
+            buffer = buffer.slice(end + 2);
+            const name = (block.match(/^event: (.*)$/m) || [])[1];
+            const data = (block.match(/^data: (.*)$/m) || [])[1];
+            if (!data) continue;
+            if (name === 'progress') onStep(JSON.parse(data).stage);
+            else if (name === 'result') result = JSON.parse(data);
+        }
+        if (done) break;
+    }
+    if (!result) throw new Error('The answer was cut off.');
+    return result;
+}
+
+// "Answered in 2.8 s", or for a repeated question "⚡ Answered in 0.2 s …"
+function answerTimingHtml(seconds, fromCache) {
+    const time = `${seconds.toFixed(1)} s`;
+    return fromCache
+        ? `<div class="result-timing">⚡ Answered in ${time}: this question was asked before, so the AI step was skipped</div>`
+        : `<div class="result-timing">Answered in ${time}</div>`;
 }
 
 // Escape text that came from the server or the model before inserting as HTML
@@ -10196,6 +10402,13 @@ app.use(['/api', '/public', '/app'], express.raw({ type: () => true, limit: '25m
       const v = upstream.headers.get(h);
       if (v) res.set(h, v);
     }
+    // A question's progress steps (server-sent events) go on as they arrive,
+    // so the chat shows them live; everything else is passed on whole
+    if ((upstream.headers.get('content-type') || '').includes('text/event-stream')) {
+      res.flushHeaders();
+      for await (const chunk of upstream.body) res.write(chunk);
+      return res.end();
+    }
     res.send(Buffer.from(await upstream.arrayBuffer()));
   } catch (err) {
     console.error(`Could not reach ${target}: ${err.message}`);
@@ -10276,7 +10489,8 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 - **The data is text and frozen.** Every raw column is `text`; timestamps are `'YYYY-MM-DD HH:MM:SS'` strings, also in Cube. Ages and "upcoming" use the newest timestamp in the data (`reporting.data_as_of`), not today. `configuration_item = 'zzz'` is a placeholder.
 - **Claude conversation history is append-only.** Never edit or drop earlier turns, and pass assistant `content` back exactly as returned (thinking blocks included); Sonnet 5.5 rejects or ignores altered history. New context goes into the next user turn (see `pendingNote`).
 - **Claude Sonnet 5.5 API rules:** forced `tool_choice` (`any`/`tool`) and `thinking: {type: "disabled"}` return 400. Steer with the prompt; control depth with `output_config.effort`.
-- **Every model-built query goes through `normalizeAndValidate`.** Don't add a path that sends model output to Cube unvalidated.
+- **Every model-built query goes through `normalizeAndValidate`.** Don't add a path that sends model output to Cube unvalidated (the repeated-question cache in `server.mjs` re-validates its stored translation on every reuse).
+- **Repeated questions skip Claude.** A conversation-opening question asked before reuses the stored user turn *and* Claude's reply as the conversation's history, so follow-ups see exactly what Claude produced. Changing `buildSystemPrompt()`, `buildUserMessage()` or the output schema needs a server restart, which empties that cache. `/api/query` streams `progress` / `result` server-sent events when asked for `text/event-stream`.
 - **Accounts:** after changing accounts, run `node scripts/users.mjs export` and commit `db/accounts.json` (hashes only), so clones get them.
 
 ## Before you finish

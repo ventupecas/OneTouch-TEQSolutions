@@ -49,7 +49,8 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 - **The data is text and frozen.** Every raw column is `text`; timestamps are `'YYYY-MM-DD HH:MM:SS'` strings, also in Cube. Ages and "upcoming" use the newest timestamp in the data (`reporting.data_as_of`), not today. `configuration_item = 'zzz'` is a placeholder.
 - **Claude conversation history is append-only.** Never edit or drop earlier turns, and pass assistant `content` back exactly as returned (thinking blocks included); Sonnet 5.5 rejects or ignores altered history. New context goes into the next user turn (see `pendingNote`).
 - **Claude Sonnet 5.5 API rules:** forced `tool_choice` (`any`/`tool`) and `thinking: {type: "disabled"}` return 400. Steer with the prompt; control depth with `output_config.effort`.
-- **Every model-built query goes through `normalizeAndValidate`.** Don't add a path that sends model output to Cube unvalidated.
+- **Every model-built query goes through `normalizeAndValidate`.** Don't add a path that sends model output to Cube unvalidated (the repeated-question cache in `server.mjs` re-validates its stored translation on every reuse).
+- **Repeated questions skip Claude.** A conversation-opening question asked before reuses the stored user turn *and* Claude's reply as the conversation's history, so follow-ups see exactly what Claude produced. Changing `buildSystemPrompt()`, `buildUserMessage()` or the output schema needs a server restart, which empties that cache. `/api/query` streams `progress` / `result` server-sent events when asked for `text/event-stream`.
 - **Accounts:** after changing accounts, run `node scripts/users.mjs export` and commit `db/accounts.json` (hashes only), so clones get them.
 
 ## Before you finish

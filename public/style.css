@@ -546,8 +546,16 @@ body {
     .dashboard-hint { display: none; }
 }
 
+/* While a question is being answered: finished steps above the current one */
+.query-progress { min-width: 260px; }
+.progress-done { color: #718096; font-size: 0.85rem; }
+.progress-current { font-weight: 600; }
+.progress-time { margin-left: 6px; color: #a0aec0; font-size: 0.8rem; font-weight: 400; font-variant-numeric: tabular-nums; }
+
 /* RESULT TABLES */
 .ai-msg.wide { max-width: 100%; width: 100%; box-sizing: border-box; }
+/* "Answered in 2.8 s" under each answer */
+.result-timing { margin-top: 8px; color: #a0aec0; font-size: 0.78rem; }
 
 .result-title { font-weight: 600; margin-bottom: 8px; }
 .result-caption { font-size: 0.8rem; color: #718096; margin-bottom: 4px; }
