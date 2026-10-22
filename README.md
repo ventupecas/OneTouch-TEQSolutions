@@ -193,6 +193,46 @@ same address. Running `npm run share` is still a quick way to confirm it's up.
 fine for a team. Anyone with the link reaches the sign-in page, and only people with an
 account in OneTouch can get past it.
 
+### Presentation day (many people at once)
+
+Measured with 30 people using OneTouch at the same moment, on the laptop that runs it:
+
+| What 30 people do at once | How long each waits |
+|---|---|
+| Ask a question that was asked before | about 0.5 s |
+| Ask a new question | 2–5 s, almost all of it Claude; the Claude API limits allow about 200 new questions a minute, and the cached instructions don't count toward them |
+| Open the same dashboard | about 5 s (one person alone: 0.2 s), once the dashboards have been opened once |
+
+A faster computer barely changes the AI answers: Claude runs on Anthropic's servers, and
+OneTouch doesn't use a graphics card. Dashboards are the part a computer works hard on,
+which is why Metabase keeps each chart's result (see [Dashboards](#dashboards-metabase)).
+
+**On the morning of the presentation:**
+
+1. Make sure OneTouch is shared: `npm run share`.
+2. Warm it up:
+   ```
+   npm run warmup
+   ```
+   It asks for your OneTouch username and password, then asks every question in
+   `scripts/warmup-questions.txt` and opens every dashboard. That takes about a minute.
+   Afterwards those questions answer instantly for everyone, provided they're asked with
+   the same words (capitals, spacing and a closing "?" don't matter), and every dashboard
+   opens from Metabase's cache. It ends with a list of anything that failed, so it doubles
+   as a final check that everything works.
+3. Demo with the questions in that file. Edit the file to add your own (one per line) and
+   run `npm run warmup` again; questions it has already asked come back instantly, marked ⚡.
+4. **Don't restart OneTouch afterwards.** A restart (including `docker compose up` after
+   editing `.env`) forgets the remembered questions. They are also tied to the date
+   Claude sees as "today", which is the real date in UTC unless `ASSUME_TODAY` is set, so
+   warm up on the day itself. A presentation that runs past 7 PM Central crosses into the
+   next UTC day; run the warm-up again then.
+
+Follow-up questions ("same but for changes") always go to Claude, so they take the usual
+few seconds. Keep the computer plugged in, awake and, if possible, on a wired connection.
+Cloudflare serves the dashboards' 9.4 MB of program files from its own cache, so your upload
+speed matters less than you might expect.
+
 ### Home page and the AI assistant
 
 After signing in, people land on **Home** ("Welcome, *first name*!"), which has three searches:
@@ -239,6 +279,18 @@ Re-run step 3 any time. It rebuilds the dashboards in Metabase's "OneTouch ITIL"
 collection and never touches anything else. The charts, and which drawer group each
 dashboard sits in, are defined in `scripts/metabase-setup.mjs`. The data they read
 is defined in `db/reporting-views.sql`.
+
+**Caching.** The setup also tells Metabase to keep each chart's result instead of
+recalculating it for every viewer, because the data never changes. With 30 people opening
+the same dashboard at once, that took the wait from about 37 seconds to about 5. The
+free edition only offers the "adaptive" policy, which keeps a result for 1,000,000 times
+as long as its query took: about 14 hours for a 0.05-second chart, and about 11 days
+for a 1-second one. The first person to open a chart after that waits the normal time,
+and `npm run warmup` opens them all in advance. To switch caching on without rebuilding
+the dashboards (which would change their links), run:
+```
+docker exec analytics_node_app node scripts/metabase-setup.mjs --cache-only
+```
 
 **Drilling down.** Click a bar, pie slice, line point, big number or blue table value
 to open a detail page for it: a record (incident, change, request), a team, a server or
@@ -1160,6 +1212,9 @@ use `REMOTE_PORT=8100`.
   run it again after every restart. With `TUNNEL_TOKEN` in `.env` it runs the permanent
   tunnel instead. [Sharing over the internet with Cloudflare](#sharing-over-the-internet-with-cloudflare)
   in Part 1 has the full setup.
+- **Before a crowd:** create `scripts/warmup.mjs` ([B.40](#b40)) and its question list
+  `scripts/warmup-questions.txt` ([B.41](#b41)), then run `npm run warmup`. See
+  [Presentation day](#presentation-day-many-people-at-once) in Part 1.
 
 ## Step 20: Claude Code helpers
 
@@ -1396,6 +1451,8 @@ Create each file at the path shown, with exactly this content. Files are in the 
 - [B.37 `tickets.mjs`](#b37)
 - [B.38 `stars.mjs`](#b38)
 - [B.39 `scripts/share.mjs`](#b39)
+- [B.40 `scripts/warmup.mjs`](#b40)
+- [B.41 `scripts/warmup-questions.txt`](#b41)
 
 <a id="b1"></a>
 ### B.1 `.gitignore`
@@ -1550,7 +1607,8 @@ desktop.ini
     "start": "node server.mjs",
     "users": "node scripts/users.mjs",
     "remote": "node remote.mjs",
-    "share": "node scripts/share.mjs"
+    "share": "node scripts/share.mjs",
+    "warmup": "node scripts/warmup.mjs"
   },
   "repository": {
     "type": "git",
@@ -10304,6 +10362,19 @@ async function fillDashboard(shell, databaseId, collectionId, shells) {
   console.log(`Built "${def.name}"${def.params ? ' (detail page)' : ''}: ${def.cards.length} charts.`);
 }
 
+// Keep chart results instead of recalculating them for every viewer: the data
+// never changes, and 30 people opening one dashboard at once otherwise means
+// 30 copies of every query. The free edition only has the "adaptive" policy
+// (results kept for multiplier × how long the query took), so the multiplier
+// is huge: a 0.05 s chart stays about 14 hours, a 1 s chart about 11 days.
+const CACHE_MULTIPLIER = 1_000_000;
+
+async function enableCaching() {
+  await api('PUT', '/api/setting/enable-query-caching', { value: true });
+  await api('PUT', '/api/cache', { model: 'root', model_id: 0, strategy: { type: 'ttl', multiplier: CACHE_MULTIPLIER, min_duration_ms: 0 } });
+  console.log('Chart results are cached (open each dashboard once to fill the cache; npm run warmup does all of them).');
+}
+
 // ---------------------------------------------------------------------
 
 async function main() {
@@ -10311,10 +10382,18 @@ async function main() {
     throw new Error('Set METABASE_ADMIN_EMAIL, METABASE_ADMIN_PASSWORD and METABASE_DB_PASSWORD in .env, ' +
       'then run `docker compose up -d` so the app container sees them.');
   }
+  // --cache-only: just switch result caching on, leaving the dashboards (and their links) as they are
+  if (process.argv.includes('--cache-only')) {
+    await waitForMetabase();
+    await signIn();
+    await enableCaching();
+    return;
+  }
   checkDefinitions();
   await waitForMetabase();
   await signIn();
   await api('PUT', '/api/setting/enable-public-sharing', { value: true });
+  await enableCaching();
   const databaseId = await connectDatabase();
   const collectionId = await freshCollection();
 
@@ -10460,6 +10539,7 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 | `public/` | The single-page UI (`index.html`, `app.js`, `style.css`); no build step. Home (ticket searches, stars) and Dashboards tabs; the AI chat is a header search bar that opens into a panel |
 | `db/` | `init-auth.sh`, `init-reporting.sh`, `reporting-views.sql` (typed `reporting.*` views for Metabase), `accounts.json` |
 | `scripts/users.mjs` | Account admin CLI (add, import CSV, export, sync, ...) |
+| `scripts/warmup.mjs` | `npm run warmup`: before a crowd, asks every question in `scripts/warmup-questions.txt` (so each is answered from the repeated-question cache) and opens every dashboard (filling Metabase's result cache); lists anything that failed |
 | `scripts/share.mjs` | `npm run share`: starts the stack and a Cloudflare tunnel (free, or permanent with `TUNNEL_TOKEN`), checks the link from outside via public DNS, prints and copies it; `--new`, `--stop` |
 | `scripts/metabase-setup.mjs` | Builds the Metabase dashboards (the `DASHBOARDS` list, each with its drawer `group`) and the drill-down pages clicks open (`DETAILS`; each chart's `click` / table's `links` say where a click goes) via Metabase's API; checks every link before changing anything; rerunnable. Writes `metabase-dashboards.json`, which the Dashboards tab reads |
 | `model/cubes/*.yml` | Cube data model over `analytics_db` |
@@ -10637,7 +10717,7 @@ const FILES = [
   '.claude/agents/onetouch-developer.md', '.claude/agents/onetouch-reviewer.md',
   'scripts/check.mjs', 'scripts/build-docs.mjs',
   // Added later; at the end so the guide's links to B.1-B.36 keep their numbers
-  'tickets.mjs', 'stars.mjs', 'scripts/share.mjs',
+  'tickets.mjs', 'stars.mjs', 'scripts/share.mjs', 'scripts/warmup.mjs', 'scripts/warmup-questions.txt',
 ];
 
 // Not copied in, and why (shown in the appendix)
@@ -11206,6 +11286,219 @@ if (failed) {
   console.log('  → Networks → Tunnels) and remove any that are not this computer\'s Docker.');
 }
 console.log('='.repeat(64) + '\n');
+```
+
+<a id="b40"></a>
+### B.40 `scripts/warmup.mjs`
+
+```js
+// Gets OneTouch ready for a crowd (e.g. a presentation): asks every question in
+// scripts/warmup-questions.txt once, so each is answered instantly for everyone
+// afterwards, and opens every dashboard once, so Metabase has every chart's
+// result ready. It also works as a check that everything still works: anything
+// that fails is listed at the end.
+//
+//   npm run warmup                         this computer's OneTouch (localhost)
+//   npm run warmup -- https://onetouch.fyi  another OneTouch server
+//   ... -- --user jsmith --password-stdin   password from stdin instead of a prompt
+//
+// It signs in as you (it asks for your username and password). Run it on the
+// day itself, and don't restart OneTouch afterwards: a restart forgets the
+// remembered questions, and they are tied to the date.
+
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { createInterface } from 'node:readline/promises';
+import { fileURLToPath } from 'node:url';
+import dotenv from 'dotenv';
+
+process.chdir(path.join(path.dirname(fileURLToPath(import.meta.url)), '..'));
+dotenv.config({ quiet: true });
+
+const base = (process.argv.slice(2).find(a => /^https?:\/\//.test(a)) || `http://localhost:${process.env.APP_PORT || 8000}`).replace(/\/+$/, '');
+const QUESTIONS_FILE = 'scripts/warmup-questions.txt';
+const secs = ms => `${(ms / 1000).toFixed(1)} s`;
+
+function stop(message) {
+  console.error(`\n❌ ${message}\n`);
+  process.exit(1);
+}
+
+// Reads a line from the terminal without echoing what is typed
+function promptHidden(question) {
+  return new Promise((resolve, reject) => {
+    const { stdin, stdout } = process;
+    if (!stdin.isTTY) return reject(new Error('No terminal to type a password into.'));
+    stdout.write(question);
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding('utf8');
+    let value = '';
+    const onData = ch => {
+      for (const c of ch) {
+        if (c === '\r' || c === '\n') {
+          stdin.setRawMode(false); stdin.pause(); stdin.off('data', onData);
+          stdout.write('\n');
+          return resolve(value);
+        }
+        if (c === '\u0003') { stdout.write('\n'); process.exit(130); } // Ctrl+C
+        if (c === '\u007f' || c === '\b') value = value.slice(0, -1);
+        else value += c;
+      }
+    };
+    stdin.on('data', onData);
+  });
+}
+
+async function readStdin() {
+  let data = '';
+  for await (const chunk of process.stdin) data += chunk;
+  return data.replace(/\r?\n$/, '');
+}
+
+// Asks for the username and password; or --user <name> --password-stdin (for scripts)
+async function signIn() {
+  const args = process.argv.slice(2);
+  let username = args.includes('--user') ? args[args.indexOf('--user') + 1] : '';
+  if (!username) {
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    username = (await rl.question('OneTouch username: ')).trim();
+    rl.close();
+  }
+  const password = args.includes('--password-stdin') ? await readStdin() : await promptHidden('Password: ');
+  const r = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
+  const data = await r.json().catch(() => ({}));
+  if (!data.token) stop(data.error || `Sign-in failed (${r.status}).`);
+  return data.token;
+}
+
+// A one-line summary of an answer: rows found, or what went wrong
+function describe(data) {
+  if (data.error) return { ok: false, text: data.error };
+  if (data.intent !== 'query') return { ok: true, text: `Claude asked for more detail (${data.intent})` };
+  const rows = data.combined ? data.combined.rows.length : (data.sections || []).reduce((n, s) => n + s.rows.length, 0);
+  return { ok: true, text: data.allEmpty ? 'nothing found (explanation ready)' : `${rows.toLocaleString()} ${rows === 1 ? 'row' : 'rows'}` };
+}
+
+// Opens a dashboard the way a browser does: its layout, then every chart's data
+async function openDashboard(dashboardPath) {
+  const uuid = dashboardPath.split('/').pop();
+  const dash = await (await fetch(`${base}/api/public/dashboard/${uuid}`)).json();
+  const cards = (dash.dashcards || []).filter(dc => dc.card_id);
+  const results = await Promise.all(cards.map(async dc => {
+    const r = await fetch(`${base}/api/public/dashboard/${uuid}/dashcard/${dc.id}/card/${dc.card_id}?parameters=[]`);
+    const body = await r.json().catch(() => ({}));
+    return r.ok && body.status !== 'failed';
+  }));
+  return { charts: cards.length, failed: results.filter(ok => !ok).length };
+}
+
+// ---------------------------------------------------------------------
+
+try {
+  await fetch(base, { signal: AbortSignal.timeout(10000) });
+} catch {
+  stop(`OneTouch is not answering at ${base}. Start it first (npm run share, or docker compose up -d).`);
+}
+
+const questions = readFileSync(QUESTIONS_FILE, 'utf8').split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+console.log(`Warming up ${base}: ${questions.length} questions from ${QUESTIONS_FILE}, then every dashboard.\n`);
+const token = await signIn();
+const auth = { Authorization: `Bearer ${token}` };
+const started = performance.now();
+const problems = [];
+
+console.log('\nQuestions (⚡ = was already ready):');
+for (const question of questions) {
+  // A fresh conversation each time: only a conversation's first question is remembered for everyone
+  await fetch(`${base}/api/conversation/reset`, { method: 'POST', headers: auth });
+  const t0 = performance.now();
+  let data;
+  try {
+    const r = await fetch(`${base}/api/query`, { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ userPrompt: question }) });
+    data = await r.json();
+  } catch (err) {
+    data = { error: err.message };
+  }
+  const d = describe(data);
+  if (!d.ok) problems.push(`"${question}": ${d.text}`);
+  console.log(`  ${!d.ok ? '✗' : data.fromCache ? '⚡' : '✓'} ${question}  (${d.text}, ${secs(performance.now() - t0)})`);
+}
+await fetch(`${base}/api/conversation/reset`, { method: 'POST', headers: auth });
+
+console.log('\nDashboards:');
+const list = await (await fetch(`${base}/api/dashboards`, { headers: auth })).json();
+if (!list.dashboards?.length) problems.push('No dashboards found (has scripts/metabase-setup.mjs been run?)');
+for (const d of list.dashboards || []) {
+  const t0 = performance.now();
+  try {
+    const r = await openDashboard(d.path);
+    if (r.failed) problems.push(`Dashboard "${d.name}": ${r.failed} of ${r.charts} charts failed`);
+    console.log(`  ${r.failed ? '✗' : '✓'} ${d.name}  (${r.charts} charts${r.failed ? `, ${r.failed} failed` : ''}, ${secs(performance.now() - t0)})`);
+  } catch (err) {
+    problems.push(`Dashboard "${d.name}": ${err.message}`);
+    console.log(`  ✗ ${d.name}  (${err.message})`);
+  }
+}
+
+await fetch(`${base}/api/logout`, { method: 'POST', headers: auth });
+
+console.log('\n' + '='.repeat(64));
+console.log(`Done in ${secs(performance.now() - started)}.`);
+if (problems.length) {
+  console.log(`\n${problems.length} problem${problems.length === 1 ? '' : 's'} to look at before people arrive:`);
+  for (const p of problems) console.log(`  - ${p}`);
+  process.exitCode = 1;
+} else {
+  console.log('Everything worked. These questions now answer instantly for everyone when asked with');
+  console.log(`the same words (see ${QUESTIONS_FILE}), and every dashboard opens from Metabase's cache.`);
+}
+console.log("Don't restart OneTouch before the presentation: a restart forgets the remembered questions.");
+console.log('='.repeat(64) + '\n');
+```
+
+<a id="b41"></a>
+### B.41 `scripts/warmup-questions.txt`
+
+```
+# Questions `npm run warmup` asks before a presentation, one per line.
+# Each becomes instant for everyone afterwards when asked with the same words
+# (capitals, spacing and a closing "?" don't matter). Lines starting with # are
+# skipped. The data runs from June 2026 (incidents from early July) to 1 September
+# 2026, so name months rather than saying "last month".
+
+# Incidents
+How many open incidents are there by priority?
+Which assignment groups have the most open incidents?
+List the P1 incidents opened in August 2026
+How many incidents were opened each week in August 2026?
+What are the most common incident subcategories?
+Which servers or systems have the most incidents?
+How many incidents were reopened?
+Show me incident INC1814467
+
+# Changes
+How many changes are there by type?
+How many changes were created in August 2026 by risk?
+List the emergency changes
+Which changes caused incidents?
+Show me change CHG1101321
+
+# Requests and catalog tasks
+What are the top 5 most requested catalog items?
+How many requests were opened each month?
+Show open catalog tasks that breached SLA
+Which teams have the most open catalog tasks?
+
+# Across ticket types
+How many incidents, changes and requests were opened in August 2026?
+How many requests and incidents were opened each week in August 2026?
+
+# Nothing found: OneTouch works out why and says so
+Show me changes owned by the TCS-ServiceDesk-L1-NA-WE team
+
+# Outside the data's dates: Claude says what the export covers
+How many incidents were opened in January 2026?
 ```
 
 ## Appendix C: images
