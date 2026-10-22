@@ -185,6 +185,7 @@ same address. Running `npm run share` is still a quick way to confirm it's up.
 | `It is not answering yet` | A new free link can take a minute or two to start working. Open it yourself before sending it. If it still fails after 5 minutes, run `npm run share -- --new`. |
 | People get "This site can't be reached" or a Cloudflare error page | Your computer is asleep or off, Docker isn't running, or they have an old link. Run `npm run share` and send the link it prints. |
 | `The permanent tunnel did not connect` | The token in `.env` is wrong or was deleted in Cloudflare. Copy it again (step 4 above). |
+| The permanent address shows "error code: 502", always or only sometimes | Something else is also running your tunnel, usually the Windows service that Cloudflare's own install command (`cloudflared.exe service install …`) creates. It can't reach `app:8000`, and Cloudflare splits visitors between it and Docker. Remove it in an **administrator** PowerShell: `& "C:\Program Files (x86)\cloudflared\cloudflared.exe" service uninstall`. The tunnel's page in the Cloudflare dashboard should then list a single connector. |
 | A question shows an error after about 100 seconds | Cloudflare ends any request that takes longer than 100 seconds. It's rare (answers usually take 3–5 seconds); ask again. |
 | Someone sees the old version after you change OneTouch | They press Ctrl+F5. Changes go live through the link as soon as they're running on your computer. |
 
