@@ -408,6 +408,18 @@ function followDashboardFrame() {
         if (main !== currentMainDashboard) markCurrentDashboard(main);
         else setDashboardHeading(main.group, main.name, main.description || '', false);
     } else if (detail) {
+        // Every filter cleared (the × in the filter box): the page has nothing to
+        // show, so go back to the dashboard it was opened from. replace(), so ← Back
+        // doesn't return to the empty page.
+        const values = new URLSearchParams(where.search);
+        if (!detail.params.some(p => values.get(p.slug))) {
+            const home = currentMainDashboard || [...dashboardPages.main.values()][0];
+            if (home) {
+                frame.contentWindow.location.replace(`${API_BASE}${home.path}#bordered=false&titled=false`);
+                showToast(`No filters left, so you're back on ${home.name}`);
+                return;
+            }
+        }
         setDashboardHeading(currentMainDashboard ? currentMainDashboard.name : '', detailPageLabel(detail, where.search), '', true);
     }
 
