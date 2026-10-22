@@ -42,21 +42,19 @@
     </div>
 
     <header class="app-header">
-        <h1 class="app-title"><img src="android-chrome-192x192.png" alt="" class="app-logo"> OneTouch <span id="user-name" class="user-name"></span></h1>
-        <!-- AI ASSISTANT: a search bar until it's used; asking opens the full chat below it -->
-        <form class="assistant-bar" id="assistant-bar" role="search" onsubmit="event.preventDefault(); askFromBar();">
-            <span class="assistant-bar-icon" aria-hidden="true">💬</span>
-            <input type="text" id="assistant-bar-input" placeholder="Ask the AI assistant a data question…"
-                   aria-label="Ask the AI assistant" autocomplete="off" aria-controls="assistant-panel" aria-expanded="false">
-            <button type="button" class="assistant-resume" id="assistant-resume" hidden onclick="toggleAssistant(true)"
-                    title="Open your conversation">Open chat</button>
-            <button type="submit" class="assistant-bar-ask">Ask</button>
-        </form>
-        <nav class="tab-navigation">
-            <button class="tab-btn active" data-tab="home" onclick="switchTab('home')">🏠 Home</button>
-            <button class="tab-btn" data-tab="dashboard" onclick="switchTab('dashboard')">📈 Dashboards</button>
-            <button class="sign-out-btn" type="button" onclick="signOut()">Sign out</button>
-        </nav>
+        <!-- Top left: the logo and name (back to Home), who's signed in, and Dashboards -->
+        <div class="header-left">
+            <h1 class="app-title">
+                <button type="button" class="home-link" onclick="goHome()" title="Back to Home">
+                    <img src="android-chrome-192x192.png" alt="" class="app-logo"> OneTouch
+                </button>
+            </h1>
+            <span id="user-name" class="user-name"></span>
+            <nav class="tab-navigation">
+                <button class="tab-btn" data-tab="dashboard" onclick="switchTab('dashboard')">📈 Dashboards</button>
+            </nav>
+        </div>
+        <button class="sign-out-btn" type="button" onclick="signOut()">Sign out</button>
     </header>
 
     <main class="app-content">
@@ -64,16 +62,24 @@
         <section id="home-view" class="view-panel active">
             <div class="home">
                 <h2 class="home-welcome" id="home-welcome">Welcome!</h2>
-                <p class="home-sub">Look up tickets and keep the ones you follow starred. To ask about the data, use the bar at the top.</p>
+                <!-- The AI assistant: an example question, and the open / delete chat buttons -->
+                <div class="search-guide">
+                    <div class="guide-card">
+                        <span class="guide-title">💬 Any question about the data</span>
+                        <span class="guide-text">In plain English. The AI assistant answers with a table you can download, and remembers the conversation for follow-ups.</span>
+                        <button type="button" class="guide-example" data-example="How many open incidents are there by priority?">How many open incidents are there by priority?</button>
+                        <div class="chat-controls">
+                            <button type="button" class="home-action" id="open-chat-btn" onclick="toggleAssistant(true)"
+                                    aria-controls="assistant-panel" aria-expanded="false">💬 Open chat</button>
+                            <button type="button" class="home-action danger" id="delete-chat-btn" hidden onclick="deleteChat()">🗑 Delete chat</button>
+                        </div>
+                    </div>
+                </div>
 
-                <div class="home-modes" role="tablist" aria-label="Ticket search">
-                    <button type="button" role="tab" class="home-mode active" data-mode="single" aria-selected="true" aria-controls="home-single" onclick="setHomeMode('single')">
-                        <span class="home-mode-name">🔎 Find a ticket</span>
-                        <span class="home-mode-desc">One ticket's full record</span>
-                    </button>
-                    <button type="button" role="tab" class="home-mode" data-mode="multiple" aria-selected="false" aria-controls="home-multiple" onclick="setHomeMode('multiple')">
-                        <span class="home-mode-name">📋 Find several tickets</span>
-                        <span class="home-mode-desc">Paste a list of numbers</span>
+                <div class="home-modes" role="tablist" aria-label="Your tickets">
+                    <button type="button" role="tab" class="home-mode active" data-mode="results" aria-selected="true" aria-controls="home-results" onclick="setHomeMode('results')">
+                        <span class="home-mode-name">🎫 Ticket results</span>
+                        <span class="home-mode-desc">Every ticket the AI assistant has shown you</span>
                     </button>
                     <button type="button" role="tab" class="home-mode" data-mode="starred" aria-selected="false" aria-controls="home-starred" onclick="setHomeMode('starred')">
                         <span class="home-mode-name">★ Starred tickets <span class="star-count" id="star-count">0</span></span>
@@ -81,22 +87,8 @@
                     </button>
                 </div>
 
-                <div class="home-panel" id="home-single" role="tabpanel">
-                    <form class="home-search" onsubmit="event.preventDefault(); searchSingleTicket();">
-                        <input type="text" id="single-ticket-input" autocomplete="off" spellcheck="false" aria-label="Ticket number"
-                               placeholder="Ticket number, e.g. INC1814467, CHG1101321, RITM0440498 or SCTASK0595823">
-                        <button type="submit">Search</button>
-                    </form>
-                    <div class="home-result" id="single-ticket-result" aria-live="polite"></div>
-                </div>
-
-                <div class="home-panel" id="home-multiple" role="tabpanel" hidden>
-                    <form class="home-search multi" onsubmit="event.preventDefault(); searchManyTickets();">
-                        <textarea id="multi-ticket-input" rows="4" spellcheck="false" aria-label="Ticket numbers"
-                                  placeholder="Paste ticket numbers separated by spaces, commas or new lines. A REQ number brings up the requests in that order."></textarea>
-                        <button type="submit">Search</button>
-                    </form>
-                    <div class="home-result" id="multi-ticket-result" aria-live="polite"></div>
+                <div class="home-panel" id="home-results" role="tabpanel">
+                    <div class="home-result" id="ticket-results" aria-live="polite"></div>
                 </div>
 
                 <div class="home-panel" id="home-starred" role="tabpanel" hidden>
@@ -146,7 +138,10 @@
         <section class="assistant-panel" id="assistant-panel" aria-label="AI Assistant">
             <div class="assistant-head">
                 <span class="assistant-title">💬 AI Assistant</span>
-                <button type="button" class="assistant-minimize" onclick="toggleAssistant(false)" title="Shrink back to the search bar (the conversation is kept)">Minimize ▴</button>
+                <div class="assistant-head-actions">
+                    <button type="button" class="assistant-delete" onclick="deleteChat()" title="Delete this conversation: its questions and answers disappear and the assistant forgets it">🗑 Delete chat</button>
+                    <button type="button" class="assistant-minimize" onclick="toggleAssistant(false)" title="Close the chat (the conversation is kept; Open chat on Home brings it back)">Minimize ▴</button>
+                </div>
             </div>
             <div class="chat-container">
                 <div class="chat-messages" id="chat-log">

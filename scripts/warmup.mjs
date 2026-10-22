@@ -6,15 +6,17 @@
 //
 //   npm run warmup                         this computer's OneTouch (localhost)
 //   npm run warmup -- https://onetouch.fyi  another OneTouch server
+//   ... -- --user jsmith                    sign in as someone else (asks for the password)
 //   ... -- --user jsmith --password-stdin   password from stdin instead of a prompt
 //
-// It signs in as you (it asks for your username and password). Run it on the
-// day itself, and don't restart OneTouch afterwards: a restart forgets the
+// It signs in as the "warmup" account, with WARMUP_PASSWORD from .env (or asks
+// for the password), so the demo tickets its answers list land in that
+// account's Ticket results rather than a real person's. Run it on the day
+// itself, and don't restart OneTouch afterwards: a restart forgets the
 // remembered questions, and they are tied to the date.
 
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 
@@ -23,6 +25,8 @@ dotenv.config({ quiet: true });
 
 const base = (process.argv.slice(2).find(a => /^https?:\/\//.test(a)) || `http://localhost:${process.env.APP_PORT || 8000}`).replace(/\/+$/, '');
 const QUESTIONS_FILE = 'scripts/warmup-questions.txt';
+// The account the warm-up signs in as (create it with: users.mjs add warmup "Warmup")
+const WARMUP_USER = 'warmup';
 const secs = ms => `${(ms / 1000).toFixed(1)} s`;
 
 function stop(message) {
@@ -62,16 +66,16 @@ async function readStdin() {
   return data.replace(/\r?\n$/, '');
 }
 
-// Asks for the username and password; or --user <name> --password-stdin (for scripts)
+// The "warmup" account (password: WARMUP_PASSWORD in .env, or asked for);
+// --user <name> signs in as someone else, --password-stdin reads the password from stdin
 async function signIn() {
   const args = process.argv.slice(2);
-  let username = args.includes('--user') ? args[args.indexOf('--user') + 1] : '';
-  if (!username) {
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    username = (await rl.question('OneTouch username: ')).trim();
-    rl.close();
-  }
-  const password = args.includes('--password-stdin') ? await readStdin() : await promptHidden('Password: ');
+  const username = args.includes('--user') ? args[args.indexOf('--user') + 1] : WARMUP_USER;
+  let password;
+  if (args.includes('--password-stdin')) password = await readStdin();
+  else if (username === WARMUP_USER && process.env.WARMUP_PASSWORD) password = process.env.WARMUP_PASSWORD;
+  else password = await promptHidden(`Password for ${username}: `);
+  console.log(`Signing in as ${username}.`);
   const r = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
   const data = await r.json().catch(() => ({}));
   if (!data.token) stop(data.error || `Sign-in failed (${r.status}).`);

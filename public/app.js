@@ -36,7 +36,6 @@ function showApp(signedIn) {
     if (signedIn) {
         switchTab('home');
         loadStars();
-        focusHomeSearch();
     } else {
         document.getElementById('login-email').focus();
     }
@@ -53,7 +52,7 @@ function setCurrentUser(user) {
     document.getElementById('user-name').textContent = currentUserName;
     renderGreetings();
     // Each person's home page opens on the search they used last
-    if (currentUsername) setHomeMode(rememberedHomeMode(), false);
+    if (currentUsername) setHomeMode(rememberedHomeMode());
 }
 
 // Just the first name: "Cassidy Sotelo" -> "Welcome, Cassidy!" on the home
@@ -144,12 +143,17 @@ function handleUnauthorized(response) {
 
 const WELCOME_HTML = document.getElementById('chat-log').innerHTML;
 
+// Bumped whenever the chat is cleared, so an answer still on its way for the
+// old conversation is dropped instead of landing in the new one
+let chatEpoch = 0;
+
 // Back to just the greeting (with the signed-in person's name)
 function clearChat() {
+    chatEpoch += 1;
     document.getElementById('chat-log').innerHTML = WELCOME_HTML;
     forgetRemovedExports();
     renderGreetings();
-    updateAssistantBar();
+    updateChatControls();
 }
 
 async function resetConversation() {
@@ -168,19 +172,45 @@ async function newChat() {
     document.getElementById('user-prompt').focus();
 }
 
-// Tabs: Home and Dashboards (the AI assistant lives in the header's bar)
+// "Delete chat": after a confirmation, the questions and answers disappear,
+// Claude forgets the conversation, and the chat closes
+async function deleteChat() {
+    if (!document.querySelector('#chat-log .user-msg')) {
+        toggleAssistant(false);
+        return;
+    }
+    if (!confirm('Delete this chat? Its questions and answers disappear, and the AI assistant forgets the conversation.')) return;
+    clearChat();
+    toggleAssistant(false);
+    await resetConversation();
+    showToast('Chat deleted');
+}
+
+// The logo and the name "OneTouch": back to Home from anywhere, closing
+// whatever is open on top (the chat, the dashboards drawer)
+function goHome() {
+    toggleAssistant(false);
+    toggleDashboardDrawer(false);
+    switchTab('home');
+    document.getElementById('home-view').scrollTop = 0;
+}
+
+// Pages: Home (the logo) and Dashboards (its button); the AI assistant opens over either
 function switchTab(viewName) {
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === viewName));
     document.querySelectorAll('.view-panel').forEach(panel => panel.classList.toggle('active', panel.id === `${viewName}-view`));
     if (viewName === 'dashboard') loadDashboards();
     // Stars may have changed elsewhere (the chat, a dashboard, another computer)
-    if (viewName === 'home' && homeMode === 'starred') showStarred();
+    if (viewName === 'home') {
+        if (homeMode === 'starred') showStarred();
+        else showTicketResults(true);
+    }
 }
 
 // =====================================================================
-// AI ASSISTANT: a search bar in the header. Asking a question (or "Open
-// chat") opens the full conversation over the page; Minimize shrinks it
-// back to the bar and keeps the conversation.
+// AI ASSISTANT: the chat opens over the page from Home's "Any question about
+// the data" card (Open chat, or its example question). Minimize closes it and
+// keeps the conversation; Delete chat removes it.
 // =====================================================================
 
 function assistantOpen() {
@@ -193,36 +223,30 @@ function toggleAssistant(open) {
     const willOpen = typeof open === 'boolean' ? open : !assistantOpen();
     panel.classList.toggle('open', willOpen);
     document.getElementById('assistant-backdrop').classList.toggle('open', willOpen);
-    document.getElementById('assistant-bar-input').setAttribute('aria-expanded', String(willOpen));
+    document.getElementById('open-chat-btn').setAttribute('aria-expanded', String(willOpen));
     if (willOpen) {
         const chatLog = document.getElementById('chat-log');
         chatLog.scrollTop = chatLog.scrollHeight;
         document.getElementById('user-prompt').focus();
     } else if (panel.contains(document.activeElement)) {
-        document.getElementById('assistant-bar-input').focus();
+        document.getElementById('open-chat-btn').focus();
     }
-    updateAssistantBar();
+    updateChatControls();
 }
 
-// The bar's question goes to the chat, which opens to show the answer
-function askFromBar() {
-    const bar = document.getElementById('assistant-bar-input');
-    const question = bar.value.trim();
-    bar.value = '';
+// Asks a question as if typed into the chat, opening it to show the answer
+function askAssistant(question) {
     toggleAssistant(true);
-    if (!question) return;
     document.getElementById('user-prompt').value = question;
     sendPrompt();
 }
 
-// While minimized with a conversation going, the bar offers to reopen it
-function updateAssistantBar() {
+// Home's chat buttons: Open chat says how many questions the conversation has,
+// and Delete chat appears once there is something to delete
+function updateChatControls() {
     const asked = document.querySelectorAll('#chat-log .user-msg').length;
-    const resume = document.getElementById('assistant-resume');
-    resume.hidden = !asked || assistantOpen();
-    resume.textContent = `Open chat (${asked})`;
-    document.getElementById('assistant-bar-input').placeholder = asked
-        ? 'Ask a follow-up question…' : 'Ask the AI assistant a data question…';
+    document.getElementById('open-chat-btn').textContent = asked ? `💬 Open chat (${asked})` : '💬 Open chat';
+    document.getElementById('delete-chat-btn').hidden = !asked;
 }
 
 // =====================================================================
@@ -480,6 +504,7 @@ async function sendPrompt() {
 
     // Shows each step while the answer is worked out, with a running clock
     const progress = startQueryProgress();
+    const epoch = chatEpoch;
 
     try {
         // text/event-stream: the server reports each step as it happens
@@ -496,6 +521,7 @@ async function sendPrompt() {
 
         const data = await readQueryResponse(response, stage => progress.step(stage));
         const seconds = progress.finish();
+        if (epoch !== chatEpoch) return; // the chat was deleted or restarted meanwhile
 
         if (data.memoryReset) {
             appendMessage('system-msg', 'This conversation got long, so Claude started fresh. Earlier questions are no longer remembered.');
@@ -541,6 +567,9 @@ async function sendPrompt() {
                 `</ul></details>`;
         }
 
+        // Star every ticket the answer lists, or all of one type
+        html += starAllHtml(answerTicketNumbers(data));
+
         // Offer the same tables as a download in any of the export formats
         const tables = buildExportTables(data);
         if (tables.length) {
@@ -553,8 +582,12 @@ async function sendPrompt() {
 
         appendMessage('ai-msg wide', html + answerTimingHtml(seconds, data.fromCache));
 
+        // The tickets in this answer pop up in Ticket results on Home
+        if (data.shownTickets && data.shownTickets.length) ticketsShown(data.shownTickets);
+
     } catch (err) {
         progress.finish();
+        if (epoch !== chatEpoch) return;
         appendMessage('ai-msg', `❌ Could not reach the OneTouch server, or the answer was cut off. Please try again.`);
         console.error(err);
     }
@@ -605,7 +638,7 @@ function startQueryProgress() {
         finish() {
             clearInterval(timer);
             bubble.remove();
-            updateAssistantBar();
+            updateChatControls();
             return (performance.now() - started) / 1000;
         },
     };
@@ -1057,7 +1090,7 @@ function appendMessage(cssClass, text) {
     
     chatLog.appendChild(msgBlock);
     chatLog.scrollTop = chatLog.scrollHeight; // Keep log automatically scrolled to bottom
-    updateAssistantBar();
+    updateChatControls();
     return uniqueId;
 }
 
@@ -1126,7 +1159,100 @@ function paintStar(button) {
 
 function refreshStarButtons() {
     document.querySelectorAll('.star-btn[data-star]').forEach(paintStar);
+    document.querySelectorAll('.star-many').forEach(paintStarMany);
     document.getElementById('star-count').textContent = starredTickets.size.toLocaleString();
+}
+
+// ---------------------------------------------------------------------
+// "Star all": every ticket in a list, or all of one type in it
+// ---------------------------------------------------------------------
+
+const KIND_NOUNS = { INC: ['incident', 'incidents'], CHG: ['change', 'changes'], RITM: ['request', 'requests'], SCTASK: ['catalog task', 'catalog tasks'] };
+const kindOf = number => (number.match(/^[A-Z]+/) || [''])[0];
+
+// The bar: "★ Star all 30 tickets", then one button per type when the list mixes
+// types. Nothing for fewer than two tickets (each row has its own star).
+function starAllHtml(numbers) {
+    const list = [...new Set(numbers)].filter(n => STARRABLE.test(n));
+    if (list.length < 2) return '';
+    const byKind = new Map();
+    for (const n of list) {
+        if (!byKind.has(kindOf(n))) byKind.set(kindOf(n), []);
+        byKind.get(kindOf(n)).push(n);
+    }
+    const buttons = [starManyButtonHtml(list, byKind.size === 1 ? kindOf(list[0]) : '')];
+    if (byKind.size > 1) for (const [kind, nums] of byKind) buttons.push(starManyButtonHtml(nums, kind));
+    return `<div class="star-all-bar">${buttons.join('')}</div>`;
+}
+
+// "28 changes", "1 incident", "30 tickets"
+function starManyWhat(numbers, kind) {
+    const nouns = KIND_NOUNS[kind] || ['ticket', 'tickets'];
+    return `${numbers.length.toLocaleString()} ${nouns[numbers.length === 1 ? 0 : 1]}`;
+}
+
+// "★ Star all 28 changes", or once they all are, "✓ 28 changes starred"
+function starManyState(numbers, kind) {
+    const what = starManyWhat(numbers, kind);
+    const done = numbers.every(n => starredTickets.has(n));
+    return { done, text: done ? `✓ ${what} starred` : (numbers.length === 1 ? `★ Star ${what}` : `★ Star all ${what}`) };
+}
+
+// The numbers are ticket numbers (checked by starAllHtml), so they need no escaping
+function starManyButtonHtml(numbers, kind) {
+    const s = starManyState(numbers, kind);
+    return `<button type="button" class="star-many" data-star-many="${numbers.join(',')}" data-kind="${kind}"${s.done ? ' disabled' : ''}>${escapeHtml(s.text)}</button>`;
+}
+
+function paintStarMany(button) {
+    const s = starManyState(button.dataset.starMany.split(','), button.dataset.kind);
+    button.textContent = s.text;
+    button.disabled = s.done;
+}
+
+// Stars them in one request; the screen changes at once, and back if the server says no
+async function starMany(numbers, what) {
+    const toAdd = numbers.filter(n => STARRABLE.test(n) && !starredTickets.has(n));
+    if (!toAdd.length) return;
+    const now = new Date().toISOString();
+    for (const n of toAdd) starredTickets.set(n, now);
+    refreshStarButtons();
+    try {
+        const response = await fetch(`${API_BASE}/api/stars`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ numbers: toAdd }),
+        });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        const starred = new Set(data.starred);
+        const leftOut = toAdd.filter(n => !starred.has(n));
+        for (const n of leftOut) starredTickets.delete(n);
+        refreshStarButtons();
+        showToast(leftOut.length
+            ? `★ Starred ${(toAdd.length - leftOut.length).toLocaleString()}; ${leftOut.length.toLocaleString()} more would pass the limit of 2,000 starred tickets. Unstar some first.`
+            : `★ Starred ${what}`);
+    } catch (err) {
+        for (const n of toAdd) starredTickets.delete(n);
+        refreshStarButtons();
+        showToast(`❌ ${err.message}`);
+    }
+}
+
+// The tickets an AI answer is about: its ticket-number column, not related
+// numbers in other columns (e.g. a task's parent request)
+function answerTicketNumbers(data) {
+    const sections = data.sections && data.sections.length ? data.sections : [{ rows: data.results || [] }];
+    const numbers = [];
+    for (const s of sections) {
+        for (const row of s.rows) {
+            for (const [member, value] of Object.entries(row)) {
+                if (member.endsWith('.number') && STARRABLE.test(String(value))) numbers.push(String(value));
+            }
+        }
+    }
+    return numbers;
 }
 
 // Changes on screen at once, and back again if the server says no
@@ -1156,13 +1282,6 @@ async function setStarred(number, on) {
     }
 }
 
-async function starAll(numbers) {
-    for (const number of numbers) {
-        if (!await setStarred(number, true)) return;
-    }
-    showToast(`★ Starred ${numbers.length.toLocaleString()} ${numbers.length === 1 ? 'ticket' : 'tickets'}`);
-}
-
 // A short message at the bottom of the screen
 let toastTimer = null;
 function showToast(message) {
@@ -1181,24 +1300,26 @@ function showToast(message) {
 }
 
 // =====================================================================
-// HOME PAGE: find one ticket, several tickets, or your starred ones
+// HOME PAGE: the latest ticket search from the search bar, and your
+// starred tickets
 // =====================================================================
 
-const HOME_MODES = ['single', 'multiple', 'starred'];
-let homeMode = 'single';
+const HOME_MODES = ['results', 'starred'];
+let homeMode = 'results';
 // Each search bumps its counter, so an older, slower answer can't replace a newer one
-const homeRuns = { single: 0, multiple: 0, starred: 0 };
+const homeRuns = { results: 0, starred: 0 };
 
-// The search each person used last, remembered in this browser
+// The list each person had open last, remembered in this browser
 function homeModeKey() {
     return `onetouch-home-mode:${currentUsername}`;
 }
 function rememberedHomeMode() {
-    try { return localStorage.getItem(homeModeKey()) || 'single'; } catch { return 'single'; }
+    try { return localStorage.getItem(homeModeKey()) || 'results'; } catch { return 'results'; }
 }
 
-function setHomeMode(mode, focus = true) {
-    if (!HOME_MODES.includes(mode)) mode = 'single';
+// Shows one of Home's lists and loads it (quiet: refresh it without a "Loading…")
+function setHomeMode(mode, quiet = false) {
+    if (!HOME_MODES.includes(mode)) mode = 'results';
     homeMode = mode;
     document.querySelectorAll('.home-mode').forEach(b => {
         const on = b.dataset.mode === mode;
@@ -1210,25 +1331,19 @@ function setHomeMode(mode, focus = true) {
         try { localStorage.setItem(homeModeKey(), mode); } catch { /* not remembered; that's fine */ }
     }
     if (mode === 'starred') showStarred();
-    if (focus) focusHomeSearch();
-}
-
-function focusHomeSearch() {
-    const field = { single: 'single-ticket-input', multiple: 'multi-ticket-input' }[homeMode];
-    if (field) document.getElementById(field).focus();
+    else showTicketResults(quiet);
 }
 
 // Signing out leaves nothing of this person's on the page
 function resetHome() {
     for (const m of HOME_MODES) homeRuns[m] += 1;
-    document.getElementById('single-ticket-input').value = '';
-    document.getElementById('multi-ticket-input').value = '';
-    for (const id of ['single-ticket-result', 'multi-ticket-result', 'starred-result']) {
-        document.getElementById(id).innerHTML = '';
-    }
+    latestShown = new Set();
+    openedRecord = null;
+    document.getElementById('ticket-results').innerHTML = NO_TICKET_RESULTS_HTML;
+    document.getElementById('starred-result').innerHTML = '';
     starredTickets.clear();
     refreshStarButtons();
-    setHomeMode('single', false);
+    setHomeMode('results');
     forgetRemovedExports();
 }
 
@@ -1264,10 +1379,11 @@ function formatStarredAt(iso) {
         ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
 }
 
-// Ticket numbers open the ticket; every row has a star
-function ticketTableHtml(tickets, columns = TICKET_COLUMNS) {
+// Ticket numbers open the ticket; every row has a star. Rows whose number is
+// in `highlight` (e.g. the latest answer's tickets) are marked.
+function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set()) {
     const head = columns.map(([label]) => `<th>${escapeHtml(label)}</th>`).join('');
-    const body = tickets.map(t => '<tr>' + columns.map(([label, get], i) => {
+    const body = tickets.map(t => (highlight.has(t.number) ? '<tr class="fresh">' : '<tr>') + columns.map(([label, get], i) => {
         if (i === 0) {
             return `<td class="ticket-cell"><button type="button" class="ticket-link" data-ticket="${escapeHtml(t.number)}"` +
                 ` title="Open ${escapeHtml(t.number)}">${escapeHtml(t.number)}</button>${starButtonHtml(t.number)}</td>`;
@@ -1324,22 +1440,13 @@ function ticketCardHtml(t, record) {
     return html;
 }
 
-// "Found 12 tickets. Not found: INC1234567. Left out (not ticket numbers): hello"
-function searchSummaryHtml(data) {
-    const parts = [`Found ${data.found.length.toLocaleString()} ${data.found.length === 1 ? 'ticket' : 'tickets'}.`];
-    if (data.notFound.length) parts.push(`Not found: ${data.notFound.join(', ')}.`);
-    if (data.ignored.length) parts.push(`Left out (not ticket numbers): ${data.ignored.join(', ')}.`);
-    if (data.tooMany) parts.push('Only the first 200 numbers were searched.');
-    return `<p class="home-status">${escapeHtml(parts.join(' '))}</p>`;
-}
 
-const TICKET_EXAMPLES = 'Ticket numbers look like INC1814467, CHG1101321, RITM0440498, SCTASK0595823 or REQ0428071.';
-
-// Runs one search into one result box, showing progress and errors there
-async function runHomeSearch(mode, outId, work) {
+// Runs one search into one result box, showing progress and errors there.
+// quiet: keep what's showing until the new content is ready (background refresh).
+async function runHomeSearch(mode, outId, work, quiet = false) {
     const run = ++homeRuns[mode];
     const out = document.getElementById(outId);
-    out.innerHTML = '<p class="home-status">Searching…</p>';
+    if (!quiet) out.innerHTML = '<p class="home-status">Loading…</p>';
     try {
         const html = await work();
         if (run !== homeRuns[mode] || html === null) return;
@@ -1352,36 +1459,113 @@ async function runHomeSearch(mode, outId, work) {
     forgetRemovedExports();
 }
 
-function searchSingleTicket(number) {
-    const input = document.getElementById('single-ticket-input');
-    if (number) input.value = number;
-    const text = input.value.trim();
-    if (!text) return;
-    return runHomeSearch('single', 'single-ticket-result', async () => {
-        const data = await searchTickets(text, true);
+// =====================================================================
+// TICKET RESULTS: every ticket the person has been shown, newest first: the
+// tickets in the AI assistant's answers (the server records them as it
+// answers) and records they opened. Kept with their account, so the list is
+// there after a refresh, signing out, or on another computer.
+// =====================================================================
+
+const NO_TICKET_RESULTS_HTML = '<p class="home-status">Tickets in the AI assistant\'s answers show up here automatically, ' +
+    'and stay here after you refresh or sign out. Click a ticket number to see its full record.</p>';
+
+let latestShown = new Set(); // the latest answer's tickets, highlighted in the list
+let openedRecord = null;     // a ticket whose full record is showing instead of the list
+
+const SHOWN_COLUMNS = [
+    ['Shown', t => formatShownAt(t.shownAt)],
+    ['From', t => t.question || 'Opened from a ticket number'],
+];
+
+// "Oct 22, 1:05 PM"
+function formatShownAt(iso) {
+    const d = iso ? new Date(iso) : null;
+    return d && !Number.isNaN(d.getTime())
+        ? d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+}
+
+// The list (or the record someone opened). quiet: refresh without a "Loading…".
+function showTicketResults(quiet = false) {
+    const out = document.getElementById('ticket-results');
+    if (!sessionTokenValue) { out.innerHTML = NO_TICKET_RESULTS_HTML; return; }
+    if (openedRecord) return showOpenedRecord(openedRecord);
+    return runHomeSearch('results', 'ticket-results', async () => {
+        const response = await fetch(`${API_BASE}/api/seen-tickets`, { headers: authHeaders() });
+        if (handleUnauthorized(response)) return null;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        const tickets = data.tickets || [];
+        if (!tickets.length) return NO_TICKET_RESULTS_HTML;
+        const columns = [...TICKET_COLUMNS, ...SHOWN_COLUMNS];
+        const fresh = tickets.filter(t => latestShown.has(t.number)).length;
+        return '<div class="results-head">' +
+            `<p class="home-status">${tickets.length.toLocaleString()} ${tickets.length === 1 ? 'ticket' : 'tickets'} shown to you, newest first. ` +
+            (fresh ? `<span class="fresh-key">Highlighted: the ${fresh.toLocaleString()} from your latest question.</span> ` : '') +
+            'Click a ticket number to see its full record.</p>' +
+            `<button type="button" class="home-action danger" onclick="deleteTicketResults(${tickets.length})">🗑 Delete ticket results</button></div>` +
+            starAllHtml(tickets.map(t => t.number)) +
+            ticketTableHtml(tickets, columns, latestShown) + ticketDownloadHtml(tickets, 'Ticket results', columns);
+    }, quiet);
+}
+
+// A ticket number someone clicked: its full record, with the way back to the list.
+// Opening it counts as being shown, so it joins the list.
+function openTicketRecord(number) {
+    openedRecord = number;
+    switchTab('home');
+    setHomeMode('results');
+    if (STARRABLE.test(number)) {
+        fetch(`${API_BASE}/api/seen-tickets`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ numbers: [number] }),
+        }).catch(err => console.error('Could not add the ticket to Ticket results:', err));
+    }
+    document.getElementById('home-view').scrollTop = 0;
+}
+
+function showOpenedRecord(number) {
+    return runHomeSearch('results', 'ticket-results', async () => {
+        const data = await searchTickets(number, true);
         if (!data) return null;
-        if (!data.found.length) {
-            return `<p class="home-status">No ticket matches “${escapeHtml(text)}”. ${TICKET_EXAMPLES}</p>`;
-        }
-        if (data.found.length === 1) return ticketCardHtml(data.found[0], data.record);
-        // A REQ, or a bare number that fits several types, brings up more than one
-        return `<p class="home-status">${data.found.length.toLocaleString()} tickets match “${escapeHtml(text)}”. Click one to see its full record.</p>` +
-            ticketTableHtml(data.found);
+        const back = '<div class="home-actions"><button type="button" class="home-action" onclick="closeTicketRecord()">← All ticket results</button></div>';
+        if (!data.found.length) return back + `<p class="home-status">${escapeHtml(number)} is not in the data.</p>`;
+        if (data.found.length === 1) return back + ticketCardHtml(data.found[0], data.record);
+        return back + ticketTableHtml(data.found);
     });
 }
 
-function searchManyTickets() {
-    const text = document.getElementById('multi-ticket-input').value.trim();
-    if (!text) return;
-    return runHomeSearch('multiple', 'multi-ticket-result', async () => {
-        const data = await searchTickets(text);
-        if (!data) return null;
-        if (!data.found.length) return searchSummaryHtml(data) + `<p class="home-status">${TICKET_EXAMPLES}</p>`;
-        const numbers = data.found.map(t => t.number).filter(n => STARRABLE.test(n));
-        return searchSummaryHtml(data) +
-            `<div class="home-actions"><button type="button" class="home-action" data-star-all="${escapeHtml(numbers.join(','))}">★ Star all ${numbers.length.toLocaleString()}</button></div>` +
-            ticketTableHtml(data.found) + ticketDownloadHtml(data.found, 'Ticket search');
-    });
+function closeTicketRecord() {
+    openedRecord = null;
+    showTicketResults();
+}
+
+// "Delete ticket results": after a confirmation, the whole list goes, on every
+// computer. Stars are separate and stay; new answers fill the list again.
+async function deleteTicketResults(count) {
+    const what = `${count.toLocaleString()} ${count === 1 ? 'ticket' : 'tickets'}`;
+    if (!confirm(`Delete your ticket results? The list of ${what} is cleared on every computer you use. Your starred tickets stay starred.`)) return;
+    try {
+        const response = await fetch(`${API_BASE}/api/seen-tickets`, { method: 'DELETE', headers: authHeaders() });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        latestShown = new Set();
+        openedRecord = null;
+        await showTicketResults();
+        showToast('Ticket results deleted');
+    } catch (err) {
+        showToast(`❌ ${err.message}`);
+    }
+}
+
+// An AI answer showed these tickets (the server has already saved them): they
+// go to the top of Ticket results, highlighted, and Home shows that list
+function ticketsShown(numbers) {
+    latestShown = new Set(numbers);
+    openedRecord = null;
+    setHomeMode('results', true);
+    showToast(`🎫 ${numbers.length.toLocaleString()} ${numbers.length === 1 ? 'ticket' : 'tickets'} from this answer ${numbers.length === 1 ? 'is' : 'are'} now in Ticket results on Home`);
 }
 
 // Newest star first. Unstarring here leaves the row (with an empty star) until
@@ -1391,7 +1575,7 @@ function showStarred() {
         await loadStars();
         const numbers = [...starredTickets.keys()];
         if (!numbers.length) {
-            return '<p class="home-status">No starred tickets yet. Click ☆ next to any ticket number: in a search here, ' +
+            return '<p class="home-status">No starred tickets yet. Click ☆ next to any ticket number: in your ticket results, ' +
                 'in the AI assistant\'s answers, or on an incident, change or request record in Dashboards. ' +
                 'Your stars are saved to your account, so they are here on any computer you sign in from.</p>';
         }
@@ -1410,19 +1594,22 @@ document.addEventListener('click', e => {
     const star = e.target.closest('.star-btn[data-star]');
     if (star) { setStarred(star.dataset.star, !starredTickets.has(star.dataset.star)); return; }
 
-    const ticket = e.target.closest('[data-ticket]');
-    if (ticket) {
-        switchTab('home');
-        setHomeMode('single', false);
-        searchSingleTicket(ticket.dataset.ticket);
+    const many = e.target.closest('.star-many');
+    if (many) {
+        const numbers = many.dataset.starMany.split(',');
+        starMany(numbers, starManyWhat(numbers, many.dataset.kind));
         return;
     }
 
-    const record = e.target.closest('[data-open-dashboard]');
-    if (record) { openInDashboards(record.dataset.openDashboard); return; }
+    const ticket = e.target.closest('[data-ticket]');
+    if (ticket) { openTicketRecord(ticket.dataset.ticket); return; }
 
-    const all = e.target.closest('[data-star-all]');
-    if (all && all.dataset.starAll) starAll(all.dataset.starAll.split(','));
+    // Home's example question is asked in the chat
+    const example = e.target.closest('[data-example]');
+    if (example) { askAssistant(example.dataset.example); return; }
+
+    const record = e.target.closest('[data-open-dashboard]');
+    if (record) openInDashboards(record.dataset.openDashboard);
 });
 
 // =====================================================================
@@ -1430,6 +1617,7 @@ document.addEventListener('click', e => {
 // has expired, the first API call returns 401 and brings the page back
 // =====================================================================
 
+document.getElementById('ticket-results').innerHTML = NO_TICKET_RESULTS_HTML;
 showApp(Boolean(sessionTokenValue));
 loadCurrentUser();
 
