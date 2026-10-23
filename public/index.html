@@ -200,6 +200,8 @@
                     <!-- On an incident, change or request record: star it -->
                     <button type="button" class="star-btn labelled" id="dashboard-star" hidden></button>
                     <span class="dashboard-hint" id="dashboard-hint" hidden>Click a bar, slice, number or blue value for details</span>
+                    <button type="button" class="home-action dashboard-tour-btn" id="dashboard-tour-btn" onclick="startTour('dashboards')"
+                            title="A short tour of the Dashboards page" aria-label="Tour of the Dashboards page">❔<span class="tour-btn-word"> Tour</span></button>
                 </div>
                 <div class="dashboard-body">
                     <div class="dashboard-backdrop" id="dashboard-backdrop" onclick="toggleDashboardDrawer(false)"></div>
@@ -208,6 +210,14 @@
                             <span>Dashboards</span>
                             <button type="button" class="drawer-close" onclick="toggleDashboardDrawer(false)" aria-label="Close">✕</button>
                         </div>
+                        <!-- Pages built into OneTouch itself (families.js) -->
+                        <section class="drawer-group builtin-dashboards">
+                            <h3>Built into OneTouch</h3>
+                            <button type="button" class="dashboard-choice" data-builtin="families" onclick="showFamilies(); toggleDashboardDrawer(false)">
+                                <span class="dashboard-choice-name">👪 Ticket families</span>
+                                <span class="dashboard-choice-desc">Parent tickets and their children. Click any ticket, parent or child, to open it.</span>
+                            </button>
+                        </section>
                         <!-- The dashboards this person built (customize.js) -->
                         <section class="drawer-group my-dashboards">
                             <h3>My dashboards</h3>
@@ -222,7 +232,33 @@
                         </div>
                     </aside>
                     <p class="dashboard-message" id="dashboard-message">Loading dashboards…</p>
+                    <!-- On an incident, change or request record: its family (families.js) -->
+                    <section class="record-family" id="record-family" aria-label="Parent, children and other linked tickets" hidden>
+                        <div class="record-family-head">
+                            <p class="record-family-summary" id="record-family-summary"></p>
+                            <button type="button" class="home-action" id="record-family-toggle" aria-controls="record-family-body" hidden></button>
+                        </div>
+                        <div class="record-family-body" id="record-family-body"></div>
+                    </section>
                     <iframe id="dashboard-frame" title="Dashboard" hidden></iframe>
+                    <!-- 👪 Ticket families (families.js): every family of one kind, biggest first -->
+                    <div class="families-view" id="families-view" hidden>
+                        <div class="families-kinds" id="families-kinds" role="group" aria-label="Kind of family"></div>
+                        <div class="families-tools">
+                            <form class="families-find" id="families-find" role="search">
+                                <input type="search" id="families-q" placeholder="Find a ticket's families: INC1813970, RITM0440458…" aria-label="Ticket number">
+                                <button type="submit" class="primary-btn">Find</button>
+                            </form>
+                            <label class="families-sort">Order
+                                <select id="families-sort">
+                                    <option value="size">Biggest families first</option>
+                                    <option value="newest">Newest parent first</option>
+                                    <option value="oldest">Oldest parent first</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div id="families-list"></div>
+                    </div>
                     <!-- One of this person's own dashboards -->
                     <div class="board-view" id="board-view" hidden>
                         <div class="board-bar">
@@ -380,6 +416,18 @@
         <div class="drill-body" id="drill-body"></div>
     </dialog>
 
+    <!-- One ticket over the page: its family first, then its record (families.js) -->
+    <dialog class="builder ticket-dialog" id="ticket-dialog" aria-labelledby="ticket-dialog-title">
+        <div class="builder-head">
+            <div class="ticket-dialog-nav">
+                <button type="button" class="home-action" id="ticket-dialog-back" onclick="ticketDialogBack()" hidden>← Back</button>
+                <h2 id="ticket-dialog-title"></h2>
+            </div>
+            <button type="button" class="drawer-close" onclick="this.closest('dialog').close()" aria-label="Close">✕</button>
+        </div>
+        <div class="drill-body" id="ticket-dialog-body"></div>
+    </dialog>
+
     <!-- Sharing one of your dashboards: its link -->
     <dialog class="ask-dialog share-dialog" id="share-dialog" aria-labelledby="share-title">
         <h2 id="share-title">Share this dashboard</h2>
@@ -430,6 +478,7 @@
 
     <script src="charts.js"></script>
     <script src="customize.js"></script>
+    <script src="families.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

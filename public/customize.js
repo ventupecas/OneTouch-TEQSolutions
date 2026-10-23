@@ -15,7 +15,10 @@ const THEME_DEFAULTS = { mode: 'light', accent: '#10a37f', header: 'dark' };
 const defaultHome = () => ({ blocks: [{ type: 'assistant' }, { type: 'tickets' }] });
 const defaultDashboards = () => ({ boards: [], hidden: [], last: '' });
 
-const prefs = { theme: { ...THEME_DEFAULTS }, home: defaultHome(), dashboards: defaultDashboards(), tour: { done: false } };
+// tour: which tours have been seen (done: Home's; dashboards: the Dashboards page's)
+const defaultTour = () => ({ done: false, dashboards: false });
+
+const prefs = { theme: { ...THEME_DEFAULTS }, home: defaultHome(), dashboards: defaultDashboards(), tour: defaultTour() };
 let prefsReady = Promise.resolve();
 // When loading failed, saving is off: it would replace what's saved with the defaults
 let prefsLoadFailed = false;
@@ -38,7 +41,7 @@ function loadPreferences() {
             prefs.theme = { ...THEME_DEFAULTS, ...saved.theme };
             prefs.home = Array.isArray(saved.home?.blocks) ? saved.home : defaultHome();
             prefs.dashboards = { ...defaultDashboards(), ...saved.dashboards };
-            prefs.tour = { done: saved.tour?.done === true };
+            prefs.tour = { done: saved.tour?.done === true, dashboards: saved.tour?.dashboards === true };
         } catch (err) {
             prefsLoadFailed = true;
             console.error('Could not load the saved layout and colors:', err);
@@ -116,7 +119,7 @@ function resetCustomizing() {
     prefs.theme = { ...THEME_DEFAULTS };
     prefs.home = defaultHome();
     prefs.dashboards = defaultDashboards();
-    prefs.tour = { done: false };
+    prefs.tour = defaultTour();
     prefsReady = Promise.resolve();
     prefsLoadFailed = false;
     sharedBoards.clear();
@@ -129,6 +132,7 @@ function resetCustomizing() {
     toggleHomeEditing(false);
     toggleDrawerEditing(false);
     hideBoard();
+    resetFamilies();
     renderHomeLayout();
     renderMyDashboards();
     document.getElementById('home-blocks').classList.add('waiting');
@@ -563,6 +567,7 @@ function renderMyDashboards() {
 function showBoard(id) {
     const board = prefs.dashboards.boards.find(b => b.id === id);
     if (!board) return false;
+    hideFamilies();
     currentBoardId = id;
     document.getElementById('dashboard-frame').hidden = true;
     document.getElementById('dashboard-message').hidden = true;
@@ -1265,16 +1270,24 @@ async function openDrill({ chart, scope = null, value = null, label = '' }) {
         const count = `${data.total.toLocaleString()} ${data.total === 1 ? 'ticket' : 'tickets'}`;
         body.innerHTML = `<p class="drill-what">${escapeHtml(what)}</p>` +
             `<p class="home-status">${count}${data.total > tickets.length ? `; the newest ${tickets.length.toLocaleString()} are listed (the download has them too)` : ''}. ` +
-            'Click a ticket number to see its full record.</p>' +
+            'Click a ticket number to open it, with its parent, children and other linked tickets.</p>' +
             starAllHtml(tickets.map(t => t.number)) + ticketTableHtml(tickets) + ticketDownloadHtml(tickets, title);
     } catch (err) {
         if (run === drillRun) body.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
     }
 }
 
-// Opening a ticket's record (or its dashboard page) from the list closes the list first
+// A ticket in the list opens in the ticket window over it, its family first
+// (families.js), and closing that returns to the list. Its dashboard page
+// closes the list.
 document.getElementById('drill-dialog').addEventListener('click', e => {
-    if (e.target.closest('[data-ticket], [data-open-dashboard]')) e.currentTarget.close();
+    const ticket = e.target.closest('[data-ticket]');
+    if (ticket) {
+        e.stopPropagation();
+        openTicketDialog(ticket.dataset.ticket);
+        return;
+    }
+    if (e.target.closest('[data-open-dashboard]')) e.currentTarget.close();
 });
 
 // ---------------------------------------------------------------------
@@ -1484,8 +1497,10 @@ window.addEventListener('hashchange', () => {
 });
 
 // ---------------------------------------------------------------------
-// THE TOUR: a few steps pointing at the main parts, shown once to each
-// person (saved to their account) and again from "❔ Tour" on Home
+// THE TOURS: a few steps pointing at the main parts of a page. Home's
+// shows on the first visit, the Dashboards page's the first time that page
+// is opened; each once per person (saved to their account), and again
+// from that page's "❔ Tour"
 // ---------------------------------------------------------------------
 
 const TOUR_STEPS = [
@@ -1498,33 +1513,66 @@ const TOUR_STEPS = [
     { target: '#customize-home-btn', title: 'Make Home yours',
         text: 'Move or hide these sections, and add charts of your own.' },
     { target: '.tab-btn[data-tab="dashboard"]', title: 'Dashboards: the team\'s and yours',
-        text: 'The team dashboards, plus ones you build: ☰ Dashboards, then ＋ New dashboard. Click any bar or slice to see its tickets, filter a whole dashboard by team or date, and share it with a link.' },
+        text: 'The team dashboards, plus ones you build: ☰ Dashboards, then ＋ New dashboard. Click any bar or slice to see its tickets, filter a whole dashboard by team or date, and share it with a link. It has its own short tour the first time you open it.' },
     { target: '#theme-btn', title: 'Your colors',
         text: 'Light or dark, your own accent color, and the header\'s color. "❔ Tour" on Home shows this tour again.' },
 ];
 
-let tourState = null; // { steps, index, opener }
+// drawer: the step is inside the ☰ Dashboards drawer (open it) or not (close it).
+// Steps whose part isn't showing are left out (the team dashboard's frame on
+// one of your own dashboards, for example).
+const DASHBOARDS_TOUR_STEPS = [
+    { target: '#dashboard-drawer-toggle', drawer: false, title: 'Every dashboard in one list',
+        text: 'Click ☰ Dashboards for the list: pages built into OneTouch, dashboards of your own, and the team dashboards. This page opens on the one you had open last.' },
+    { target: '.builtin-dashboards', drawer: true, title: 'Ticket families',
+        text: 'Every parent ticket and its children, from the links in the data. Click any ticket, parent or child, to open it with its family.' },
+    { target: '.my-dashboards', drawer: true, title: 'Dashboards of your own',
+        text: '＋ New dashboard starts one: choose what each chart counts and how it is drawn, filter the whole dashboard by team or dates, and share it with a link. Nobody else sees it until you share it.' },
+    { target: '#dashboard-picker .drawer-group', drawer: true, title: 'The team dashboards',
+        text: 'Incidents, problems, changes and requests, grouped by area (scroll the list for the rest). Everyone has the same ones.' },
+    { target: '#drawer-customize', drawer: true, title: 'Only the ones you use',
+        text: 'Untick the team dashboards you don\'t need and they leave your list (nobody else\'s). They come back the same way.' },
+    { target: '#dashboard-frame', drawer: false, title: 'Click for details',
+        text: 'Click a bar, slice, number or blue value to open a page with its details, and ← Back to return. A ticket\'s record shows its parent, children and other linked tickets above it.' },
+    { target: '#board-view .board-bar', drawer: false, title: 'Your dashboard',
+        text: 'Add charts, share it with a link, rename or delete it. Click a bar or slice to list its tickets.' },
+    { target: '#dashboard-tour-btn', drawer: false, title: 'This tour again',
+        text: '❔ Tour shows this tour again any time. Home has its own, under ❔ Tour there.' },
+];
 
-function maybeStartTour() {
-    if (prefs.tour.done || prefsLoadFailed) return;
+// Each tour: its steps, its page, and its flag in prefs.tour
+const TOURS = {
+    home: { steps: TOUR_STEPS, view: 'home', seen: 'done' },
+    dashboards: { steps: DASHBOARDS_TOUR_STEPS, view: 'dashboard', seen: 'dashboards' },
+};
+
+let tourState = null; // { name, steps, index, opener }
+
+// A tour not seen yet starts once its page is showing, unless something else
+// is open (it waits for the next visit then)
+function maybeStartTour(name = 'home') {
+    const tour = TOURS[name];
+    if (prefs.tour[tour.seen] || prefsLoadFailed || tourState) return;
     setTimeout(() => {
-        const ready = !prefs.tour.done && !document.body.classList.contains('signed-out') && !document.querySelector('dialog[open]') &&
-            document.getElementById('home-view').classList.contains('active') && !assistantOpen();
-        if (ready) startTour();
+        const ready = !prefs.tour[tour.seen] && !tourState && !document.body.classList.contains('signed-out') && !document.querySelector('dialog[open]') &&
+            document.getElementById(`${tour.view}-view`).classList.contains('active') && !assistantOpen();
+        if (ready) startTour(name);
     }, 600);
 }
 
-function startTour() {
-    toggleHomeEditing(false);
+function startTour(name = 'home') {
+    const tour = TOURS[name];
+    if (name === 'home') toggleHomeEditing(false);
+    else toggleDrawerEditing(false);
     toggleThemePanel(false);
     toggleAssistant(false);
-    if (!document.getElementById('home-view').classList.contains('active')) switchTab('home');
-    const steps = TOUR_STEPS.filter(s => {
+    if (!document.getElementById(`${tour.view}-view`).classList.contains('active')) switchTab(tour.view);
+    const steps = tour.steps.filter(s => {
         const el = document.querySelector(s.target);
         return el && el.getClientRects().length > 0;
     });
     if (!steps.length) return;
-    tourState = { steps, index: 0, opener: document.activeElement };
+    tourState = { name, steps, index: 0, opener: document.activeElement };
     document.getElementById('tour').hidden = false;
     showTourStep();
 }
@@ -1533,6 +1581,13 @@ function showTourStep() {
     if (!tourState) return;
     const { steps, index } = tourState;
     const step = steps[index];
+    // Open or close the drawer for this step; point once it has slid
+    const drawer = document.getElementById('dashboard-drawer');
+    if ('drawer' in step && step.drawer !== drawer.classList.contains('open')) {
+        toggleDashboardDrawer(step.drawer);
+        setTimeout(() => { if (tourState?.steps === steps && tourState.index === index) showTourStep(); }, 250);
+        return;
+    }
     const target = document.querySelector(step.target);
     if (!target) return closeTour();
     target.scrollIntoView({ block: 'nearest' });
@@ -1545,11 +1600,13 @@ function showTourStep() {
     document.getElementById('tour-text').textContent = step.text;
     document.getElementById('tour-back').disabled = index === 0;
     document.getElementById('tour-next').textContent = index === steps.length - 1 ? 'Done' : 'Next';
-    // The card goes under what it points at, or above when there's no room below
+    // The card goes under what it points at, or above when there's no room
+    // below, or inside its top when it fills the page (a dashboard)
     const card = document.getElementById('tour-card');
     const h = card.offsetHeight, w = card.offsetWidth;
     const below = r.bottom + pad + 12;
-    const top = below + h < innerHeight - 8 ? below : Math.max(8, r.top - pad - 12 - h);
+    const above = r.top - pad - 12 - h;
+    const top = below + h < innerHeight - 8 ? below : above >= 8 ? above : Math.max(8, Math.min(r.top + 16, innerHeight - h - 8));
     card.style.top = `${top}px`;
     card.style.left = `${Math.max(8, Math.min(r.left, innerWidth - w - 8))}px`;
     document.getElementById('tour-next').focus();
@@ -1566,12 +1623,13 @@ function tourMove(delta) {
 // save: remember it was seen (Skip and Done both count)
 function closeTour(save = true) {
     const opener = tourState?.opener;
-    const wasOpen = Boolean(tourState);
+    const name = tourState?.name;
     tourState = null;
     document.getElementById('tour').hidden = true;
-    if (!wasOpen) return;
-    if (save && !prefs.tour.done) {
-        prefs.tour = { done: true };
+    if (!name) return;
+    const seen = TOURS[name].seen;
+    if (save && !prefs.tour[seen]) {
+        prefs.tour = { ...prefs.tour, [seen]: true };
         savePreference('tour');
     }
     if (opener && opener.isConnected) opener.focus();

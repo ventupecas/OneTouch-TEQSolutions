@@ -112,6 +112,13 @@ and stars, the AI assistant, downloads, and the dashboards with drill-down.
 
 It only works while **your computer is on and awake, with Docker Desktop running**.
 
+**Changes reach people straight away.** Cloudflare tells browsers to keep script and style
+files for 4 hours, so a browser could keep running an old `app.js` after OneTouch changed.
+To prevent that, the server names each script and the stylesheet in the page with a version
+made from its contents (`app.js?v=3fe9a193ee`). A changed file gets a new name, so browsers
+fetch it on their next visit, and the page itself is never kept. This works for files added
+the usual way (`<script src="x.js">`, `<link rel="stylesheet" href="x.css">`).
+
 #### One-time setup
 
 1. Install [Node.js](https://nodejs.org) 18 or newer, and run `npm install` once in the
@@ -298,11 +305,23 @@ from a ticket number"). The list downloads like any other table.
 asks first, and the list is then empty on every computer. Starred tickets stay starred, and
 new answers start filling the list again.
 
-**Removing some.** Each row has a checkbox. Tick the ones you want gone (Shift-click ticks a
-whole range, the box in the header ticks every row) and click **✕ Remove *n* from Ticket
-results**; the rest stay, and so do the stars. **Clear selection** unticks them. Removing
-every row asks first, like Clear ticket results. Ticks survive the list refreshing (after a
-new answer, for example).
+**Ticking tickets.** Each row in Ticket results and Starred tickets has a checkbox (Shift-click
+ticks a whole range, the box in the header ticks every row). The bar above the list then
+offers, in this order:
+- **💬 Ask the AI about *n*** opens a question box under the bar, with suggestions ("What do
+  these tickets have in common?", "Which of these are still open?", "Who is working on these,
+  and in which teams?", "Show me the full details of these tickets"). Type a question and
+  press Enter or **Ask**, or click a suggestion. The chat opens and asks it as "About tickets
+  INC1788698, INC1813985: *your question*" (up to 100 tickets at a time).
+- **✕ Remove *n* from Ticket results** (in Ticket results) or **☆ Unstar *n*** (in Starred
+  tickets).
+- **☆ Unstar and ✕ remove *n* from Ticket results** does both at once, after asking, in
+  either list.
+- **Clear selection** unticks them.
+
+Removing tickets leaves the rest, and their stars, alone; removing every row asks first,
+like Clear ticket results. Ticks survive the list refreshing (after a new answer, for
+example).
 
 **Parent and Family.** Ticket results and Starred tickets both show, after the summary:
 - **Parent**: an incident's parent incident, a request's bundle request (or, if it has
@@ -325,7 +344,8 @@ follow you to any computer that signs in to the same server. A full copy of the 
 own stars; they aren't in `db/accounts.json`.
 
 **Unstarring many.** In **Starred tickets**:
-- Tick rows (Shift-click for a range, the header box for all) and click **☆ Unstar *n***.
+- Tick rows (Shift-click for a range, the header box for all) and click **☆ Unstar *n***,
+  or **☆ Unstar and ✕ remove *n* from Ticket results** for both (see Ticking tickets above).
 - **☆ Unstar all** (at the right of the summary line) unstars every one, after asking.
 - **Unstar by issue**: one button for each family that two or more of your starred tickets
   share, e.g. **☆ Unstar the 3 in Parent incident INC1813985** or **☆ Unstar the 2 in Order
@@ -377,7 +397,25 @@ For each family it shows:
   e.g. `one-touch-related-to-inc1794145-2026-10-22.xlsx`.
 
 One ticket shows every family it is in. A list shows only the families that two or more of
-its tickets share, so a long list isn't buried. A ticket with no links shows nothing extra.
+its tickets share, so a long list isn't buried.
+
+**Opening a ticket shows its family first.** Whenever a ticket's record opens (a ticket
+number in Ticket results or Starred tickets, its Parent or Family, a row of an AI answer, a
+ticket in a family or in a chart's ticket list), its family comes right under its heading,
+above the full record, headed "👪 *ticket*'s family: parent, children and other linked
+tickets". Each family starts with a line saying where the ticket sits, and lists the parent
+(or the order, request or change) on the first row:
+- a parent: "INC1813985 is the parent incident. Its 5 child incidents are listed under it."
+- a child: "INC1813970 is a child incident. Its parent is INC1813985 (the first row), which
+  has 4 other child incidents." The parent comes first, then the child itself, then the others.
+- also bundle and child requests, a request and its catalog tasks ("SCTASK0595823 is a
+  catalog task of request RITM0440498 (the first row)"), an order, a problem record, and a
+  change with the incidents it fixes or caused.
+
+Big families show their first 25 members and **Show all *n***. A ticket with no family says
+"No parent, child or other linked tickets". Ticket numbers inside a record (its Parent
+Incident, Request Item, Caused by Change, …) and in AI answers are links too, so from a
+child you can click straight to its parent and see the children. A ticket with no links shows nothing extra.
 The families also go to the AI with your next question, so follow-ups such as "show me the
 others in that family" work. The AI also knows these links directly: "child incidents of
 INC1813985", "the parent request of RITM0440458", and an incident's record shows its
@@ -405,7 +443,11 @@ Nobody else sees it.
 - **Header**: Dark (the default), the accent color, or the same as the page.
 - **↺ Default colors** puts everything back.
 
-The team dashboards switch to Metabase's own dark look when OneTouch is dark.
+The team dashboards switch to Metabase's own dark look when OneTouch is dark, and so does
+every page a click inside them opens. Metabase's links can't know OneTouch is dark, so
+OneTouch adds the dark look to each page as it opens, and **← Back** still steps back as
+before. The accent color stays in OneTouch itself: Metabase keeps its own blue links, which
+match OneTouch's.
 
 **✏️ Customize Home** (next to the welcome) turns on editing:
 - Each section gets **▲ Move up**, **▼ Move down** and **Hide**. The sections are
@@ -437,8 +479,10 @@ shared dashboard, and AI answers that are exactly a chart), a click on a bar, do
 or point of a line, or on a big number, opens a list of the tickets behind it (with the
 dashboard's filters too): how many there are, the newest 200 with ☆ stars and **Star all**,
 and a download. The tooltip says "Click to see these tickets". Click a ticket number to open
-its full record on Home (the list closes). The keyboard works too: Tab to a bar and press
-Enter.
+it in a window over the list: its family first (parent, children and other linked tickets,
+as on the [Ticket families](#ticket-families-dashboards) page), then its full record. Its
+parent and children open in the same window, with **← Back**; closing it returns to the list.
+The keyboard works too: Tab to a bar and press Enter.
 
 **Sharing a dashboard.** **🔗 Share** gives a link (**Copy link**). Anyone who signs in to
 OneTouch and opens it sees the dashboard, with its filters, and can click its charts; **＋ Add
@@ -448,10 +492,18 @@ reads **🔗 Shared** while it is shared; **Stop sharing** (in the same box) tur
 and so does deleting the dashboard. Shared links live in the `shared_dashboards` table of
 `onetouch_auth` (up to 20 per person).
 
-**The tour.** On a first visit, a short tour of six steps points at Home and Dashboards, the
-AI assistant, your tickets, Customize Home, Dashboards and Colors. **Skip the tour**, **Next**
-/ **Back**, and Escape work; once it is closed it doesn't come back by itself (that is saved
-to your account), and **❔ Tour** on Home shows it again.
+**The tours.** On a first visit, a short tour of six steps points at Home and Dashboards, the
+AI assistant, your tickets, Customize Home, Dashboards and Colors. The first time you open
+the Dashboards page, it has a tour of its own (seven steps): the **☰ Dashboards** button,
+then, with the drawer opened for you, Ticket families, your own dashboards, the team
+dashboards and **Show or hide team dashboards**, then (drawer closed) clicking a team
+dashboard for details, and the **❔ Tour** button. A step whose part isn't on screen is left
+out (on the Ticket families page there is no team dashboard to click, so that tour has six
+steps). **Skip the tour**, **Next** / **Back**, and Escape work in both. Once a tour is closed
+it doesn't come back by itself (that is saved to your account, separately for each tour), and
+**❔ Tour** shows it again: on Home for Home's, at the right of the Dashboards toolbar for
+the Dashboards page's (just **❔** on a phone). Accounts that already existed see the
+Dashboards tour once too, the next time they open Dashboards.
 
 **The chart builder** has a live preview that redraws as you choose:
 1. **What to count**: incidents, changes, requests or catalog tasks.
@@ -487,6 +539,45 @@ from these choices). "Open" means the same as in the AI assistant's answers. The
 dashboards count a catalog task as open by its *active* flag instead, so they show 6 fewer
 open catalog tasks (824 against 830): 6 tasks are marked Pending or Work in Progress but
 no longer active.
+
+### Ticket families (Dashboards)
+
+**☰ Dashboards → Built into OneTouch → 👪 Ticket families** lists every family of tickets in
+the data, from the links ServiceNow stored (the same ones as 🔗 Related tickets). It is part
+of OneTouch, not Metabase, so it works the same for everyone and opens where you left it.
+
+- **Six tabs**, each with how many families it has: **Parent incidents** (514, holding 2,080
+  child incidents), **Bundle requests** (974), **Requests and their tasks** (12,880),
+  **Orders** with two or more requests (125), **Problem records** (87) and **Changes and
+  incidents** (106).
+- **One row per family**, biggest first: the parent (or the order, problem or change), its
+  summary, state, priority or risk, team, when it was opened, and how many it holds ("212
+  child incidents"). **Order** can also be newest or oldest parent first. 50 rows at a time,
+  then **Show 50 more**.
+- **Click a row** to open the whole family under it: a line saying who the parent is ("INC1808293
+  is the parent incident. Its 212 child incidents are listed under it"), what the members
+  share and where they differ, the parent on the first row and every child under it (25,
+  then **Show all**), and a download of the family.
+- **Click any ticket number**, parent or child, in a row or in an opened family, to open that
+  ticket in a window over the page: its family first (a child's says "Its parent is … (the
+  first row)"), then its full record. Its parent, children and other linked tickets open in
+  the same window, and **← Back** returns to the one before. **Open in Dashboards** shows the
+  ticket's Metabase record page instead. An order's number opens the requests in it; a
+  problem record isn't in the export, so it isn't clickable.
+- **Find a ticket's families**: type a ticket number (INC, CHG, RITM or SCTASK) and **Find**
+  to list every family it is in, whatever the kind. A single family opens straight away.
+
+The lists are worked out once and then kept (the data never changes); `npm run warmup`
+works them out in advance.
+
+**On a ticket's record in a team dashboard** (an incident, change or request page, however
+it was opened), OneTouch shows the ticket's family in a band above the page: one line
+naming it ("👪 INC1813970's family: Parent incident INC1813985 and its 5 child incidents"),
+then the same view as on this page, with the line saying who the parent is. The band
+scrolls on its own so the record keeps most of the height, and **Hide family** folds it to
+its one line (until you show it again). Click a ticket in it to open that ticket's record
+in the same place (the band follows, and **← Back** returns); a catalog task or an order,
+which have no record page, opens in the ticket window instead.
 
 ### Dashboards (Metabase)
 
@@ -531,7 +622,9 @@ docker exec analytics_node_app node scripts/metabase-setup.mjs --cache-only
 to open a detail page for it: a record (incident, change, request), a team, a server or
 system, a site or brewery, a problem record, a catalog item, or a filtered list (e.g.
 "Incidents · Priority: P2 - High"). Detail pages link onward too; on a record, use the
-blue **Go to** row under it. OneTouch's toolbar shows where you are, with **← Back**.
+blue **Go to** row under it. OneTouch's toolbar shows where you are, with **← Back**, and
+on a record, OneTouch shows the ticket's parent, children and other linked tickets above it
+(see [Ticket families](#ticket-families-dashboards)). In dark mode every page stays dark.
 A detail page's filter boxes (top left) suggest values as you type, so you can switch to
 another team, ticket or item there. Clearing the last filter returns you to the dashboard.
 What each click opens is set by `click` / `links` on the charts in
@@ -559,6 +652,12 @@ Get-Content people.csv | docker exec -i analytics_node_app node scripts/users.mj
 ```
 
 Never commit that CSV: it holds everyone's passwords.
+
+**Sign-in links for everyone.** `node scripts/signin-links.mjs <people.csv> [address]` prints
+one line per person (name, username, password, and a link that opens the sign-in page with
+both filled in; see [2.1 Sign-in](#21-sign-in)), plus the test accounts and `warmup` from
+`.env`. The output holds passwords: it only goes to your terminal, so copy each person their
+own line and don't save, commit or post the list.
 
 **Sharing accounts with clones.** After any change above, write the accounts file and commit it:
 
@@ -614,6 +713,16 @@ OneTouch; it is not single sign-on.
   available yet. Use your email and password." The **Contact Support** link goes nowhere yet.
 - After a failed attempt the password box is cleared and the error appears under it.
 
+**Sign-in links.** A link like `https://onetouch.fyi/#user=jsmith&pass=secret` opens the
+sign-in page with that username and password already filled in, so the person only clicks
+**Continue with SSO** (or presses Enter). Encode anything unusual in a password
+(`encodeURIComponent`). Details after `#` stay in the browser and are never sent to the
+server or the Cloudflare tunnel, and the page takes them out of the address bar and the
+tab's history as soon as it reads them. Opened in a tab where someone else is already signed
+in, the link doesn't sign them out: a message says whose link it is, and the form is filled
+in once they sign out. Anyone holding a link can sign in as that person, so give each person
+only their own, and don't post the links anywhere shared.
+
 **What the server checks** (`POST /api/login`):
 
 | Situation | What you see |
@@ -658,7 +767,9 @@ it in the tab's `sessionStorage`, so:
   and "Hello, *first name*!" at the top of the chat.
 - **Icons:** favicons, an Apple touch icon and a web-app manifest, so OneTouch can be
   pinned to a phone's home screen as "One Touch".
-- **Tour:** a six-step tour on a first visit (remembered per account), and **❔ Tour** on Home.
+- **Tours:** a six-step tour of Home on a first visit and a seven-step tour of the Dashboards
+  page the first time it is opened (each remembered per account), with **❔ Tour** on Home and
+  on the Dashboards toolbar.
 
 ## 2.3 The AI Assistant (chat)
 
@@ -913,8 +1024,9 @@ XLSX file…", then "Downloaded *file name*", or the error.
 
 ## 2.6 The Dashboards tab
 
-**The drawer.** **☰ Dashboards** opens a side drawer: **My dashboards** (the ones you
-built, with **＋ New dashboard**) at the top, then the team dashboards under their group
+**The drawer.** **☰ Dashboards** opens a side drawer: **Built into OneTouch** (**👪 Ticket
+families**, see [Ticket families](#ticket-families-dashboards)) and **My dashboards** (the
+ones you built, with **＋ New dashboard**) at the top, then the team dashboards under their group
 headings, each with a one-line description. On your first visit it opens by itself. Pick
 one and the drawer closes. **Escape**, **✕** or a click outside also close it. OneTouch
 saves the last dashboard you viewed to your account and opens it next time, on any
@@ -1001,7 +1113,9 @@ rejected or cancelled items (top 10), and requests by order guide.
 
 Clicking a chart element or a blue value opens a detail page inside the same frame. The
 toolbar then names it ("Team: TCS-Network-Voice", or for a list "Incidents · Priority:
-P2 - High") and shows **← Back**, which steps back one page.
+P2 - High") and shows **← Back**, which steps back one page. On an incident, change or
+request record, the ticket's family is in a band above the page (see
+[Ticket families](#ticket-families-dashboards)).
 
 | Page | Opened by clicking | Shows |
 |---|---|---|
@@ -1058,6 +1172,14 @@ creates new ones with new links, and `metabase-dashboards.json` is rewritten wit
 | `sync [file]` | Loads `db/accounts.json` by hand. The server also does this on every start. |
 
 Add `--password-stdin` to `add` or `reset-password` to pipe the password in for automation.
+
+**Test accounts.** `tester1` ("Test Account 1") and `tester2` ("Test Account 2") are for
+automated and hand testing. Their passwords are `TESTER1_PASSWORD` and `TESTER2_PASSWORD`
+in `.env`. Tests sign in as `tester1`, and as `tester2` where a second person is needed
+(sharing a dashboard, checking one person can't see another's list). They never use a real
+person's account (a test's wrong password would count toward locking that person out) or
+`warmup`, whose Ticket results the warm-up fills. Both accounts have the Home and Dashboards
+tours marked as seen; a test that needs a first visit resets that itself.
 
 **How the accounts file merges.** Missing accounts are added. An existing account is
 overwritten only if the file's copy changed more recently, so an old file can't undo a
@@ -1435,6 +1557,11 @@ Check: `node --check business_logic.mjs` prints nothing.
   sums them up for Claude. The page calls `POST /api/tickets/related` with `{ numbers,
   conversation }`; with `conversation: true`, the summary joins the conversation's
   `pendingNote`, queued behind the answer and only for that same conversation.
+  The six kinds of family are built by one function each (`parentIncidentFamily`, …),
+  shared with the Ticket families page: `familyList` (every family of a kind, biggest first,
+  from one grouped count, kept in memory), `familySummary` and `familyOf` (one family with
+  all its members), served by `/api/families`, `/api/families/:kind`,
+  `/api/families/:kind/:anchor` and `/api/families/find?number=`.
   `ticketLinks` is the light version for whole lists: each ticket's parent and its
   families with their sizes (from the ticket's own link columns plus one count per kind of
   family, no members fetched), kept in memory per ticket because the data never changes.
@@ -1469,6 +1596,10 @@ Check: `node --check business_logic.mjs` prints nothing.
   through to a mark's tickets, redrawing when a chart's width changes, and pictures:
   `chartPicture` redraws a chart off screen in the light colors and writes every color into
   a standalone SVG; `picturePng` turns that into a PNG.
+- `public/families.js` ([B.49](#b49)): the 👪 Ticket families page in the Dashboards tab
+  (tabs per kind, rows that open into the whole family, find a ticket's families), the
+  ticket window any ticket number on it (or in a chart's ticket list) opens in, with ← Back,
+  and the family band above a ticket's record in a team dashboard.
 - `public/customize.js` ([B.47](#b47)): loads and saves each person's preferences, the
   colors panel, Customize Home, My dashboards and their filter row, hiding team dashboards,
   the chart builder, the list of tickets behind a chart, saving an AI answer as a chart,
@@ -1477,7 +1608,8 @@ Check: `node --check business_logic.mjs` prints nothing.
 - `public/app.js` ([B.27](#b27)): sign-in, ticket results and stars, the AI assistant
   chat (sending questions, turning the results into tables with English column names and
   readable values, "New chat", "Delete chat"), the download buttons, and the dashboard
-  drawer with drill-down, **← Back** and the toolbar star.
+  drawer with drill-down, **← Back** and the toolbar star (and keeping the dashboards dark
+  in dark mode, on every page a click opens).
 - `public/site.webmanifest` ([B.28](#b28)): the app name and icons.
 - `onetouchsso.html` ([B.29](#b29)) and `styles2.css` ([B.30](#b30)): the design template
   the sign-in page was built from. Nothing loads them, but they are in the repository.
@@ -1838,6 +1970,8 @@ Create each file at the path shown, with exactly this content. Files are in the 
 - [B.46 `public/charts.js`](#b46)
 - [B.47 `public/customize.js`](#b47)
 - [B.48 `shares.mjs`](#b48)
+- [B.49 `public/families.js`](#b49)
+- [B.50 `scripts/signin-links.mjs`](#b50)
 
 <a id="b1"></a>
 ### B.1 `.gitignore`
@@ -2049,6 +2183,11 @@ ONETOUCH_PUBLIC_URL=
 # Optional: the "warmup" account's password, so `npm run warmup` signs in without asking.
 # Create the account first: docker exec -it analytics_node_app node scripts/users.mjs add warmup "Warmup"
 WARMUP_PASSWORD=
+
+# Optional: the test accounts' passwords (tests sign in as tester1 and tester2, never as a
+# real person or warmup). Create them with scripts/users.mjs add tester1 "Test Account 1".
+TESTER1_PASSWORD=
+TESTER2_PASSWORD=
 ```
 
 <a id="b5"></a>
@@ -5722,7 +5861,8 @@ try {
 
 ```js
 import dns from 'node:dns/promises';
-import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -5739,7 +5879,7 @@ import * as auth from './auth.mjs';
 import * as stars from './stars.mjs';
 import * as seen from './seen.mjs';
 import { findTickets, ticketRecord, ticketSummaries, ticketNumbersIn, STARRABLE } from './tickets.mjs';
-import { relatedFamilies, describeFamilies, ticketLinks } from './relations.mjs';
+import { relatedFamilies, describeFamilies, ticketLinks, FAMILY_KINDS, LINK_KIND, familyList, familySummary, familyOf } from './relations.mjs';
 import * as prefs from './prefs.mjs';
 import { chartData, chartValues, chartCatalog, chartTickets, chartFromQuery, teamValues, ChartError } from './charts.mjs';
 import * as shares from './shares.mjs';
@@ -5794,6 +5934,32 @@ app.use('/api/export', express.json({ limit: '25mb' }));
 // A whole set of dashboards is saved (or a dashboard shared) at once
 app.use(['/api/preferences', '/api/shares'], express.json({ limit: '1mb' }));
 app.use(express.json());
+
+// The page names its scripts and stylesheet with a version made from their
+// contents (app.js?v=1a2b3c4d5e). Cloudflare tells browsers to keep those
+// files for hours, so a changed file needs a new address to reach people
+// straight away. The page itself is never kept, so it always names the latest.
+const VERSIONED_ASSET = /(<script src="|<link rel="stylesheet" href=")([\w-]+\.(?:js|css))(")/g;
+const assetVersions = new Map(); // file -> { mtimeMs, version }
+function assetVersion(file) {
+  const full = `public/${file}`;
+  const { mtimeMs } = statSync(full);
+  const known = assetVersions.get(file);
+  if (known?.mtimeMs === mtimeMs) return known.version;
+  const version = createHash('sha256').update(readFileSync(full)).digest('hex').slice(0, 10);
+  assetVersions.set(file, { mtimeMs, version });
+  return version;
+}
+app.get(['/', '/index.html'], (req, res, next) => {
+  try {
+    const html = readFileSync('public/index.html', 'utf8')
+      .replace(VERSIONED_ASSET, (match, before, file, after) => `${before}${file}?v=${assetVersion(file)}${after}`);
+    res.set('Cache-Control', 'no-cache').type('html').send(html);
+  } catch (error) {
+    console.error(`📄 Could not version the page's files: ${error.message}`);
+    next(); // the plain page, from express.static
+  }
+});
 app.use(express.static('public'));
 
 // =====================================================================
@@ -5924,7 +6090,7 @@ async function requireLogin(req, res, next) {
   next();
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families'], requireLogin);
 
 // Who is signed in (the page shows their display name)
 app.get('/api/me', (req, res) => {
@@ -6360,6 +6526,77 @@ app.post('/api/tickets/related', async (req, res) => {
   } catch (error) {
     console.error('🔗 Could not find related tickets:', error.message);
     res.status(502).json({ error: `Could not look for related tickets right now: ${error.message}` });
+  }
+});
+
+// =====================================================================
+// THE TICKET FAMILIES PAGE (relations.mjs): every family of one kind,
+// one family with all its members, and the families a ticket is in
+// =====================================================================
+
+// Each family row with its anchor's summary (null for an order or a problem record)
+async function withAnchors(rows) {
+  const summaries = await ticketSummaries(rows.map(r => r.anchor), runCubeQuery);
+  return rows.map(r => ({ ...r, ticket: summaries.get(r.anchor) || null }));
+}
+
+function familiesFailed(res, error) {
+  console.error('👪 Ticket families failed:', error.message);
+  res.status(502).json({ error: `The ticket families could not be loaded right now: ${error.message}` });
+}
+
+// -> { kinds: { kind: { families, tickets } } }
+app.get('/api/families', async (_req, res) => {
+  try {
+    res.json({ kinds: await familySummary(runCubeQuery) });
+  } catch (error) {
+    familiesFailed(res, error);
+  }
+});
+
+// ?number=INC1813970 -> the families that ticket is in, as list rows
+app.get('/api/families/find', async (req, res) => {
+  const number = String(req.query.number || '').trim().toUpperCase();
+  if (!STARRABLE.test(number)) return res.status(400).json({ error: 'Type a ticket number, like INC1813970, CHG1100098, RITM0440458 or SCTASK0595823.' });
+  try {
+    const [links, found] = await Promise.all([ticketLinks([number], runCubeQuery), ticketSummaries([number], runCubeQuery)]);
+    const rows = [];
+    for (const f of links.get(number)?.families || []) {
+      const kind = LINK_KIND[f.kind];
+      const entry = (await familyList(kind, runCubeQuery)).find(e => e.anchor === f.anchor);
+      if (entry) rows.push({ kind, ...entry });
+    }
+    res.json({ number, known: found.has(number), families: await withAnchors(rows) });
+  } catch (error) {
+    familiesFailed(res, error);
+  }
+});
+
+// ?sort=size|newest|oldest&offset&limit -> { total, families: one page of rows }
+app.get('/api/families/:kind', async (req, res) => {
+  const kind = req.params.kind;
+  if (!FAMILY_KINDS.includes(kind)) return res.status(400).json({ error: 'Unknown kind of family.' });
+  const offset = Math.max(0, Number.parseInt(req.query.offset, 10) || 0);
+  const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 50));
+  try {
+    let list = await familyList(kind, runCubeQuery);
+    // Ticket numbers go up over time, so the newest parent has the highest number
+    if (req.query.sort === 'newest') list = [...list].sort((a, b) => b.anchor.localeCompare(a.anchor));
+    if (req.query.sort === 'oldest') list = [...list].sort((a, b) => a.anchor.localeCompare(b.anchor));
+    res.json({ kind, total: list.length, families: await withAnchors(list.slice(offset, offset + limit)) });
+  } catch (error) {
+    familiesFailed(res, error);
+  }
+});
+
+// -> { family }: every member, with what they share and where they differ
+app.get('/api/families/:kind/:anchor', async (req, res) => {
+  try {
+    const family = await familyOf(req.params.kind, String(req.params.anchor).toUpperCase(), runCubeQuery);
+    if (!family) return res.status(404).json({ error: 'That family is not in the data.' });
+    res.json({ family });
+  } catch (error) {
+    familiesFailed(res, error);
   }
 });
 
@@ -6908,6 +7145,8 @@ prepareAccounts();
                     <!-- On an incident, change or request record: star it -->
                     <button type="button" class="star-btn labelled" id="dashboard-star" hidden></button>
                     <span class="dashboard-hint" id="dashboard-hint" hidden>Click a bar, slice, number or blue value for details</span>
+                    <button type="button" class="home-action dashboard-tour-btn" id="dashboard-tour-btn" onclick="startTour('dashboards')"
+                            title="A short tour of the Dashboards page" aria-label="Tour of the Dashboards page">❔<span class="tour-btn-word"> Tour</span></button>
                 </div>
                 <div class="dashboard-body">
                     <div class="dashboard-backdrop" id="dashboard-backdrop" onclick="toggleDashboardDrawer(false)"></div>
@@ -6916,6 +7155,14 @@ prepareAccounts();
                             <span>Dashboards</span>
                             <button type="button" class="drawer-close" onclick="toggleDashboardDrawer(false)" aria-label="Close">✕</button>
                         </div>
+                        <!-- Pages built into OneTouch itself (families.js) -->
+                        <section class="drawer-group builtin-dashboards">
+                            <h3>Built into OneTouch</h3>
+                            <button type="button" class="dashboard-choice" data-builtin="families" onclick="showFamilies(); toggleDashboardDrawer(false)">
+                                <span class="dashboard-choice-name">👪 Ticket families</span>
+                                <span class="dashboard-choice-desc">Parent tickets and their children. Click any ticket, parent or child, to open it.</span>
+                            </button>
+                        </section>
                         <!-- The dashboards this person built (customize.js) -->
                         <section class="drawer-group my-dashboards">
                             <h3>My dashboards</h3>
@@ -6930,7 +7177,33 @@ prepareAccounts();
                         </div>
                     </aside>
                     <p class="dashboard-message" id="dashboard-message">Loading dashboards…</p>
+                    <!-- On an incident, change or request record: its family (families.js) -->
+                    <section class="record-family" id="record-family" aria-label="Parent, children and other linked tickets" hidden>
+                        <div class="record-family-head">
+                            <p class="record-family-summary" id="record-family-summary"></p>
+                            <button type="button" class="home-action" id="record-family-toggle" aria-controls="record-family-body" hidden></button>
+                        </div>
+                        <div class="record-family-body" id="record-family-body"></div>
+                    </section>
                     <iframe id="dashboard-frame" title="Dashboard" hidden></iframe>
+                    <!-- 👪 Ticket families (families.js): every family of one kind, biggest first -->
+                    <div class="families-view" id="families-view" hidden>
+                        <div class="families-kinds" id="families-kinds" role="group" aria-label="Kind of family"></div>
+                        <div class="families-tools">
+                            <form class="families-find" id="families-find" role="search">
+                                <input type="search" id="families-q" placeholder="Find a ticket's families: INC1813970, RITM0440458…" aria-label="Ticket number">
+                                <button type="submit" class="primary-btn">Find</button>
+                            </form>
+                            <label class="families-sort">Order
+                                <select id="families-sort">
+                                    <option value="size">Biggest families first</option>
+                                    <option value="newest">Newest parent first</option>
+                                    <option value="oldest">Oldest parent first</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div id="families-list"></div>
+                    </div>
                     <!-- One of this person's own dashboards -->
                     <div class="board-view" id="board-view" hidden>
                         <div class="board-bar">
@@ -7088,6 +7361,18 @@ prepareAccounts();
         <div class="drill-body" id="drill-body"></div>
     </dialog>
 
+    <!-- One ticket over the page: its family first, then its record (families.js) -->
+    <dialog class="builder ticket-dialog" id="ticket-dialog" aria-labelledby="ticket-dialog-title">
+        <div class="builder-head">
+            <div class="ticket-dialog-nav">
+                <button type="button" class="home-action" id="ticket-dialog-back" onclick="ticketDialogBack()" hidden>← Back</button>
+                <h2 id="ticket-dialog-title"></h2>
+            </div>
+            <button type="button" class="drawer-close" onclick="this.closest('dialog').close()" aria-label="Close">✕</button>
+        </div>
+        <div class="drill-body" id="ticket-dialog-body"></div>
+    </dialog>
+
     <!-- Sharing one of your dashboards: its link -->
     <dialog class="ask-dialog share-dialog" id="share-dialog" aria-labelledby="share-title">
         <h2 id="share-title">Share this dashboard</h2>
@@ -7138,6 +7423,7 @@ prepareAccounts();
 
     <script src="charts.js"></script>
     <script src="customize.js"></script>
+    <script src="families.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
@@ -7901,6 +8187,15 @@ tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
 }
 @media (max-width: 1100px) {
     .dashboard-hint { display: none; }
+}
+/* ❔ Tour, at the right end (after the star or the hint when they show) */
+.dashboard-tour-btn { margin-left: auto; flex-shrink: 0; }
+.dashboard-toolbar .star-btn:not([hidden]) ~ .dashboard-tour-btn { margin-left: 0; }
+@media (min-width: 1101px) {
+    .dashboard-hint:not([hidden]) ~ .dashboard-tour-btn { margin-left: 0; }
+}
+@media (max-width: 640px) {
+    .tour-btn-word { display: none; }
 }
 
 /* While a question is being answered: finished steps above the current one */
@@ -8730,6 +9025,127 @@ span.family-chip { color: var(--text-2); background: var(--surface-3); }
 .issue-unstar:hover { background: var(--warn-softer); }
 
 /* =====================================================================
+   ASKING THE AI ABOUT TICKED TICKETS, AND A RECORD'S FAMILY FIRST
+   ===================================================================== */
+
+/* 💬 Ask the AI about the ticked tickets: a question box under the bar */
+.ask-selected { margin: -2px 0 12px; padding: 10px 12px; background: var(--accent-softer); border: 1px solid var(--accent); border-radius: 8px; }
+.ask-selected-row { display: flex; gap: 8px; }
+.ask-selected-input {
+    flex: 1;
+    min-width: 0;
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel-bg);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.9rem;
+}
+.ask-suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ask-chip {
+    background: var(--panel-bg);
+    border: 1px dashed var(--accent);
+    border-radius: 999px;
+    padding: 4px 10px;
+    color: var(--accent-ink);
+    font: inherit;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+.ask-chip:hover { border-style: solid; background: var(--accent-soft); }
+
+/* A record: its family above its fields */
+.record-fields { margin-top: 14px; }
+.record-fields-title { font-weight: 700; margin-bottom: 8px; }
+.related-slot + .record-fields { margin-top: 0; }
+.ticket-head + .ticket-summary + .related-slot .related,
+.ticket-head + .related-slot .related { margin-top: 4px; border-top: none; padding-top: 0; }
+.related-none { margin: 4px 0 0; color: var(--muted); font-size: 0.88rem; }
+/* "INC1813970 is a child incident. Its parent is INC1813985 (the first row)…" */
+.family-where { margin: 6px 0 4px; padding: 6px 10px; background: var(--info-soft); border-radius: 6px; font-size: 0.88rem; font-weight: 600; color: var(--text); }
+/* A big family: the first 25 members, then "Show all" */
+.family.collapsed tr.more-member { display: none; }
+.family-show-all { margin-top: 8px; }
+
+/* =====================================================================
+   👪 TICKET FAMILIES (families.js): a page in the Dashboards tab, and the
+   window a ticket opens in
+   ===================================================================== */
+
+.families-view { flex: 1; min-height: 0; overflow-y: auto; box-sizing: border-box; padding: 16px 20px 32px; }
+/* One tab per kind of family, with how many there are */
+.families-kinds { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.family-kind {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 14px;
+    color: var(--text-2);
+    font: inherit;
+    font-size: 0.88rem;
+    cursor: pointer;
+}
+.family-kind:hover { border-color: var(--faint); }
+.family-kind.active { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.family-kind:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.family-kind-count { font-size: 0.78rem; font-weight: 700; padding: 0 7px; border-radius: 999px; background: var(--surface-3); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.family-kind.active .family-kind-count { background: rgba(255, 255, 255, 0.25); color: var(--on-accent); }
+.families-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 12px; }
+.families-find { display: flex; gap: 8px; flex: 1 1 360px; max-width: 560px; }
+.families-find input,
+.families-sort select {
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel-bg);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.9rem;
+}
+.families-find input { flex: 1; min-width: 0; }
+.families-sort { display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--text-2); }
+.families-about { margin: 0 0 10px; color: var(--text-2); line-height: 1.5; font-size: 0.9rem; }
+.families-about .home-action { margin-left: 6px; }
+.families-table { max-height: none; }
+.result-table tbody tr.family-row { cursor: pointer; }
+.result-table tbody tr.family-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.result-table tbody tr.family-row.expanded,
+.result-table tbody tr.family-row.expanded:nth-child(even) { background: var(--accent-soft); }
+tr.family-row.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
+.family-size { font-weight: 600; white-space: nowrap; }
+.family-anchor-text { font-weight: 600; color: var(--text-2); }
+.families-more { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 12px; }
+.families-more .home-status { margin: 0; }
+
+/* The ticket window: ← Back and the ticket's name in its head */
+.ticket-dialog-nav { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ticket-dialog-nav h2 { margin: 0; font-size: 1.1rem; overflow-wrap: anywhere; }
+
+/* A ticket record in a team dashboard: its family in a band above the page,
+   scrolling on its own so the record below keeps most of the height */
+.record-family { flex-shrink: 0; background: var(--bg-primary); border-bottom: 1px solid var(--border); }
+.dashboard-body:has(#dashboard-frame[hidden]) .record-family { display: none; }
+.record-family-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 8px 20px; }
+.record-family-summary { margin: 0; min-width: 0; font-size: 0.88rem; color: var(--text-2); line-height: 1.45; }
+.record-family-summary b { color: var(--text); }
+.record-family-head .home-action { flex-shrink: 0; }
+.record-family-body { max-height: min(30vh, 320px); overflow-y: auto; padding: 0 20px 10px; }
+.record-family-body .related { margin-top: 0; padding-top: 0; border-top: none; }
+.record-family-body .related-title { display: none; } /* the line above says it */
+.record-family-body .family .table-wrap { max-height: none; } /* one scroll: the band's */
+
+@media (max-width: 640px) {
+    .families-view { padding: 12px 16px 24px; }
+    .families-find { flex-basis: 100%; }
+    .record-family-head { padding: 8px 16px; }
+    .record-family-body { max-height: 24vh; padding: 0 16px 10px; }
+}
+
+/* =====================================================================
    SIGN-IN PAGE (from styles2.css; every rule is scoped to .login-page
    so it cannot restyle the app behind it)
    ===================================================================== */
@@ -9053,10 +9469,49 @@ function showApp(signedIn) {
         switchTab('home');
         loadStars();
         loadPreferences();
-    } else {
+    } else if (!fillSignInLink()) {
         document.getElementById('login-email').focus();
     }
 }
+
+// A sign-in link (…/#user=jsmith&pass=secret) fills in the form, and the
+// person still clicks the button. The part after "#" is never sent to the
+// server (or the tunnel), and it is taken out of the address bar at once.
+let signInLink = null;
+function readSignInLink() {
+    let details = location.hash.slice(1);
+    // Some apps escape the "=" and "&" when they open a link (#user%3Djsmith%26pass%3D…)
+    if (!/[=&]/.test(details) && /%3D/i.test(details)) {
+        try { details = decodeURIComponent(details); } catch { /* read as it is */ }
+    }
+    const params = new URLSearchParams(details);
+    if (!params.has('user')) return false;
+    signInLink = { user: params.get('user') || '', pass: params.get('pass') || '' };
+    history.replaceState(null, '', location.pathname + location.search);
+    return true;
+}
+function fillSignInLink() {
+    if (!signInLink || !document.body.classList.contains('signed-out')) return false;
+    document.getElementById('login-email').value = signInLink.user;
+    document.getElementById('login-password').value = signInLink.pass;
+    // A link with just the username: the password is typed next
+    document.getElementById(signInLink.pass ? 'login-btn' : 'login-password').focus();
+    signInLink = null;
+    showLoginError('');
+    return true;
+}
+// Opened while someone is signed in in this tab: their session stays, and the
+// form is filled in when they sign out
+function signInLinkWhileSignedIn() {
+    if (!signInLink || !currentUsername) return;
+    const user = signInLink.user.trim().toLowerCase().replace(/@molsoncoors\.com$/, '');
+    if (user === currentUsername) signInLink = null;
+    else showToast(`That link signs in as ${user}. You're signed in as ${currentUsername}: sign out to use it.`);
+}
+window.addEventListener('hashchange', () => {
+    if (!readSignInLink()) return;
+    if (!fillSignInLink()) signInLinkWhileSignedIn();
+});
 
 // The signed-in person's name, shown in the header and the greetings
 // (their display name, or their username if they don't have one)
@@ -9087,7 +9542,10 @@ async function loadCurrentUser() {
     try {
         const response = await fetch(`${API_BASE}/api/me`, { headers: authHeaders() });
         if (handleUnauthorized(response)) return;
-        if (response.ok) setCurrentUser(await response.json());
+        if (response.ok) {
+            setCurrentUser(await response.json());
+            signInLinkWhileSignedIn();
+        }
     } catch (err) {
         console.error('Could not load the signed-in user:', err);
     }
@@ -9219,7 +9677,8 @@ function goHome() {
 function switchTab(viewName) {
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === viewName));
     document.querySelectorAll('.view-panel').forEach(panel => panel.classList.toggle('active', panel.id === `${viewName}-view`));
-    if (viewName === 'dashboard') loadDashboards();
+    // The first time someone sees Dashboards: its tour (customize.js)
+    if (viewName === 'dashboard') loadDashboards().then(() => maybeStartTour('dashboards'));
     // Stars may have changed elsewhere (the chat, a dashboard, another computer)
     if (viewName === 'home') {
         if (homeMode === 'starred') showStarred();
@@ -9297,12 +9756,22 @@ function frameHash() {
     return `#bordered=false&titled=false${document.documentElement.dataset.theme === 'dark' ? '&theme=night' : ''}`;
 }
 
+// A page's own hash with OneTouch's look in it, keeping everything else it
+// says (a detail page hides some of its filters there). Kept as written,
+// because Metabase reads it without turning "+" into spaces.
+function themedFrameHash(hash) {
+    const options = hash.replace(/^#/, '').split('&').filter(o => o && !o.startsWith('theme='));
+    if (document.documentElement.dataset.theme === 'dark') options.push('theme=night');
+    return `#${options.join('&')}`;
+}
+const frameHashIsDark = hash => /(^#|&)theme=night(&|$)/.test(hash);
+
 // Light <-> dark: the dashboard in the frame reloads in the matching look
 function refreshDashboardTheme() {
     if (!frameHasPage()) return;
     try {
         const where = document.getElementById('dashboard-frame').contentWindow.location;
-        where.replace(`${where.pathname}${where.search}${frameHash()}`);
+        where.replace(`${where.pathname}${where.search}${themedFrameHash(where.hash)}`);
         where.reload();
     } catch { /* not ours */ }
 }
@@ -9372,12 +9841,14 @@ async function buildDashboards() {
         applyHiddenDashboards();
 
         const last = rememberedDashboard();
+        if (last === 'families') { showFamilies(); return true; }
         if (last.startsWith('my:') && showBoard(last.slice(3))) return true;
         const remembered = dashboards.find(d => d.key === last && !isDashboardHidden(d.key));
         if (remembered) showDashboard(remembered);
         else showFirstDashboard();
         // First visit: open the drawer so people see everything that's there
-        if (!last) toggleDashboardDrawer(true);
+        // (unless the Dashboards tour is about to show it to them)
+        if (!last && (prefs.tour.dashboards || prefsLoadFailed)) toggleDashboardDrawer(true);
         return true;
     } catch (err) {
         message.textContent = 'Could not load the dashboards. Please try again.';
@@ -9450,6 +9921,8 @@ document.getElementById('dashboard-frame').addEventListener('load', () => {
 
 function showDashboard(dashboard) {
     hideBoard();
+    hideFamilies();
+    showRecordFamily('');
     markCurrentDashboard(dashboard);
     const frame = document.getElementById('dashboard-frame');
     frame.src = `${API_BASE}${dashboard.path}${frameHash()}`;
@@ -9493,10 +9966,17 @@ function followDashboardFrame() {
     if (frame.hidden) return; // one of their own dashboards is showing
     let where;
     try { where = frame.contentWindow.location; } catch { return; } // not ours (yet)
-    if (!where || where.href === lastFrameAddress) return;
+    if (!where) return;
+    // A click's link can't know OneTouch is dark, so its page opens light: put the
+    // look back in place (no reload, and ← Back still returns to the page before)
+    const id = pageId(where.pathname);
+    if (id && frameHashIsDark(where.hash) !== (document.documentElement.dataset.theme === 'dark')) {
+        where.replace(`${where.pathname}${where.search}${themedFrameHash(where.hash)}`);
+        return;
+    }
+    if (where.href === lastFrameAddress) return;
     lastFrameAddress = where.href;
 
-    const id = pageId(where.pathname);
     const main = dashboardPages.main.get(id);
     const detail = dashboardPages.details.get(id);
     if (main) {
@@ -9527,9 +10007,27 @@ function followDashboardFrame() {
         star.dataset.star = number;
         paintStar(star);
     }
+    // …and its parent, children and other linked tickets above it (families.js)
+    showRecordFamily(star.hidden ? '' : number);
 }
 setInterval(followDashboardFrame, 400);
 document.getElementById('dashboard-frame').addEventListener('load', followDashboardFrame);
+
+// Follows a click inside the frame as it happens rather than at the next
+// look, so a page that opened light turns dark before it is seen
+document.getElementById('dashboard-frame').addEventListener('load', () => {
+    try {
+        const w = document.getElementById('dashboard-frame').contentWindow;
+        if (w.oneTouchFollows) return;
+        w.oneTouchFollows = true;
+        const pushState = w.history.pushState;
+        w.history.pushState = function (...args) {
+            pushState.apply(this, args);
+            queueMicrotask(followDashboardFrame);
+        };
+        w.addEventListener('popstate', () => setTimeout(followDashboardFrame));
+    } catch { /* not ours */ }
+});
 
 function dashboardBack() {
     // Only from a detail page: on a drawer dashboard there is nothing to go back to
@@ -9912,8 +10410,18 @@ function cellHtml(member, raw, truncate) {
     if (truncate && LONG_TEXT.has(column) && text.length > 120) {
         return `<td${cls} title="${escapeHtml(text)}">${escapeHtml(text.slice(0, 117))}…</td>`;
     }
-    // A ticket number gets a star next to it
-    return `<td${cls}>${escapeHtml(text)}${starFor(raw)}</td>`;
+    // A ticket number opens that ticket (its record and family), with a star next to it
+    return `<td${cls}>${ticketValueHtml(raw, text)}</td>`;
+}
+
+// A value that is a ticket number (a parent, a request, a change…): a link that
+// opens that ticket's record and family, and its star. self: the record's own number.
+function ticketValueHtml(raw, text, self = null) {
+    const value = String(raw ?? '');
+    if (/^(INC|CHG|RITM|SCTASK|REQ)\d{7}$/.test(value) && value !== self) {
+        return `<button type="button" class="ticket-link" data-ticket="${escapeHtml(value)}" title="Open ${escapeHtml(value)}: its record and family">${escapeHtml(text)}</button>${starFor(raw)}`;
+    }
+    return `${escapeHtml(text)}${starFor(raw)}`;
 }
 
 function renderResults(rows, entity) {
@@ -9935,7 +10443,7 @@ function renderResults(rows, entity) {
             const { column } = splitMember(c);
             const text = formatValue(c, rows[0][c]);
             const cls = LONG_TEXT.has(column) ? ' class="long"' : '';
-            return `<tr><th>${escapeHtml(columnLabel(c))}</th><td${cls}>${escapeHtml(text)}${starFor(rows[0][c])}</td></tr>`;
+            return `<tr><th>${escapeHtml(columnLabel(c))}</th><td${cls}>${ticketValueHtml(rows[0][c], text)}</td></tr>`;
         }).join('');
         return `<div class="table-wrap"><table class="result-table detail"><tbody>${body}</tbody></table></div>`;
     }
@@ -10717,10 +11225,12 @@ function formatStarredAt(iso) {
 // in `highlight` (e.g. the latest answer's tickets) get `highlightClass`.
 // select: the list's name ('results', 'starred'): each row gets a checkbox,
 // and the header's ticks them all.
-function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set(), highlightClass = 'fresh', { select = null } = {}) {
+function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set(), highlightClass = 'fresh', { select = null, rowClass = null } = {}) {
     const head = (select ? `<th class="select-cell"><input type="checkbox" class="select-all" data-select-list="${select}" aria-label="Select all"></th>` : '') +
         columns.map(([label]) => `<th>${escapeHtml(label)}</th>`).join('');
-    const body = tickets.map(t => (highlight.has(t.number) ? `<tr class="${highlightClass}">` : '<tr>') +
+    const body = tickets.map((t, i) => {
+        const cls = [highlight.has(t.number) ? highlightClass : '', rowClass ? rowClass(t, i) : ''].filter(Boolean).join(' ');
+        return (cls ? `<tr class="${cls}">` : '<tr>') +
         (select ? `<td class="select-cell"><input type="checkbox" class="row-select" data-select-list="${select}" value="${escapeHtml(t.number)}" aria-label="Select ${escapeHtml(t.number)}"></td>` : '') +
         columns.map(([label, get, html], i) => {
         if (i === 0) {
@@ -10733,7 +11243,8 @@ function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set(
             return `<td title="${escapeHtml(text)}">${escapeHtml(text.slice(0, 117))}…</td>`;
         }
         return `<td>${escapeHtml(text || '—')}</td>`;
-    }).join('') + '</tr>').join('');
+    }).join('') + '</tr>';
+    }).join('');
     return `<div class="table-wrap"><table class="result-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
@@ -10765,8 +11276,10 @@ function ticketCardHtml(t, record) {
     const fields = Object.entries(record.fields);
     const body = fields.map(([member, value]) => {
         const cls = LONG_TEXT.has(splitMember(member).column) ? ' class="long"' : '';
-        return `<tr><th>${escapeHtml(columnLabel(member))}</th><td${cls}>${escapeHtml(formatValue(member, value))}${starFor(value)}</td></tr>`;
+        return `<tr><th>${escapeHtml(columnLabel(member))}</th><td${cls}>${ticketValueHtml(value, formatValue(member, value), t.number)}</td></tr>`;
     }).join('');
+    // Its family (parent, children, …) goes above this, once found (showRelated)
+    html += '<div class="record-fields"><div class="record-fields-title">Full record</div>';
     html += `<div class="table-wrap tall"><table class="result-table detail"><tbody>${body}</tbody></table></div>`;
     html += downloadBarHtml(registerExport({
         title: `${t.type} ${t.number}`,
@@ -10777,7 +11290,7 @@ function ticketCardHtml(t, record) {
             footer: null,
         }],
     }));
-    return html;
+    return html + '</div>';
 }
 
 
@@ -10874,9 +11387,9 @@ async function showOpenedRecord(number) {
         if (data.found.length === 1) return back + ticketCardHtml(data.found[0], data.record);
         return back + ticketTableHtml(data.found);
     });
-    // Its parent / child tickets and other linked ones, under the record
+    // Its parent / child tickets and other linked ones, above its fields
     const out = document.getElementById('ticket-results');
-    if (openedRecord === number && out.querySelector('.ticket-head')) showRelated(out, [number], false);
+    if (openedRecord === number && out.querySelector('.ticket-head')) showRelated(out, [number], false, out.querySelector('.record-fields'));
 }
 
 // =====================================================================
@@ -10947,30 +11460,73 @@ function relatedHtml(families, focus) {
         ? downloadBarHtml(registerExport({ title: `Related tickets: ${families.length} families`, question: about, tables: families.flatMap(familyExportTables) }),
             `Download all ${families.length} families as`)
         : '';
-    return '<div class="related"><div class="related-title">🔗 Related tickets</div>' + all + families.map(f => {
+    const single = focus.size === 1 ? [...focus][0] : null;
+    const heading = single ? `👪 ${single}'s family: parent, children and other linked tickets` : '🔗 Related tickets';
+    return `<div class="related"><div class="related-title">${escapeHtml(heading)}</div>` + all + families.map(f => {
         const facts = list => list.map(fact => `<span class="fact"><b>${escapeHtml(fact.field)}:</b> ${escapeHtml(familyFact(fact))}</span>`).join('');
         const same = f.same.length
             ? `<div class="family-line"><span class="same-label">Same in all ${f.total.toLocaleString()}</span>${facts(f.same)}</div>` : '';
         const differ = f.differ.length
             ? `<div class="family-line"><span class="differ-label">Different</span>${facts(f.differ)}</div>` : '';
-        const shown = f.members.slice(0, FAMILY_MEMBERS_SHOWN);
-        const more = f.members.length > shown.length
-            ? `<p class="family-more">Showing ${shown.length.toLocaleString()} of ${f.members.length.toLocaleString()}; the comparison above and the download cover all of them.</p>` : '';
+        // The parent (or the order, request, change…) first, then the ticket(s) asked about
+        const members = [...f.members].sort((a, b) => ((b.number === f.anchor) - (a.number === f.anchor)) || (focus.has(b.number) - focus.has(a.number)));
+        const extra = members.length - FAMILY_MEMBERS_SHOWN;
+        const more = extra > 0
+            ? `<button type="button" class="home-action family-show-all" data-show-all>Show all ${members.length.toLocaleString()}</button>` : '';
+        const where = single ? familyRoleLine(f, single) : '';
         const download = downloadBarHtml(registerExport({ title: f.title, question: about, tables: familyExportTables(f) }), 'Download this family as');
-        return `<section class="family"><div class="family-title">${escapeHtml(f.title)}</div>` +
+        return `<section class="family${extra > 0 ? ' collapsed' : ''}"><div class="family-title">${escapeHtml(f.title)}</div>` +
+            (where ? `<p class="family-where">${escapeHtml(where)}</p>` : '') +
             `<p class="family-why">${escapeHtml(f.why)}</p>${same}${differ}` +
-            ticketTableHtml(shown, FAMILY_COLUMNS, focus, 'focus') + more + download + '</section>';
+            ticketTableHtml(members, FAMILY_COLUMNS, focus, 'focus', { rowClass: (t, i) => i >= FAMILY_MEMBERS_SHOWN ? 'more-member' : '' }) +
+            more + download + '</section>';
     }).join('') + '</div>';
+}
+
+// Where one ticket sits in a family: "INC1813970 is a child incident. Its parent is
+// INC1813985 (the first row), and it has 4 other child incidents."
+function familyRoleLine(f, number) {
+    const me = f.members.find(m => m.number === number);
+    if (!me) return '';
+    const count = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
+    const kids = f.members.filter(m => ['Child', 'Child request', 'Task'].includes(m.role)).length;
+    switch (f.kind) {
+        case 'parent-incident':
+            return number === f.anchor
+                ? `${number} is the parent incident. Its ${count(kids, 'child incident is', 'child incidents are')} listed under it.`
+                : `${number} is a child incident. Its parent is ${f.anchor} (the first row)${kids > 1 ? `, which has ${count(kids - 1, 'other child incident', 'other child incidents')}` : ''}.`;
+        case 'bundle-request':
+            return number === f.anchor
+                ? `${number} is a bundle request. Its ${count(kids, 'child request is', 'child requests are')} listed under it.`
+                : `${number} is a child request. Its parent is bundle request ${f.anchor} (the first row)${kids > 1 ? `, which has ${count(kids - 1, 'other child request', 'other child requests')}` : ''}.`;
+        case 'request-tasks':
+            return number === f.anchor
+                ? `${number} is fulfilled by ${count(kids, 'catalog task', 'catalog tasks')}, listed under it.`
+                : `${number} is a catalog task of request ${f.anchor} (the first row)${kids > 1 ? `, which has ${count(kids - 1, 'other task', 'other tasks')}` : ''}.`;
+        case 'order':
+            return `${number} was ordered together with ${count(f.total - 1, 'other request', 'other requests')} in order ${f.anchor}.`;
+        case 'problem':
+            return `${number} is one of ${count(f.total, 'ticket', 'tickets')} linked to problem ${f.anchor}.`;
+        case 'change-incident':
+            if (number === f.anchor) return `${number} is the change; the incidents it fixes or caused are listed under it.`;
+            return me.role === 'Incident it fixes'
+                ? `${number} is the incident that change ${f.anchor} (the first row) was raised to fix.`
+                : `${number} was caused by change ${f.anchor} (the first row).`;
+        default:
+            return '';
+    }
 }
 
 // Adds "Related tickets" to the end of `container` (an AI answer, or a record on
 // Home) once the server has looked; nothing at all if there are none.
 // conversation: true also tells the AI about them with the next question.
-async function showRelated(container, numbers, conversation) {
+// before: put it above this element (a record's fields) instead of at the end;
+// there, a ticket with no family says so
+async function showRelated(container, numbers, conversation, before = null) {
     const slot = document.createElement('div');
     slot.className = 'related-slot';
-    slot.innerHTML = '<p class="related-loading">🔗 Looking for related tickets…</p>';
-    container.appendChild(slot);
+    slot.innerHTML = `<p class="related-loading">${before ? '👪 Looking for its parent, children and other linked tickets…' : '🔗 Looking for related tickets…'}</p>`;
+    if (before) before.before(slot); else container.appendChild(slot);
     try {
         const response = await fetch(`${API_BASE}/api/tickets/related`, {
             method: 'POST',
@@ -10981,7 +11537,11 @@ async function showRelated(container, numbers, conversation) {
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
         if (!slot.isConnected) return; // the chat was cleared, or another record opened
-        if (!data.families.length) { slot.remove(); return; }
+        if (!data.families.length) {
+            if (before) slot.innerHTML = '<p class="related-none">👪 No parent, child or other linked tickets.</p>';
+            else slot.remove();
+            return;
+        }
         slot.innerHTML = relatedHtml(data.families, new Set(numbers));
         // Keep the newest answer in view, as the chat does for new messages
         const chatLog = document.getElementById('chat-log');
@@ -11084,10 +11644,48 @@ const selections = { results: new Set(), starred: new Set() };
 const lastTicked = { results: null, starred: null };
 const LIST_BOXES = { results: 'ticket-results', starred: 'starred-result' };
 
+// The bar over a list: what's ticked, then 💬 ask the AI about them, the list's own
+// action (remove / unstar), unstar and remove, and clear the ticks
 function selectBarHtml(list) {
     return `<div class="select-bar" data-select-bar="${list}"><span class="select-count" aria-live="polite"></span>` +
+        `<button type="button" class="home-action" data-ask-open="${list}" aria-expanded="false" disabled></button>` +
         `<button type="button" class="home-action danger" data-selected-action="${list}" disabled></button>` +
-        `<button type="button" class="home-action" data-select-none="${list}" disabled>Clear selection</button></div>`;
+        `<button type="button" class="home-action danger" data-selected-both="${list}" disabled title="Unstar the ticked tickets and remove them from Ticket results"></button>` +
+        `<button type="button" class="home-action" data-select-none="${list}" disabled>Clear selection</button></div>` +
+        askBoxHtml(list);
+}
+
+// 💬 A question about the ticked tickets, asked in the chat with their numbers
+const ASK_SUGGESTIONS = [
+    'What do these tickets have in common?',
+    'Which of these are still open?',
+    'Who is working on these, and in which teams?',
+    'Show me the full details of these tickets',
+];
+const MAX_ASK_TICKETS = 100;
+
+function askBoxHtml(list) {
+    return `<div class="ask-selected" data-ask-box="${list}" hidden>` +
+        `<div class="ask-selected-row"><input type="text" class="ask-selected-input" data-ask-input="${list}" maxlength="300"` +
+        ` placeholder="Ask anything about the ticked tickets…" aria-label="Your question about the ticked tickets">` +
+        `<button type="button" class="primary-btn" data-ask-go="${list}">Ask</button></div>` +
+        `<div class="ask-suggestions">${ASK_SUGGESTIONS.map(q => `<button type="button" class="ask-chip" data-ask-suggest="${list}" data-question="${escapeHtml(q)}">${escapeHtml(q)}</button>`).join('')}</div></div>`;
+}
+
+// The ticked tickets, in the list's order
+function tickedInOrder(list) {
+    return [...document.getElementById(LIST_BOXES[list]).querySelectorAll('.row-select:checked')].map(b => b.value);
+}
+
+function askAboutTicked(list, question) {
+    const numbers = tickedInOrder(list);
+    question = String(question || '').trim();
+    if (!numbers.length || !question) return;
+    if (numbers.length > MAX_ASK_TICKETS) {
+        showToast(`Ask about up to ${MAX_ASK_TICKETS} tickets at a time; ${numbers.length.toLocaleString()} are ticked.`);
+        return;
+    }
+    askAssistant(`About ${numbers.length === 1 ? 'ticket' : 'tickets'} ${numbers.join(', ')}: ${question}`);
 }
 
 // The ticks, the header checkbox and the bar, from the list's selection
@@ -11110,10 +11708,20 @@ function paintSelection(list) {
     if (!bar) return;
     bar.querySelector('.select-count').textContent = n ? `${n.toLocaleString()} selected`
         : list === 'results' ? 'Tick tickets to remove them from this list.' : 'Tick tickets to unstar them together.';
+    const count = n ? ` ${n.toLocaleString()}` : '';
     const action = bar.querySelector('[data-selected-action]');
     action.disabled = !n;
-    action.textContent = list === 'results' ? (n ? `✕ Remove ${n.toLocaleString()} from Ticket results` : '✕ Remove from Ticket results')
-        : (n ? `☆ Unstar ${n.toLocaleString()}` : '☆ Unstar selected');
+    action.textContent = list === 'results' ? `✕ Remove${count} from Ticket results` : (n ? `☆ Unstar${count}` : '☆ Unstar selected');
+    const both = bar.querySelector('[data-selected-both]');
+    both.disabled = !n;
+    both.textContent = `☆ Unstar and ✕ remove${count} from Ticket results`;
+    const ask = bar.querySelector('[data-ask-open]');
+    ask.disabled = !n;
+    ask.textContent = n ? `💬 Ask the AI about${count}` : '💬 Ask the AI about them';
+    if (!n) {
+        out.querySelector('.ask-selected').hidden = true;
+        ask.setAttribute('aria-expanded', 'false');
+    }
     bar.querySelector('[data-select-none]').disabled = !n;
 }
 
@@ -11141,6 +11749,29 @@ document.addEventListener('click', e => {
         paintSelection(none.dataset.selectNone);
         return;
     }
+    const both = e.target.closest?.('[data-selected-both]');
+    if (both) {
+        unstarAndRemove(tickedInOrder(both.dataset.selectedBoth));
+        return;
+    }
+    const askOpen = e.target.closest?.('[data-ask-open]');
+    if (askOpen) {
+        const box = document.querySelector(`[data-ask-box="${askOpen.dataset.askOpen}"]`);
+        box.hidden = !box.hidden;
+        askOpen.setAttribute('aria-expanded', String(!box.hidden));
+        if (!box.hidden) box.querySelector('input').focus();
+        return;
+    }
+    const askGo = e.target.closest?.('[data-ask-go]');
+    if (askGo) {
+        askAboutTicked(askGo.dataset.askGo, document.querySelector(`[data-ask-input="${askGo.dataset.askGo}"]`).value);
+        return;
+    }
+    const suggestion = e.target.closest?.('[data-ask-suggest]');
+    if (suggestion) {
+        askAboutTicked(suggestion.dataset.askSuggest, suggestion.dataset.question);
+        return;
+    }
     const act = e.target.closest?.('[data-selected-action]');
     if (act) {
         const list = act.dataset.selectedAction;
@@ -11156,11 +11787,20 @@ document.addEventListener('click', e => {
     }
 });
 
-// The ticked tickets leave Ticket results (on every computer); their stars stay
-async function removeFromResults(numbers) {
-    if (!numbers.length) return;
+// Enter in the question box asks
+document.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && e.target.matches?.('[data-ask-input]')) {
+        e.preventDefault();
+        askAboutTicked(e.target.dataset.askInput, e.target.value);
+    }
+});
+
+// The ticked tickets leave Ticket results (on every computer); their stars stay.
+// quiet: no list refresh or note (unstarAndRemove does both itself). -> true when done
+async function removeFromResults(numbers, { quiet = false } = {}) {
+    if (!numbers.length) return false;
     const total = document.querySelectorAll('#ticket-results .row-select').length;
-    if (numbers.length === total && !confirm(`Remove all ${total.toLocaleString()} tickets from your ticket results? Your starred tickets stay starred.`)) return;
+    if (!quiet && numbers.length === total && !confirm(`Remove all ${total.toLocaleString()} tickets from your ticket results? Your starred tickets stay starred.`)) return false;
     try {
         const response = await fetch(`${API_BASE}/api/seen-tickets/remove`, {
             method: 'POST',
@@ -11174,17 +11814,33 @@ async function removeFromResults(numbers) {
             selections.results.delete(n);
             latestShown.delete(n);
         }
+        if (quiet) return true;
         await showTicketResults(true);
         showToast(`Removed ${numbers.length.toLocaleString()} ${numbers.length === 1 ? 'ticket' : 'tickets'} from Ticket results`);
+        return true;
     } catch (err) {
         showToast(`❌ ${err.message}`);
+        return false;
     }
 }
 
-// Unstars many in one request; the screen changes at once, and back if the server says no
-async function unstarMany(numbers, what) {
+// "Unstar and remove from Ticket results": both, for the ticked tickets, after asking
+async function unstarAndRemove(numbers) {
+    if (!numbers.length) return;
+    const what = `${numbers.length.toLocaleString()} ${numbers.length === 1 ? 'ticket' : 'tickets'}`;
+    if (!confirm(`Unstar ${what} and remove ${numbers.length === 1 ? 'it' : 'them'} from your Ticket results?`)) return;
+    const unstarred = numbers.some(n => starredTickets.has(n)) ? await unstarMany(numbers, what, { quiet: true }) : true;
+    const removed = await removeFromResults(numbers, { quiet: true });
+    for (const n of numbers) selections.starred.delete(n);
+    if (homeMode === 'starred') await showStarred(true); else await showTicketResults(true);
+    if (unstarred && removed) showToast(`☆ Unstarred ${what} and removed ${numbers.length === 1 ? 'it' : 'them'} from Ticket results`);
+}
+
+// Unstars many in one request; the screen changes at once, and back if the server says no.
+// quiet: no list refresh or note. -> true when done
+async function unstarMany(numbers, what, { quiet = false } = {}) {
     const toRemove = numbers.filter(n => starredTickets.has(n));
-    if (!toRemove.length) return;
+    if (!toRemove.length) return true;
     const before = new Map(toRemove.map(n => [n, starredTickets.get(n)]));
     for (const n of toRemove) starredTickets.delete(n);
     refreshStarButtons();
@@ -11198,12 +11854,15 @@ async function unstarMany(numbers, what) {
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
         for (const n of toRemove) selections.starred.delete(n);
+        if (quiet) return true;
         if (homeMode === 'starred') await showStarred(true);
         showToast(`☆ Unstarred ${what}`);
+        return true;
     } catch (err) {
         for (const [n, at] of before) starredTickets.set(n, at);
         refreshStarButtons();
         showToast(`❌ ${err.message}`);
+        return false;
     }
 }
 
@@ -11227,6 +11886,13 @@ document.addEventListener('click', e => {
 
     const ticket = e.target.closest('[data-ticket]');
     if (ticket) { openTicketRecord(ticket.dataset.ticket); return; }
+
+    const showAll = e.target.closest('[data-show-all]');
+    if (showAll) {
+        showAll.closest('.family').classList.remove('collapsed');
+        showAll.remove();
+        return;
+    }
 
     const view = e.target.closest('[data-answer-view]');
     if (view) { setAnswerView(view.closest('.msg'), view.dataset.answerView); return; }
@@ -11293,7 +11959,7 @@ async function loadTicketDetail(box, number) {
             return;
         }
         box.innerHTML = ticketCardHtml(data.found[0], data.record);
-        showRelated(box, [number], false);
+        showRelated(box, [number], false, box.querySelector('.record-fields'));
     } catch (err) {
         if (box.isConnected) box.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
         console.error(err);
@@ -11311,6 +11977,7 @@ buildBuilder();
 buildBoardFilters();
 renderHomeLayout();
 renderMyDashboards();
+readSignInLink();
 showApp(Boolean(sessionTokenValue));
 loadCurrentUser();
 
@@ -13405,10 +14072,11 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 |---|---|
 | `server.mjs` | Express app (port 8000): sign-in routes, `/api/query` (one-shot translator with per-session conversation memory), `/api/export`, `/api/tickets/search` and `/api/stars` (home page), dashboards list, and a pass-through of Metabase public-dashboard pages |
 | `tickets.mjs` | Home page ticket search: parses INC/CHG/RITM/SCTASK/REQ numbers and builds its own Cube queries from them (never from model output); full records use Cube's `/meta` column list |
-| `relations.mjs` | Related tickets: from the link columns only (incident.parent_incident, sc_req_item.parent / request, sc_task.request_item, change_request.incident, incident.caused_by_change, *.problem), the families a ticket is in, with `same` / `differ` comparisons and every member (the page lists 25 but downloads all, via `familyExportTables` in app.js); one ticket gets all its families, a list only families 2+ of its tickets share. `POST /api/tickets/related` (conversation: true adds `describeFamilies` to Claude's pendingNote). `ticketLinks`: per ticket, its parent and families (`key` = kind:anchor, name, size) for the Ticket results / Starred lists, cached per ticket |
+| `relations.mjs` | Related tickets: from the link columns only (incident.parent_incident, sc_req_item.parent / request, sc_task.request_item, change_request.incident, incident.caused_by_change, *.problem), the families a ticket is in, with `same` / `differ` comparisons and every member (the page lists 25 but downloads all, via `familyExportTables` in app.js); one ticket gets all its families, a list only families 2+ of its tickets share. `POST /api/tickets/related` (conversation: true adds `describeFamilies` to Claude's pendingNote). The family builders (`parentIncidentFamily`, `bundleFamily`, …) are shared with the Ticket families page: `familyList` / `familySummary` / `familyOf` (`/api/families…`). `ticketLinks`: per ticket, its parent and families (`key` = kind:anchor, name, size) for the Ticket results / Starred lists, cached per ticket |
+| `public/families.js` | The 👪 Ticket families page in the Dashboards tab (built into OneTouch: `showFamilies` / `hideFamilies`, remembered as `last: 'families'`) and the ticket window (`openTicketDialog`, with a back trail); ticket numbers clicked on that page, in that window or in a chart's ticket list (`openDrill`) open there, not on Home. Also `showRecordFamily(number)`: the family band (`#record-family`) above a Metabase incident / change / request record, called by app.js's `followDashboardFrame`; a ticket in it with a record page opens that page (`openInDashboards`), others the ticket window |
 | `stars.mjs` | Each person's starred tickets, in `onetouch_auth` (`starred_tickets`, created on start); `addStars` stars many at once ("Star all", `PUT /api/stars`) up to `MAX_STARS`; `removeStars` unstars many (`POST /api/stars/remove`: ticked rows, "Unstar by issue", "Unstar all"). `GET /api/stars?details=1` adds summaries, parents and families |
 | `seen.mjs` | Each person's "Ticket results": every ticket shown to them (`seen_tickets`, created on start). `/api/query` records the ticket numbers in each answer (`ticketNumbersIn`) before replying and returns them as `shownTickets`; `GET /api/seen-tickets` returns the list with summaries (`ticketSummaries`); `DELETE /api/seen-tickets` empties it ("Clear ticket results"), `POST /api/seen-tickets/remove` removes ticked rows (`removeSeen`); the list carries each ticket's parent and families (`ticketLinks`) |
-| `prefs.mjs` | Each person's preferences in `onetouch_auth` (`user_preferences`: one JSONB per user, saved in parts `theme` / `home` / `dashboards` via `PUT /api/preferences/:part`, reset with `DELETE`). `cleanPreference` drops unknown keys and caps sizes (20 dashboards x 30 charts, 30 Home sections); every chart goes through `sanitizeChart` |
+| `prefs.mjs` | Each person's preferences in `onetouch_auth` (`user_preferences`: one JSONB per user, saved in parts `theme` / `home` / `dashboards` / `tour` via `PUT /api/preferences/:part`, reset with `DELETE`; `tour` is `{ done, dashboards }`: Home's tour and the Dashboards page's tour seen). `cleanPreference` drops unknown keys and caps sizes (20 dashboards x 30 charts, 30 Home sections); every chart goes through `sanitizeChart` |
 | `charts.mjs` | The charts people build: `CHART_SOURCES` (per ticket type, the fields to group / filter by and the time groupings), `sanitizeChart`, `chartData` (builds its own Cube query: count, one dimension, `equals` / `notEquals` / `contains` filters, open / closed states from `ENTITY_CATALOG`, a day range, plus a dashboard's `scope` (dates, teams via `TEAM_FIELDS`); top N plus an `other` total), `chartTickets` (the tickets behind one bar), `chartFromQuery` (an AI answer's validated query as a chart, returned on `/api/query` as `chartable`), `chartValues` / `teamValues`, `chartCatalog`. In-memory LRU cache, since the data is frozen. Routes: `/api/charts/catalog`, `/api/charts/data`, `/api/charts/values`, `/api/charts/teams`, `/api/charts/tickets` |
 | `shares.mjs` | Shared dashboards (`shared_dashboards` in `onetouch_auth`): one random token per (owner, dashboard), re-sharing updates it, anyone signed in can read it (`/api/shares`). The board goes through `prefs.cleanBoard` |
 | `business_logic.mjs` | Everything Claude knows about the data: `ENTITY_CATALOG`, `buildSystemPrompt()` (sections A-E), `OUTPUT_SCHEMA`, and `normalizeAndValidate()`, which every Claude-built query passes through before Cube |
@@ -13416,9 +14084,10 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 | `export.mjs` | Tables -> pdf/docx/xlsx/csv/txt/rtf, and zip/7z bundles (7-Zip). An optional `chart` (a PNG data URL the browser drew) goes above the tables in pdf/docx/xlsx/rtf and into archives; tables marked `note` stay out of CSV |
 | `auth.mjs` | Accounts and sessions in the `onetouch_auth` Postgres DB (its own role `onetouch_app`); scrypt hashes; `db/accounts.json` export/sync |
 | `remote.mjs` | "Remote mode" for clones: serves `public/` on localhost and forwards `/api`, `/public`, `/app` to a OneTouch server |
-| `public/` | The single-page UI (`index.html`, `app.js`, `style.css`); no build step. Home has the AI assistant's card (example question, Open chat, Delete chat; the chat opens as a panel over the page; ticket rows in its answers open in place into the record plus related tickets via `toggleTicketRow`), ticket results (a clicked ticket's record) and starred tickets; Dashboards is the other tab. Delete chat resets the server conversation and bumps `chatEpoch` so a late answer is dropped. `customize.js` (colors panel, Customize Home, My dashboards and their filter row, hiding team dashboards, the chart builder, the drill-down list, sharing, the tour, saving preferences) and `charts.js` (SVG charts incl. several series, tooltips, table view, click-through via a box's `_pick`, pictures for downloads via `chartPicture` / `picturePng`) load before `app.js`; their start-up work (`buildThemePanel`, `buildBuilder`, `buildBoardFilters`) is called from `app.js` because they use its helpers. Every color in `style.css` is a variable (`:root`, `[data-theme="dark"]`, `[data-header=...]`); never hard-code one |
+| `public/` | The single-page UI (`index.html`, `app.js`, `style.css`); no build step. Home has the AI assistant's card (example question, Open chat, Delete chat; the chat opens as a panel over the page; ticket rows in its answers open in place into the record plus related tickets via `toggleTicketRow`; a record's families go above its fields: `showRelated(container, numbers, conversation, before)`, with `familyRoleLine` saying where the ticket sits and the anchor first. Ticket numbers in fields and answer cells are links via `ticketValueHtml`. Ticket results / Starred tickets have checkboxes (`selections`, `selectBarHtml`): ask the AI about the ticked ones (`askAboutTicked`), remove, unstar, or both (`unstarAndRemove`)), ticket results (a clicked ticket's record) and starred tickets; Dashboards is the other tab. Delete chat resets the server conversation and bumps `chatEpoch` so a late answer is dropped. `customize.js` (colors panel, Customize Home, My dashboards and their filter row, hiding team dashboards, the chart builder, the drill-down list, sharing, the tours of Home and of the Dashboards page (`TOURS`, `startTour(name)`, `maybeStartTour(name)`), saving preferences) and `charts.js` (SVG charts incl. several series, tooltips, table view, click-through via a box's `_pick`, pictures for downloads via `chartPicture` / `picturePng`) load before `app.js`; their start-up work (`buildThemePanel`, `buildBuilder`, `buildBoardFilters`) is called from `app.js` because they use its helpers. Every color in `style.css` is a variable (`:root`, `[data-theme="dark"]`, `[data-header=...]`); never hard-code one |
 | `db/` | `init-auth.sh`, `init-reporting.sh`, `reporting-views.sql` (typed `reporting.*` views for Metabase), `accounts.json` |
 | `scripts/users.mjs` | Account admin CLI (add, import CSV, export, sync, ...) |
+| `scripts/signin-links.mjs` | Prints a sign-in link per person (`…/#user=…&pass=…`, which `readSignInLink` in app.js fills into the form) from the import CSV plus the test accounts and warmup in `.env`. Its output holds passwords: the person running it reads it in their terminal; don't print it from an agent session |
 | `scripts/warmup.mjs` | `npm run warmup`: before a crowd, asks every question in `scripts/warmup-questions.txt` (so each is answered from the repeated-question cache) and opens every dashboard (filling Metabase's result cache); lists anything that failed |
 | `scripts/share.mjs` | `npm run share`: starts the stack and a Cloudflare tunnel (free, or permanent with `TUNNEL_TOKEN`), checks the link from outside via public DNS, prints and copies it; `--new`, `--stop` |
 | `scripts/metabase-setup.mjs` | Builds the Metabase dashboards (the `DASHBOARDS` list, each with its drawer `group`) and the drill-down pages clicks open (`DETAILS`; each chart's `click` / table's `links` say where a click goes) via Metabase's API; every filter needs suggestions (`distinct(...)` from the reporting views, or `fixed(...)`); turns on result caching (`--cache-only` does just that); checks every link and filter before changing anything; rerunnable (new links each run). Writes `metabase-dashboards.json`, which the Dashboards tab reads; `public/app.js` returns to the main dashboard when a detail page's filters are all cleared |
@@ -13452,6 +14121,9 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 - **Every model-built query goes through `normalizeAndValidate`.** Don't add a path that sends model output to Cube unvalidated (the repeated-question cache in `server.mjs` re-validates its stored translation on every reuse).
 - **Repeated questions skip Claude.** A conversation-opening question asked before reuses the stored user turn *and* Claude's reply as the conversation's history, so follow-ups see exactly what Claude produced. Changing `buildSystemPrompt()`, `buildUserMessage()` or the output schema needs a server restart, which empties that cache. `/api/query` streams `progress` / `result` server-sent events when asked for `text/event-stream`.
 - **Accounts:** after changing accounts, run `node scripts/users.mjs export` and commit `db/accounts.json` (hashes only), so clones get them.
+- **Cloudflare makes browsers keep `.js` / `.css` for 4 hours** (it rewrites `max-age=0` to `max-age=14400`). `server.mjs` serves `index.html` itself, adding `?v=<content hash>` to each `<script src="x.js">` and `<link rel="stylesheet" href="x.css">`, so changed files reach browsers at once. Add new page files in exactly that form, or they skip the versioning and can be stale for hours.
+- **Test as `tester1` (and `tester2` when a second person is needed), passwords `TESTER1_PASSWORD` / `TESTER2_PASSWORD` in `.env`.** Never test as a real person (a wrong-password check counts toward locking them out, and their stars, lists and last sign-in change) or as `warmup` (the warm-up fills its Ticket results). Put back what a test changes on the test accounts; both have the Home and Dashboards tours marked as seen.
+- **Metabase's dark look lives in the frame's hash (`theme=night`), and click links drop it.** The click links in `metabase-setup.mjs` can't carry each viewer's look, so `followDashboardFrame` (app.js) adds it back with `location.replace` on a same-page hash change, which Metabase picks up without a reload and which leaves ← Back alone. Change a frame address with `themedFrameHash`, which keeps the rest of the hash (`hide_parameters`); rebuilding the hash from `frameHash()` loses it.
 
 ## Before you finish
 
@@ -13599,7 +14271,8 @@ const FILES = [
   // Added later; at the end so the guide's links to B.1-B.36 keep their numbers
   'tickets.mjs', 'stars.mjs', 'scripts/share.mjs', 'scripts/warmup.mjs', 'scripts/warmup-questions.txt',
   'seen.mjs', 'relations.mjs',
-  'prefs.mjs', 'charts.mjs', 'public/charts.js', 'public/customize.js', 'shares.mjs',
+  'prefs.mjs', 'charts.mjs', 'public/charts.js', 'public/customize.js', 'shares.mjs', 'public/families.js',
+  'scripts/signin-links.mjs',
 ];
 
 // Not copied in, and why (shown in the appendix)
@@ -14379,6 +15052,21 @@ for (const d of list.dashboards || []) {
   }
 }
 
+// 👪 Ticket families (built into OneTouch): its lists are worked out once, then kept
+{
+  const t0 = performance.now();
+  const r = await fetch(`${base}/api/families`, { headers: auth });
+  const data = await r.json().catch(() => ({}));
+  if (r.ok) {
+    const kinds = Object.keys(data.kinds || {});
+    await Promise.all(kinds.map(kind => fetch(`${base}/api/families/${kind}`, { headers: auth })));
+    console.log(`  ✓ Ticket families  (${kinds.length} kinds of family, ${secs(performance.now() - t0)})`);
+  } else {
+    problems.push(`Ticket families: ${data.error || `the server answered ${r.status}`}`);
+    console.log(`  ✗ Ticket families  (${data.error || r.status})`);
+  }
+}
+
 await fetch(`${base}/api/logout`, { method: 'POST', headers: auth });
 
 console.log('\n' + '='.repeat(64));
@@ -14677,6 +15365,54 @@ function family(kind, anchor, title, why, members, wanted) {
 const plural = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 const role = (t, label) => ({ ...t, role: label });
 
+// The six kinds of family, built the same way for a ticket's related tickets
+// and for the Ticket families page
+function parentIncidentFamily(p, parent, children, wanted) {
+  return family('parent-incident', p,
+    `Parent incident ${p} and its ${plural(children.length, 'child incident', 'child incidents')}`,
+    `${p} is a parent (master) incident: it groups incidents raised for the same issue, such as several alerts or reports about one fault, so they are worked and resolved together.`,
+    [role(parent || missing(p, 'Incident'), 'Parent'), ...children.map(c => role(c, 'Child'))], wanted);
+}
+
+function problemFamily(prb, incidents, changes, wanted) {
+  const linked = [...incidents.map(t => role(t, 'Incident')), ...changes.map(t => role(t, 'Change'))];
+  return family('problem', prb,
+    `${plural(linked.length, 'ticket', 'tickets')} linked to problem ${prb}`,
+    `These tickets were all linked to problem ${prb}, the investigation into their shared root cause. The problem record itself isn't in this export.`,
+    linked, wanted);
+}
+
+// A change, the incident it was raised to fix (if any), and the incidents it caused
+function changeFamily(c, change, fixes, caused, wanted) {
+  const parts = [fixes.length ? `raised to fix ${fixes[0].number}` : '', caused.length ? `the cause of ${plural(caused.length, 'incident', 'incidents')}` : ''].filter(Boolean);
+  return family('change-incident', c,
+    `Change ${c}: ${parts.join(', and ')}`,
+    fixes.length && caused.length ? `${c} was raised to fix an incident, and other incidents name it as their cause.`
+      : fixes.length ? `${c} was raised to fix incident ${fixes[0].number}.` : `These incidents name change ${c} as their cause.`,
+    [role(change || missing(c, 'Change'), 'Change'), ...fixes.map(t => role(t, 'Incident it fixes')), ...caused.map(t => role(t, 'Incident it caused'))], wanted);
+}
+
+function orderFamily(order, together, wanted) {
+  return family('order', order,
+    `${plural(together.length, 'request', 'requests')} ordered together in ${order}`,
+    `${order} is one order (REQ); each request (RITM) in it is a separate item that was ordered at the same time.`,
+    together.map(t => role(t, 'Request')), wanted);
+}
+
+function bundleFamily(p, parent, children, wanted) {
+  return family('bundle-request', p,
+    `Request ${p} and its ${plural(children.length, 'child request', 'child requests')}`,
+    `${p} is a bundle request; it was split into child requests, one for each part of the work (for example one per server to start or stop).`,
+    [role(parent || missing(p, 'Request'), 'Parent request'), ...children.map(c => role(c, 'Child request'))], wanted);
+}
+
+function requestTasksFamily(r, request, tasks, wanted) {
+  return family('request-tasks', r,
+    `Request ${r} and its ${plural(tasks.length, 'catalog task', 'catalog tasks')}`,
+    `Catalog tasks are the pieces of work that fulfil request ${r}; each is done by a fulfilment team.`,
+    [role(request || missing(r, 'Request'), 'Request'), ...tasks.map(t => role(t, 'Task'))], wanted);
+}
+
 export async function relatedFamilies(numbers, runQuery) {
   const wantedList = [...new Set(numbers.map(n => String(n).toUpperCase()))].filter(n => TICKET_NUMBER.test(n)).slice(0, MAX_TICKETS);
   if (!wantedList.length) return [];
@@ -14722,22 +15458,14 @@ export async function relatedFamilies(numbers, runQuery) {
   const parentsByNumber = byNumber(parentIncs);
   for (const p of parentIncidents) {
     const children = childIncs.filter(c => c.parentIncident === p);
-    if (!children.length) continue;
-    const parent = parentsByNumber.get(p) || missing(p, 'Incident');
-    families.push(family('parent-incident', p,
-      `Parent incident ${p} and its ${plural(children.length, 'child incident', 'child incidents')}`,
-      `${p} is a parent (master) incident: it groups incidents raised for the same issue, such as several alerts or reports about one fault, so they are worked and resolved together.`,
-      [role(parent, 'Parent'), ...children.map(c => role(c, 'Child'))], wanted));
+    if (children.length) families.push(parentIncidentFamily(p, parentsByNumber.get(p), children, wanted));
   }
 
   // Problem record
   for (const prb of problems) {
-    const linked = [...problemIncs.filter(t => t.problem === prb).map(t => role(t, 'Incident')), ...problemChgs.filter(t => t.problem === prb).map(t => role(t, 'Change'))];
-    if (linked.length < 2) continue;
-    families.push(family('problem', prb,
-      `${plural(linked.length, 'ticket', 'tickets')} linked to problem ${prb}`,
-      `These tickets were all linked to problem ${prb}, the investigation into their shared root cause. The problem record itself isn't in this export.`,
-      linked, wanted));
+    const incidents = problemIncs.filter(t => t.problem === prb);
+    const linkedChanges = problemChgs.filter(t => t.problem === prb);
+    if (incidents.length + linkedChanges.length >= 2) families.push(problemFamily(prb, incidents, linkedChanges, wanted));
   }
 
   // Change <-> incident: the incident a change fixes, and incidents it caused
@@ -14747,47 +15475,27 @@ export async function relatedFamilies(numbers, runQuery) {
     const change = changesByNumber.get(c) || missing(c, 'Change');
     const fixes = change.fixesIncident ? [fixedByNumber.get(change.fixesIncident) || incs.find(t => t.number === change.fixesIncident) || missing(change.fixesIncident, 'Incident')] : [];
     const caused = causedIncs.filter(t => t.causedByChange === c);
-    if (!fixes.length && !caused.length) continue;
-    const parts = [fixes.length ? `raised to fix ${fixes[0].number}` : '', caused.length ? `the cause of ${plural(caused.length, 'incident', 'incidents')}` : ''].filter(Boolean);
-    families.push(family('change-incident', c,
-      `Change ${c}: ${parts.join(', and ')}`,
-      fixes.length && caused.length ? `${c} was raised to fix an incident, and other incidents name it as their cause.`
-        : fixes.length ? `${c} was raised to fix incident ${fixes[0].number}.` : `These incidents name change ${c} as their cause.`,
-      [role(change, 'Change'), ...fixes.map(t => role(t, 'Incident it fixes')), ...caused.map(t => role(t, 'Incident it caused'))], wanted));
+    if (fixes.length || caused.length) families.push(changeFamily(c, change, fixes, caused, wanted));
   }
 
   // Requests ordered together
   for (const order of orders) {
     const together = orderRitms.filter(t => t.order === order);
-    if (together.length < 2) continue;
-    families.push(family('order', order,
-      `${plural(together.length, 'request', 'requests')} ordered together in ${order}`,
-      `${order} is one order (REQ); each request (RITM) in it is a separate item that was ordered at the same time.`,
-      together.map(t => role(t, 'Request')), wanted));
+    if (together.length >= 2) families.push(orderFamily(order, together, wanted));
   }
 
   // Bundle request and its child requests
   const parentRitmsByNumber = byNumber(parentRitms);
   for (const p of parentRequests) {
     const children = childRitms.filter(t => t.parentRequest === p);
-    if (!children.length) continue;
-    const parent = parentRitmsByNumber.get(p) || missing(p, 'Request');
-    families.push(family('bundle-request', p,
-      `Request ${p} and its ${plural(children.length, 'child request', 'child requests')}`,
-      `${p} is a bundle request; it was split into child requests, one for each part of the work (for example one per server to start or stop).`,
-      [role(parent, 'Parent request'), ...children.map(c => role(c, 'Child request'))], wanted));
+    if (children.length) families.push(bundleFamily(p, parentRitmsByNumber.get(p), children, wanted));
   }
 
   // A request and the catalog tasks that fulfil it
   const taskRitmsByNumber = byNumber(taskRitms);
   for (const r of requestItems) {
     const itsTasks = taskSiblings.filter(t => t.requestItem === r);
-    if (!itsTasks.length) continue;
-    const request = taskRitmsByNumber.get(r) || missing(r, 'Request');
-    families.push(family('request-tasks', r,
-      `Request ${r} and its ${plural(itsTasks.length, 'catalog task', 'catalog tasks')}`,
-      `Catalog tasks are the pieces of work that fulfil request ${r}; each is done by a fulfilment team.`,
-      [role(request, 'Request'), ...itsTasks.map(t => role(t, 'Task'))], wanted));
+    if (itsTasks.length) families.push(requestTasksFamily(r, taskRitmsByNumber.get(r), itsTasks, wanted));
   }
 
   // One ticket: every family it is in. A list: families two or more of them share.
@@ -14926,6 +15634,113 @@ export async function ticketLinks(numbers, runQuery) {
   }
   return new Map(wanted.map(n => [n, linkCache.get(n)]));
 }
+
+// =====================================================================
+// THE TICKET FAMILIES PAGE (the Dashboards tab): every family of one kind,
+// biggest first, and one family with all its members. The lists come from
+// one grouped count per kind and are kept (the data never changes).
+// =====================================================================
+
+export const FAMILY_KINDS = ['parent-incident', 'bundle-request', 'request-tasks', 'order', 'problem', 'change-incident'];
+// What each kind's families are anchored on
+export const FAMILY_ANCHOR = {
+  'parent-incident': /^INC\d{7}$/, 'bundle-request': /^RITM\d{7}$/, 'request-tasks': /^RITM\d{7}$/,
+  order: /^REQ\d{7}$/, problem: /^PRB\d{7}$/, 'change-incident': /^CHG\d{7}$/,
+};
+// ticketLinks names two kinds differently
+export const LINK_KIND = { 'parent-incident': 'parent-incident', bundle: 'bundle-request', 'request-tasks': 'request-tasks', order: 'order', problem: 'problem', change: 'change-incident' };
+
+// How many tickets of a type have each value in a link column (every value)
+async function allCounts(cube, column, runQuery) {
+  const rows = await runQuery({
+    measures: [`${cube}.count`],
+    dimensions: [`${cube}.${column}`],
+    filters: [{ member: `${cube}.${column}`, operator: 'set' }],
+    limit: 50000,
+  });
+  return new Map(rows.map(r => [clean(r[`${cube}.${column}`]), Number(r[`${cube}.count`]) || 0]).filter(([key]) => key));
+}
+
+// kind -> [{ anchor, children, size }], biggest first. children: the tickets
+// besides the anchor (for an order or a problem, every ticket in it).
+async function buildFamilyList(kind, runQuery) {
+  const entries = map => [...map];
+  let list = [];
+  if (kind === 'parent-incident') list = entries(await allCounts('incident', 'parent_incident', runQuery)).map(([anchor, n]) => ({ anchor, children: n, size: n + 1 }));
+  if (kind === 'bundle-request') list = entries(await allCounts('sc_req_item', 'parent', runQuery)).map(([anchor, n]) => ({ anchor, children: n, size: n + 1 }));
+  if (kind === 'request-tasks') list = entries(await allCounts('sc_task', 'request_item', runQuery)).map(([anchor, n]) => ({ anchor, children: n, size: n + 1 }));
+  if (kind === 'order') list = entries(await allCounts('sc_req_item', 'request', runQuery)).filter(([, n]) => n >= 2).map(([anchor, n]) => ({ anchor, children: n, size: n }));
+  if (kind === 'problem') {
+    const [incs, chgs] = await Promise.all([allCounts('incident', 'problem', runQuery), allCounts('change_request', 'problem', runQuery)]);
+    list = [...new Set([...incs.keys(), ...chgs.keys()])].map(anchor => {
+      const n = (incs.get(anchor) || 0) + (chgs.get(anchor) || 0);
+      return { anchor, children: n, size: n };
+    });
+  }
+  if (kind === 'change-incident') {
+    const [fixRows, caused] = await Promise.all([
+      runQuery({ dimensions: ['change_request.number', 'change_request.incident'], filters: [{ member: 'change_request.incident', operator: 'set' }], limit: 50000 }),
+      allCounts('incident', 'caused_by_change', runQuery),
+    ]);
+    const fixes = new Set(fixRows.map(r => clean(r['change_request.number'])).filter(Boolean));
+    list = [...new Set([...fixes, ...caused.keys()])].map(anchor => {
+      const n = (fixes.has(anchor) ? 1 : 0) + (caused.get(anchor) || 0);
+      return { anchor, children: n, size: n + 1 };
+    });
+  }
+  return list.filter(f => FAMILY_ANCHOR[kind].test(f.anchor)).sort((a, b) => (b.size - a.size) || b.anchor.localeCompare(a.anchor));
+}
+
+const familyLists = new Map();
+export function familyList(kind, runQuery) {
+  if (!familyLists.has(kind)) {
+    const pending = buildFamilyList(kind, runQuery);
+    familyLists.set(kind, pending);
+    pending.catch(() => familyLists.delete(kind));
+  }
+  return familyLists.get(kind);
+}
+
+// For the page's tabs: per kind, how many families and how many tickets they hold
+export async function familySummary(runQuery) {
+  const lists = await Promise.all(FAMILY_KINDS.map(kind => familyList(kind, runQuery)));
+  return Object.fromEntries(FAMILY_KINDS.map((kind, i) => [kind, {
+    families: lists[i].length,
+    tickets: lists[i].reduce((sum, f) => sum + f.children, 0),
+  }]));
+}
+
+// One family with every member, compared (the same shape as relatedFamilies'), or null
+export async function familyOf(kind, anchor, runQuery) {
+  if (!FAMILY_KINDS.includes(kind) || !FAMILY_ANCHOR[kind].test(anchor)) return null;
+  const wanted = new Set([anchor]);
+  const one = async (prefix, column) => (await queryTickets(prefix, [[column, [anchor]]], runQuery));
+  if (kind === 'parent-incident') {
+    const [parent, children] = await Promise.all([one('INC', 'number'), one('INC', 'parent_incident')]);
+    return children.length ? parentIncidentFamily(anchor, parent[0], children, wanted) : null;
+  }
+  if (kind === 'bundle-request') {
+    const [parent, children] = await Promise.all([one('RITM', 'number'), one('RITM', 'parent')]);
+    return children.length ? bundleFamily(anchor, parent[0], children, wanted) : null;
+  }
+  if (kind === 'request-tasks') {
+    const [request, tasks] = await Promise.all([one('RITM', 'number'), one('SCTASK', 'request_item')]);
+    return tasks.length ? requestTasksFamily(anchor, request[0], tasks, wanted) : null;
+  }
+  if (kind === 'order') {
+    const together = await one('RITM', 'request');
+    return together.length ? orderFamily(anchor, together, wanted) : null;
+  }
+  if (kind === 'problem') {
+    const [incidents, changes] = await Promise.all([one('INC', 'problem'), one('CHG', 'problem')]);
+    return incidents.length + changes.length ? problemFamily(anchor, incidents, changes, wanted) : null;
+  }
+  const [change, caused] = await Promise.all([one('CHG', 'number'), one('INC', 'caused_by_change')]);
+  const fixesNumber = change[0]?.fixesIncident;
+  const fixes = fixesNumber ? (await queryTickets('INC', [['number', [fixesNumber]]], runQuery)) : [];
+  const fixed = fixesNumber ? [fixes[0] || missing(fixesNumber, 'Incident')] : [];
+  return fixed.length || caused.length ? changeFamily(anchor, change[0], fixed, caused, wanted) : null;
+}
 ```
 
 <a id="b44"></a>
@@ -14943,7 +15758,7 @@ import { pool } from './auth.mjs';
 import { sanitizeChart, sanitizeScope, newId } from './charts.mjs';
 
 // Saved separately, so changing colors never overwrites a dashboard.
-// tour: whether the first-visit tour has been seen.
+// tour: which tours have been seen (Home's, and the Dashboards page's).
 export const PARTS = ['theme', 'home', 'dashboards', 'tour'];
 
 export const MAX_BOARDS = 20;
@@ -15050,7 +15865,8 @@ function cleanDashboards(d = {}) {
   return { boards, hidden, last };
 }
 
-const cleanTour = (t = {}) => ({ done: t.done === true });
+// done: Home's tour has been seen; dashboards: the Dashboards page's
+const cleanTour = (t = {}) => ({ done: t.done === true, dashboards: t.dashboards === true });
 
 const CLEANERS = { theme: cleanTheme, home: cleanHome, dashboards: cleanDashboards, tour: cleanTour };
 
@@ -16457,7 +17273,10 @@ const THEME_DEFAULTS = { mode: 'light', accent: '#10a37f', header: 'dark' };
 const defaultHome = () => ({ blocks: [{ type: 'assistant' }, { type: 'tickets' }] });
 const defaultDashboards = () => ({ boards: [], hidden: [], last: '' });
 
-const prefs = { theme: { ...THEME_DEFAULTS }, home: defaultHome(), dashboards: defaultDashboards(), tour: { done: false } };
+// tour: which tours have been seen (done: Home's; dashboards: the Dashboards page's)
+const defaultTour = () => ({ done: false, dashboards: false });
+
+const prefs = { theme: { ...THEME_DEFAULTS }, home: defaultHome(), dashboards: defaultDashboards(), tour: defaultTour() };
 let prefsReady = Promise.resolve();
 // When loading failed, saving is off: it would replace what's saved with the defaults
 let prefsLoadFailed = false;
@@ -16480,7 +17299,7 @@ function loadPreferences() {
             prefs.theme = { ...THEME_DEFAULTS, ...saved.theme };
             prefs.home = Array.isArray(saved.home?.blocks) ? saved.home : defaultHome();
             prefs.dashboards = { ...defaultDashboards(), ...saved.dashboards };
-            prefs.tour = { done: saved.tour?.done === true };
+            prefs.tour = { done: saved.tour?.done === true, dashboards: saved.tour?.dashboards === true };
         } catch (err) {
             prefsLoadFailed = true;
             console.error('Could not load the saved layout and colors:', err);
@@ -16558,7 +17377,7 @@ function resetCustomizing() {
     prefs.theme = { ...THEME_DEFAULTS };
     prefs.home = defaultHome();
     prefs.dashboards = defaultDashboards();
-    prefs.tour = { done: false };
+    prefs.tour = defaultTour();
     prefsReady = Promise.resolve();
     prefsLoadFailed = false;
     sharedBoards.clear();
@@ -16571,6 +17390,7 @@ function resetCustomizing() {
     toggleHomeEditing(false);
     toggleDrawerEditing(false);
     hideBoard();
+    resetFamilies();
     renderHomeLayout();
     renderMyDashboards();
     document.getElementById('home-blocks').classList.add('waiting');
@@ -17005,6 +17825,7 @@ function renderMyDashboards() {
 function showBoard(id) {
     const board = prefs.dashboards.boards.find(b => b.id === id);
     if (!board) return false;
+    hideFamilies();
     currentBoardId = id;
     document.getElementById('dashboard-frame').hidden = true;
     document.getElementById('dashboard-message').hidden = true;
@@ -17707,16 +18528,24 @@ async function openDrill({ chart, scope = null, value = null, label = '' }) {
         const count = `${data.total.toLocaleString()} ${data.total === 1 ? 'ticket' : 'tickets'}`;
         body.innerHTML = `<p class="drill-what">${escapeHtml(what)}</p>` +
             `<p class="home-status">${count}${data.total > tickets.length ? `; the newest ${tickets.length.toLocaleString()} are listed (the download has them too)` : ''}. ` +
-            'Click a ticket number to see its full record.</p>' +
+            'Click a ticket number to open it, with its parent, children and other linked tickets.</p>' +
             starAllHtml(tickets.map(t => t.number)) + ticketTableHtml(tickets) + ticketDownloadHtml(tickets, title);
     } catch (err) {
         if (run === drillRun) body.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
     }
 }
 
-// Opening a ticket's record (or its dashboard page) from the list closes the list first
+// A ticket in the list opens in the ticket window over it, its family first
+// (families.js), and closing that returns to the list. Its dashboard page
+// closes the list.
 document.getElementById('drill-dialog').addEventListener('click', e => {
-    if (e.target.closest('[data-ticket], [data-open-dashboard]')) e.currentTarget.close();
+    const ticket = e.target.closest('[data-ticket]');
+    if (ticket) {
+        e.stopPropagation();
+        openTicketDialog(ticket.dataset.ticket);
+        return;
+    }
+    if (e.target.closest('[data-open-dashboard]')) e.currentTarget.close();
 });
 
 // ---------------------------------------------------------------------
@@ -17926,8 +18755,10 @@ window.addEventListener('hashchange', () => {
 });
 
 // ---------------------------------------------------------------------
-// THE TOUR: a few steps pointing at the main parts, shown once to each
-// person (saved to their account) and again from "❔ Tour" on Home
+// THE TOURS: a few steps pointing at the main parts of a page. Home's
+// shows on the first visit, the Dashboards page's the first time that page
+// is opened; each once per person (saved to their account), and again
+// from that page's "❔ Tour"
 // ---------------------------------------------------------------------
 
 const TOUR_STEPS = [
@@ -17940,33 +18771,66 @@ const TOUR_STEPS = [
     { target: '#customize-home-btn', title: 'Make Home yours',
         text: 'Move or hide these sections, and add charts of your own.' },
     { target: '.tab-btn[data-tab="dashboard"]', title: 'Dashboards: the team\'s and yours',
-        text: 'The team dashboards, plus ones you build: ☰ Dashboards, then ＋ New dashboard. Click any bar or slice to see its tickets, filter a whole dashboard by team or date, and share it with a link.' },
+        text: 'The team dashboards, plus ones you build: ☰ Dashboards, then ＋ New dashboard. Click any bar or slice to see its tickets, filter a whole dashboard by team or date, and share it with a link. It has its own short tour the first time you open it.' },
     { target: '#theme-btn', title: 'Your colors',
         text: 'Light or dark, your own accent color, and the header\'s color. "❔ Tour" on Home shows this tour again.' },
 ];
 
-let tourState = null; // { steps, index, opener }
+// drawer: the step is inside the ☰ Dashboards drawer (open it) or not (close it).
+// Steps whose part isn't showing are left out (the team dashboard's frame on
+// one of your own dashboards, for example).
+const DASHBOARDS_TOUR_STEPS = [
+    { target: '#dashboard-drawer-toggle', drawer: false, title: 'Every dashboard in one list',
+        text: 'Click ☰ Dashboards for the list: pages built into OneTouch, dashboards of your own, and the team dashboards. This page opens on the one you had open last.' },
+    { target: '.builtin-dashboards', drawer: true, title: 'Ticket families',
+        text: 'Every parent ticket and its children, from the links in the data. Click any ticket, parent or child, to open it with its family.' },
+    { target: '.my-dashboards', drawer: true, title: 'Dashboards of your own',
+        text: '＋ New dashboard starts one: choose what each chart counts and how it is drawn, filter the whole dashboard by team or dates, and share it with a link. Nobody else sees it until you share it.' },
+    { target: '#dashboard-picker .drawer-group', drawer: true, title: 'The team dashboards',
+        text: 'Incidents, problems, changes and requests, grouped by area (scroll the list for the rest). Everyone has the same ones.' },
+    { target: '#drawer-customize', drawer: true, title: 'Only the ones you use',
+        text: 'Untick the team dashboards you don\'t need and they leave your list (nobody else\'s). They come back the same way.' },
+    { target: '#dashboard-frame', drawer: false, title: 'Click for details',
+        text: 'Click a bar, slice, number or blue value to open a page with its details, and ← Back to return. A ticket\'s record shows its parent, children and other linked tickets above it.' },
+    { target: '#board-view .board-bar', drawer: false, title: 'Your dashboard',
+        text: 'Add charts, share it with a link, rename or delete it. Click a bar or slice to list its tickets.' },
+    { target: '#dashboard-tour-btn', drawer: false, title: 'This tour again',
+        text: '❔ Tour shows this tour again any time. Home has its own, under ❔ Tour there.' },
+];
 
-function maybeStartTour() {
-    if (prefs.tour.done || prefsLoadFailed) return;
+// Each tour: its steps, its page, and its flag in prefs.tour
+const TOURS = {
+    home: { steps: TOUR_STEPS, view: 'home', seen: 'done' },
+    dashboards: { steps: DASHBOARDS_TOUR_STEPS, view: 'dashboard', seen: 'dashboards' },
+};
+
+let tourState = null; // { name, steps, index, opener }
+
+// A tour not seen yet starts once its page is showing, unless something else
+// is open (it waits for the next visit then)
+function maybeStartTour(name = 'home') {
+    const tour = TOURS[name];
+    if (prefs.tour[tour.seen] || prefsLoadFailed || tourState) return;
     setTimeout(() => {
-        const ready = !prefs.tour.done && !document.body.classList.contains('signed-out') && !document.querySelector('dialog[open]') &&
-            document.getElementById('home-view').classList.contains('active') && !assistantOpen();
-        if (ready) startTour();
+        const ready = !prefs.tour[tour.seen] && !tourState && !document.body.classList.contains('signed-out') && !document.querySelector('dialog[open]') &&
+            document.getElementById(`${tour.view}-view`).classList.contains('active') && !assistantOpen();
+        if (ready) startTour(name);
     }, 600);
 }
 
-function startTour() {
-    toggleHomeEditing(false);
+function startTour(name = 'home') {
+    const tour = TOURS[name];
+    if (name === 'home') toggleHomeEditing(false);
+    else toggleDrawerEditing(false);
     toggleThemePanel(false);
     toggleAssistant(false);
-    if (!document.getElementById('home-view').classList.contains('active')) switchTab('home');
-    const steps = TOUR_STEPS.filter(s => {
+    if (!document.getElementById(`${tour.view}-view`).classList.contains('active')) switchTab(tour.view);
+    const steps = tour.steps.filter(s => {
         const el = document.querySelector(s.target);
         return el && el.getClientRects().length > 0;
     });
     if (!steps.length) return;
-    tourState = { steps, index: 0, opener: document.activeElement };
+    tourState = { name, steps, index: 0, opener: document.activeElement };
     document.getElementById('tour').hidden = false;
     showTourStep();
 }
@@ -17975,6 +18839,13 @@ function showTourStep() {
     if (!tourState) return;
     const { steps, index } = tourState;
     const step = steps[index];
+    // Open or close the drawer for this step; point once it has slid
+    const drawer = document.getElementById('dashboard-drawer');
+    if ('drawer' in step && step.drawer !== drawer.classList.contains('open')) {
+        toggleDashboardDrawer(step.drawer);
+        setTimeout(() => { if (tourState?.steps === steps && tourState.index === index) showTourStep(); }, 250);
+        return;
+    }
     const target = document.querySelector(step.target);
     if (!target) return closeTour();
     target.scrollIntoView({ block: 'nearest' });
@@ -17987,11 +18858,13 @@ function showTourStep() {
     document.getElementById('tour-text').textContent = step.text;
     document.getElementById('tour-back').disabled = index === 0;
     document.getElementById('tour-next').textContent = index === steps.length - 1 ? 'Done' : 'Next';
-    // The card goes under what it points at, or above when there's no room below
+    // The card goes under what it points at, or above when there's no room
+    // below, or inside its top when it fills the page (a dashboard)
     const card = document.getElementById('tour-card');
     const h = card.offsetHeight, w = card.offsetWidth;
     const below = r.bottom + pad + 12;
-    const top = below + h < innerHeight - 8 ? below : Math.max(8, r.top - pad - 12 - h);
+    const above = r.top - pad - 12 - h;
+    const top = below + h < innerHeight - 8 ? below : above >= 8 ? above : Math.max(8, Math.min(r.top + 16, innerHeight - h - 8));
     card.style.top = `${top}px`;
     card.style.left = `${Math.max(8, Math.min(r.left, innerWidth - w - 8))}px`;
     document.getElementById('tour-next').focus();
@@ -18008,12 +18881,13 @@ function tourMove(delta) {
 // save: remember it was seen (Skip and Done both count)
 function closeTour(save = true) {
     const opener = tourState?.opener;
-    const wasOpen = Boolean(tourState);
+    const name = tourState?.name;
     tourState = null;
     document.getElementById('tour').hidden = true;
-    if (!wasOpen) return;
-    if (save && !prefs.tour.done) {
-        prefs.tour = { done: true };
+    if (!name) return;
+    const seen = TOURS[name].seen;
+    if (save && !prefs.tour[seen]) {
+        prefs.tour = { ...prefs.tour, [seen]: true };
         savePreference('tour');
     }
     if (opener && opener.isConnected) opener.focus();
@@ -18110,6 +18984,473 @@ export async function unshare(userId, token) {
   const { rowCount } = await pool.query('DELETE FROM shared_dashboards WHERE token = $1 AND owner_id = $2', [token, userId]);
   return rowCount > 0;
 }
+```
+
+<a id="b49"></a>
+### B.49 `public/families.js`
+
+```js
+// =====================================================================
+// TICKET FAMILIES: a page in the Dashboards tab, built into OneTouch (not
+// Metabase), listing every family of one kind, biggest first: parent
+// incidents and their children, bundle and child requests, requests and
+// their tasks, orders, problem records, and changes with their incidents.
+// A row opens to show the whole family. Any ticket number, parent or
+// child, opens that ticket (its record, with its family first) in a window
+// over the page, where its own parent and children open the same way.
+// The lists come from /api/families (relations.mjs on the server).
+// Also here: the family shown above a team dashboard's ticket record.
+// Loaded before app.js, whose helpers these functions use when they run.
+// =====================================================================
+
+const FAMILY_KIND_INFO = {
+    'parent-incident': {
+        tab: 'Parent incidents', anchor: 'Parent', child: ['child incident', 'child incidents'],
+        about: 'A parent (master) incident groups incidents raised for the same issue, such as several alerts or reports about one fault, so they are worked and resolved together.',
+    },
+    'bundle-request': {
+        tab: 'Bundle requests', anchor: 'Parent', child: ['child request', 'child requests'],
+        about: 'A bundle request is split into child requests, one for each part of the work (for example one per server to start or stop).',
+    },
+    'request-tasks': {
+        tab: 'Requests and their tasks', anchor: 'Request', child: ['catalog task', 'catalog tasks'],
+        about: 'Catalog tasks are the pieces of work that fulfil a request; each is done by a fulfilment team.',
+    },
+    order: {
+        tab: 'Orders', anchor: 'Order', child: ['request', 'requests'],
+        about: 'An order (REQ) holds the requests (RITMs) ordered at the same time. Orders with two or more requests are listed.',
+    },
+    problem: {
+        tab: 'Problem records', anchor: 'Problem', child: ['linked ticket', 'linked tickets'],
+        about: "Incidents and changes linked to the same problem record, the investigation into their shared root cause. The problem records themselves aren't in this export.",
+    },
+    'change-incident': {
+        tab: 'Changes and incidents', anchor: 'Change', child: ['linked incident', 'linked incidents'],
+        about: 'A change, and the incident it was raised to fix or the incidents that name it as their cause.',
+    },
+};
+const FAMILIES_PAGE = 50;
+const familiesState = { kind: 'parent-incident', sort: 'size', loaded: 0, total: 0, summary: null, run: 0 };
+
+// ---------------------------------------------------------------------
+// Showing the page (from the ☰ Dashboards drawer)
+// ---------------------------------------------------------------------
+
+function showFamilies() {
+    hideBoard();
+    document.getElementById('dashboard-frame').hidden = true;
+    document.getElementById('dashboard-message').hidden = true;
+    document.getElementById('dashboard-star').hidden = true;
+    document.getElementById('families-view').hidden = false;
+    document.querySelectorAll('.dashboard-choice').forEach(b => {
+        const on = b.dataset.builtin === 'families';
+        b.classList.toggle('active', on);
+        if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+    });
+    setDashboardHeading('Built into OneTouch', 'Ticket families', 'Parent tickets and their children, from the links in the data', false);
+    document.getElementById('dashboard-hint').hidden = true;
+    rememberDashboard('families');
+    if (!familiesState.loaded) loadFamilies();
+}
+
+function hideFamilies() {
+    document.getElementById('families-view').hidden = true;
+    document.querySelector('.dashboard-choice[data-builtin="families"]')?.classList.remove('active');
+}
+
+// Signing out: the next person starts fresh
+function resetFamilies() {
+    hideFamilies();
+    showRecordFamily('');
+    Object.assign(familiesState, { kind: 'parent-incident', sort: 'size', loaded: 0, total: 0, summary: null, run: familiesState.run + 1 });
+    document.getElementById('families-list').innerHTML = '';
+    document.getElementById('families-kinds').innerHTML = '';
+    document.getElementById('families-q').value = '';
+    document.getElementById('families-sort').value = 'size';
+}
+
+async function familiesFetch(path) {
+    const response = await fetch(`${API_BASE}${path}`, { headers: authHeaders() });
+    if (handleUnauthorized(response)) return null;
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+    return data;
+}
+
+// The tabs: one per kind, with how many families it has
+function paintFamilyKinds() {
+    const summary = familiesState.summary || {};
+    document.getElementById('families-kinds').innerHTML = Object.entries(FAMILY_KIND_INFO).map(([kind, info]) =>
+        `<button type="button" class="family-kind${kind === familiesState.kind ? ' active' : ''}" data-family-kind="${kind}" aria-pressed="${kind === familiesState.kind}">` +
+        `<span class="family-kind-name">${escapeHtml(info.tab)}</span>` +
+        `<span class="family-kind-count">${summary[kind] ? summary[kind].families.toLocaleString() : '…'}</span></button>`).join('');
+}
+
+// One kind's families, biggest first (or by the chosen order); more: the next page
+async function loadFamilies(more = false) {
+    const run = more ? familiesState.run : ++familiesState.run;
+    const list = document.getElementById('families-list');
+    const kind = familiesState.kind;
+    const info = FAMILY_KIND_INFO[kind];
+    if (!more) {
+        list.innerHTML = '<p class="home-status">Loading the families…</p>';
+        familiesState.loaded = 0;
+    }
+    try {
+        if (!familiesState.summary) {
+            const summary = await familiesFetch('/api/families');
+            if (!summary) return;
+            familiesState.summary = summary.kinds;
+        }
+        paintFamilyKinds();
+        const data = await familiesFetch(`/api/families/${kind}?sort=${familiesState.sort}&offset=${familiesState.loaded}&limit=${FAMILIES_PAGE}`);
+        if (!data || run !== familiesState.run) return;
+        familiesState.total = data.total;
+        familiesState.loaded += data.families.length;
+        const rows = familyRowsHtml(data.families, false);
+        if (more) {
+            list.querySelector('tbody').insertAdjacentHTML('beforeend', rows);
+        } else {
+            const counts = familiesState.summary[kind];
+            list.innerHTML = `<p class="families-about"><b>${data.total.toLocaleString()} ${escapeHtml(info.tab.toLowerCase())}</b>, ` +
+                `holding ${counts.tickets.toLocaleString()} ${counts.tickets === 1 ? info.child[0] : info.child[1]}. ${escapeHtml(info.about)} ` +
+                'Click a row to see the whole family, or any ticket number, parent or child, to open that ticket.</p>' +
+                familyTableHtml(rows, false) + '<div class="families-more"></div>';
+        }
+        paintFamiliesMore();
+    } catch (err) {
+        if (run === familiesState.run) list.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+    }
+}
+
+function paintFamiliesMore() {
+    const box = document.querySelector('#families-list .families-more');
+    if (!box) return;
+    const left = familiesState.total - familiesState.loaded;
+    box.innerHTML = `<span class="home-status">Showing ${familiesState.loaded.toLocaleString()} of ${familiesState.total.toLocaleString()}.</span>` +
+        (left > 0 ? `<button type="button" class="home-action" data-families-more>Show ${Math.min(left, FAMILIES_PAGE).toLocaleString()} more</button>` : '');
+}
+
+const FAMILY_HEADS = ['Parent', 'Summary', 'State', 'Priority / Risk', 'Team', 'Opened', 'Family'];
+
+function familyTableHtml(rowsHtml, withKind) {
+    const heads = withKind ? ['Parent', 'Kind of family', ...FAMILY_HEADS.slice(1)] : FAMILY_HEADS;
+    return `<div class="table-wrap families-table"><table class="result-table"><thead><tr>${heads.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead>` +
+        `<tbody>${rowsHtml}</tbody></table></div>`;
+}
+
+// One row per family: its parent (or order / problem / change), and how many it holds
+function familyRowsHtml(families, withKind) {
+    return families.map(f => {
+        const info = FAMILY_KIND_INFO[f.kind || familiesState.kind];
+        const kind = f.kind || familiesState.kind;
+        const t = f.ticket;
+        // A ticket opens; an order shows its requests; a problem record isn't in the data
+        const anchor = /^PRB/.test(f.anchor)
+            ? `<span class="family-anchor-text">${escapeHtml(f.anchor)}</span>`
+            : `<button type="button" class="ticket-link" data-ticket="${escapeHtml(f.anchor)}" title="Open ${escapeHtml(f.anchor)}">${escapeHtml(f.anchor)}</button>${starFor(f.anchor)}`;
+        const summary = t ? t.summary : kind === 'order' ? 'An order of several requests' : kind === 'problem' ? "Problem record (the record itself isn't in this export)" : 'Not in this export';
+        const cell = text => `<td>${escapeHtml(text || '—')}</td>`;
+        const short = String(summary || '');
+        return `<tr class="family-row" data-kind="${kind}" data-anchor="${escapeHtml(f.anchor)}" tabindex="0" aria-expanded="false" title="Click to see the whole family">` +
+            `<td class="ticket-cell"><span class="expand-caret" aria-hidden="true">▸</span>${anchor}</td>` +
+            (withKind ? cell(info.tab) : '') +
+            (short.length > 110 ? `<td title="${escapeHtml(short)}">${escapeHtml(short.slice(0, 107))}…</td>` : cell(short)) +
+            cell(t?.state) + cell(t?.level) + cell(t?.team) + cell(t?.opened ? formatValue('ticket.opened', t.opened) : '') +
+            `<td class="family-size">${f.children.toLocaleString()} ${f.children === 1 ? info.child[0] : info.child[1]}</td></tr>`;
+    }).join('');
+}
+
+// A row opens (or folds away) the whole family under it
+async function toggleFamilyRow(row) {
+    const next = row.nextElementSibling;
+    if (next && next.classList.contains('row-detail')) {
+        next.remove();
+        row.classList.remove('expanded');
+        row.setAttribute('aria-expanded', 'false');
+        return;
+    }
+    const detail = document.createElement('tr');
+    detail.className = 'row-detail';
+    const cell = document.createElement('td');
+    cell.colSpan = row.cells.length;
+    cell.innerHTML = '<div class="row-detail-body"><button type="button" class="row-detail-close">▴ Close</button>' +
+        '<div class="row-detail-content"><p class="home-status">Loading the family…</p></div></div>';
+    detail.appendChild(cell);
+    row.after(detail);
+    row.classList.add('expanded');
+    row.setAttribute('aria-expanded', 'true');
+    const box = cell.querySelector('.row-detail-content');
+    try {
+        const data = await familiesFetch(`/api/families/${row.dataset.kind}/${encodeURIComponent(row.dataset.anchor)}`);
+        if (!data || !box.isConnected) return;
+        box.innerHTML = relatedHtml([data.family], new Set([row.dataset.anchor]));
+        forgetRemovedExports();
+    } catch (err) {
+        if (box.isConnected) box.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+    }
+}
+
+// "Find the families of a ticket": every family that ticket is in, whatever the kind
+async function findFamilies(number) {
+    const list = document.getElementById('families-list');
+    const run = ++familiesState.run;
+    number = number.trim().toUpperCase();
+    if (!number) return loadFamilies();
+    list.innerHTML = '<p class="home-status">Looking…</p>';
+    try {
+        const data = await familiesFetch(`/api/families/find?number=${encodeURIComponent(number)}`);
+        if (!data || run !== familiesState.run) return;
+        const back = '<button type="button" class="home-action" data-families-back>← All families</button>';
+        const open = data.known ? ` <button type="button" class="home-action" data-ticket="${escapeHtml(data.number)}">Open ${escapeHtml(data.number)}</button>` : '';
+        if (!data.known) {
+            list.innerHTML = `<p class="families-about">${escapeHtml(data.number)} is not in the data. ${back}</p>`;
+        } else if (!data.families.length) {
+            list.innerHTML = `<p class="families-about">${escapeHtml(data.number)} has no parent, children or other linked tickets.${open} ${back}</p>`;
+        } else {
+            list.innerHTML = `<p class="families-about"><b>${escapeHtml(data.number)}</b> is in ${data.families.length} ${data.families.length === 1 ? 'family' : 'families'}.${open} ${back}</p>` +
+                familyTableHtml(familyRowsHtml(data.families, true), true);
+            // One family: open it straight away
+            if (data.families.length === 1) toggleFamilyRow(list.querySelector('tr.family-row'));
+        }
+    } catch (err) {
+        if (run === familiesState.run) list.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+    }
+}
+
+const familiesView = document.getElementById('families-view');
+familiesView.addEventListener('click', e => {
+    // Any ticket number here opens in the ticket window, not on Home
+    const ticket = e.target.closest('[data-ticket]');
+    if (ticket) {
+        e.stopPropagation();
+        openTicketDialog(ticket.dataset.ticket);
+        return;
+    }
+    const kind = e.target.closest('[data-family-kind]');
+    if (kind) {
+        familiesState.kind = kind.dataset.familyKind;
+        document.getElementById('families-q').value = '';
+        loadFamilies();
+        return;
+    }
+    if (e.target.closest('[data-families-more]')) { loadFamilies(true); return; }
+    if (e.target.closest('[data-families-back]')) { document.getElementById('families-q').value = ''; loadFamilies(); return; }
+    const row = e.target.closest('tr.family-row');
+    if (row && !e.target.closest('button, a, input, select, label')) toggleFamilyRow(row);
+});
+familiesView.addEventListener('keydown', e => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('tr.family-row')) {
+        e.preventDefault();
+        toggleFamilyRow(e.target);
+    }
+});
+document.getElementById('families-find').addEventListener('submit', e => {
+    e.preventDefault();
+    findFamilies(document.getElementById('families-q').value);
+});
+document.getElementById('families-sort').addEventListener('change', e => {
+    familiesState.sort = e.target.value;
+    loadFamilies();
+});
+
+// ---------------------------------------------------------------------
+// THE TICKET WINDOW: one ticket's record, its family first, over the page.
+// Its parent, children and other linked tickets open in the same window,
+// and ← Back returns to the one before.
+// ---------------------------------------------------------------------
+
+const ticketTrail = [];
+let ticketDialogRun = 0;
+
+async function openTicketDialog(number, { back = false } = {}) {
+    const dialog = document.getElementById('ticket-dialog');
+    const body = document.getElementById('ticket-dialog-body');
+    if (!back) ticketTrail.push(number);
+    const run = ++ticketDialogRun;
+    document.getElementById('ticket-dialog-title').textContent = number;
+    document.getElementById('ticket-dialog-back').hidden = ticketTrail.length < 2;
+    body.innerHTML = `<p class="home-status">Loading ${escapeHtml(number)}…</p>`;
+    hideChartTip();
+    if (!dialog.open) dialog.showModal();
+    body.scrollTop = 0;
+    // Opening a ticket counts as being shown it (like a ticket number on Home)
+    if (STARRABLE.test(number)) {
+        fetch(`${API_BASE}/api/seen-tickets`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ numbers: [number] }),
+        }).catch(err => console.error('Could not add the ticket to Ticket results:', err));
+    }
+    try {
+        const data = await searchTickets(number, true);
+        if (!data || run !== ticketDialogRun) return;
+        if (!data.found.length) {
+            body.innerHTML = `<p class="home-status">${escapeHtml(number)} is not in the data.</p>`;
+        } else if (data.found.length === 1) {
+            document.getElementById('ticket-dialog-title').textContent = `${data.found[0].type} ${number}`;
+            body.innerHTML = ticketCardHtml(data.found[0], data.record);
+            showRelated(body, [number], false, body.querySelector('.record-fields'));
+        } else {
+            // An order (REQ): the requests in it
+            body.innerHTML = `<p class="home-status">${escapeHtml(number)} is an order of ${data.found.length} requests.</p>` + ticketTableHtml(data.found);
+        }
+        forgetRemovedExports();
+    } catch (err) {
+        if (run === ticketDialogRun) body.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+    }
+}
+
+function ticketDialogBack() {
+    ticketTrail.pop();
+    const previous = ticketTrail[ticketTrail.length - 1];
+    if (previous) openTicketDialog(previous, { back: true });
+}
+
+const ticketDialog = document.getElementById('ticket-dialog');
+ticketDialog.addEventListener('click', e => {
+    const ticket = e.target.closest('[data-ticket]');
+    if (ticket) {
+        e.stopPropagation();
+        openTicketDialog(ticket.dataset.ticket);
+        return;
+    }
+    // "Open in Dashboards": the window (and a chart's ticket list under it)
+    // steps aside for the record page
+    if (e.target.closest('[data-open-dashboard]')) {
+        ticketDialog.close();
+        document.getElementById('drill-dialog').close();
+    }
+});
+ticketDialog.addEventListener('close', () => {
+    ticketTrail.length = 0;
+    ticketDialogRun += 1;
+    document.getElementById('ticket-dialog-body').innerHTML = '';
+});
+
+// ---------------------------------------------------------------------
+// A TICKET RECORD IN A TEAM DASHBOARD (an incident, change or request page
+// in Metabase): its family above the page, from OneTouch. A ticket in it
+// with a record page of its own opens there (← Back returns); a catalog
+// task or an order opens in the ticket window.
+// ---------------------------------------------------------------------
+
+const recordFamily = { number: '', open: true, run: 0 };
+
+// number: the record showing, or '' for any other page
+async function showRecordFamily(number) {
+    if (number === recordFamily.number) return;
+    recordFamily.number = number;
+    const run = ++recordFamily.run;
+    const panel = document.getElementById('record-family');
+    const summary = document.getElementById('record-family-summary');
+    const body = document.getElementById('record-family-body');
+    const toggle = document.getElementById('record-family-toggle');
+    panel.hidden = !number;
+    body.innerHTML = '';
+    toggle.hidden = true;
+    if (!number) return;
+    summary.textContent = `👪 Looking for ${number}'s parent, children and other linked tickets…`;
+    try {
+        const response = await fetch(`${API_BASE}/api/tickets/related`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ numbers: [number], conversation: false }),
+        });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        if (run !== recordFamily.run) return;
+        if (!data.families.length) {
+            summary.textContent = `👪 ${number} has no parent, child or other linked tickets.`;
+            return;
+        }
+        summary.innerHTML = `<b>👪 ${escapeHtml(number)}'s family:</b> ${escapeHtml(data.families.map(f => f.title).join(' · '))}`;
+        body.innerHTML = relatedHtml(data.families, new Set([number]));
+        forgetRemovedExports();
+        toggle.hidden = false;
+        paintRecordFamily();
+    } catch (err) {
+        if (run === recordFamily.run) summary.textContent = `👪 Couldn't look for ${number}'s family: ${err.message}`;
+    }
+}
+
+// Shown or folded away; the choice holds for the next record too
+function paintRecordFamily() {
+    const toggle = document.getElementById('record-family-toggle');
+    document.getElementById('record-family-body').hidden = !recordFamily.open;
+    toggle.textContent = recordFamily.open ? 'Hide family ▴' : 'Show family ▾';
+    toggle.setAttribute('aria-expanded', String(recordFamily.open));
+}
+document.getElementById('record-family-toggle').addEventListener('click', () => {
+    recordFamily.open = !recordFamily.open;
+    paintRecordFamily();
+});
+
+document.getElementById('record-family').addEventListener('click', e => {
+    const ticket = e.target.closest('[data-ticket]');
+    if (!ticket) return;
+    e.stopPropagation();
+    const number = ticket.dataset.ticket;
+    if (RECORD_PAGES[(number.match(/^[A-Z]+/) || [])[0]]) openInDashboards(number);
+    else openTicketDialog(number);
+});
+```
+
+<a id="b50"></a>
+### B.50 `scripts/signin-links.mjs`
+
+```js
+// Prints a sign-in link for every account whose password you have, so each
+// person can be handed their own: opening it fills in the sign-in form (see
+// "Sign-in links" in README.md).
+//
+//   node scripts/signin-links.mjs <people.csv> [address]
+//   node scripts/signin-links.mjs $HOME\Downloads\people.csv https://onetouch.fyi
+//
+// The CSV is the one the accounts were imported from (Username, Display Name,
+// Password). The test accounts and warmup are added from .env
+// (TESTER1_PASSWORD, TESTER2_PASSWORD, WARMUP_PASSWORD) when set. The address
+// defaults to ONETOUCH_PUBLIC_URL from .env, else http://localhost:8000.
+//
+// The links hold passwords: the output goes to this terminal only. Don't save
+// it in the project, commit it, or post it anywhere shared; send each person
+// only their own line.
+
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import dotenv from 'dotenv';
+
+process.chdir(path.join(path.dirname(fileURLToPath(import.meta.url)), '..'));
+dotenv.config({ quiet: true });
+
+const [csvPath, addressArg] = process.argv.slice(2);
+if (!csvPath) {
+  console.error('Usage: node scripts/signin-links.mjs <people.csv> [address]');
+  process.exit(1);
+}
+const address = (addressArg || process.env.ONETOUCH_PUBLIC_URL || `http://localhost:${process.env.APP_PORT || 8000}`).replace(/\/+$/, '');
+
+// Username, Display Name, Password (the same columns `users.mjs import` reads)
+const people = readFileSync(csvPath, 'utf8').split(/\r?\n/).slice(1).filter(l => l.trim())
+  .map(l => l.split(',').map(s => s.trim()))
+  .map(([username, name, password]) => ({ username: username.toLowerCase(), name: name || username, password }))
+  .filter(p => p.username && p.password)
+  .sort((a, b) => a.name.localeCompare(b.name));
+
+const fromEnv = [
+  ['tester1', 'Test Account 1', process.env.TESTER1_PASSWORD],
+  ['tester2', 'Test Account 2', process.env.TESTER2_PASSWORD],
+  ['warmup', 'Warmup', process.env.WARMUP_PASSWORD],
+].filter(([username, , password]) => password && !people.some(p => p.username === username))
+  .map(([username, name, password]) => ({ username, name, password }));
+
+const link = p => `${address}/#user=${encodeURIComponent(p.username)}&pass=${encodeURIComponent(p.password)}`;
+for (const p of [...people, ...fromEnv]) {
+  console.log(`${p.name} (username: ${p.username}, password: ${p.password}): ${link(p)}`);
+}
+console.error(`\n${people.length + fromEnv.length} links. Each one signs in as that person: send it to them only.`);
 ```
 
 ## Appendix C: images
