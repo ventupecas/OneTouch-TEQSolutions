@@ -1630,6 +1630,8 @@ function setHomeMode(mode, quiet = false) {
 // Signing out leaves nothing of this person's on the page
 function resetHome() {
     for (const m of HOME_MODES) homeRuns[m] += 1;
+    selections.results.clear();
+    selections.starred.clear();
     latestShown = new Set();
     openedRecord = null;
     document.getElementById('ticket-results').innerHTML = NO_TICKET_RESULTS_HTML;
@@ -1666,6 +1668,29 @@ const TICKET_COLUMNS = [
 ];
 const STARRED_COLUMN = ['Starred', t => formatStarredAt(starredTickets.get(t.number))];
 
+// Each ticket's parent and the families it is in (relations.mjs ticketLinks),
+// in Ticket results and Starred tickets. The third item draws the cell: the
+// parent and each family's anchor open that ticket's record, with its related tickets.
+const OPENABLE = /^(INC|CHG|RITM|SCTASK|REQ)\d{7}$/;
+const LINK_COLUMNS = [
+    ['Parent', t => t.parent || '', t => t.parent && OPENABLE.test(t.parent)
+        ? `<button type="button" class="ticket-link" data-ticket="${escapeHtml(t.parent)}" title="Open ${escapeHtml(t.parent)}">${escapeHtml(t.parent)}</button>` : '—'],
+    ['Family', t => (t.families || []).map(f => `${f.name} (${f.size} ${f.size === 1 ? 'ticket' : 'tickets'})`).join('; '),
+        t => (t.families || []).length ? t.families.map(familyChipHtml).join('') : '—'],
+];
+
+// "Parent incident INC1813985 · 6": opens the anchor's record and its related tickets
+function familyChipHtml(f) {
+    const label = escapeHtml(`${f.name} · ${f.size.toLocaleString()}`);
+    const size = `${f.size.toLocaleString()} ${f.size === 1 ? 'ticket' : 'tickets'} in this family`;
+    return OPENABLE.test(f.anchor)
+        ? `<button type="button" class="family-chip" data-ticket="${escapeHtml(f.anchor)}" title="${size}. Click to open ${escapeHtml(f.anchor)} and see the family">${label}</button>`
+        : `<span class="family-chip" title="${size}. The problem record itself isn't in this export">${label}</span>`;
+}
+
+// The list columns with Parent and Family after the summary
+const withLinks = extra => [...TICKET_COLUMNS.slice(0, 3), ...LINK_COLUMNS, ...TICKET_COLUMNS.slice(3), ...extra];
+
 function formatStarredAt(iso) {
     const d = iso ? new Date(iso) : null;
     return d && !Number.isNaN(d.getTime())
@@ -1674,13 +1699,19 @@ function formatStarredAt(iso) {
 
 // Ticket numbers open the ticket; every row has a star. Rows whose number is
 // in `highlight` (e.g. the latest answer's tickets) get `highlightClass`.
-function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set(), highlightClass = 'fresh') {
-    const head = columns.map(([label]) => `<th>${escapeHtml(label)}</th>`).join('');
-    const body = tickets.map(t => (highlight.has(t.number) ? `<tr class="${highlightClass}">` : '<tr>') + columns.map(([label, get], i) => {
+// select: the list's name ('results', 'starred'): each row gets a checkbox,
+// and the header's ticks them all.
+function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set(), highlightClass = 'fresh', { select = null } = {}) {
+    const head = (select ? `<th class="select-cell"><input type="checkbox" class="select-all" data-select-list="${select}" aria-label="Select all"></th>` : '') +
+        columns.map(([label]) => `<th>${escapeHtml(label)}</th>`).join('');
+    const body = tickets.map(t => (highlight.has(t.number) ? `<tr class="${highlightClass}">` : '<tr>') +
+        (select ? `<td class="select-cell"><input type="checkbox" class="row-select" data-select-list="${select}" value="${escapeHtml(t.number)}" aria-label="Select ${escapeHtml(t.number)}"></td>` : '') +
+        columns.map(([label, get, html], i) => {
         if (i === 0) {
             return `<td class="ticket-cell"><button type="button" class="ticket-link" data-ticket="${escapeHtml(t.number)}"` +
                 ` title="Open ${escapeHtml(t.number)}">${escapeHtml(t.number)}</button>${starButtonHtml(t.number)}</td>`;
         }
+        if (html) return `<td class="${label === 'Family' ? 'family-cell' : 'parent-cell'}">${html(t)}</td>`;
         const text = String(get(t) || '');
         if (label === 'Summary' && text.length > 120) {
             return `<td title="${escapeHtml(text)}">${escapeHtml(text.slice(0, 117))}…</td>`;
@@ -1789,16 +1820,16 @@ function showTicketResults(quiet = false) {
         if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
         const tickets = data.tickets || [];
         if (!tickets.length) return NO_TICKET_RESULTS_HTML;
-        const columns = [...TICKET_COLUMNS, ...SHOWN_COLUMNS];
+        const columns = withLinks(SHOWN_COLUMNS);
         const fresh = tickets.filter(t => latestShown.has(t.number)).length;
         return '<div class="results-head">' +
             `<p class="home-status">${tickets.length.toLocaleString()} ${tickets.length === 1 ? 'ticket' : 'tickets'} shown to you, newest first. ` +
             (fresh ? `<span class="fresh-key">Highlighted: the ${fresh.toLocaleString()} from your latest question.</span> ` : '') +
-            'Click a ticket number to see its full record.</p>' +
+            'Click a ticket number to see its full record, or its parent or family to see those.</p>' +
             `<button type="button" class="home-action danger" onclick="clearTicketResults(${tickets.length})">🧹 Clear ticket results</button></div>` +
-            starAllHtml(tickets.map(t => t.number)) +
-            ticketTableHtml(tickets, columns, latestShown) + ticketDownloadHtml(tickets, 'Ticket results', columns);
-    }, quiet);
+            starAllHtml(tickets.map(t => t.number)) + selectBarHtml('results') +
+            ticketTableHtml(tickets, columns, latestShown, 'fresh', { select: 'results' }) + ticketDownloadHtml(tickets, 'Ticket results', columns);
+    }, quiet).then(() => paintSelection('results'));
 }
 
 // A ticket number someone clicked: its full record, with the way back to the list.
@@ -1980,23 +2011,190 @@ function ticketsShown(numbers) {
 
 // Newest star first. Unstarring here leaves the row (with an empty star) until
 // the list is opened again, so a slip of the mouse is easy to undo.
-function showStarred() {
+function showStarred(quiet = false) {
     return runHomeSearch('starred', 'starred-result', async () => {
-        await loadStars();
-        const numbers = [...starredTickets.keys()];
+        const response = await fetch(`${API_BASE}/api/stars?details=1`, { headers: authHeaders() });
+        if (handleUnauthorized(response)) return null;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        starredTickets.clear();
+        for (const s of data.stars) starredTickets.set(s.number, s.starredAt);
+        refreshStarButtons();
+        const numbers = data.stars.map(s => s.number);
         if (!numbers.length) {
             return '<p class="home-status">No starred tickets yet. Click ☆ next to any ticket number: in your ticket results, ' +
                 'in the AI assistant\'s answers, or on an incident, change or request record in Dashboards. ' +
                 'Your stars are saved to your account, so they are here on any computer you sign in from.</p>';
         }
-        const data = await searchTickets(numbers.join(' '));
-        if (!data) return null;
-        const columns = [...TICKET_COLUMNS, STARRED_COLUMN];
+        const columns = withLinks([STARRED_COLUMN]);
         const missing = data.notFound.length
             ? `<p class="home-status">Not in the data any more: ${escapeHtml(data.notFound.join(', '))}</p>` : '';
-        return `<p class="home-status">${numbers.length.toLocaleString()} starred ${numbers.length === 1 ? 'ticket' : 'tickets'}, newest first.</p>` +
-            ticketTableHtml(data.found, columns) + missing + ticketDownloadHtml(data.found, 'Starred tickets', columns);
-    });
+        return '<div class="results-head">' +
+            `<p class="home-status">${numbers.length.toLocaleString()} starred ${numbers.length === 1 ? 'ticket' : 'tickets'}, newest first. ` +
+            'Tick tickets to unstar several at once.</p>' +
+            `<button type="button" class="home-action danger" onclick="unstarAll()">☆ Unstar all</button></div>` +
+            unstarByIssueHtml(data.tickets) + selectBarHtml('starred') +
+            ticketTableHtml(data.tickets, columns, new Set(), 'fresh', { select: 'starred' }) + missing + ticketDownloadHtml(data.tickets, 'Starred tickets', columns);
+    }, quiet).then(() => paintSelection('starred'));
+}
+
+// "Unstar by issue": starred tickets that share a family (the same parent
+// incident, problem, change, order, bundle or request), one button per family
+function unstarByIssueHtml(tickets) {
+    const groups = new Map();
+    for (const t of tickets) {
+        for (const f of t.families || []) {
+            if (!groups.has(f.key)) groups.set(f.key, { name: f.name, numbers: [] });
+            groups.get(f.key).numbers.push(t.number);
+        }
+    }
+    const shared = [...groups.values()].filter(g => g.numbers.length >= 2).sort((a, b) => b.numbers.length - a.numbers.length);
+    if (!shared.length) return '';
+    const shown = shared.slice(0, 10);
+    // The numbers are ticket numbers (from the server's list), so they need no escaping
+    return '<div class="issue-bar"><span class="issue-label">Unstar by issue:</span>' +
+        shown.map(g => `<button type="button" class="issue-unstar" data-unstar-many="${g.numbers.join(',')}" data-what="${escapeHtml(g.name)}">` +
+            `☆ Unstar the ${g.numbers.length} in ${escapeHtml(g.name)}</button>`).join('') +
+        (shared.length > shown.length ? `<span class="issue-more">and ${(shared.length - shown.length).toLocaleString()} more issues</span>` : '') + '</div>';
+}
+
+// ---------------------------------------------------------------------
+// Selecting tickets in Ticket results or Starred tickets: tick rows (Shift
+// ticks a range, the header's checkbox ticks all), then remove them from
+// the list or unstar them, in one go
+// ---------------------------------------------------------------------
+
+const selections = { results: new Set(), starred: new Set() };
+const lastTicked = { results: null, starred: null };
+const LIST_BOXES = { results: 'ticket-results', starred: 'starred-result' };
+
+function selectBarHtml(list) {
+    return `<div class="select-bar" data-select-bar="${list}"><span class="select-count" aria-live="polite"></span>` +
+        `<button type="button" class="home-action danger" data-selected-action="${list}" disabled></button>` +
+        `<button type="button" class="home-action" data-select-none="${list}" disabled>Clear selection</button></div>`;
+}
+
+// The ticks, the header checkbox and the bar, from the list's selection
+function paintSelection(list) {
+    const out = document.getElementById(LIST_BOXES[list]);
+    const boxes = [...out.querySelectorAll('.row-select')];
+    const present = new Set(boxes.map(b => b.value));
+    for (const n of [...selections[list]]) if (!present.has(n)) selections[list].delete(n);
+    for (const box of boxes) {
+        box.checked = selections[list].has(box.value);
+        box.closest('tr').classList.toggle('selected', box.checked);
+    }
+    const n = selections[list].size;
+    const all = out.querySelector('.select-all');
+    if (all) {
+        all.checked = n > 0 && n === boxes.length;
+        all.indeterminate = n > 0 && n < boxes.length;
+    }
+    const bar = out.querySelector('.select-bar');
+    if (!bar) return;
+    bar.querySelector('.select-count').textContent = n ? `${n.toLocaleString()} selected`
+        : list === 'results' ? 'Tick tickets to remove them from this list.' : 'Tick tickets to unstar them together.';
+    const action = bar.querySelector('[data-selected-action]');
+    action.disabled = !n;
+    action.textContent = list === 'results' ? (n ? `✕ Remove ${n.toLocaleString()} from Ticket results` : '✕ Remove from Ticket results')
+        : (n ? `☆ Unstar ${n.toLocaleString()}` : '☆ Unstar selected');
+    bar.querySelector('[data-select-none]').disabled = !n;
+}
+
+document.addEventListener('click', e => {
+    const box = e.target.closest?.('.row-select, .select-all');
+    if (box) {
+        const list = box.dataset.selectList;
+        const boxes = [...document.getElementById(LIST_BOXES[list]).querySelectorAll('.row-select')];
+        if (box.classList.contains('select-all')) {
+            for (const b of boxes) box.checked ? selections[list].add(b.value) : selections[list].delete(b.value);
+        } else {
+            // Shift: every row between the last one ticked and this one takes this one's tick
+            const i = boxes.indexOf(box);
+            const from = e.shiftKey && lastTicked[list] !== null ? Math.min(lastTicked[list], i) : i;
+            const to = e.shiftKey && lastTicked[list] !== null ? Math.max(lastTicked[list], i) : i;
+            for (const b of boxes.slice(from, to + 1)) box.checked ? selections[list].add(b.value) : selections[list].delete(b.value);
+            lastTicked[list] = i;
+        }
+        paintSelection(list);
+        return;
+    }
+    const none = e.target.closest?.('[data-select-none]');
+    if (none) {
+        selections[none.dataset.selectNone].clear();
+        paintSelection(none.dataset.selectNone);
+        return;
+    }
+    const act = e.target.closest?.('[data-selected-action]');
+    if (act) {
+        const list = act.dataset.selectedAction;
+        const numbers = [...selections[list]];
+        if (list === 'results') removeFromResults(numbers);
+        else unstarMany(numbers, `${numbers.length.toLocaleString()} ${numbers.length === 1 ? 'ticket' : 'tickets'}`);
+        return;
+    }
+    const issue = e.target.closest?.('[data-unstar-many]');
+    if (issue) {
+        const numbers = issue.dataset.unstarMany.split(',');
+        unstarMany(numbers, `the ${numbers.length} in ${issue.dataset.what}`);
+    }
+});
+
+// The ticked tickets leave Ticket results (on every computer); their stars stay
+async function removeFromResults(numbers) {
+    if (!numbers.length) return;
+    const total = document.querySelectorAll('#ticket-results .row-select').length;
+    if (numbers.length === total && !confirm(`Remove all ${total.toLocaleString()} tickets from your ticket results? Your starred tickets stay starred.`)) return;
+    try {
+        const response = await fetch(`${API_BASE}/api/seen-tickets/remove`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ numbers }),
+        });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        for (const n of numbers) {
+            selections.results.delete(n);
+            latestShown.delete(n);
+        }
+        await showTicketResults(true);
+        showToast(`Removed ${numbers.length.toLocaleString()} ${numbers.length === 1 ? 'ticket' : 'tickets'} from Ticket results`);
+    } catch (err) {
+        showToast(`❌ ${err.message}`);
+    }
+}
+
+// Unstars many in one request; the screen changes at once, and back if the server says no
+async function unstarMany(numbers, what) {
+    const toRemove = numbers.filter(n => starredTickets.has(n));
+    if (!toRemove.length) return;
+    const before = new Map(toRemove.map(n => [n, starredTickets.get(n)]));
+    for (const n of toRemove) starredTickets.delete(n);
+    refreshStarButtons();
+    try {
+        const response = await fetch(`${API_BASE}/api/stars/remove`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ numbers: toRemove }),
+        });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        for (const n of toRemove) selections.starred.delete(n);
+        if (homeMode === 'starred') await showStarred(true);
+        showToast(`☆ Unstarred ${what}`);
+    } catch (err) {
+        for (const [n, at] of before) starredTickets.set(n, at);
+        refreshStarButtons();
+        showToast(`❌ ${err.message}`);
+    }
+}
+
+function unstarAll() {
+    const count = starredTickets.size;
+    if (!count || !confirm(`Unstar all ${count.toLocaleString()} starred ${count === 1 ? 'ticket' : 'tickets'}? This can't be undone.`)) return;
+    unstarMany([...starredTickets.keys()], `all ${count.toLocaleString()} ${count === 1 ? 'ticket' : 'tickets'}`);
 }
 
 // One listener for every star, ticket link and record button, wherever it was drawn

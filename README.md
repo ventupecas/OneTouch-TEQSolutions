@@ -283,8 +283,8 @@ person can change it with **✏️ Customize Home**.
 **Ticket results** is every ticket the AI assistant has shown you, newest first. When an
 answer lists tickets, they appear at the top of the list automatically, highlighted, and a
 note says how many ("28 tickets from this answer are now in Ticket results on Home"). Each
-row shows the ticket's summary, when it was shown, and the question that showed it. A
-ticket shown again moves back to the top. The list is kept with your account (the
+row shows the ticket's summary, its **Parent** and **Family** (see below), when it was shown,
+and the question that showed it. A ticket shown again moves back to the top. The list is kept with your account (the
 `seen_tickets` table in `onetouch_auth`), so it is still there after a refresh, after
 signing out and in, and on another computer. Each person has their own list, holding the
 2,000 most recent tickets.
@@ -298,11 +298,42 @@ from a ticket number"). The list downloads like any other table.
 asks first, and the list is then empty on every computer. Starred tickets stay starred, and
 new answers start filling the list again.
 
+**Removing some.** Each row has a checkbox. Tick the ones you want gone (Shift-click ticks a
+whole range, the box in the header ticks every row) and click **✕ Remove *n* from Ticket
+results**; the rest stay, and so do the stars. **Clear selection** unticks them. Removing
+every row asks first, like Clear ticket results. Ticks survive the list refreshing (after a
+new answer, for example).
+
+**Parent and Family.** Ticket results and Starred tickets both show, after the summary:
+- **Parent**: an incident's parent incident, a request's bundle request (or, if it has
+  none, its order, the REQ), a catalog task's request. Click it to open that ticket.
+- **Family**: every family the ticket is in, with how many tickets each has, e.g.
+  "Parent incident INC1813985 · 6", "Problem PRB0051839 · 96", "Order REQ0421352 · 18",
+  "Change CHG1100098 · 2" (a change with the incident it fixes or the ones it caused),
+  "Bundle request RITM0440455 · 3", "Request RITM0440498 and its tasks · 2". Click one to
+  open its parent (or anchor) ticket, with the whole family under 🔗 Related tickets.
+  Problem records themselves aren't in the export, so a problem isn't clickable.
+
+These come from the same links as 🔗 Related tickets below, and are in the downloads too.
+They are worked out once per ticket and then kept (the data never changes): 500 tickets
+take about half a second the first time, a tenth of a second after that.
+
 A ☆ appears next to every ticket number in OneTouch: in ticket results, in the AI assistant's
 tables, and in the Dashboards toolbar on an incident, change or request record. Stars are
 saved to each person's account (the `starred_tickets` table in `onetouch_auth`), so they
 follow you to any computer that signs in to the same server. A full copy of the tool keeps its
 own stars; they aren't in `db/accounts.json`.
+
+**Unstarring many.** In **Starred tickets**:
+- Tick rows (Shift-click for a range, the header box for all) and click **☆ Unstar *n***.
+- **☆ Unstar all** (at the right of the summary line) unstars every one, after asking.
+- **Unstar by issue**: one button for each family that two or more of your starred tickets
+  share, e.g. **☆ Unstar the 3 in Parent incident INC1813985** or **☆ Unstar the 2 in Order
+  REQ0421352** (the biggest ten; a note counts the rest). One click unstars that whole group.
+
+Each is one request, however many tickets. The ☆ on a single row still unstars just that one
+and leaves the row (with an empty star) until the list is opened again, so a slip of the
+mouse is easy to undo.
 
 **Star all.** Ticket results, and every AI answer that lists two or more tickets, have a
 row of yellow buttons: **★ Star all 30 tickets**, plus one per type when the list mixes
@@ -1360,8 +1391,12 @@ Check: `node --check business_logic.mjs` prints nothing.
   - Every data route (`/api/query`, `/api/export`, `/api/conversation/reset`, `/api/me`,
     `/api/dashboards`, `/api/tickets/search`, `/api/stars`) needs a signed-in session.
   - `/api/tickets/search` → `tickets.mjs`; `/api/stars` (list, `PUT` to star, `DELETE`
-    to unstar, and `PUT /api/stars` with a list of numbers to star many at once) → `stars.mjs`. `/api/seen-tickets` (the person's Ticket results with
-    summaries; `POST` adds an opened record; `DELETE` empties the list) → `seen.mjs`. `/api/query` saves every ticket
+    to unstar, `PUT /api/stars` with a list of numbers to star many at once, `POST
+    /api/stars/remove` to unstar many, and `GET /api/stars?details=1` for the Starred
+    tickets list with each ticket's summary, parent and families) → `stars.mjs`.
+    `/api/seen-tickets` (the person's Ticket results with summaries, parents and families;
+    `POST` adds an opened record; `POST /api/seen-tickets/remove` removes ticked ones;
+    `DELETE` empties the list) → `seen.mjs`. `/api/query` saves every ticket
     number in an answer's rows there before replying, and lists them as `shownTickets`.
   - `/api/query`: question → Claude (streaming, with prompt caching, conversation memory
     per session, up to 40 turns) → validator → Cube, one query per table in parallel →
@@ -1400,6 +1435,9 @@ Check: `node --check business_logic.mjs` prints nothing.
   sums them up for Claude. The page calls `POST /api/tickets/related` with `{ numbers,
   conversation }`; with `conversation: true`, the summary joins the conversation's
   `pendingNote`, queued behind the answer and only for that same conversation.
+  `ticketLinks` is the light version for whole lists: each ticket's parent and its
+  families with their sizes (from the ticket's own link columns plus one count per kind of
+  family, no members fetched), kept in memory per ticket because the data never changes.
 - `prefs.mjs` ([B.44](#b44)): each person's preferences, in the `user_preferences` table of
   `onetouch_auth` (one JSON document per person, saved in three parts: `theme`, `home`,
   `dashboards`). Everything the page sends is cleaned first: unknown keys dropped, text
@@ -5701,7 +5739,7 @@ import * as auth from './auth.mjs';
 import * as stars from './stars.mjs';
 import * as seen from './seen.mjs';
 import { findTickets, ticketRecord, ticketSummaries, ticketNumbersIn, STARRABLE } from './tickets.mjs';
-import { relatedFamilies, describeFamilies } from './relations.mjs';
+import { relatedFamilies, describeFamilies, ticketLinks } from './relations.mjs';
 import * as prefs from './prefs.mjs';
 import { chartData, chartValues, chartCatalog, chartTickets, chartFromQuery, teamValues, ChartError } from './charts.mjs';
 import * as shares from './shares.mjs';
@@ -6330,8 +6368,9 @@ app.post('/api/tickets/related', async (req, res) => {
 app.get('/api/seen-tickets', async (req, res) => {
   try {
     const list = await seen.listSeen(req.user.id);
-    const summaries = await ticketSummaries(list.map(s => s.number), runCubeQuery);
-    res.json({ tickets: list.filter(s => summaries.has(s.number)).map(s => ({ ...summaries.get(s.number), shownAt: s.shownAt, question: s.question })) });
+    const numbers = list.map(s => s.number);
+    const [summaries, links] = await Promise.all([ticketSummaries(numbers, runCubeQuery), linksOrNone(numbers)]);
+    res.json({ tickets: list.filter(s => summaries.has(s.number)).map(s => ({ ...summaries.get(s.number), ...links.get(s.number), shownAt: s.shownAt, question: s.question })) });
   } catch (error) {
     console.error('🎫 Could not list the shown tickets:', error.message);
     res.status(503).json({ error: 'Your ticket results could not be loaded right now.' });
@@ -6350,6 +6389,31 @@ app.delete('/api/seen-tickets', async (req, res) => {
   }
 });
 
+// Each ticket's parent and families (relations.mjs) for a list; if that fails, the
+// list still shows, just without them
+async function linksOrNone(numbers) {
+  try {
+    return await ticketLinks(numbers, runCubeQuery);
+  } catch (error) {
+    console.error('🔗 Could not look up parents and families:', error.message);
+    return new Map();
+  }
+}
+
+// { numbers } -> the ones someone ticked leave their Ticket results (the rest stay)
+app.post('/api/seen-tickets/remove', async (req, res) => {
+  const numbers = (Array.isArray(req.body?.numbers) ? req.body.numbers : []).map(n => String(n).toUpperCase()).filter(n => STARRABLE.test(n)).slice(0, seen.MAX_SEEN);
+  if (!numbers.length) return res.status(400).json({ error: 'No tickets to remove.' });
+  try {
+    const removed = await seen.removeSeen(req.user.id, numbers);
+    console.log(`🎫 ${req.user.username} removed ${removed} from their ticket results`);
+    res.json({ ok: true, removed });
+  } catch (error) {
+    console.error('🎫 Could not remove from the ticket results:', error.message);
+    res.status(503).json({ error: 'Those tickets could not be removed right now.' });
+  }
+});
+
 // A ticket record someone opened (clicked a ticket number): it joins their Ticket results
 app.post('/api/seen-tickets', async (req, res) => {
   const numbers = (Array.isArray(req.body?.numbers) ? req.body.numbers : []).map(n => String(n).toUpperCase()).filter(n => STARRABLE.test(n)).slice(0, 50);
@@ -6363,9 +6427,19 @@ app.post('/api/seen-tickets', async (req, res) => {
   }
 });
 
+// ?details=1: also each starred ticket's summary, parent and families (for the
+// Starred tickets list), and the stars that aren't in the data
 app.get('/api/stars', async (req, res) => {
   try {
-    res.json({ stars: await stars.listStars(req.user.id) });
+    const list = await stars.listStars(req.user.id);
+    if (!req.query.details) return res.json({ stars: list });
+    const numbers = list.map(s => s.number);
+    const [summaries, links] = await Promise.all([ticketSummaries(numbers, runCubeQuery), linksOrNone(numbers)]);
+    res.json({
+      stars: list,
+      tickets: list.filter(s => summaries.has(s.number)).map(s => ({ ...summaries.get(s.number), ...links.get(s.number), starredAt: s.starredAt })),
+      notFound: numbers.filter(n => !summaries.has(n)),
+    });
   } catch (error) {
     console.error('⭐ Could not list stars:', error.message);
     res.status(503).json({ error: 'Your starred tickets could not be loaded right now.' });
@@ -6383,6 +6457,18 @@ app.put('/api/stars', async (req, res) => {
   } catch (error) {
     console.error('⭐ Could not star all:', error.message);
     res.status(503).json({ error: 'Those tickets could not be starred right now.' });
+  }
+});
+
+// { numbers } -> unstars them all at once (ticked ones, a whole family, or every star)
+app.post('/api/stars/remove', async (req, res) => {
+  const numbers = (Array.isArray(req.body?.numbers) ? req.body.numbers : []).map(n => String(n).toUpperCase()).filter(n => STARRABLE.test(n)).slice(0, stars.MAX_STARS);
+  if (!numbers.length) return res.status(400).json({ error: 'No tickets to unstar.' });
+  try {
+    res.json({ ok: true, removed: await stars.removeStars(req.user.id, numbers) });
+  } catch (error) {
+    console.error('⭐ Could not unstar many:', error.message);
+    res.status(503).json({ error: 'Those tickets could not be unstarred right now.' });
   }
 });
 
@@ -8595,6 +8681,55 @@ dialog.ask-dialog {
 }
 
 /* =====================================================================
+   TICKET RESULTS AND STARRED TICKETS: ticking rows to remove or unstar
+   them together, unstar by issue, and each ticket's parent and family
+   ===================================================================== */
+
+.result-table .select-cell { width: 28px; min-width: 28px; padding-right: 0; }
+.select-cell input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--accent); cursor: pointer; }
+.result-table tbody tr.selected,
+.result-table tbody tr.selected:nth-child(even) { background: var(--accent-soft); }
+.select-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 10px 0; font-size: 0.85rem; color: var(--text-2); }
+.select-count { min-width: 9em; }
+.select-bar .home-action:disabled { opacity: 0.45; cursor: default; }
+
+/* The parent and the families (each opens its anchor's record) */
+.result-table td.family-cell { min-width: 220px; }
+.family-chip {
+    display: inline-block;
+    margin: 0 4px 4px 0;
+    padding: 2px 8px;
+    background: var(--info-soft);
+    border: 1px solid transparent;
+    border-radius: 999px;
+    color: var(--link);
+    font: inherit;
+    font-size: 0.8rem;
+    white-space: nowrap;
+}
+button.family-chip { cursor: pointer; }
+button.family-chip:hover { border-color: var(--info); }
+button.family-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+span.family-chip { color: var(--text-2); background: var(--surface-3); }
+
+/* "Unstar by issue": one button per family two or more starred tickets share */
+.issue-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }
+.issue-label { font-size: 0.85rem; font-weight: 700; color: var(--text-2); }
+.issue-more { font-size: 0.8rem; color: var(--muted); }
+.issue-unstar {
+    background: var(--panel-bg);
+    border: 1px solid var(--warn-line);
+    border-radius: 6px;
+    padding: 5px 10px;
+    color: var(--warn-ink);
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.issue-unstar:hover { background: var(--warn-softer); }
+
+/* =====================================================================
    SIGN-IN PAGE (from styles2.css; every rule is scoped to .login-page
    so it cannot restyle the app behind it)
    ===================================================================== */
@@ -10511,6 +10646,8 @@ function setHomeMode(mode, quiet = false) {
 // Signing out leaves nothing of this person's on the page
 function resetHome() {
     for (const m of HOME_MODES) homeRuns[m] += 1;
+    selections.results.clear();
+    selections.starred.clear();
     latestShown = new Set();
     openedRecord = null;
     document.getElementById('ticket-results').innerHTML = NO_TICKET_RESULTS_HTML;
@@ -10547,6 +10684,29 @@ const TICKET_COLUMNS = [
 ];
 const STARRED_COLUMN = ['Starred', t => formatStarredAt(starredTickets.get(t.number))];
 
+// Each ticket's parent and the families it is in (relations.mjs ticketLinks),
+// in Ticket results and Starred tickets. The third item draws the cell: the
+// parent and each family's anchor open that ticket's record, with its related tickets.
+const OPENABLE = /^(INC|CHG|RITM|SCTASK|REQ)\d{7}$/;
+const LINK_COLUMNS = [
+    ['Parent', t => t.parent || '', t => t.parent && OPENABLE.test(t.parent)
+        ? `<button type="button" class="ticket-link" data-ticket="${escapeHtml(t.parent)}" title="Open ${escapeHtml(t.parent)}">${escapeHtml(t.parent)}</button>` : '—'],
+    ['Family', t => (t.families || []).map(f => `${f.name} (${f.size} ${f.size === 1 ? 'ticket' : 'tickets'})`).join('; '),
+        t => (t.families || []).length ? t.families.map(familyChipHtml).join('') : '—'],
+];
+
+// "Parent incident INC1813985 · 6": opens the anchor's record and its related tickets
+function familyChipHtml(f) {
+    const label = escapeHtml(`${f.name} · ${f.size.toLocaleString()}`);
+    const size = `${f.size.toLocaleString()} ${f.size === 1 ? 'ticket' : 'tickets'} in this family`;
+    return OPENABLE.test(f.anchor)
+        ? `<button type="button" class="family-chip" data-ticket="${escapeHtml(f.anchor)}" title="${size}. Click to open ${escapeHtml(f.anchor)} and see the family">${label}</button>`
+        : `<span class="family-chip" title="${size}. The problem record itself isn't in this export">${label}</span>`;
+}
+
+// The list columns with Parent and Family after the summary
+const withLinks = extra => [...TICKET_COLUMNS.slice(0, 3), ...LINK_COLUMNS, ...TICKET_COLUMNS.slice(3), ...extra];
+
 function formatStarredAt(iso) {
     const d = iso ? new Date(iso) : null;
     return d && !Number.isNaN(d.getTime())
@@ -10555,13 +10715,19 @@ function formatStarredAt(iso) {
 
 // Ticket numbers open the ticket; every row has a star. Rows whose number is
 // in `highlight` (e.g. the latest answer's tickets) get `highlightClass`.
-function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set(), highlightClass = 'fresh') {
-    const head = columns.map(([label]) => `<th>${escapeHtml(label)}</th>`).join('');
-    const body = tickets.map(t => (highlight.has(t.number) ? `<tr class="${highlightClass}">` : '<tr>') + columns.map(([label, get], i) => {
+// select: the list's name ('results', 'starred'): each row gets a checkbox,
+// and the header's ticks them all.
+function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set(), highlightClass = 'fresh', { select = null } = {}) {
+    const head = (select ? `<th class="select-cell"><input type="checkbox" class="select-all" data-select-list="${select}" aria-label="Select all"></th>` : '') +
+        columns.map(([label]) => `<th>${escapeHtml(label)}</th>`).join('');
+    const body = tickets.map(t => (highlight.has(t.number) ? `<tr class="${highlightClass}">` : '<tr>') +
+        (select ? `<td class="select-cell"><input type="checkbox" class="row-select" data-select-list="${select}" value="${escapeHtml(t.number)}" aria-label="Select ${escapeHtml(t.number)}"></td>` : '') +
+        columns.map(([label, get, html], i) => {
         if (i === 0) {
             return `<td class="ticket-cell"><button type="button" class="ticket-link" data-ticket="${escapeHtml(t.number)}"` +
                 ` title="Open ${escapeHtml(t.number)}">${escapeHtml(t.number)}</button>${starButtonHtml(t.number)}</td>`;
         }
+        if (html) return `<td class="${label === 'Family' ? 'family-cell' : 'parent-cell'}">${html(t)}</td>`;
         const text = String(get(t) || '');
         if (label === 'Summary' && text.length > 120) {
             return `<td title="${escapeHtml(text)}">${escapeHtml(text.slice(0, 117))}…</td>`;
@@ -10670,16 +10836,16 @@ function showTicketResults(quiet = false) {
         if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
         const tickets = data.tickets || [];
         if (!tickets.length) return NO_TICKET_RESULTS_HTML;
-        const columns = [...TICKET_COLUMNS, ...SHOWN_COLUMNS];
+        const columns = withLinks(SHOWN_COLUMNS);
         const fresh = tickets.filter(t => latestShown.has(t.number)).length;
         return '<div class="results-head">' +
             `<p class="home-status">${tickets.length.toLocaleString()} ${tickets.length === 1 ? 'ticket' : 'tickets'} shown to you, newest first. ` +
             (fresh ? `<span class="fresh-key">Highlighted: the ${fresh.toLocaleString()} from your latest question.</span> ` : '') +
-            'Click a ticket number to see its full record.</p>' +
+            'Click a ticket number to see its full record, or its parent or family to see those.</p>' +
             `<button type="button" class="home-action danger" onclick="clearTicketResults(${tickets.length})">🧹 Clear ticket results</button></div>` +
-            starAllHtml(tickets.map(t => t.number)) +
-            ticketTableHtml(tickets, columns, latestShown) + ticketDownloadHtml(tickets, 'Ticket results', columns);
-    }, quiet);
+            starAllHtml(tickets.map(t => t.number)) + selectBarHtml('results') +
+            ticketTableHtml(tickets, columns, latestShown, 'fresh', { select: 'results' }) + ticketDownloadHtml(tickets, 'Ticket results', columns);
+    }, quiet).then(() => paintSelection('results'));
 }
 
 // A ticket number someone clicked: its full record, with the way back to the list.
@@ -10861,23 +11027,190 @@ function ticketsShown(numbers) {
 
 // Newest star first. Unstarring here leaves the row (with an empty star) until
 // the list is opened again, so a slip of the mouse is easy to undo.
-function showStarred() {
+function showStarred(quiet = false) {
     return runHomeSearch('starred', 'starred-result', async () => {
-        await loadStars();
-        const numbers = [...starredTickets.keys()];
+        const response = await fetch(`${API_BASE}/api/stars?details=1`, { headers: authHeaders() });
+        if (handleUnauthorized(response)) return null;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        starredTickets.clear();
+        for (const s of data.stars) starredTickets.set(s.number, s.starredAt);
+        refreshStarButtons();
+        const numbers = data.stars.map(s => s.number);
         if (!numbers.length) {
             return '<p class="home-status">No starred tickets yet. Click ☆ next to any ticket number: in your ticket results, ' +
                 'in the AI assistant\'s answers, or on an incident, change or request record in Dashboards. ' +
                 'Your stars are saved to your account, so they are here on any computer you sign in from.</p>';
         }
-        const data = await searchTickets(numbers.join(' '));
-        if (!data) return null;
-        const columns = [...TICKET_COLUMNS, STARRED_COLUMN];
+        const columns = withLinks([STARRED_COLUMN]);
         const missing = data.notFound.length
             ? `<p class="home-status">Not in the data any more: ${escapeHtml(data.notFound.join(', '))}</p>` : '';
-        return `<p class="home-status">${numbers.length.toLocaleString()} starred ${numbers.length === 1 ? 'ticket' : 'tickets'}, newest first.</p>` +
-            ticketTableHtml(data.found, columns) + missing + ticketDownloadHtml(data.found, 'Starred tickets', columns);
-    });
+        return '<div class="results-head">' +
+            `<p class="home-status">${numbers.length.toLocaleString()} starred ${numbers.length === 1 ? 'ticket' : 'tickets'}, newest first. ` +
+            'Tick tickets to unstar several at once.</p>' +
+            `<button type="button" class="home-action danger" onclick="unstarAll()">☆ Unstar all</button></div>` +
+            unstarByIssueHtml(data.tickets) + selectBarHtml('starred') +
+            ticketTableHtml(data.tickets, columns, new Set(), 'fresh', { select: 'starred' }) + missing + ticketDownloadHtml(data.tickets, 'Starred tickets', columns);
+    }, quiet).then(() => paintSelection('starred'));
+}
+
+// "Unstar by issue": starred tickets that share a family (the same parent
+// incident, problem, change, order, bundle or request), one button per family
+function unstarByIssueHtml(tickets) {
+    const groups = new Map();
+    for (const t of tickets) {
+        for (const f of t.families || []) {
+            if (!groups.has(f.key)) groups.set(f.key, { name: f.name, numbers: [] });
+            groups.get(f.key).numbers.push(t.number);
+        }
+    }
+    const shared = [...groups.values()].filter(g => g.numbers.length >= 2).sort((a, b) => b.numbers.length - a.numbers.length);
+    if (!shared.length) return '';
+    const shown = shared.slice(0, 10);
+    // The numbers are ticket numbers (from the server's list), so they need no escaping
+    return '<div class="issue-bar"><span class="issue-label">Unstar by issue:</span>' +
+        shown.map(g => `<button type="button" class="issue-unstar" data-unstar-many="${g.numbers.join(',')}" data-what="${escapeHtml(g.name)}">` +
+            `☆ Unstar the ${g.numbers.length} in ${escapeHtml(g.name)}</button>`).join('') +
+        (shared.length > shown.length ? `<span class="issue-more">and ${(shared.length - shown.length).toLocaleString()} more issues</span>` : '') + '</div>';
+}
+
+// ---------------------------------------------------------------------
+// Selecting tickets in Ticket results or Starred tickets: tick rows (Shift
+// ticks a range, the header's checkbox ticks all), then remove them from
+// the list or unstar them, in one go
+// ---------------------------------------------------------------------
+
+const selections = { results: new Set(), starred: new Set() };
+const lastTicked = { results: null, starred: null };
+const LIST_BOXES = { results: 'ticket-results', starred: 'starred-result' };
+
+function selectBarHtml(list) {
+    return `<div class="select-bar" data-select-bar="${list}"><span class="select-count" aria-live="polite"></span>` +
+        `<button type="button" class="home-action danger" data-selected-action="${list}" disabled></button>` +
+        `<button type="button" class="home-action" data-select-none="${list}" disabled>Clear selection</button></div>`;
+}
+
+// The ticks, the header checkbox and the bar, from the list's selection
+function paintSelection(list) {
+    const out = document.getElementById(LIST_BOXES[list]);
+    const boxes = [...out.querySelectorAll('.row-select')];
+    const present = new Set(boxes.map(b => b.value));
+    for (const n of [...selections[list]]) if (!present.has(n)) selections[list].delete(n);
+    for (const box of boxes) {
+        box.checked = selections[list].has(box.value);
+        box.closest('tr').classList.toggle('selected', box.checked);
+    }
+    const n = selections[list].size;
+    const all = out.querySelector('.select-all');
+    if (all) {
+        all.checked = n > 0 && n === boxes.length;
+        all.indeterminate = n > 0 && n < boxes.length;
+    }
+    const bar = out.querySelector('.select-bar');
+    if (!bar) return;
+    bar.querySelector('.select-count').textContent = n ? `${n.toLocaleString()} selected`
+        : list === 'results' ? 'Tick tickets to remove them from this list.' : 'Tick tickets to unstar them together.';
+    const action = bar.querySelector('[data-selected-action]');
+    action.disabled = !n;
+    action.textContent = list === 'results' ? (n ? `✕ Remove ${n.toLocaleString()} from Ticket results` : '✕ Remove from Ticket results')
+        : (n ? `☆ Unstar ${n.toLocaleString()}` : '☆ Unstar selected');
+    bar.querySelector('[data-select-none]').disabled = !n;
+}
+
+document.addEventListener('click', e => {
+    const box = e.target.closest?.('.row-select, .select-all');
+    if (box) {
+        const list = box.dataset.selectList;
+        const boxes = [...document.getElementById(LIST_BOXES[list]).querySelectorAll('.row-select')];
+        if (box.classList.contains('select-all')) {
+            for (const b of boxes) box.checked ? selections[list].add(b.value) : selections[list].delete(b.value);
+        } else {
+            // Shift: every row between the last one ticked and this one takes this one's tick
+            const i = boxes.indexOf(box);
+            const from = e.shiftKey && lastTicked[list] !== null ? Math.min(lastTicked[list], i) : i;
+            const to = e.shiftKey && lastTicked[list] !== null ? Math.max(lastTicked[list], i) : i;
+            for (const b of boxes.slice(from, to + 1)) box.checked ? selections[list].add(b.value) : selections[list].delete(b.value);
+            lastTicked[list] = i;
+        }
+        paintSelection(list);
+        return;
+    }
+    const none = e.target.closest?.('[data-select-none]');
+    if (none) {
+        selections[none.dataset.selectNone].clear();
+        paintSelection(none.dataset.selectNone);
+        return;
+    }
+    const act = e.target.closest?.('[data-selected-action]');
+    if (act) {
+        const list = act.dataset.selectedAction;
+        const numbers = [...selections[list]];
+        if (list === 'results') removeFromResults(numbers);
+        else unstarMany(numbers, `${numbers.length.toLocaleString()} ${numbers.length === 1 ? 'ticket' : 'tickets'}`);
+        return;
+    }
+    const issue = e.target.closest?.('[data-unstar-many]');
+    if (issue) {
+        const numbers = issue.dataset.unstarMany.split(',');
+        unstarMany(numbers, `the ${numbers.length} in ${issue.dataset.what}`);
+    }
+});
+
+// The ticked tickets leave Ticket results (on every computer); their stars stay
+async function removeFromResults(numbers) {
+    if (!numbers.length) return;
+    const total = document.querySelectorAll('#ticket-results .row-select').length;
+    if (numbers.length === total && !confirm(`Remove all ${total.toLocaleString()} tickets from your ticket results? Your starred tickets stay starred.`)) return;
+    try {
+        const response = await fetch(`${API_BASE}/api/seen-tickets/remove`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ numbers }),
+        });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        for (const n of numbers) {
+            selections.results.delete(n);
+            latestShown.delete(n);
+        }
+        await showTicketResults(true);
+        showToast(`Removed ${numbers.length.toLocaleString()} ${numbers.length === 1 ? 'ticket' : 'tickets'} from Ticket results`);
+    } catch (err) {
+        showToast(`❌ ${err.message}`);
+    }
+}
+
+// Unstars many in one request; the screen changes at once, and back if the server says no
+async function unstarMany(numbers, what) {
+    const toRemove = numbers.filter(n => starredTickets.has(n));
+    if (!toRemove.length) return;
+    const before = new Map(toRemove.map(n => [n, starredTickets.get(n)]));
+    for (const n of toRemove) starredTickets.delete(n);
+    refreshStarButtons();
+    try {
+        const response = await fetch(`${API_BASE}/api/stars/remove`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ numbers: toRemove }),
+        });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        for (const n of toRemove) selections.starred.delete(n);
+        if (homeMode === 'starred') await showStarred(true);
+        showToast(`☆ Unstarred ${what}`);
+    } catch (err) {
+        for (const [n, at] of before) starredTickets.set(n, at);
+        refreshStarButtons();
+        showToast(`❌ ${err.message}`);
+    }
+}
+
+function unstarAll() {
+    const count = starredTickets.size;
+    if (!count || !confirm(`Unstar all ${count.toLocaleString()} starred ${count === 1 ? 'ticket' : 'tickets'}? This can't be undone.`)) return;
+    unstarMany([...starredTickets.keys()], `all ${count.toLocaleString()} ${count === 1 ? 'ticket' : 'tickets'}`);
 }
 
 // One listener for every star, ticket link and record button, wherever it was drawn
@@ -13072,9 +13405,9 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 |---|---|
 | `server.mjs` | Express app (port 8000): sign-in routes, `/api/query` (one-shot translator with per-session conversation memory), `/api/export`, `/api/tickets/search` and `/api/stars` (home page), dashboards list, and a pass-through of Metabase public-dashboard pages |
 | `tickets.mjs` | Home page ticket search: parses INC/CHG/RITM/SCTASK/REQ numbers and builds its own Cube queries from them (never from model output); full records use Cube's `/meta` column list |
-| `relations.mjs` | Related tickets: from the link columns only (incident.parent_incident, sc_req_item.parent / request, sc_task.request_item, change_request.incident, incident.caused_by_change, *.problem), the families a ticket is in, with `same` / `differ` comparisons and every member (the page lists 25 but downloads all, via `familyExportTables` in app.js); one ticket gets all its families, a list only families 2+ of its tickets share. `POST /api/tickets/related` (conversation: true adds `describeFamilies` to Claude's pendingNote) |
-| `stars.mjs` | Each person's starred tickets, in `onetouch_auth` (`starred_tickets`, created on start); `addStars` stars many at once ("Star all", `PUT /api/stars`) up to `MAX_STARS` |
-| `seen.mjs` | Each person's "Ticket results": every ticket shown to them (`seen_tickets`, created on start). `/api/query` records the ticket numbers in each answer (`ticketNumbersIn`) before replying and returns them as `shownTickets`; `GET /api/seen-tickets` returns the list with summaries (`ticketSummaries`); `DELETE /api/seen-tickets` empties it ("Clear ticket results") |
+| `relations.mjs` | Related tickets: from the link columns only (incident.parent_incident, sc_req_item.parent / request, sc_task.request_item, change_request.incident, incident.caused_by_change, *.problem), the families a ticket is in, with `same` / `differ` comparisons and every member (the page lists 25 but downloads all, via `familyExportTables` in app.js); one ticket gets all its families, a list only families 2+ of its tickets share. `POST /api/tickets/related` (conversation: true adds `describeFamilies` to Claude's pendingNote). `ticketLinks`: per ticket, its parent and families (`key` = kind:anchor, name, size) for the Ticket results / Starred lists, cached per ticket |
+| `stars.mjs` | Each person's starred tickets, in `onetouch_auth` (`starred_tickets`, created on start); `addStars` stars many at once ("Star all", `PUT /api/stars`) up to `MAX_STARS`; `removeStars` unstars many (`POST /api/stars/remove`: ticked rows, "Unstar by issue", "Unstar all"). `GET /api/stars?details=1` adds summaries, parents and families |
+| `seen.mjs` | Each person's "Ticket results": every ticket shown to them (`seen_tickets`, created on start). `/api/query` records the ticket numbers in each answer (`ticketNumbersIn`) before replying and returns them as `shownTickets`; `GET /api/seen-tickets` returns the list with summaries (`ticketSummaries`); `DELETE /api/seen-tickets` empties it ("Clear ticket results"), `POST /api/seen-tickets/remove` removes ticked rows (`removeSeen`); the list carries each ticket's parent and families (`ticketLinks`) |
 | `prefs.mjs` | Each person's preferences in `onetouch_auth` (`user_preferences`: one JSONB per user, saved in parts `theme` / `home` / `dashboards` via `PUT /api/preferences/:part`, reset with `DELETE`). `cleanPreference` drops unknown keys and caps sizes (20 dashboards x 30 charts, 30 Home sections); every chart goes through `sanitizeChart` |
 | `charts.mjs` | The charts people build: `CHART_SOURCES` (per ticket type, the fields to group / filter by and the time groupings), `sanitizeChart`, `chartData` (builds its own Cube query: count, one dimension, `equals` / `notEquals` / `contains` filters, open / closed states from `ENTITY_CATALOG`, a day range, plus a dashboard's `scope` (dates, teams via `TEAM_FIELDS`); top N plus an `other` total), `chartTickets` (the tickets behind one bar), `chartFromQuery` (an AI answer's validated query as a chart, returned on `/api/query` as `chartable`), `chartValues` / `teamValues`, `chartCatalog`. In-memory LRU cache, since the data is frozen. Routes: `/api/charts/catalog`, `/api/charts/data`, `/api/charts/values`, `/api/charts/teams`, `/api/charts/tickets` |
 | `shares.mjs` | Shared dashboards (`shared_dashboards` in `onetouch_auth`): one random token per (owner, dashboard), re-sharing updates it, anyone signed in can read it (`/api/shares`). The board goes through `prefs.cleanBoard` |
@@ -13665,6 +13998,12 @@ export async function addStars(userId, numbers) {
 export async function removeStar(userId, number) {
   await pool.query('DELETE FROM starred_tickets WHERE user_id = $1 AND number = $2', [userId, number]);
 }
+
+// Unstars many at once (ticked ones, a whole family, or all). -> how many were unstarred
+export async function removeStars(userId, numbers) {
+  const { rowCount } = await pool.query('DELETE FROM starred_tickets WHERE user_id = $1 AND number = ANY($2::text[])', [userId, numbers]);
+  return rowCount;
+}
 ```
 
 <a id="b39"></a>
@@ -14192,6 +14531,12 @@ export async function clearSeen(userId) {
   return rowCount;
 }
 
+// The tickets someone ticked and removed from their list. -> how many went
+export async function removeSeen(userId, numbers) {
+  const { rowCount } = await pool.query('DELETE FROM seen_tickets WHERE user_id = $1 AND number = ANY($2::text[])', [userId, numbers]);
+  return rowCount;
+}
+
 // Newest first
 export async function listSeen(userId) {
   const { rows } = await pool.query(
@@ -14459,6 +14804,127 @@ export function describeFamilies(families) {
     const differ = f.differ.map(d => d.field).join(', ');
     return `${f.title}${same ? `; all share ${same}` : ''}${differ ? `; they differ in ${differ}` : ''}.`;
   }).join(' ');
+}
+
+// =====================================================================
+// PARENT AND FAMILY, for lists (Ticket results, Starred tickets): each
+// ticket's parent, and the families it is in with how many tickets each
+// has, from the ticket's own link columns plus one count per kind of
+// family. Lighter than relatedFamilies (no members are fetched), so it
+// works for a whole list. The export is frozen, so a ticket's answer is
+// kept and reused.
+// =====================================================================
+
+const MAX_LINK_TICKETS = 2000;
+// Each ticket's link columns
+const LINK_COLUMNS = {
+  INC: ['parent_incident', 'problem', 'caused_by_change'],
+  CHG: ['incident', 'problem'],
+  RITM: ['parent', 'request'],
+  SCTASK: ['request_item'],
+};
+const linkCache = new Map(); // number -> { parent, families }
+const LINK_CACHE_SIZE = 50000;
+
+async function linkRows(prefix, column, values, runQuery) {
+  if (!values.length) return [];
+  const { cube } = TICKET_KINDS[prefix];
+  const columns = ['number', ...LINK_COLUMNS[prefix]];
+  const rows = await runQuery({
+    dimensions: columns.map(c => `${cube}.${c}`),
+    filters: [{ member: `${cube}.${column}`, operator: 'equals', values }],
+    limit: 5000,
+  });
+  return rows.map(r => Object.fromEntries(columns.map(c => [c, clean(r[`${cube}.${c}`])])));
+}
+
+// How many tickets of a type have each of these values in a link column
+async function countBy(cube, column, values, runQuery) {
+  if (!values.length) return new Map();
+  const rows = await runQuery({
+    measures: [`${cube}.count`],
+    dimensions: [`${cube}.${column}`],
+    filters: [{ member: `${cube}.${column}`, operator: 'equals', values }],
+    limit: 5000,
+  });
+  return new Map(rows.map(r => [clean(r[`${cube}.${column}`]), Number(r[`${cube}.count`]) || 0]));
+}
+
+// numbers -> Map(number -> { parent: number or '', families: [{ key, kind, anchor, name, size }] }).
+// key (kind + anchor) is the same for every member of one family, so a list
+// can be grouped by issue.
+export async function ticketLinks(numbers, runQuery) {
+  const wanted = [...new Set(numbers.map(n => String(n).toUpperCase()))].filter(n => TICKET_NUMBER.test(n)).slice(0, MAX_LINK_TICKETS);
+  const todo = wanted.filter(n => !linkCache.has(n));
+  if (todo.length) {
+    const of = prefix => todo.filter(n => prefixOf(n) === prefix);
+    const uniq = list => [...new Set(list.filter(Boolean))];
+    const [incs, chgs, ritms, tasks, fixers] = await Promise.all([
+      linkRows('INC', 'number', of('INC'), runQuery),
+      linkRows('CHG', 'number', of('CHG'), runQuery),
+      linkRows('RITM', 'number', of('RITM'), runQuery),
+      linkRows('SCTASK', 'number', of('SCTASK'), runQuery),
+      // Changes raised to fix these incidents
+      linkRows('CHG', 'incident', of('INC'), runQuery),
+    ]);
+    const parentIncidents = uniq([...incs.map(t => t.parent_incident), ...incs.map(t => t.number)]);
+    const problems = uniq([...incs, ...chgs].map(t => t.problem));
+    const changes = uniq([...incs.map(t => t.caused_by_change), ...chgs.map(t => t.number), ...fixers.map(f => f.number)]);
+    const orders = uniq(ritms.map(t => t.request));
+    const bundles = uniq([...ritms.map(t => t.parent), ...ritms.map(t => t.number)]);
+    const requestItems = uniq([...ritms.map(t => t.number), ...tasks.map(t => t.request_item)]);
+    const [children, problemIncs, problemChgs, caused, orderSize, bundleSize, taskCount, changeRows] = await Promise.all([
+      countBy('incident', 'parent_incident', parentIncidents, runQuery),
+      countBy('incident', 'problem', problems, runQuery),
+      countBy('change_request', 'problem', problems, runQuery),
+      countBy('incident', 'caused_by_change', changes, runQuery),
+      countBy('sc_req_item', 'request', orders, runQuery),
+      countBy('sc_req_item', 'parent', bundles, runQuery),
+      countBy('sc_task', 'request_item', requestItems, runQuery),
+      linkRows('CHG', 'number', changes, runQuery),
+    ]);
+    const fixes = new Map(changeRows.map(c => [c.number, c.incident]));
+    const family = (kind, anchor, name, size) => ({ key: `${kind}:${anchor}`, kind, anchor, name, size });
+    const problemFamily = prb => family('problem', prb, `Problem ${prb}`, (problemIncs.get(prb) || 0) + (problemChgs.get(prb) || 0));
+    // A change, the incident it fixes, and the incidents it caused
+    const changeFamily = c => family('change', c, `Change ${c}`, 1 + (fixes.get(c) ? 1 : 0) + (caused.get(c) || 0));
+    const found = new Map();
+
+    for (const t of incs) {
+      const families = [];
+      const parent = t.parent_incident;
+      if (parent) families.push(family('parent-incident', parent, `Parent incident ${parent}`, (children.get(parent) || 0) + 1));
+      else if (children.get(t.number)) families.push(family('parent-incident', t.number, `Parent incident ${t.number}`, children.get(t.number) + 1));
+      if (t.problem) families.push(problemFamily(t.problem));
+      for (const c of uniq([t.caused_by_change, ...fixers.filter(f => f.incident === t.number).map(f => f.number)])) families.push(changeFamily(c));
+      found.set(t.number, { parent, families });
+    }
+    for (const t of chgs) {
+      const families = [];
+      if (t.incident || caused.get(t.number)) families.push(changeFamily(t.number));
+      if (t.problem) families.push(problemFamily(t.problem));
+      found.set(t.number, { parent: '', families });
+    }
+    for (const t of ritms) {
+      const families = [];
+      if (t.parent) families.push(family('bundle', t.parent, `Bundle request ${t.parent}`, (bundleSize.get(t.parent) || 0) + 1));
+      else if (bundleSize.get(t.number)) families.push(family('bundle', t.number, `Bundle request ${t.number}`, bundleSize.get(t.number) + 1));
+      if (t.request && (orderSize.get(t.request) || 0) >= 2) families.push(family('order', t.request, `Order ${t.request}`, orderSize.get(t.request)));
+      if (taskCount.get(t.number)) families.push(family('request-tasks', t.number, `Request ${t.number} and its tasks`, taskCount.get(t.number) + 1));
+      // A child request's parent is its bundle request; otherwise its order (REQ)
+      found.set(t.number, { parent: t.parent || t.request, families });
+    }
+    for (const t of tasks) {
+      const families = t.request_item
+        ? [family('request-tasks', t.request_item, `Request ${t.request_item} and its tasks`, (taskCount.get(t.request_item) || 0) + 1)] : [];
+      found.set(t.number, { parent: t.request_item, families });
+    }
+    for (const n of todo) {
+      linkCache.set(n, found.get(n) || { parent: '', families: [] });
+      if (linkCache.size > LINK_CACHE_SIZE) linkCache.delete(linkCache.keys().next().value);
+    }
+  }
+  return new Map(wanted.map(n => [n, linkCache.get(n)]));
 }
 ```
 

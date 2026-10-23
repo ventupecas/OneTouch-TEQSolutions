@@ -1532,6 +1532,55 @@ dialog.ask-dialog {
 }
 
 /* =====================================================================
+   TICKET RESULTS AND STARRED TICKETS: ticking rows to remove or unstar
+   them together, unstar by issue, and each ticket's parent and family
+   ===================================================================== */
+
+.result-table .select-cell { width: 28px; min-width: 28px; padding-right: 0; }
+.select-cell input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--accent); cursor: pointer; }
+.result-table tbody tr.selected,
+.result-table tbody tr.selected:nth-child(even) { background: var(--accent-soft); }
+.select-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 10px 0; font-size: 0.85rem; color: var(--text-2); }
+.select-count { min-width: 9em; }
+.select-bar .home-action:disabled { opacity: 0.45; cursor: default; }
+
+/* The parent and the families (each opens its anchor's record) */
+.result-table td.family-cell { min-width: 220px; }
+.family-chip {
+    display: inline-block;
+    margin: 0 4px 4px 0;
+    padding: 2px 8px;
+    background: var(--info-soft);
+    border: 1px solid transparent;
+    border-radius: 999px;
+    color: var(--link);
+    font: inherit;
+    font-size: 0.8rem;
+    white-space: nowrap;
+}
+button.family-chip { cursor: pointer; }
+button.family-chip:hover { border-color: var(--info); }
+button.family-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+span.family-chip { color: var(--text-2); background: var(--surface-3); }
+
+/* "Unstar by issue": one button per family two or more starred tickets share */
+.issue-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }
+.issue-label { font-size: 0.85rem; font-weight: 700; color: var(--text-2); }
+.issue-more { font-size: 0.8rem; color: var(--muted); }
+.issue-unstar {
+    background: var(--panel-bg);
+    border: 1px solid var(--warn-line);
+    border-radius: 6px;
+    padding: 5px 10px;
+    color: var(--warn-ink);
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.issue-unstar:hover { background: var(--warn-softer); }
+
+/* =====================================================================
    SIGN-IN PAGE (from styles2.css; every rule is scoped to .login-page
    so it cannot restyle the app behind it)
    ===================================================================== */
