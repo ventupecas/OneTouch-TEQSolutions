@@ -250,15 +250,17 @@ speed matters less than you might expect.
 
 ### Home page and the AI assistant
 
-The header is one row: the OneTouch logo and name, the signed-in person's name, the
-**📈 Dashboards** button right next to it (green while the dashboards are showing), and
-**Sign out** at the right. Clicking the logo or the name **OneTouch** goes back to Home from
-anywhere, closing the AI chat or the dashboards drawer if one is open. On a phone,
-Dashboards moves to a second line.
+The header is one row: the OneTouch logo and name, the signed-in person's name, then the
+**🏠 Home** and **📈 Dashboards** buttons. The one for the page you're on lights up green
+(or in your own accent color; see [Making it your own](#making-it-your-own-colors-home-and-your-own-dashboards)).
+**🎨 Colors** and **Sign out** are at the right. Clicking **Home**, the logo or the name
+**OneTouch** goes back to Home from anywhere, closing the AI chat, the colors panel or the
+dashboards drawer if one is open. On a phone, the buttons wrap onto more lines.
 
 After signing in, people land on **Home**: "Welcome, *first name*!" in the top-left corner,
 then the **💬 Any question about the data** card, then **Ticket results** and **Starred
-tickets** (everything you've starred, newest first).
+tickets** (everything you've starred, newest first). That is the default order; each
+person can change it with **✏️ Customize Home**.
 
 **The AI assistant** is reached from that card:
 
@@ -304,6 +306,120 @@ they are all starred, a button reads "✓ 28 changes starred". In an AI answer, 
 tickets the answer lists (its ticket-number column), not related numbers in other columns
 such as a task's parent request. It is one request however many tickets there are, and the
 2,000-star limit still applies: anything past it is left unstarred and a note says so.
+
+**🔗 Related tickets.** Under an AI answer, and under a ticket's record on Home, OneTouch
+lists the "families" those tickets belong to. These come from the links stored in the
+ServiceNow export; nothing is guessed:
+
+| Family | The link in the data | How common |
+|---|---|---|
+| Parent incident and its child incidents | `incident.parent_incident` | 2,080 child incidents under 514 parents (up to 212 children each; one level only) |
+| Bundle request and its child requests | `sc_req_item.parent` | 1,543 child requests under 974 bundles (e.g. "Start and Snooze Applications/Servers" → "Virtual Server - Stop") |
+| Requests ordered together | `sc_req_item.request` (the REQ) | 125 orders hold several requests (up to 18) |
+| A request and its catalog tasks | `sc_task.request_item` | 2,361 requests have several tasks (up to 7) |
+| A change and the incidents it fixes or caused | `change_request.incident`, `incident.caused_by_change` | 100 changes name the incident they fix; 6 incidents name the change that caused them |
+| Tickets under one problem record | `incident.problem`, `change_request.problem` | 64 problems, up to 870 incidents each (the PRB records themselves aren't in the export) |
+
+For each family it shows:
+- a plain-English line on what the link means (e.g. "a parent (master) incident groups
+  incidents raised for the same issue … so they are worked and resolved together")
+- **Same in all** — the values every member shares: state, priority or risk, team,
+  server / system, subcategory, catalog item, location, assignee, summary, opened time
+- **Different** — the fields where they differ, with how many have each value (e.g. "Team:
+  ACN-INFRA-CLOUD-LINUX (3), ACN-SAP-BASIS (3)", "Opened: Sep 1, 1:07 AM to 1:18 AM",
+  "Summary: 5 different summaries")
+- the members, each with its role (Parent, Child, Task, Incident it fixes, …). The
+  ticket you asked about is highlighted. Up to 25 are listed, but the comparison covers all.
+- **Download this family as** — the family in any of the download formats. The file has two
+  tables: **Members of *anchor*** (every member, not just the 25 shown: ticket, role, type,
+  summary, state, priority / risk, team, opened) and **Same or different in *anchor***
+  (each field, "Same in all *n*" or "Different", and the values with their counts). The
+  *anchor* is the family's parent, order, request, change or problem number. Table names
+  start that way so they stay distinct as Excel worksheet names, which are cut at 31
+  characters. When there are several families, **Download all *n* families as** at the
+  top puts all of them in one file. The file is named after the tickets it relates to,
+  e.g. `one-touch-related-to-inc1794145-2026-10-22.xlsx`.
+
+One ticket shows every family it is in. A list shows only the families that two or more of
+its tickets share, so a long list isn't buried. A ticket with no links shows nothing extra.
+The families also go to the AI with your next question, so follow-ups such as "show me the
+others in that family" work. The AI also knows these links directly: "child incidents of
+INC1813985", "the parent request of RITM0440458", and an incident's record shows its
+**Parent Incident** and **Problem Record**.
+
+In child incidents, the parent's server / system matches 94% of the time, the subcategory
+95%, the location 90%, the team 82%, the priority 75% and the state 99%. The summary
+text matches only 9% of the time, because each alert or report carries its own detail.
+Only about half the children were opened after their parent: the parent is the "master"
+someone picked to group them, not always the first.
+
+### Making it your own: colors, Home and your own dashboards
+
+Each person can set up OneTouch their own way. Everything below is saved to their account
+(the `user_preferences` table in `onetouch_auth`) as they go. It is all still there after a
+refresh, after signing out and in, after the server restarts, and on any other computer.
+Nobody else sees it.
+
+**🎨 Colors** (header, right) opens a small panel:
+- **Light or dark**: Light, Dark, or **Match my computer** (follows the computer's own
+  setting, and changes with it).
+- **Accent color**: OneTouch green (the default), blue, violet, pink, red, orange, teal,
+  slate, or **＋** for any color at all. It colors the buttons, the lit Home / Dashboards
+  button, and your charts. On a pale color, button text turns dark so it stays readable.
+- **Header**: Dark (the default), the accent color, or the same as the page.
+- **↺ Default colors** puts everything back.
+
+The team dashboards switch to Metabase's own dark look when OneTouch is dark.
+
+**✏️ Customize Home** (next to the welcome) turns on editing:
+- Each section gets **▲ Move up**, **▼ Move down** and **Hide**. The sections are
+  **💬 AI assistant**, **🎫 Your tickets** (Ticket results and Starred tickets) and
+  **📊 Your dashboards**, which is hidden at first and has one-click shortcuts to the
+  dashboards you built. Hidden sections come back with their **＋** button.
+- **＋ Add a chart** puts a chart of your own on Home (the same chart builder as below).
+- **↺ Reset Home** goes back to the default (it removes the charts you added to Home, not
+  your dashboards).
+- **✓ Done** stops editing. Charts on Home keep their own buttons (see below) all the time.
+
+**My dashboards.** At the top of the **☰ Dashboards** drawer, above the team dashboards:
+- **＋ New dashboard** asks for a name and opens it, empty. **＋ Add a chart** adds charts,
+  or **✨ Add suggested charts** fills it with a starter set: open incidents, open changes,
+  open catalog tasks, incidents per day, open incidents by priority, changes by risk, the
+  top catalog items, and open tasks by team. Change any of them afterwards.
+- **✎ Rename** and **🗑 Delete dashboard** (it asks first) are above the charts.
+- Each person can have up to 20 dashboards of up to 30 charts each.
+
+**The chart builder** has a live preview that redraws as you choose:
+1. **What to count**: incidents, changes, requests or catalog tasks.
+2. **Which ones**: All, **Open only** or **Closed only** (each ticket type's own states, shown
+   under the buttons); when they were opened (any time, the data's last 7 / 30 / 90 days,
+   or between two dates); and **＋ Only include some…**: up to six conditions such as
+   "Priority is P1 or P2" or "Team is one of …". Each condition lists every choice with how
+   many tickets have it, most common first, with a search box.
+3. **Group by**: a field (priority, state, team, category, catalog item, risk, location,
+   …), a period (day, week or month opened; month resolved, closed or planned to start), or
+   nothing, for one total.
+4. **Show it as**: columns, sideways bars, line, area, donut, table, or one big number.
+   Then how many to show (top 5 to top 50; the rest add up in a note, or in "Other" on a
+   donut), the order (biggest first, or natural order: A to Z, P1 first, New before Closed),
+   the color, and the size (small, medium or wide).
+5. **Title**: or leave it empty for an automatic one such as "Open incidents by priority".
+
+Every chart shows a tooltip with the number and its share when you point at a bar, slice
+or line (or tab to it). Its buttons appear when you point at it: **▦** shows it as a table
+(with a download), **✎** edits it, **◀ ▶** move it, **📌** (on a dashboard) puts a copy on
+Home, and **🗑** removes it.
+
+**Hiding team dashboards.** **👁 Show or hide team dashboards** at the bottom of the drawer
+turns each team dashboard into a checkbox; untick the ones you don't use and click
+**✓ Done**. They disappear from your list only. The Dashboards tab opens on the dashboard
+you had open last, team or your own, on any computer.
+
+The charts count tickets straight from the data (`charts.mjs` builds every query itself
+from these choices). "Open" means the same as in the AI assistant's answers. The team
+dashboards count a catalog task as open by its *active* flag instead, so they show 6 fewer
+open catalog tasks (824 against 830): 6 tasks are marked Pending or Work in Progress but
+no longer active.
 
 ### Dashboards (Metabase)
 
@@ -459,13 +575,18 @@ it in the tab's `sessionStorage`, so:
 ## 2.2 The page around the tabs
 
 - **Header:** one row with the OneTouch logo and name (click either to go back to Home), the
-  signed-in person's display name (or their username if they have none), the **📈 Dashboards**
-  button next to it, and **Sign out** at the right. There is no separate Home button; the
-  logo and name take its place.
+  signed-in person's display name (or their username if they have none), the **🏠 Home**
+  and **📈 Dashboards** buttons (the page you're on lights up in the accent color, green by
+  default), and **🎨 Colors** and **Sign out** at the right.
 - **Home** is the first page after signing in: "Welcome, *first name*!" in the top-left
   corner, the AI assistant's card (an example question, **Open chat**, **Delete chat**),
   then ticket results and starred tickets (see
-  [Home page and the AI assistant](#home-page-and-the-ai-assistant) in Part 1).
+  [Home page and the AI assistant](#home-page-and-the-ai-assistant) in Part 1). Each person
+  can reorder or hide those and add charts with **✏️ Customize Home** (see
+  [Making it your own](#making-it-your-own-colors-home-and-your-own-dashboards)).
+- **Colors:** each person's light / dark mode, accent color and header color, saved to
+  their account. A reload starts in the colors this browser last used (kept in
+  `localStorage` as `onetouch-theme`), so the default colors don't flash first.
 - **Greetings** use the first word of the display name: "Welcome, *first name*!" on Home
   and "Hello, *first name*!" at the top of the chat.
 - **Icons:** favicons, an Apple touch icon and a web-app manifest, so OneTouch can be
@@ -542,6 +663,18 @@ last 500 such questions in memory; restarting it starts the list over.
 - **One record** with more than 4 fields (a ticket lookup) → a two-column field / value card.
 - **A list or breakdown** → a table with a row count above it. Long text (descriptions,
   notes, plans) is cut at 120 characters, with the full text on hover.
+- **Clickable ticket rows:** in a table that lists tickets, each row has a ▸ by its ticket
+  number. Click the row (or focus it and press Enter or Space) and a detailed view opens
+  under it:
+  - the ticket's **full record**: every field, ☆ Star, **Open in Dashboards** for incidents,
+    changes and requests, and a download
+  - its **🔗 related tickets**: each family, with what the members share and where they
+    differ, and the family downloads
+
+  Click the row again or **▴ Close** to fold it away. Several rows can be open at once.
+  While a row is open, the table shows in full instead of in a short scrolling box. The
+  star in a row stars without opening it. **Open in Dashboards**, or a ticket number
+  inside a family, closes the chat and shows that page.
 - **Counts across ticket types** → one table: the grouping column, one column per type,
   a Total column and a Total row. Without grouping, it's a big total plus a row per type.
 - **Lists across ticket types** → one titled table per type (25 rows each unless you
@@ -553,6 +686,9 @@ last 500 such questions in memory; restarting it starts the list over.
 - **How I read your question:** a collapsible list of every assumption Claude made (what
   "open" meant, which ticket types were included and why others were dropped, the exact
   dates used, values that were corrected).
+- **🔗 Related tickets:** when the answer's tickets have parents, children or other linked
+  tickets, the families they belong to, with what the members share and where they differ
+  (see [Home page and the AI assistant](#home-page-and-the-ai-assistant)).
 - **Star all:** when the answer lists two or more tickets, buttons to star them all, or all
   of one type (see [Home page and the AI assistant](#home-page-and-the-ai-assistant)).
   The tickets also go to Ticket results on Home.
@@ -668,16 +804,20 @@ Files are named `one-touch-<the question>-<date>.<format>`, e.g.
 `one-touch-how-many-open-p1s-2026-10-21.xlsx`. The date, and the "Generated" time inside
 the file (e.g. "Oct 21, 2026, 9:11 PM CDT"), are in the downloader's own time zone, which
 the browser sends with the request; without one they're in UTC, labelled as such. The home
-page's ticket lists and a single ticket's record download the same way. A result too large to export (over
+page's ticket lists and a single ticket's record download the same way, and so does each
+family under **🔗 Related tickets** (its members and the same / different comparison). A result too large to export (over
 2 million cells) is refused. While the file is being made, the button says "Preparing
 XLSX file…", then "Downloaded *file name*", or the error.
 
 ## 2.6 The Dashboards tab
 
-**The drawer.** **☰ Dashboards** opens a side drawer listing the dashboards under their
-group headings, each with a one-line description. On your first visit it opens by
-itself. Pick one and the drawer closes. **Escape**, **✕** or a click outside also close
-it. OneTouch remembers the last dashboard you viewed in this browser and opens it next time.
+**The drawer.** **☰ Dashboards** opens a side drawer: **My dashboards** (the ones you
+built, with **＋ New dashboard**) at the top, then the team dashboards under their group
+headings, each with a one-line description. On your first visit it opens by itself. Pick
+one and the drawer closes. **Escape**, **✕** or a click outside also close it. OneTouch
+saves the last dashboard you viewed to your account and opens it next time, on any
+computer. **👁 Show or hide team dashboards** at the bottom hides the ones you don't use
+from your list. See [Making it your own](#making-it-your-own-colors-home-and-your-own-dashboards).
 
 **The toolbar** shows the group, name and description of the dashboard on screen, and
 the hint "Click a bar, slice, number or blue value for details". If no dashboards have
@@ -1160,10 +1300,14 @@ Check: `node --check business_logic.mjs` prints nothing.
     conversation and was asked before reuses the earlier translation (kept in memory, up to
     500), so it skips Claude; the reused answer still goes through the validator.
   - `/api/export` → `export.mjs`.
+  - `/api/preferences` (each person's colors, Home layout and own dashboards: `GET` all,
+    `PUT /api/preferences/:part` saves `theme`, `home` or `dashboards`, `DELETE` resets one)
+    → `prefs.mjs`. `/api/charts/catalog`, `/api/charts/data` and `/api/charts/values` (what
+    the chart builder offers, a chart's numbers, a condition's choices) → `charts.mjs`.
   - Passes Metabase's public dashboard pages through, so the Dashboards tab works wherever
     OneTouch does.
-  - On start it creates the account and starred-ticket tables, loads `db/accounts.json`,
-    and retries until Postgres is ready.
+  - On start it creates the account, starred-ticket, shown-ticket and preference tables,
+    loads `db/accounts.json`, and retries until Postgres is ready.
 - `tickets.mjs` ([B.37](#b37)): the home page's ticket search. It finds INC, CHG, RITM,
   SCTASK and REQ numbers in whatever was typed and builds its own Cube queries from them
   (never from Claude's output). A single ticket's full record lists every column Cube has
@@ -1173,11 +1317,39 @@ Check: `node --check business_logic.mjs` prints nothing.
 - `seen.mjs` ([B.42](#b42)): each person's Ticket results, every ticket they have been
   shown, in the `seen_tickets` table of `onetouch_auth`, with when and by which question
   (the 2,000 most recent per person).
+- `relations.mjs` ([B.43](#b43)): related tickets. Given ticket numbers, it finds their
+  families from the link columns (parent / child incidents, bundle / child requests, an
+  order's requests, a request's tasks, a change and its incidents, a problem record). It
+  says what each family's members share and where they differ, and `describeFamilies`
+  sums them up for Claude. The page calls `POST /api/tickets/related` with `{ numbers,
+  conversation }`; with `conversation: true`, the summary joins the conversation's
+  `pendingNote`, queued behind the answer and only for that same conversation.
+- `prefs.mjs` ([B.44](#b44)): each person's preferences, in the `user_preferences` table of
+  `onetouch_auth` (one JSON document per person, saved in three parts: `theme`, `home`,
+  `dashboards`). Everything the page sends is cleaned first: unknown keys dropped, text
+  trimmed, at most 20 dashboards of 30 charts and 30 Home sections, every chart checked by
+  `charts.mjs`.
+- `charts.mjs` ([B.45](#b45)): the charts people build. `CHART_SOURCES` lists what each
+  ticket type can be grouped and filtered by; `sanitizeChart` checks a chart's choices;
+  `chartData` builds the Cube query from them (count, one grouping, "equals" conditions,
+  open / closed states from `business_logic.mjs`, a date range) and returns the top N
+  plus an "other" total. Results are cached in memory, because the data never changes.
 - `public/index.html` ([B.25](#b25)): the sign-in page, the header (logo and name, which go
-  back to Home; the signed-in name; the Dashboards button; Sign out at the right), the Home tab (welcome, the AI assistant's card with an
-  example question, Open chat and Delete chat, ticket results, starred tickets), the
-  Dashboards tab with its drawer, and the chat panel.
-- `public/style.css` ([B.26](#b26)): the styling.
+  back to Home; the signed-in name; the Home and Dashboards buttons; Colors and Sign out at
+  the right), the colors panel, the Home tab (welcome, Customize Home, then the AI
+  assistant's card, ticket results and starred tickets, and the dashboard shortcuts, as
+  sections that can be moved or hidden), the Dashboards tab with its drawer and the view
+  for your own dashboards, the chat panel, and the chart builder. A short script in the
+  page's head applies the colors this browser last used before anything is drawn.
+- `public/style.css` ([B.26](#b26)): the styling. Every color is a variable at the top,
+  with a dark set and the header variants, so a color scheme changes them all.
+- `public/charts.js` ([B.46](#b46)): draws the charts as SVG in the page's colors (columns,
+  sideways bars, line, area, donut, table, one number), with tooltips, the table view and
+  redrawing when a chart's width changes.
+- `public/customize.js` ([B.47](#b47)): loads and saves each person's preferences, the
+  colors panel, Customize Home, My dashboards, hiding team dashboards and the chart
+  builder. It loads before `app.js`, which builds the colors panel and the builder when it
+  starts.
 - `public/app.js` ([B.27](#b27)): sign-in, ticket results and stars, the AI assistant
   chat (sending questions, turning the results into tables with English column names and
   readable values, "New chat", "Delete chat"), the download buttons, and the dashboard
@@ -1536,6 +1708,11 @@ Create each file at the path shown, with exactly this content. Files are in the 
 - [B.40 `scripts/warmup.mjs`](#b40)
 - [B.41 `scripts/warmup-questions.txt`](#b41)
 - [B.42 `seen.mjs`](#b42)
+- [B.43 `relations.mjs`](#b43)
+- [B.44 `prefs.mjs`](#b44)
+- [B.45 `charts.mjs`](#b45)
+- [B.46 `public/charts.js`](#b46)
+- [B.47 `public/customize.js`](#b47)
 
 <a id="b1"></a>
 ### B.1 `.gitignore`
@@ -3303,7 +3480,7 @@ export const ENTITY_CATALOG = {
     dateRange: '2026-07-05 to 2026-09-01',
     dimensions: ['number', 'created', 'created_day', 'created_week', 'created_month', 'short_description', 'description', 'affected_user', 'assignment_group', 'assigned_to', 'problem', 'state', 'parent_incident', 'priority', 'impact', 'urgency', 'breach_reason', 'global_incident', 'knowledge_article_reference', 'category', 'subcategory', 'updated', 'was_p1', 'configuration_item', 'contact_type', 'reassignment_count', 'close_code', 'close_notes', 'cause_code', 'cause_sub_code', 'opened_by_group', 'location', 'reopen_count', 'caused_by_change', 'business_impact_outage', 'resolved', 'resolved_day', 'resolved_month', 'closed', 'closed_day', 'closed_month', 'responsibility_for_outage', 'on_hold_reason', 'work_notes', 'risk_register_number', 'tags', 'third_party_related_ticket', 'business_impact', 'downgrade_reason', 'downgrade_type', 'kb_article'],
     listColumns: ['number', 'created', 'priority', 'state', 'short_description', 'assignment_group', 'category', 'subcategory', 'location'],
-    detailColumns: ['number', 'created', 'updated', 'resolved', 'closed', 'priority', 'impact', 'urgency', 'state', 'on_hold_reason', 'short_description', 'description', 'category', 'subcategory', 'assignment_group', 'assigned_to', 'affected_user', 'location', 'configuration_item', 'contact_type', 'close_code', 'close_notes', 'cause_code', 'reassignment_count', 'reopen_count', 'caused_by_change', 'was_p1'],
+    detailColumns: ['number', 'created', 'updated', 'resolved', 'closed', 'priority', 'impact', 'urgency', 'state', 'on_hold_reason', 'short_description', 'description', 'category', 'subcategory', 'assignment_group', 'assigned_to', 'affected_user', 'location', 'configuration_item', 'contact_type', 'close_code', 'close_notes', 'cause_code', 'reassignment_count', 'reopen_count', 'caused_by_change', 'parent_incident', 'problem', 'was_p1'],
     enums: {
       state: ['New', 'In Progress', 'On Hold', 'Resolved', 'Closed'],
       priority: ['P1 - Critical', 'P2 - High', 'P3 - Average', 'P4 - Low'],
@@ -3382,7 +3559,7 @@ export const ENTITY_CATALOG = {
     dateRange: '2026-06-01 to 2026-09-01',
     dimensions: ['number', 'item', 'description', 'short_description', 'opened', 'opened_day', 'opened_week', 'opened_month', 'updated', 'closed', 'closed_month', 'stage', 'state', 'parent', 'request', 'requested_for', 'opened_by', 'approval', 'approval_history', 'approval_set', 'location', 'work_notes', 'fulfilled_time', 'order_guide'],
     listColumns: ['number', 'opened', 'item', 'state', 'stage', 'approval', 'short_description', 'location'],
-    detailColumns: ['number', 'request', 'opened', 'updated', 'closed', 'item', 'state', 'stage', 'approval', 'short_description', 'description', 'requested_for', 'opened_by', 'location', 'fulfilled_time'],
+    detailColumns: ['number', 'request', 'parent', 'opened', 'updated', 'closed', 'item', 'state', 'stage', 'approval', 'short_description', 'description', 'requested_for', 'opened_by', 'location', 'fulfilled_time'],
     enums: {
       state: ['Open', 'Pending', 'Fulfilled', 'Closed Complete', 'Closed Cancelled', 'Closed Incomplete', 'Closed Rejected', 'Unsatisfied Fulfillment'],
       stage: ['Completed', 'Request Completed', 'Fulfillment', 'Request Cancelled', 'Request Approved', 'Waiting for Approval', 'complete', 'Request Failed', 'operation_failed', 'Cancelled', 'request_approved', 'Deployment'],
@@ -3540,6 +3717,9 @@ ${cubes.map(c => {
 
 How they relate (ITIL mental model):
 - A REQ is an order; it contains one or more RITMs (sc_req_item.request = REQ number). Each RITM spawns SCTASKs (sc_task.request_item = RITM number) and may need approvals (ritm_approvals.parent = RITM number).
+- Parent and child incidents: incident.parent_incident = the parent (master) INC number. A parent incident groups child incidents raised for the same issue (for example several monitoring alerts about one fault); children usually share the parent's server/system, subcategory and state, and are resolved together. 2,080 child incidents point to 514 parents; there is one level only (a parent has no parent of its own). "children / child incidents of INC…" → filter incident.parent_incident equals that number. "parent of INC…" → look up that incident; its parent_incident column holds the parent. "master / parent incidents" → group by incident.parent_incident with incident.count, filter parent_incident set.
+- Problem records: incident.problem and change_request.problem hold a PRB number; every ticket linked to the same PRB shares that root cause investigation. The problem records themselves are not in the export.
+- Bundle requests: sc_req_item.parent = the parent RITM. A bundle request (e.g. "Start and Snooze Applications/Servers") is split into child RITMs, one per part of the work (e.g. "Virtual Server - Stop"). "child requests of RITM…" → filter sc_req_item.parent equals that number.
 - A CHG needs approvals (change_approvals.parent = CHG number). An incident can be linked to a change that caused it (incident.caused_by_change = CHG number) and a change can reference the incident it fixes (change_request.incident).
 - IMPORTANT: the cubes are NOT joined. Each entry in "queries" must use members from exactly one cube. When a question spans several ticket types, emit one entry per type (see C0); the server runs them side by side and merges the counts. Questions that need a row-level join between tables (e.g. "incidents caused by changes owned by team X") are still not possible; pick the cube the question is fundamentally about and state the limitation in assumptions.
 
@@ -3752,7 +3932,7 @@ User: "software requests waiting on approval from the security guys"
 → {"intent":"query","queries":[{"entity":"ritm_approvals","query":{"measures":[],"dimensions":["ritm_approvals.parent","ritm_approvals.assignment_group","ritm_approvals.approval","ritm_approvals.state","ritm_approvals.created","ritm_approvals.short_description"],"filters":[{"member":"ritm_approvals.short_description","operator":"contains","values":["Software"]},{"member":"ritm_approvals.assignment_group","operator":"contains","values":["Security"]},{"member":"ritm_approvals.state","operator":"equals","values":["Open"]}],"order":[{"member":"ritm_approvals.created","direction":"asc"}],"limit":50}}],"message":"Open RITM approval records for software requests sitting with a Security approval group, oldest first.","assumptions":["Used the approval-records table because the question is about a specific approver group","'software' matched on the approval short description"]}
 
 User: "INC1814467"
-→ {"intent":"query","queries":[{"entity":"incident","query":{"measures":[],"dimensions":["incident.number","incident.created","incident.updated","incident.resolved","incident.closed","incident.priority","incident.impact","incident.urgency","incident.state","incident.on_hold_reason","incident.short_description","incident.description","incident.category","incident.subcategory","incident.assignment_group","incident.assigned_to","incident.affected_user","incident.location","incident.configuration_item","incident.contact_type","incident.close_code","incident.close_notes","incident.cause_code","incident.reassignment_count","incident.reopen_count","incident.caused_by_change","incident.was_p1"],"filters":[{"member":"incident.number","operator":"equals","values":["INC1814467"]}],"order":[],"limit":1}}],"message":"Full details for incident INC1814467.","assumptions":[]}
+→ {"intent":"query","queries":[{"entity":"incident","query":{"measures":[],"dimensions":["incident.number","incident.created","incident.updated","incident.resolved","incident.closed","incident.priority","incident.impact","incident.urgency","incident.state","incident.on_hold_reason","incident.short_description","incident.description","incident.category","incident.subcategory","incident.assignment_group","incident.assigned_to","incident.affected_user","incident.location","incident.configuration_item","incident.contact_type","incident.close_code","incident.close_notes","incident.cause_code","incident.reassignment_count","incident.reopen_count","incident.caused_by_change","incident.parent_incident","incident.problem","incident.was_p1"],"filters":[{"member":"incident.number","operator":"equals","values":["INC1814467"]}],"order":[],"limit":1}}],"message":"Full details for incident INC1814467.","assumptions":[]}
 
 User: "anything prod scheduled for next week with downtime?"
 → {"intent":"query","queries":[{"entity":"change_request","query":{"measures":[],"dimensions":["change_request.number","change_request.created","change_request.type","change_request.sub_type","change_request.state","change_request.approval","change_request.risk","change_request.short_description","change_request.owner_group","change_request.planned_start_date","change_request.environment"],"filters":[{"member":"change_request.environment","operator":"equals","values":["Production"]},{"member":"change_request.outage","operator":"equals","values":["Yes"]},{"member":"change_request.planned_start_date","operator":"gte","values":["2026-09-07"]},{"member":"change_request.planned_start_date","operator":"lt","values":["2026-09-14"]}],"order":[{"member":"change_request.planned_start_date","direction":"asc"}],"limit":50}}],"message":"Production changes with a planned outage whose planned start falls in the week of 2026-09-07.","assumptions":["'next week' = Monday 2026-09-07 through Sunday 2026-09-13","'downtime' = outage Yes"]}
@@ -5377,6 +5557,9 @@ import * as auth from './auth.mjs';
 import * as stars from './stars.mjs';
 import * as seen from './seen.mjs';
 import { findTickets, ticketRecord, ticketSummaries, ticketNumbersIn, STARRABLE } from './tickets.mjs';
+import { relatedFamilies, describeFamilies } from './relations.mjs';
+import * as prefs from './prefs.mjs';
+import { chartData, chartValues, chartCatalog, ChartError } from './charts.mjs';
 import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
 
 dotenv.config();
@@ -5425,6 +5608,8 @@ app.use(async (req, res, next) => {
 });
 // Exports carry whole result tables back up, so that route gets a bigger limit
 app.use('/api/export', express.json({ limit: '25mb' }));
+// A whole set of dashboards is saved at once
+app.use('/api/preferences', express.json({ limit: '1mb' }));
 app.use(express.json());
 app.use(express.static('public'));
 
@@ -5556,7 +5741,7 @@ async function requireLogin(req, res, next) {
   next();
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts'], requireLogin);
 
 // Who is signed in (the page shows their display name)
 app.get('/api/me', (req, res) => {
@@ -5963,6 +6148,33 @@ app.post('/api/tickets/search', async (req, res) => {
   }
 });
 
+// { numbers, conversation } -> { families }: the parent/child, order, task,
+// change and problem families those tickets belong to (relations.mjs), with
+// what each family's members share and where they differ. conversation: true
+// (an AI answer's tickets) also tells Claude about them with the next question.
+app.post('/api/tickets/related', async (req, res) => {
+  const numbers = Array.isArray(req.body?.numbers) ? req.body.numbers.slice(0, 500).map(String) : [];
+  if (!numbers.length) return res.status(400).json({ error: 'No ticket numbers to look at.' });
+  try {
+    const families = await relatedFamilies(numbers, runCubeQuery);
+    if (req.body.conversation && families.length) {
+      // Queued behind the answer that showed these tickets, and only for that
+      // same conversation (not one started by "New chat" in the meantime)
+      const session = req.session;
+      const conversation = session.conversation;
+      session.queue = session.queue.then(() => {
+        if (session.conversation !== conversation) return;
+        const note = `Related tickets OneTouch showed the user under that answer: ${describeFamilies(families)}`;
+        conversation.pendingNote = conversation.pendingNote ? `${conversation.pendingNote} ${note}` : note;
+      });
+    }
+    res.json({ families });
+  } catch (error) {
+    console.error('🔗 Could not find related tickets:', error.message);
+    res.status(502).json({ error: `Could not look for related tickets right now: ${error.message}` });
+  }
+});
+
 // Every ticket this person has been shown, newest first, with each one's
 // summary, when it was shown, and the question that showed it
 app.get('/api/seen-tickets', async (req, res) => {
@@ -6049,6 +6261,81 @@ app.delete('/api/stars/:number', async (req, res) => {
   }
 });
 
+// =====================================================================
+// PREFERENCES AND CHARTS: each person's colors, Home page and own
+// dashboards (prefs.mjs), and the data their charts show (charts.mjs)
+// =====================================================================
+
+app.get('/api/preferences', async (req, res) => {
+  try {
+    res.json({ preferences: await prefs.getPreferences(req.user.id) });
+  } catch (error) {
+    console.error('🎨 Could not load preferences:', error.message);
+    res.status(503).json({ error: 'Your saved layout and colors could not be loaded right now.' });
+  }
+});
+
+// { value } -> the value as saved (checked and cleaned by prefs.cleanPreference)
+app.put('/api/preferences/:part', async (req, res) => {
+  let value;
+  try {
+    value = prefs.cleanPreference(req.params.part, req.body?.value);
+  } catch (error) {
+    const known = error instanceof prefs.PreferenceError || error instanceof ChartError;
+    return res.status(400).json({ error: known ? error.message : 'That setting could not be read.' });
+  }
+  try {
+    await prefs.savePreference(req.user.id, req.params.part, value);
+    res.json({ value });
+  } catch (error) {
+    console.error('🎨 Could not save preferences:', error.message);
+    res.status(503).json({ error: 'That change could not be saved right now.' });
+  }
+});
+
+app.delete('/api/preferences/:part', async (req, res) => {
+  if (!prefs.PARTS.includes(req.params.part)) return res.status(400).json({ error: 'Unknown setting.' });
+  try {
+    await prefs.resetPreference(req.user.id, req.params.part);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('🎨 Could not reset preferences:', error.message);
+    res.status(503).json({ error: 'That could not be reset right now.' });
+  }
+});
+
+// What the chart builder can offer (ticket types, fields, the dates the data covers)
+app.get('/api/charts/catalog', async (_req, res) => {
+  try {
+    res.json(await chartCatalog(runCubeQuery));
+  } catch (error) {
+    console.error('📊 Chart catalog failed:', error.message);
+    res.status(502).json({ error: `The chart options could not be loaded right now: ${error.message}` });
+  }
+});
+
+// { chart } -> its numbers
+app.post('/api/charts/data', async (req, res) => {
+  try {
+    res.json(await chartData(req.body?.chart, runCubeQuery));
+  } catch (error) {
+    if (error instanceof ChartError) return res.status(400).json({ error: error.message });
+    console.error('📊 Chart data failed:', error.message);
+    res.status(502).json({ error: `This chart could not be loaded right now: ${error.message}` });
+  }
+});
+
+// { source, field } -> the values a filter can choose from
+app.post('/api/charts/values', async (req, res) => {
+  try {
+    res.json({ values: await chartValues(String(req.body?.source), String(req.body?.field), runCubeQuery) });
+  } catch (error) {
+    if (error instanceof ChartError) return res.status(400).json({ error: error.message });
+    console.error('📊 Filter values failed:', error.message);
+    res.status(502).json({ error: `The choices could not be loaded right now: ${error.message}` });
+  }
+});
+
 // The tables shown in the chat -> a downloadable file (see export.mjs)
 app.post('/api/export', async (req, res) => {
   const problem = validateExport(req.body);
@@ -6081,6 +6368,7 @@ async function prepareAccounts(attempt = 1) {
     await auth.ensureSchema();
     await stars.ensureStarsSchema();
     await seen.ensureSeenSchema();
+    await prefs.ensurePrefsSchema();
   } catch (error) {
     const wait = Math.min(attempt * 2, 15);
     console.error(`🔐 Account database not reachable yet (${error.message}); retrying in ${wait}s`);
@@ -6125,6 +6413,21 @@ prepareAccounts();
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
     <link rel="manifest" href="site.webmanifest">
     <link rel="stylesheet" href="style.css">
+    <script>
+        // A signed-in reload starts in the colors this browser last used, so the
+        // default ones don't flash first (customize.js keeps the copy current)
+        try {
+            var saved = sessionStorage.getItem('onetouch-session') && JSON.parse(localStorage.getItem('onetouch-theme') || 'null');
+            if (saved) {
+                var root = document.documentElement;
+                var dark = saved.mode === 'dark' || (saved.mode === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+                root.dataset.theme = dark ? 'dark' : 'light';
+                root.dataset.header = saved.header || 'dark';
+                if (/^#[0-9a-f]{6}$/i.test(saved.accent)) root.style.setProperty('--accent', saved.accent);
+                if (/^#[0-9a-f]{6}$/i.test(saved.onAccent)) root.style.setProperty('--on-accent', saved.onAccent);
+            }
+        } catch (e) { /* the default colors, until the account's arrive */ }
+    </script>
 </head>
 <body class="signed-out">
     <!-- SIGN-IN PAGE: shown until the user signs in -->
@@ -6157,7 +6460,7 @@ prepareAccounts();
     </div>
 
     <header class="app-header">
-        <!-- Top left: the logo and name (back to Home), who's signed in, and Dashboards -->
+        <!-- Top left: the logo and name (back to Home), who's signed in, then Home and Dashboards -->
         <div class="header-left">
             <h1 class="app-title">
                 <button type="button" class="home-link" onclick="goHome()" title="Back to Home">
@@ -6166,53 +6469,119 @@ prepareAccounts();
             </h1>
             <span id="user-name" class="user-name"></span>
             <nav class="tab-navigation">
+                <button class="tab-btn" data-tab="home" onclick="goHome()">🏠 Home</button>
                 <button class="tab-btn" data-tab="dashboard" onclick="switchTab('dashboard')">📈 Dashboards</button>
             </nav>
         </div>
-        <button class="sign-out-btn" type="button" onclick="signOut()">Sign out</button>
+        <div class="header-right">
+            <button type="button" class="header-btn" id="theme-btn" onclick="toggleThemePanel()"
+                    aria-controls="theme-panel" aria-expanded="false">🎨 Colors</button>
+            <button class="sign-out-btn" type="button" onclick="signOut()">Sign out</button>
+        </div>
     </header>
 
+    <!-- 🎨 Colors: each person's color scheme, saved to their account (customize.js) -->
+    <section class="theme-panel" id="theme-panel" role="dialog" aria-label="Your colors" hidden>
+        <div class="theme-panel-head">
+            <span>🎨 Your colors</span>
+            <button type="button" class="drawer-close" onclick="toggleThemePanel(false)" aria-label="Close">✕</button>
+        </div>
+        <fieldset>
+            <legend>Light or dark</legend>
+            <div class="choice-row" id="theme-modes"></div>
+        </fieldset>
+        <fieldset>
+            <legend>Accent color <span class="legend-note">buttons, the page you're on, and charts</span></legend>
+            <div class="swatch-row">
+                <span id="theme-accents" class="swatch-row"></span>
+                <label class="swatch swatch-custom" title="Any color you like">
+                    <input type="color" id="theme-custom" value="#10a37f" aria-label="Pick any color">
+                    <span class="swatch-custom-face">＋</span>
+                </label>
+            </div>
+        </fieldset>
+        <fieldset>
+            <legend>Header</legend>
+            <div class="choice-row" id="theme-headers"></div>
+        </fieldset>
+        <div class="theme-panel-foot">
+            <span class="theme-note">Saved to your account, so your colors follow you to any computer.</span>
+            <button type="button" class="home-action" onclick="resetTheme()">↺ Default colors</button>
+        </div>
+    </section>
+
     <main class="app-content">
-        <!-- HOME: welcome, ticket search and starred tickets -->
+        <!-- HOME: welcome, then each person's sections and charts in their order (customize.js) -->
         <section id="home-view" class="view-panel active">
-            <div class="home">
-                <h2 class="home-welcome" id="home-welcome">Welcome!</h2>
-                <!-- The AI assistant: an example question, and the open / delete chat buttons -->
-                <div class="search-guide">
-                    <div class="guide-card">
-                        <span class="guide-title">💬 Any question about the data</span>
-                        <span class="guide-text">In plain English. The AI assistant answers with a table you can download, and remembers the conversation for follow-ups.</span>
-                        <button type="button" class="guide-example" data-example="How many open incidents are there by priority?">How many open incidents are there by priority?</button>
-                        <div class="chat-controls">
-                            <button type="button" class="home-action" id="open-chat-btn" onclick="toggleAssistant(true)"
-                                    aria-controls="assistant-panel" aria-expanded="false">💬 Open chat</button>
-                            <button type="button" class="home-action danger" id="delete-chat-btn" hidden onclick="deleteChat()">🗑 Delete chat</button>
-                        </div>
+            <div class="home" id="home">
+                <div class="home-head">
+                    <h2 class="home-welcome" id="home-welcome">Welcome!</h2>
+                    <button type="button" class="home-action" id="customize-home-btn" onclick="toggleHomeEditing()" aria-pressed="false">✏️ Customize Home</button>
+                </div>
+                <!-- While customizing: add charts, bring back hidden sections, reset -->
+                <div class="home-edit-bar" id="home-edit-bar" hidden>
+                    <p class="home-edit-text"><b>Customizing Home.</b> Move or hide sections with their buttons, add charts of your own,
+                        and edit or move a chart with the buttons on it. Changes are saved to your account as you go.</p>
+                    <div class="home-edit-actions">
+                        <button type="button" class="primary-btn" onclick="addHomeChart()">＋ Add a chart</button>
+                        <span class="home-add-back" id="home-add-back"></span>
+                        <button type="button" class="home-action" onclick="resetHomeLayout()">↺ Reset Home</button>
+                        <button type="button" class="home-action" onclick="toggleHomeEditing(false)">✓ Done</button>
                     </div>
                 </div>
+                <p class="home-status home-empty" id="home-empty" hidden>Your Home page is empty. Click <b>Customize Home</b> to add sections or charts.</p>
 
-                <div class="home-modes" role="tablist" aria-label="Your tickets">
-                    <button type="button" role="tab" class="home-mode active" data-mode="results" aria-selected="true" aria-controls="home-results" onclick="setHomeMode('results')">
-                        <span class="home-mode-name">🎫 Ticket results</span>
-                        <span class="home-mode-desc">Every ticket the AI assistant has shown you</span>
-                    </button>
-                    <button type="button" role="tab" class="home-mode" data-mode="starred" aria-selected="false" aria-controls="home-starred" onclick="setHomeMode('starred')">
-                        <span class="home-mode-name">★ Starred tickets <span class="star-count" id="star-count">0</span></span>
-                        <span class="home-mode-desc">Saved to your account</span>
-                    </button>
-                </div>
+                <div class="home-blocks waiting" id="home-blocks">
+                    <!-- The AI assistant: an example question, and the open / delete chat buttons -->
+                    <section class="home-block" data-block="assistant">
+                        <div class="search-guide">
+                            <div class="guide-card">
+                                <span class="guide-title">💬 Any question about the data</span>
+                                <span class="guide-text">In plain English. The AI assistant answers with a table you can download, and remembers the conversation for follow-ups.</span>
+                                <button type="button" class="guide-example" data-example="How many open incidents are there by priority?">How many open incidents are there by priority?</button>
+                                <div class="chat-controls">
+                                    <button type="button" class="home-action" id="open-chat-btn" onclick="toggleAssistant(true)"
+                                            aria-controls="assistant-panel" aria-expanded="false">💬 Open chat</button>
+                                    <button type="button" class="home-action danger" id="delete-chat-btn" hidden onclick="deleteChat()">🗑 Delete chat</button>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
 
-                <div class="home-panel" id="home-results" role="tabpanel">
-                    <div class="home-result" id="ticket-results" aria-live="polite"></div>
-                </div>
+                    <!-- Your tickets: Ticket results and starred tickets -->
+                    <section class="home-block" data-block="tickets">
+                        <div class="home-modes" role="tablist" aria-label="Your tickets">
+                            <button type="button" role="tab" class="home-mode active" data-mode="results" aria-selected="true" aria-controls="home-results" onclick="setHomeMode('results')">
+                                <span class="home-mode-name">🎫 Ticket results</span>
+                                <span class="home-mode-desc">Every ticket the AI assistant has shown you</span>
+                            </button>
+                            <button type="button" role="tab" class="home-mode" data-mode="starred" aria-selected="false" aria-controls="home-starred" onclick="setHomeMode('starred')">
+                                <span class="home-mode-name">★ Starred tickets <span class="star-count" id="star-count">0</span></span>
+                                <span class="home-mode-desc">Saved to your account</span>
+                            </button>
+                        </div>
 
-                <div class="home-panel" id="home-starred" role="tabpanel" hidden>
-                    <div class="home-result" id="starred-result" aria-live="polite"></div>
+                        <div class="home-panel" id="home-results" role="tabpanel">
+                            <div class="home-result" id="ticket-results" aria-live="polite"></div>
+                        </div>
+
+                        <div class="home-panel" id="home-starred" role="tabpanel" hidden>
+                            <div class="home-result" id="starred-result" aria-live="polite"></div>
+                        </div>
+                    </section>
+
+                    <!-- Your dashboards: shortcuts to the dashboards you built (hidden until added) -->
+                    <section class="home-block" data-block="shortcuts" hidden>
+                        <div class="guide-card shortcuts-card">
+                            <span class="guide-title">📊 Your dashboards</span>
+                            <div class="shortcut-list" id="home-shortcuts"></div>
+                        </div>
+                    </section>
                 </div>
             </div>
         </section>
 
-        <!-- DASHBOARD VIEW CONTAINER (METABASE) -->
+        <!-- DASHBOARD VIEW CONTAINER (METABASE, and each person's own dashboards) -->
         <section id="dashboard-view" class="view-panel">
             <div class="dashboard-container">
                 <!-- Top-left: the drawer button and which dashboard is showing -->
@@ -6234,16 +6603,35 @@ prepareAccounts();
                 </div>
                 <div class="dashboard-body">
                     <div class="dashboard-backdrop" id="dashboard-backdrop" onclick="toggleDashboardDrawer(false)"></div>
-                    <!-- Filled in by app.js from /api/dashboards (built by scripts/metabase-setup.mjs) -->
                     <aside class="dashboard-drawer" id="dashboard-drawer" aria-label="Dashboards">
                         <div class="drawer-header">
                             <span>Dashboards</span>
                             <button type="button" class="drawer-close" onclick="toggleDashboardDrawer(false)" aria-label="Close">✕</button>
                         </div>
+                        <!-- The dashboards this person built (customize.js) -->
+                        <section class="drawer-group my-dashboards">
+                            <h3>My dashboards</h3>
+                            <div id="my-dashboards-list"></div>
+                            <button type="button" class="drawer-new" onclick="newBoard()">＋ New dashboard</button>
+                        </section>
+                        <!-- The team dashboards: filled in by app.js from /api/dashboards (built by scripts/metabase-setup.mjs) -->
                         <nav id="dashboard-picker"></nav>
+                        <div class="drawer-foot">
+                            <p class="drawer-note" id="drawer-hidden-note"></p>
+                            <button type="button" class="drawer-customize" id="drawer-customize" onclick="toggleDrawerEditing()" aria-pressed="false">👁 Show or hide team dashboards</button>
+                        </div>
                     </aside>
                     <p class="dashboard-message" id="dashboard-message">Loading dashboards…</p>
                     <iframe id="dashboard-frame" title="Dashboard" hidden></iframe>
+                    <!-- One of this person's own dashboards -->
+                    <div class="board-view" id="board-view" hidden>
+                        <div class="board-bar">
+                            <button type="button" class="primary-btn" onclick="addBoardChart()">＋ Add a chart</button>
+                            <button type="button" class="home-action" onclick="renameBoard()">✎ Rename</button>
+                            <button type="button" class="home-action danger" onclick="deleteBoard()">🗑 Delete dashboard</button>
+                        </div>
+                        <div class="tile-grid" id="board-grid"></div>
+                    </div>
                 </div>
             </div>
         </section>
@@ -6271,6 +6659,95 @@ prepareAccounts();
         </section>
     </main>
 
+    <!-- THE CHART BUILDER: what a chart counts, which ones, grouped by what, and how it's drawn -->
+    <dialog class="builder" id="chart-builder" aria-labelledby="builder-title">
+        <form id="builder-form" class="builder-form">
+            <div class="builder-head">
+                <h2 id="builder-title">Add a chart</h2>
+                <button type="button" class="drawer-close" onclick="closeBuilder()" aria-label="Close">✕</button>
+            </div>
+            <div class="builder-body">
+                <div class="builder-fields">
+                    <fieldset>
+                        <legend>1. What to count</legend>
+                        <select id="b-source" aria-label="What to count"></select>
+                    </fieldset>
+                    <fieldset>
+                        <legend>2. Which ones</legend>
+                        <div class="choice-row" id="b-status" role="radiogroup" aria-label="Open or closed"></div>
+                        <p class="field-note" id="b-status-note"></p>
+                        <label class="field-label">Opened
+                            <select id="b-dates"></select>
+                        </label>
+                        <div class="date-range" id="b-range" hidden>
+                            <label>From <input type="date" id="b-from"></label>
+                            <label>To <input type="date" id="b-to"></label>
+                        </div>
+                        <p class="field-note" id="b-dates-note"></p>
+                        <div id="b-filters"></div>
+                        <button type="button" class="home-action" id="b-add-filter">＋ Only include some… (team, priority, state, …)</button>
+                    </fieldset>
+                    <fieldset>
+                        <legend>3. Group by</legend>
+                        <select id="b-group" aria-label="Group by"></select>
+                    </fieldset>
+                    <fieldset>
+                        <legend>4. Show it as</legend>
+                        <div class="display-picker" id="b-display" role="radiogroup" aria-label="Chart type"></div>
+                        <p class="field-note" id="b-display-note"></p>
+                        <div class="builder-row" id="b-cut">
+                            <label class="field-label">Show
+                                <select id="b-limit"></select>
+                            </label>
+                            <label class="field-label">Order
+                                <select id="b-sort">
+                                    <option value="count">Biggest first</option>
+                                    <option value="label">In order (A to Z, P1 first)</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div class="builder-row" id="b-color-row">
+                            <span class="field-label-text">Color</span>
+                            <div class="swatch-row" id="b-colors" role="radiogroup" aria-label="Color"></div>
+                        </div>
+                        <div class="builder-row">
+                            <span class="field-label-text">Size</span>
+                            <div class="choice-row" id="b-sizes" role="radiogroup" aria-label="Size"></div>
+                        </div>
+                    </fieldset>
+                    <fieldset>
+                        <legend>5. Title</legend>
+                        <input type="text" id="b-title" maxlength="80" aria-label="Title">
+                    </fieldset>
+                </div>
+                <div class="builder-preview">
+                    <div class="builder-preview-label">Preview</div>
+                    <div id="b-preview"></div>
+                </div>
+            </div>
+            <div class="builder-foot">
+                <button type="button" class="home-action" onclick="closeBuilder()">Cancel</button>
+                <button type="submit" class="primary-btn" id="b-save">Add chart</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- A small "name it" box (new dashboard, rename) -->
+    <dialog class="ask-dialog" id="ask-dialog">
+        <form method="dialog">
+            <h2 class="ask-title"></h2>
+            <label class="field-label"><span class="ask-label"></span>
+                <input type="text" id="ask-input" maxlength="60" required>
+            </label>
+            <div class="builder-foot">
+                <button type="button" class="home-action" onclick="this.closest('dialog').close('cancel')">Cancel</button>
+                <button type="submit" class="primary-btn" id="ask-ok" value="ok">Save</button>
+            </div>
+        </form>
+    </dialog>
+
+    <script src="charts.js"></script>
+    <script src="customize.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
@@ -6280,12 +6757,140 @@ prepareAccounts();
 ### B.26 `public/style.css`
 
 ```css
+/* COLORS: every color in the app is one of these, so each person's color
+   scheme (light / dark, accent, header; see customize.js) changes them all.
+   --accent and --on-accent are set by the page from the chosen accent. */
 :root {
+    color-scheme: light;
     --bg-primary: #f4f6f9;
     --panel-bg: #ffffff;
-    --accent: #10a37f;
+    --surface-2: #f7fafc;
+    --surface-3: #edf2f7;
+    --zebra: #f9fafb;
     --text: #2d3748;
+    --text-2: #4a5568;
+    --muted: #718096;
+    --faint: #a0aec0;
     --border: #e2e8f0;
+    --accent: #10a37f;
+    --on-accent: #ffffff;
+    --accent-ink: color-mix(in srgb, var(--accent) 70%, #000);
+    --accent-soft: color-mix(in srgb, var(--accent) 12%, var(--panel-bg));
+    --accent-softer: color-mix(in srgb, var(--accent) 6%, var(--panel-bg));
+    --link: #2b6cb0;
+    --danger: #c53030;
+    --danger-soft: #fff5f5;
+    --danger-line: #feb2b2;
+    --warn: #d69e2e;
+    --warn-ink: #975a16;
+    --warn-soft: #fefcbf;
+    --warn-soft-hover: #faf089;
+    --warn-softer: #fffff0;
+    --warn-line: #ecc94b;
+    --info: #4299e1;
+    --info-soft: #ebf8ff;
+    --same-bg: #e6fffa;
+    --same-ink: #0b7a5f;
+    --differ-bg: #fffaf0;
+    --differ-ink: #b7791f;
+    --note-bg: #fffbea;
+    --backdrop: rgba(26, 32, 44, 0.35);
+    --shadow: rgba(0, 0, 0, 0.12);
+    --shadow-strong: rgba(0, 0, 0, 0.22);
+    --toast-bg: #1a202c;
+    --toast-text: #ffffff;
+    /* The header (dark by default; see the data-header variants below) */
+    --header-bg: #1a202c;
+    --header-text: #cbd5e0;
+    --header-strong: #ffffff;
+    --header-line: #4a5568;
+    --header-line-hover: #a0aec0;
+    --header-link-hover: #c6f6e5;
+    /* Charts: hairline grid and axis, and the categorical colors in their
+       fixed order (validated for color-blind separation on this surface) */
+    --chart-grid: #edf0f3;
+    --chart-axis: #cbd2d9;
+    --chart-other: #a0aec0;
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
+    --series-3: #1baf7a;
+    --series-4: #eda100;
+    --series-5: #e87ba4;
+    --series-6: #008300;
+    --series-7: #6250d6;
+    --series-8: #e34948;
+}
+
+/* Dark mode: its own steps, not an automatic flip */
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg-primary: #0f1216;
+    --panel-bg: #191c21;
+    --surface-2: #1f2329;
+    --surface-3: #262b32;
+    --zebra: #1c2025;
+    --text: #e4e7eb;
+    --text-2: #c2c8d0;
+    --muted: #9aa3ae;
+    --faint: #6f7883;
+    --border: #2e343c;
+    --accent-ink: color-mix(in srgb, var(--accent) 60%, #fff);
+    --accent-soft: color-mix(in srgb, var(--accent) 24%, var(--panel-bg));
+    --accent-softer: color-mix(in srgb, var(--accent) 12%, var(--panel-bg));
+    --link: #63b3ed;
+    --danger: #fc8181;
+    --danger-soft: #3b1f22;
+    --danger-line: #7b3437;
+    --warn: #ecc94b;
+    --warn-ink: #f6e05e;
+    --warn-soft: #3d3514;
+    --warn-soft-hover: #4d4318;
+    --warn-softer: #2a2510;
+    --warn-line: #8a7425;
+    --info: #63b3ed;
+    --info-soft: #1a2c3d;
+    --same-bg: #133b33;
+    --same-ink: #68d3b0;
+    --differ-bg: #3a2b14;
+    --differ-ink: #f0b866;
+    --note-bg: #2f2a16;
+    --backdrop: rgba(0, 0, 0, 0.55);
+    --shadow: rgba(0, 0, 0, 0.4);
+    --shadow-strong: rgba(0, 0, 0, 0.6);
+    --toast-bg: #e4e7eb;
+    --toast-text: #1a202c;
+    --header-bg: #0b0d10;
+    --header-line: #2e343c;
+    --header-line-hover: #6f7883;
+    --chart-grid: #262b32;
+    --chart-axis: #3a414a;
+    --chart-other: #6f7883;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+}
+
+/* Header in the accent color */
+:root[data-header="accent"] {
+    --header-bg: color-mix(in srgb, var(--accent) 82%, #000);
+    --header-text: rgba(255, 255, 255, 0.85);
+    --header-line: rgba(255, 255, 255, 0.35);
+    --header-line-hover: rgba(255, 255, 255, 0.8);
+    --header-link-hover: #ffffff;
+}
+/* Header in the page's own colors */
+:root[data-header="light"] {
+    --header-bg: var(--panel-bg);
+    --header-text: var(--text-2);
+    --header-strong: var(--text);
+    --header-line: var(--border);
+    --header-line-hover: var(--faint);
+    --header-link-hover: var(--accent);
 }
 
 body {
@@ -6299,14 +6904,16 @@ body {
 }
 
 .app-header {
-    background: #1a202c;
-    color: white;
+    background: var(--header-bg);
+    color: var(--header-strong);
     padding: 10px 20px;
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: 16px;
+    border-bottom: 1px solid transparent;
 }
+:root[data-header="light"] .app-header { border-bottom-color: var(--border); }
 
 .app-header h1 { margin: 0; font-size: 1.25rem; }
 .app-title { display: flex; align-items: center; }
@@ -6325,7 +6932,7 @@ body {
 }
 /* Only with a mouse: on touch screens a tapped link would keep its hover color */
 @media (hover: hover) {
-    .home-link:hover { color: #c6f6e5; }
+    .home-link:hover { color: var(--header-link-hover); }
 }
 .home-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .app-logo { width: 28px; height: 28px; border-radius: 6px; }
@@ -6333,46 +6940,47 @@ body {
 .user-name {
     font-size: 0.95rem;
     font-weight: 400;
-    color: #cbd5e0;
+    color: var(--header-text);
     padding-left: 10px;
     margin-left: 2px;
-    border-left: 1px solid #4a5568;
+    border-left: 1px solid var(--header-line);
 }
 .user-name:empty { display: none; }
 
-/* Top left, one row: logo and name (Home), who's signed in, then Dashboards */
+/* Top left, one row: logo and name (Home), who's signed in, then Home and Dashboards */
 .header-left { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; min-width: 0; }
-.tab-navigation { display: flex; }
-.tab-navigation .tab-btn {
+.tab-navigation { display: flex; gap: 8px; }
+.tab-navigation .tab-btn,
+.header-btn,
+.sign-out-btn {
     background: transparent;
-    border: 1px solid #4a5568;
+    border: 1px solid var(--header-line);
     border-radius: 6px;
-    color: #cbd5e0;
+    color: var(--header-text);
     padding: 5px 12px;
     cursor: pointer;
     font-size: 0.9rem;
     font-weight: 500;
     white-space: nowrap;
 }
-.tab-navigation .tab-btn:hover { color: white; border-color: #a0aec0; }
+.tab-navigation .tab-btn:hover,
+.header-btn:hover,
+.sign-out-btn:hover { color: var(--header-strong); border-color: var(--header-line-hover); }
+.sign-out-btn { flex-shrink: 0; }
+.header-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.header-btn[aria-expanded="true"] { color: var(--header-strong); border-color: var(--header-line-hover); }
 
-.sign-out-btn {
-    background: transparent;
-    border: 1px solid #4a5568;
-    border-radius: 6px;
-    color: #cbd5e0;
-    padding: 6px 12px;
-    cursor: pointer;
-    font-size: 0.9rem;
-    flex-shrink: 0;
-}
-.sign-out-btn:hover { color: white; border-color: #a0aec0; }
-
-/* While the dashboards are showing */
+/* The page that's showing (Home or Dashboards) lights up in the accent color */
 .tab-navigation .tab-btn.active {
-    color: white;
+    color: var(--on-accent);
     background: var(--accent);
     border-color: var(--accent);
+}
+/* On a header that is itself the accent color, the lit button stands out in white */
+:root[data-header="accent"] .tab-navigation .tab-btn.active {
+    color: color-mix(in srgb, var(--accent) 70%, #000);
+    background: #ffffff;
+    border-color: #ffffff;
 }
 
 .app-content { flex: 1; position: relative; overflow: hidden; }
@@ -6391,7 +6999,7 @@ body {
 .assistant-backdrop {
     position: absolute;
     inset: 0;
-    background: rgba(26, 32, 44, 0.35);
+    background: var(--backdrop);
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.15s;
@@ -6409,7 +7017,7 @@ body {
     background: var(--panel-bg);
     border: 1px solid var(--border);
     border-radius: 10px;
-    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.22);
+    box-shadow: 0 16px 40px var(--shadow-strong);
     overflow: hidden;
     z-index: 11;
     opacity: 0;
@@ -6445,8 +7053,8 @@ body {
     cursor: pointer;
 }
 .assistant-minimize:hover { background: var(--bg-primary); }
-.assistant-delete { color: #c53030; }
-.assistant-delete:hover { background: #fff5f5; border-color: #feb2b2; }
+.assistant-delete { color: var(--danger); }
+.assistant-delete:hover { background: var(--danger-soft); border-color: var(--danger-line); }
 .assistant-panel .chat-container {
     flex: 1;
     min-height: 0;
@@ -6489,27 +7097,27 @@ body {
     padding: 14px 16px;
 }
 .guide-title { font-weight: 700; }
-.guide-text { font-size: 0.87rem; color: #4a5568; line-height: 1.45; }
+.guide-text { font-size: 0.87rem; color: var(--text-2); line-height: 1.45; }
 .guide-example {
     align-self: flex-start;
     max-width: 100%;
     margin-top: 2px;
-    background: #f3fbf8;
+    background: var(--accent-softer);
     border: 1px dashed var(--accent);
     border-radius: 6px;
     padding: 6px 10px;
-    color: #0b7a5f;
+    color: var(--accent-ink);
     font: inherit;
     font-size: 0.85rem;
     text-align: left;
     cursor: pointer;
     overflow-wrap: anywhere;
 }
-.guide-example::before { content: 'Try: '; color: #718096; }
-.guide-example:hover { background: #e6f6f1; border-style: solid; }
+.guide-example::before { content: 'Try: '; color: var(--muted); }
+.guide-example:hover { background: var(--accent-soft); border-style: solid; }
 .chat-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
-.home-action.danger { color: #c53030; }
-.home-action.danger:hover { background: #fff5f5; border-color: #feb2b2; }
+.home-action.danger { color: var(--danger); }
+.home-action.danger:hover { background: var(--danger-soft); border-color: var(--danger-line); }
 
 .home-modes {
     display: grid;
@@ -6531,17 +7139,17 @@ body {
     cursor: pointer;
     font: inherit;
 }
-.home-mode:hover { border-color: #a0aec0; }
-.home-mode.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: #f3fbf8; }
+.home-mode:hover { border-color: var(--faint); }
+.home-mode.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: var(--accent-softer); }
 .home-mode-name { font-weight: 700; }
-.home-mode-desc { font-size: 0.82rem; color: #718096; }
+.home-mode-desc { font-size: 0.82rem; color: var(--muted); }
 .star-count {
     display: inline-block;
     min-width: 1.4em;
     padding: 0 6px;
     margin-left: 4px;
     border-radius: 999px;
-    background: #edf2f7;
+    background: var(--surface-3);
     font-size: 0.78rem;
     text-align: center;
 }
@@ -6551,9 +7159,9 @@ body {
     border-radius: 8px;
     padding: 16px;
 }
-.home-status { margin: 0 0 10px; color: #4a5568; line-height: 1.5; }
+.home-status { margin: 0 0 10px; color: var(--text-2); line-height: 1.5; }
 .home-status:last-child { margin-bottom: 0; }
-.home-status.error { color: #c53030; }
+.home-status.error { color: var(--danger); }
 .home-actions { margin: 0 0 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 /* Ticket results: the summary line, with Delete ticket results at its right */
 .results-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; }
@@ -6561,9 +7169,9 @@ body {
 .results-head .home-action { flex-shrink: 0; }
 /* Ticket results: the rows from the latest answer */
 .result-table tbody tr.fresh,
-.result-table tbody tr.fresh:nth-child(even) { background: #fefcbf; }
-.result-table tbody tr.fresh:hover { background: #faf089; }
-.fresh-key { background: #fefcbf; border-radius: 4px; padding: 1px 6px; }
+.result-table tbody tr.fresh:nth-child(even) { background: var(--warn-soft); }
+.result-table tbody tr.fresh:hover { background: var(--warn-soft-hover); }
+.fresh-key { background: var(--warn-soft); border-radius: 4px; padding: 1px 6px; }
 .home-action {
     background: transparent;
     border: 1px solid var(--border);
@@ -6584,10 +7192,10 @@ body {
     font-weight: 700;
     letter-spacing: 0.05em;
     text-transform: uppercase;
-    color: #718096;
+    color: var(--muted);
 }
 .ticket-number { font-size: 1.3rem; font-weight: 700; }
-.ticket-summary { margin: 6px 0 12px; color: #4a5568; }
+.ticket-summary { margin: 6px 0 12px; color: var(--text-2); }
 .ticket-cell { white-space: nowrap; }
 .ticket-link {
     background: none;
@@ -6595,7 +7203,7 @@ body {
     padding: 0;
     font: inherit;
     font-weight: 600;
-    color: #2b6cb0;
+    color: var(--link);
     cursor: pointer;
 }
 .ticket-link:hover { text-decoration: underline; }
@@ -6608,12 +7216,12 @@ body {
     margin-left: 4px;
     font-size: 1.05rem;
     line-height: 1;
-    color: #a0aec0;
+    color: var(--faint);
     cursor: pointer;
     vertical-align: baseline;
 }
-.star-btn:hover { color: #d69e2e; }
-.star-btn.on { color: #d69e2e; }
+.star-btn:hover { color: var(--warn); }
+.star-btn.on { color: var(--warn); }
 .star-btn.labelled {
     margin-left: 0;
     border: 1px solid var(--border);
@@ -6623,32 +7231,88 @@ body {
     font-weight: 600;
     color: var(--text);
 }
-.star-btn.labelled.on { color: #975a16; background: #fefcbf; border-color: #ecc94b; }
+.star-btn.labelled.on { color: var(--warn-ink); background: var(--warn-soft); border-color: var(--warn-line); }
 .dashboard-toolbar .star-btn.labelled { flex-shrink: 0; margin-left: auto; }
+
+/* TICKET ROWS IN AI ANSWERS: click to open the full record and related tickets */
+.result-table tbody tr.expandable { cursor: pointer; }
+.result-table tbody tr.expandable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.result-table tbody tr.expanded,
+.result-table tbody tr.expanded:nth-child(even) { background: var(--accent-soft); }
+.expand-caret { display: inline-block; width: 1em; color: var(--faint); transition: transform 0.15s; }
+tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
+/* The opened view: under its row, kept in sight when the table scrolls sideways */
+.result-table tbody tr.row-detail,
+.result-table tbody tr.row-detail:nth-child(even),
+.result-table tbody tr.row-detail:hover { background: var(--surface-2); }
+.result-table tr.row-detail > td { padding: 0; border-bottom: 2px solid var(--accent); }
+.row-detail-body {
+    position: sticky;
+    left: 0;
+    box-sizing: border-box;
+    width: min(1100px, calc(100vw - 120px));
+    padding: 12px 16px 16px;
+    border-left: 3px solid var(--accent);
+}
+.row-detail-close {
+    float: right;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text);
+    cursor: pointer;
+}
+.row-detail-close:hover { background: var(--panel-bg); }
+/* A table with an opened row shows in full, instead of in a short scrolling box */
+.table-wrap:has(tr.row-detail) { max-height: none; }
+
+/* RELATED TICKETS: under an AI answer, and under a ticket's record on Home */
+.related { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.related-title { font-weight: 700; margin-bottom: 8px; }
+.related-loading { margin: 12px 0 0; color: var(--muted); font-size: 0.85rem; }
+.family { margin-bottom: 16px; padding: 12px 14px; background: var(--panel-bg); border: 1px solid var(--border); border-left: 3px solid var(--info); border-radius: 6px; }
+.family-title { font-weight: 600; }
+.family-why { margin: 4px 0 8px; color: var(--text-2); font-size: 0.87rem; line-height: 1.45; }
+.family-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 0 0 6px; font-size: 0.85rem; line-height: 1.5; }
+.same-label, .differ-label { font-weight: 700; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 7px; border-radius: 4px; }
+.same-label { background: var(--same-bg); color: var(--same-ink); }
+.differ-label { background: var(--differ-bg); color: var(--differ-ink); }
+.fact b { font-weight: 600; color: var(--text-2); }
+.family-more { margin: 6px 0 0; color: var(--muted); font-size: 0.8rem; }
+.family .table-wrap { max-height: 320px; margin-top: 8px; }
+/* "Download all N families as" above the families */
+.related > .download-bar { margin: 0 0 12px; }
+/* The ticket (or tickets) the question was about, in each family */
+.result-table tbody tr.focus,
+.result-table tbody tr.focus:nth-child(even) { background: var(--info-soft); }
+.result-table tbody tr.focus td:first-child { box-shadow: inset 3px 0 0 var(--info); }
 
 /* "Star all": under an AI answer's table, and above Ticket results */
 .star-all-bar { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
 .star-many {
-    background: #fffff0;
-    border: 1px solid #ecc94b;
+    background: var(--warn-softer);
+    border: 1px solid var(--warn-line);
     border-radius: 6px;
     padding: 5px 10px;
-    color: #975a16;
+    color: var(--warn-ink);
     font: inherit;
     font-size: 0.85rem;
     font-weight: 600;
     cursor: pointer;
 }
-.star-many:hover:not(:disabled) { background: #fefcbf; }
-.star-many:disabled { background: transparent; border-color: var(--border); color: #718096; cursor: default; }
+.star-many:hover:not(:disabled) { background: var(--warn-soft); }
+.star-many:disabled { background: transparent; border-color: var(--border); color: var(--muted); cursor: default; }
 
 .toast {
     position: fixed;
     left: 50%;
     bottom: 24px;
     transform: translate(-50%, 20px);
-    background: #1a202c;
-    color: white;
+    background: var(--toast-bg);
+    color: var(--toast-text);
     padding: 10px 18px;
     border-radius: 8px;
     font-size: 0.9rem;
@@ -6688,9 +7352,9 @@ body {
 }
 
 .msg { padding: 12px 16px; border-radius: 6px; max-width: 75%; line-height: 1.5; }
-.system-msg { background: #edf2f7; align-self: center; text-align: center; font-size: 0.9rem; }
-.user-msg { background: var(--accent); color: white; align-self: flex-end; }
-.ai-msg { background: #f7fafc; border: 1px solid var(--border); align-self: flex-start; }
+.system-msg { background: var(--surface-3); align-self: center; text-align: center; font-size: 0.9rem; }
+.user-msg { background: var(--accent); color: var(--on-accent); align-self: flex-end; }
+.ai-msg { background: var(--surface-2); border: 1px solid var(--border); align-self: flex-start; }
 
 .chat-input-area {
     display: flex;
@@ -6709,7 +7373,7 @@ body {
 
 .chat-input-area button {
     background: var(--accent);
-    color: white;
+    color: var(--on-accent);
     border: none;
     padding: 0 24px;
     border-radius: 6px;
@@ -6743,7 +7407,7 @@ body {
     align-items: center;
     gap: 8px;
     background: var(--accent);
-    color: white;
+    color: var(--on-accent);
     border: none;
     border-radius: 6px;
     padding: 8px 14px;
@@ -6754,10 +7418,10 @@ body {
 }
 .drawer-toggle span { font-size: 1.1rem; line-height: 1; }
 .dashboard-current { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex-wrap: wrap; }
-.dashboard-current-group { color: #718096; font-size: 0.85rem; }
+.dashboard-current-group { color: var(--muted); font-size: 0.85rem; }
 .dashboard-current-group:not(:empty)::after { content: ' ›'; }
 .dashboard-current-name { font-weight: 600; font-size: 1rem; }
-.dashboard-current-desc { color: #718096; font-size: 0.85rem; }
+.dashboard-current-desc { color: var(--muted); font-size: 0.85rem; }
 /* Back from a detail page that a click on a chart opened */
 .dashboard-back {
     background: transparent;
@@ -6771,14 +7435,14 @@ body {
     flex-shrink: 0;
 }
 .dashboard-back:hover { background: var(--bg-primary); }
-.dashboard-hint { margin-left: auto; color: #a0aec0; font-size: 0.8rem; white-space: nowrap; }
+.dashboard-hint { margin-left: auto; color: var(--faint); font-size: 0.8rem; white-space: nowrap; }
 
 /* The drawer slides over the dashboard from the left */
 .dashboard-body { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .dashboard-backdrop {
     position: absolute;
     inset: 0;
-    background: rgba(26, 32, 44, 0.35);
+    background: var(--backdrop);
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.2s;
@@ -6793,7 +7457,7 @@ body {
     width: min(320px, 85vw);
     background: var(--panel-bg);
     border-right: 1px solid var(--border);
-    box-shadow: 4px 0 16px rgba(0, 0, 0, 0.12);
+    box-shadow: 4px 0 16px var(--shadow);
     overflow-y: auto;
     transform: translateX(-100%);
     visibility: hidden;
@@ -6808,7 +7472,7 @@ body {
     padding: 14px 16px 6px;
     font-weight: 700;
 }
-.drawer-close { background: none; border: none; font-size: 1rem; color: #718096; cursor: pointer; padding: 4px 6px; }
+.drawer-close { background: none; border: none; font-size: 1rem; color: var(--muted); cursor: pointer; padding: 4px 6px; }
 .drawer-close:hover { color: var(--text); }
 .drawer-group { padding: 6px 8px 10px; }
 .drawer-group h3 {
@@ -6817,7 +7481,7 @@ body {
     font-weight: 700;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: #718096;
+    color: var(--muted);
 }
 .dashboard-choice {
     display: flex;
@@ -6834,11 +7498,11 @@ body {
     cursor: pointer;
 }
 .dashboard-choice:hover { background: var(--bg-primary); }
-.dashboard-choice.active { background: #e6f6f1; border-left-color: var(--accent); }
+.dashboard-choice.active { background: var(--accent-soft); border-left-color: var(--accent); }
 .dashboard-choice-name { font-weight: 600; font-size: 0.92rem; }
-.dashboard-choice-desc { font-size: 0.78rem; color: #718096; line-height: 1.35; }
+.dashboard-choice-desc { font-size: 0.78rem; color: var(--muted); line-height: 1.35; }
 
-.dashboard-message { margin: 40px auto; max-width: 560px; text-align: center; color: #4a5568; line-height: 1.6; }
+.dashboard-message { margin: 40px auto; max-width: 560px; text-align: center; color: var(--text-2); line-height: 1.6; }
 #dashboard-frame { flex: 1; width: 100%; border: 0; }
 
 @media (max-width: 640px) {
@@ -6851,24 +7515,24 @@ body {
 
 /* While a question is being answered: finished steps above the current one */
 .query-progress { min-width: 260px; }
-.progress-done { color: #718096; font-size: 0.85rem; }
+.progress-done { color: var(--muted); font-size: 0.85rem; }
 .progress-current { font-weight: 600; }
-.progress-time { margin-left: 6px; color: #a0aec0; font-size: 0.8rem; font-weight: 400; font-variant-numeric: tabular-nums; }
+.progress-time { margin-left: 6px; color: var(--faint); font-size: 0.8rem; font-weight: 400; font-variant-numeric: tabular-nums; }
 
 /* RESULT TABLES */
 .ai-msg.wide { max-width: 100%; width: 100%; box-sizing: border-box; }
 /* "Answered in 2.8 s" under each answer */
-.result-timing { margin-top: 8px; color: #a0aec0; font-size: 0.78rem; }
+.result-timing { margin-top: 8px; color: var(--faint); font-size: 0.78rem; }
 
 .result-title { font-weight: 600; margin-bottom: 8px; }
-.result-caption { font-size: 0.8rem; color: #718096; margin-bottom: 4px; }
-.result-empty { margin: 4px 0; color: #4a5568; }
+.result-caption { font-size: 0.8rem; color: var(--muted); margin-bottom: 4px; }
+.result-empty { margin: 4px 0; color: var(--text-2); }
 /* Why a question found nothing (dates covered, which condition emptied it) */
 .result-explanation {
     margin: 6px 0 4px;
     padding: 10px 14px;
-    background: #fffbea;
-    border-left: 3px solid #d69e2e;
+    background: var(--note-bg);
+    border-left: 3px solid var(--warn);
     border-radius: 4px;
     color: var(--text);
     line-height: 1.5;
@@ -6896,23 +7560,23 @@ body {
 .result-table thead th {
     position: sticky;
     top: 0;
-    background: #edf2f7;
+    background: var(--surface-3);
     font-weight: 600;
     white-space: nowrap;
     z-index: 1;
 }
-.result-table tbody tr:nth-child(even) { background: #f9fafb; }
-.result-table tbody tr:hover { background: #e6f6f1; }
+.result-table tbody tr:nth-child(even) { background: var(--zebra); }
+.result-table tbody tr:hover { background: var(--accent-soft); }
 .result-table td { min-width: 90px; }
 .result-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .result-table td[title] { cursor: help; }
 
 /* Single-ticket lookups: label on the left, value on the right */
-.result-table.detail th { width: 200px; background: #f7fafc; white-space: nowrap; }
+.result-table.detail th { width: 200px; background: var(--surface-2); white-space: nowrap; }
 .result-table.detail td.long { white-space: pre-wrap; max-width: 700px; }
 
-.assumptions { margin-top: 10px; font-size: 0.85rem; color: #4a5568; }
-.assumptions summary { cursor: pointer; color: #718096; }
+.assumptions { margin-top: 10px; font-size: 0.85rem; color: var(--text-2); }
+.assumptions summary { cursor: pointer; color: var(--muted); }
 .assumptions ul { margin: 6px 0 0; padding-left: 20px; }
 
 /* Tables that combine several ticket types */
@@ -6920,7 +7584,7 @@ body {
 .result-table tfoot td {
     position: sticky;
     bottom: 0;
-    background: #edf2f7;
+    background: var(--surface-3);
     font-weight: 700;
     border-top: 2px solid var(--border);
 }
@@ -6934,7 +7598,7 @@ body {
     gap: 8px;
     margin-top: 10px;
     font-size: 0.85rem;
-    color: #4a5568;
+    color: var(--text-2);
 }
 .download-bar select {
     padding: 5px 8px;
@@ -6945,7 +7609,7 @@ body {
 }
 .download-bar button {
     background: var(--accent);
-    color: white;
+    color: var(--on-accent);
     border: none;
     padding: 6px 14px;
     border-radius: 6px;
@@ -6954,8 +7618,486 @@ body {
     font-size: 0.85rem;
 }
 .download-bar button:disabled { opacity: 0.6; cursor: wait; }
-.download-status { color: #718096; }
-.download-status.error { color: #c53030; }
+.download-status { color: var(--muted); }
+.download-status.error { color: var(--danger); }
+
+/* =====================================================================
+   CUSTOMIZING (customize.js): the colors panel, Home's layout, each
+   person's own dashboards, the chart builder, and the charts (charts.js)
+   ===================================================================== */
+
+/* Anything hidden stays hidden, whatever display a rule gives it */
+[hidden] { display: none !important; }
+
+/* Buttons: the main action in the accent color */
+.primary-btn {
+    background: var(--accent);
+    color: var(--on-accent);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    padding: 6px 14px;
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.primary-btn:hover { filter: brightness(0.93); }
+.primary-btn:focus-visible,
+.home-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* 🎨 Colors: drops down under the header's right side */
+.theme-panel {
+    position: fixed;
+    top: 58px;
+    right: 16px;
+    z-index: 40;
+    width: min(380px, calc(100vw - 32px));
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
+    box-sizing: border-box;
+    padding: 12px 16px 14px;
+    background: var(--panel-bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 16px 40px var(--shadow-strong);
+}
+.theme-panel-head { display: flex; justify-content: space-between; align-items: center; font-weight: 700; margin-bottom: 8px; }
+.theme-panel fieldset,
+.builder fieldset { border: none; margin: 0 0 14px; padding: 0; min-width: 0; }
+.theme-panel legend,
+.builder legend { font-weight: 700; font-size: 0.82rem; color: var(--text-2); padding: 0; margin-bottom: 6px; }
+.legend-note { font-weight: 400; color: var(--muted); }
+.theme-panel-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+}
+.theme-note { font-size: 0.78rem; color: var(--muted); flex: 1 1 180px; line-height: 1.4; }
+
+/* Radio buttons drawn as pills and color swatches (the real input stays, for keyboards) */
+.choice-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.choice-pill, .display-choice, .swatch { position: relative; }
+.choice-pill input, .display-choice input, .swatch input[type="radio"] {
+    position: absolute;
+    opacity: 0;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+}
+.choice-pill span {
+    display: inline-block;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 5px 12px;
+    font-size: 0.85rem;
+    color: var(--text-2);
+    background: var(--panel-bg);
+    cursor: pointer;
+}
+.choice-pill span:hover { border-color: var(--faint); }
+.choice-pill input:checked + span { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.choice-pill input:focus-visible + span,
+.display-choice input:focus-visible + span,
+.swatch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.swatch-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.swatch { display: inline-flex; cursor: pointer; }
+.swatch span {
+    display: block;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+.swatch input:checked + span,
+.swatch-custom.on .swatch-custom-face { box-shadow: 0 0 0 2px var(--panel-bg), 0 0 0 4px var(--text); }
+/* "Any color": the browser's color picker, under a rainbow button */
+.swatch-custom input[type="color"] {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+    border: none;
+    padding: 0;
+}
+.swatch-custom input[type="color"]:focus-visible + .swatch-custom-face { outline: 2px solid var(--accent); outline-offset: 2px; }
+.swatch-custom-face {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    background: conic-gradient(#e34948, #eda100, #1baf7a, #2a78d6, #6250d6, #d55181, #e34948);
+    color: #ffffff;
+    font-weight: 700;
+    text-shadow: 0 0 3px rgba(0, 0, 0, 0.7);
+}
+
+/* HOME: the welcome with "Customize Home", then each section and chart */
+.home-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 12px; }
+.home-head .home-welcome { margin: 0; }
+.home-edit-bar {
+    background: var(--accent-softer);
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 16px;
+}
+.home-edit-text { margin: 0 0 10px; font-size: 0.88rem; color: var(--text-2); line-height: 1.45; }
+.home-edit-actions, .home-add-back { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.home-add-back:empty { display: none; }
+.home-empty { padding: 24px; text-align: center; background: var(--panel-bg); border: 1px dashed var(--border); border-radius: 8px; }
+.home-blocks {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 16px;
+    align-items: start;
+}
+/* Until this person's layout has loaded (no flash of the default one) */
+.home-blocks.waiting { visibility: hidden; }
+.home-block[data-block] { grid-column: 1 / -1; min-width: 0; }
+.home-block > .search-guide { margin-bottom: 0; }
+.home-block .home-modes { margin-bottom: 12px; }
+/* While customizing, each section is outlined and has its own buttons */
+.home.editing .home-block[data-block] { outline: 2px dashed var(--border); outline-offset: 6px; border-radius: 8px; }
+.block-bar { display: none; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.home.editing .block-bar { display: flex; }
+.block-name { font-weight: 700; margin-right: auto; }
+.home-action:disabled { opacity: 0.45; cursor: default; }
+
+/* "Your dashboards" section on Home */
+.shortcuts-card { max-width: none; }
+.shortcut-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-top: 6px; }
+.shortcut {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: left;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: var(--text);
+    font: inherit;
+    cursor: pointer;
+}
+.shortcut:hover { border-color: var(--accent); background: var(--accent-softer); }
+.shortcut.new { border-style: dashed; }
+.shortcut-name { font-weight: 600; }
+.shortcut-desc { font-size: 0.78rem; color: var(--muted); }
+
+/* DASHBOARDS DRAWER: "My dashboards", and hiding team dashboards */
+.drawer-new {
+    display: block;
+    width: calc(100% - 16px);
+    margin: 4px 8px 0;
+    text-align: left;
+    background: transparent;
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    color: var(--accent-ink);
+    font: inherit;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.drawer-new:hover { background: var(--accent-softer); border-color: var(--accent); }
+.drawer-note { margin: 4px 10px 6px; font-size: 0.78rem; color: var(--muted); line-height: 1.4; }
+.drawer-note:empty { display: none; }
+.drawer-foot { border-top: 1px solid var(--border); padding: 10px 8px 16px; margin-top: 4px; }
+.drawer-customize {
+    width: 100%;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font: inherit;
+    font-size: 0.85rem;
+    color: var(--text-2);
+    cursor: pointer;
+}
+.drawer-customize:hover,
+.drawer-customize[aria-pressed="true"] { background: var(--surface-2); color: var(--text); }
+.dashboard-choice { position: relative; }
+.choice-check { display: none; }
+.dashboard-drawer.editing #dashboard-picker .dashboard-choice { padding-left: 38px; }
+.dashboard-drawer.editing .choice-check {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    left: 10px;
+    top: 10px;
+    width: 16px;
+    height: 16px;
+    box-sizing: border-box;
+    border: 2px solid var(--accent);
+    border-radius: 4px;
+    background: var(--accent);
+    color: var(--on-accent);
+    font-size: 11px;
+    font-weight: 700;
+}
+.dashboard-drawer.editing .choice-check::after { content: '✓'; }
+.dashboard-drawer.editing .is-hidden .choice-check { background: transparent; border-color: var(--faint); }
+.dashboard-drawer.editing .is-hidden .choice-check::after { content: ''; }
+.dashboard-drawer.editing .is-hidden .dashboard-choice-name,
+.dashboard-drawer.editing .is-hidden .dashboard-choice-desc { opacity: 0.5; }
+
+/* ONE OF YOUR OWN DASHBOARDS: its buttons, then its charts */
+.board-view { flex: 1; min-height: 0; overflow-y: auto; box-sizing: border-box; padding: 16px 20px 32px; }
+.board-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.tile-grid {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 16px;
+    align-items: start;
+}
+.board-empty {
+    grid-column: 1 / -1;
+    max-width: 560px;
+    margin: 32px auto;
+    padding: 24px;
+    text-align: center;
+    color: var(--text-2);
+    line-height: 1.55;
+    background: var(--panel-bg);
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+}
+.board-empty p { margin: 0; }
+.board-empty .board-empty-title { font-weight: 700; color: var(--text); font-size: 1.05rem; margin-bottom: 6px; }
+.board-empty-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+
+/* A CHART: its title and what it counts, its buttons, the drawing */
+.chart-tile {
+    grid-column: span 6;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    box-sizing: border-box;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px 14px;
+}
+.chart-tile.size-small { grid-column: span 4; }
+.chart-tile.size-large { grid-column: 1 / -1; }
+.tile-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 4px 8px; margin-bottom: 8px; }
+.tile-titles { flex: 1 1 200px; min-width: 0; }
+.tile-actions { margin-left: auto; }
+.tile-title { margin: 0; font-size: 0.98rem; font-weight: 650; overflow-wrap: anywhere; }
+.tile-sub { margin: 2px 0 0; font-size: 0.78rem; color: var(--muted); line-height: 1.35; }
+/* The buttons show on hover or keyboard focus (always on touch screens and while customizing) */
+.tile-actions { display: flex; gap: 2px; flex-shrink: 0; opacity: 0; transition: opacity 0.15s; }
+.chart-tile:hover .tile-actions,
+.chart-tile:focus-within .tile-actions,
+.home.editing .tile-actions { opacity: 1; }
+@media (hover: none) {
+    .tile-actions { opacity: 1; }
+}
+.tile-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 3px 7px;
+    font-size: 0.85rem;
+    line-height: 1.2;
+    color: var(--muted);
+    cursor: pointer;
+}
+.tile-btn:hover { background: var(--surface-2); border-color: var(--border); color: var(--text); }
+.tile-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tile-btn[aria-pressed="true"] { color: var(--accent-ink); background: var(--accent-soft); }
+.tile-body { position: relative; min-width: 0; transition: opacity 0.15s; }
+/* New numbers loading: the old drawing stays, dimmed (no jump to "Loading…") */
+.tile-body.refreshing { opacity: 0.45; }
+.chart-note { margin: 8px 0 0; font-size: 0.78rem; color: var(--muted); }
+.chart-loading, .chart-empty { margin: 16px 0; color: var(--muted); font-size: 0.88rem; }
+.chart-empty.error { color: var(--danger); }
+.chart-table { max-height: 340px; }
+.chart-table .result-table td { min-width: 0; }
+
+/* The drawings: hairline grid and axis, thin marks, text in text colors */
+.chart-svg { display: block; overflow: visible; max-width: 100%; height: auto; font-family: inherit; }
+.chart-grid { stroke: var(--chart-grid); stroke-width: 1; shape-rendering: crispEdges; }
+.chart-axis { stroke: var(--chart-axis); stroke-width: 1; shape-rendering: crispEdges; }
+.chart-tick { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chart-label { fill: var(--text-2); font-size: 12px; }
+.chart-value { fill: var(--text); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.chart-hit { fill: var(--text); fill-opacity: 0; outline: none; }
+.chart-hit.hover,
+.chart-hit:focus-visible { fill-opacity: 0.06; }
+.chart-hit:focus-visible { stroke: var(--accent); stroke-width: 2; }
+.line-hit:focus-visible { fill-opacity: 0; }
+.chart-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart-area { fill-opacity: 0.1; }
+.chart-dot { stroke: var(--panel-bg); stroke-width: 2; }
+.chart-cross { stroke: var(--faint); stroke-width: 1; shape-rendering: crispEdges; }
+/* Donut slices: a 2px gap in the background color between them */
+.slice { stroke: var(--panel-bg); stroke-width: 2; outline: none; }
+.slice.hover { opacity: 0.82; }
+.slice:focus-visible { stroke: var(--text); }
+.chart-donut-total { fill: var(--text); font-size: 20px; font-weight: 700; }
+.chart-donut { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.chart-donut.side { flex-direction: row; gap: 20px; }
+.chart-legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; font-size: 0.82rem; min-width: 0; flex: 1; width: 100%; }
+.chart-legend li { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto auto; gap: 8px; align-items: center; }
+.legend-key { width: 10px; height: 10px; border-radius: 3px; }
+.legend-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.legend-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+.legend-share { min-width: 3.4em; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* One number: the total, big */
+.chart-stat { display: flex; flex-direction: column; padding: 6px 0 2px; }
+.chart-stat-value { font-size: 3rem; font-weight: 700; line-height: 1.05; color: var(--text); }
+.chart-stat-label { color: var(--muted); font-size: 0.9rem; margin-top: 2px; }
+/* The tooltip: the value first, then what it is */
+.chart-tip {
+    position: fixed;
+    z-index: 70;
+    display: none;
+    flex-direction: column;
+    max-width: 280px;
+    padding: 6px 10px;
+    pointer-events: none;
+    background: var(--panel-bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 6px 18px var(--shadow);
+    font-size: 0.82rem;
+}
+.chart-tip.show { display: flex; }
+.chart-tip strong { font-size: 0.95rem; font-variant-numeric: tabular-nums; }
+.chart-tip span { color: var(--muted); }
+
+@media (max-width: 1000px) {
+    .chart-tile.size-small { grid-column: span 6; }
+    .chart-tile.size-medium { grid-column: 1 / -1; }
+}
+@media (max-width: 640px) {
+    .chart-tile.size-small { grid-column: 1 / -1; }
+    .board-view { padding: 12px 16px 24px; }
+    .header-btn, .sign-out-btn { padding: 5px 9px; }
+}
+
+/* THE CHART BUILDER: the choices on the left, a live preview on the right */
+dialog::backdrop { background: var(--backdrop); }
+dialog.builder {
+    width: min(1100px, calc(100vw - 32px));
+    max-width: none;
+    max-height: calc(100vh - 32px);
+    padding: 0;
+    overflow: hidden;
+    background: var(--panel-bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 24px 60px var(--shadow-strong);
+}
+.builder-form { display: flex; flex-direction: column; max-height: calc(100vh - 34px); }
+.builder-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; border-bottom: 1px solid var(--border); }
+.builder-head h2 { margin: 0; font-size: 1.1rem; }
+.builder-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+    gap: 24px;
+    padding: 16px 20px;
+    overflow-y: auto;
+    min-height: 0;
+}
+.builder-fields select,
+.builder-fields input[type="text"],
+.builder-fields input[type="date"],
+.builder-fields input[type="search"],
+.ask-dialog input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel-bg);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.9rem;
+}
+.field-label { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: 0.82rem; color: var(--text-2); }
+.field-label-text { font-size: 0.82rem; color: var(--text-2); min-width: 44px; }
+.field-note { margin: 4px 0 0; font-size: 0.76rem; color: var(--muted); line-height: 1.4; }
+.field-note:empty { display: none; }
+.date-range { display: flex; gap: 8px; margin-top: 6px; }
+.date-range label { flex: 1; display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; color: var(--text-2); }
+.filter-row { margin-top: 10px; padding: 8px 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; }
+.filter-top { display: flex; align-items: flex-end; gap: 8px; margin-bottom: 6px; }
+.filter-field { flex: 1; display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; color: var(--text-2); }
+.filter-count { padding-bottom: 8px; font-size: 0.76rem; color: var(--muted); white-space: nowrap; }
+.filter-values { max-height: 168px; overflow-y: auto; margin-top: 6px; background: var(--panel-bg); border: 1px solid var(--border); border-radius: 6px; }
+.filter-value {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    padding: 5px 8px;
+    font-size: 0.84rem;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+}
+.filter-value:last-child { border-bottom: none; }
+.filter-value:hover { background: var(--accent-softer); }
+.filter-value input { accent-color: var(--accent); margin: 0; }
+.filter-value-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filter-value-count { font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.filter-more { margin: 6px 8px; font-size: 0.76rem; color: var(--muted); }
+#b-add-filter { margin-top: 10px; }
+.display-picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 6px; }
+.display-choice span {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 4px;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.78rem;
+    color: var(--text-2);
+    text-align: center;
+    cursor: pointer;
+}
+.display-choice svg { color: var(--muted); }
+.display-choice span:hover { border-color: var(--faint); }
+.display-choice input:checked + span { background: var(--accent-soft); border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); color: var(--text); }
+.display-choice input:checked + span svg { color: var(--accent); }
+.display-choice input:disabled + span,
+.choice-pill input:disabled + span { opacity: 0.4; cursor: not-allowed; }
+.builder-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 10px; }
+.builder-row .field-label { margin-top: 0; flex: 1 1 140px; }
+.builder-preview { position: sticky; top: 0; align-self: start; min-width: 0; }
+.builder-preview-label { margin-bottom: 6px; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.chart-tile.preview { box-shadow: 0 2px 12px var(--shadow); }
+.builder-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--border); }
+@media (max-width: 820px) {
+    .builder-body { grid-template-columns: minmax(0, 1fr); }
+    .builder-preview { position: static; order: -1; }
+}
+
+/* "Name it" box */
+dialog.ask-dialog {
+    width: min(420px, calc(100vw - 32px));
+    padding: 18px 20px 0;
+    background: var(--panel-bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 24px 60px var(--shadow-strong);
+}
+.ask-dialog h2 { margin: 0 0 8px; font-size: 1.1rem; }
+.ask-dialog .builder-foot { padding: 14px 0 16px; border-top: none; }
 
 /* =====================================================================
    SIGN-IN PAGE (from styles2.css; every rule is scoped to .login-page
@@ -7274,12 +8416,13 @@ function showLoginError(message) {
     document.getElementById('login-error').textContent = message || '';
 }
 
-// Signed in: the home page, with this person's starred tickets
+// Signed in: the home page, with this person's starred tickets, layout and colors
 function showApp(signedIn) {
     document.body.classList.toggle('signed-out', !signedIn);
     if (signedIn) {
         switchTab('home');
         loadStars();
+        loadPreferences();
     } else {
         document.getElementById('login-email').focus();
     }
@@ -7368,6 +8511,7 @@ function signOut(message) {
     clearChat();
     setCurrentUser(null);
     resetHome();
+    resetCustomizing();
     showLoginError(typeof message === 'string' ? message : '');
     showApp(false);
 }
@@ -7435,11 +8579,13 @@ async function deleteChat() {
 function goHome() {
     toggleAssistant(false);
     toggleDashboardDrawer(false);
+    toggleThemePanel(false);
     switchTab('home');
     document.getElementById('home-view').scrollTop = 0;
 }
 
-// Pages: Home (the logo) and Dashboards (its button); the AI assistant opens over either
+// Pages: Home (the logo, or its button) and Dashboards; the page showing lights up.
+// The AI assistant opens over either.
 function switchTab(viewName) {
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === viewName));
     document.querySelectorAll('.view-panel').forEach(panel => panel.classList.toggle('active', panel.id === `${viewName}-view`));
@@ -7498,20 +8644,37 @@ function updateChatControls() {
 // shown through the OneTouch server (so they work from any address)
 // =====================================================================
 
-const LAST_DASHBOARD_KEY = 'onetouch-dashboard';
-
 // Every page the frame can show, by its public id: the drawer's dashboards,
 // and the detail pages a click on a chart opens
 const dashboardPages = { main: new Map(), details: new Map() };
 let currentMainDashboard = null;
 const pageId = path => (String(path).match(/\/public\/dashboard\/([0-9a-f-]{36})/) || [])[1];
 
-// The last dashboard this browser showed (storage can be blocked: then none)
+// The dashboard each person had open last ("my:<id>" for one of their own),
+// saved to their account so it opens there next time, on any computer
 function rememberedDashboard() {
-    try { return localStorage.getItem(LAST_DASHBOARD_KEY); } catch { return null; }
+    return prefs.dashboards.last || '';
 }
 function rememberDashboard(key) {
-    try { localStorage.setItem(LAST_DASHBOARD_KEY, key); } catch { /* not remembered; that's fine */ }
+    if (prefs.dashboards.last === key || !sessionTokenValue || prefsLoadFailed) return;
+    prefs.dashboards.last = key;
+    savePreference('dashboards');
+}
+
+// How the frame shows a dashboard: no extra border or title (the toolbar
+// above names it), and Metabase's dark look when OneTouch is dark
+function frameHash() {
+    return `#bordered=false&titled=false${document.documentElement.dataset.theme === 'dark' ? '&theme=night' : ''}`;
+}
+
+// Light <-> dark: the dashboard in the frame reloads in the matching look
+function refreshDashboardTheme() {
+    if (!frameHasPage()) return;
+    try {
+        const where = document.getElementById('dashboard-frame').contentWindow.location;
+        where.replace(`${where.pathname}${where.search}${frameHash()}`);
+        where.reload();
+    } catch { /* not ours */ }
 }
 
 // Loads the drawer once; resolves true when the dashboards are there.
@@ -7536,10 +8699,11 @@ async function buildDashboards() {
         const { dashboards, details = [] } = await response.json();
         for (const d of dashboards) dashboardPages.main.set(pageId(d.path), d);
         for (const d of details) dashboardPages.details.set(pageId(d.path), d);
+        // Which team dashboards this person hid, and which one they had open
+        await prefsReady;
         if (!dashboards.length) {
-            message.textContent = 'No dashboards yet. Whoever runs this OneTouch server can create them with: ' +
-                'docker exec analytics_node_app node scripts/metabase-setup.mjs';
-            document.getElementById('dashboard-drawer-toggle').hidden = true;
+            message.textContent = 'No team dashboards yet. Whoever runs this OneTouch server can create them with: ' +
+                'docker exec analytics_node_app node scripts/metabase-setup.mjs. You can still build your own under ☰ Dashboards.';
             return false;
         }
 
@@ -7561,10 +8725,12 @@ async function buildDashboards() {
                 button.type = 'button';
                 button.className = 'dashboard-choice';
                 button.dataset.key = d.key;
-                button.innerHTML = '<span class="dashboard-choice-name"></span><span class="dashboard-choice-desc"></span>';
+                button.innerHTML = '<span class="choice-check" aria-hidden="true"></span><span class="dashboard-choice-name"></span><span class="dashboard-choice-desc"></span>';
                 button.querySelector('.dashboard-choice-name').textContent = d.name;
                 button.querySelector('.dashboard-choice-desc').textContent = d.description || '';
                 button.onclick = () => {
+                    // "Show or hide team dashboards": a click shows or hides it in the list
+                    if (drawerEditing) return toggleDashboardHidden(d.key);
                     showDashboard(d);
                     toggleDashboardDrawer(false);
                 };
@@ -7573,10 +8739,15 @@ async function buildDashboards() {
             picker.appendChild(section);
         }
 
-        const remembered = dashboards.find(d => d.key === rememberedDashboard());
-        showDashboard(remembered || dashboards[0]);
+        applyHiddenDashboards();
+
+        const last = rememberedDashboard();
+        if (last.startsWith('my:') && showBoard(last.slice(3))) return true;
+        const remembered = dashboards.find(d => d.key === last && !isDashboardHidden(d.key));
+        if (remembered) showDashboard(remembered);
+        else showFirstDashboard();
         // First visit: open the drawer so people see everything that's there
-        if (!remembered) toggleDashboardDrawer(true);
+        if (!last) toggleDashboardDrawer(true);
         return true;
     } catch (err) {
         message.textContent = 'Could not load the dashboards. Please try again.';
@@ -7585,18 +8756,44 @@ async function buildDashboards() {
     }
 }
 
+// The first team dashboard in this person's list; with every one hidden, a
+// dashboard of their own, or a note saying how to bring the team ones back
+function showFirstDashboard() {
+    const visible = [...dashboardPages.main.values()].filter(d => !isDashboardHidden(d.key));
+    if (visible.length) return showDashboard(visible[0]);
+    if (prefs.dashboards.boards.length) return showBoard(prefs.dashboards.boards[0].id);
+    hideBoard();
+    document.getElementById('dashboard-frame').hidden = true;
+    const message = document.getElementById('dashboard-message');
+    message.textContent = 'Every team dashboard is hidden from your list. Open ☰ Dashboards and click "Show or hide team dashboards" ' +
+        'to bring some back, or create a dashboard of your own.';
+    message.hidden = false;
+    setDashboardHeading('', '', '', false);
+    document.getElementById('dashboard-hint').hidden = true;
+}
+
 // The record pages a ticket number can open (built by scripts/metabase-setup.mjs)
 const RECORD_PAGES = { INC: 'incident-detail', CHG: 'change-detail', RITM: 'request-detail' };
 
 // Home page -> that ticket's record in the Dashboards tab
 async function openInDashboards(number) {
+    toggleAssistant(false); // opened from a ticket inside the chat: show the page behind it
     switchTab('dashboard');
     if (!await loadDashboards()) return;
     const key = RECORD_PAGES[(number.match(/^[A-Z]+/) || [])[0]];
     const page = [...dashboardPages.details.values()].find(d => d.key === key);
     if (!page) return;
     toggleDashboardDrawer(false);
-    openDashboardPath(`${page.path}?number=${encodeURIComponent(number)}#titled=false&bordered=false`);
+    const path = `${page.path}?number=${encodeURIComponent(number)}${frameHash()}`;
+    if (currentBoardId || document.getElementById('dashboard-frame').hidden) {
+        // One of their own dashboards is showing: back to the team dashboards, and
+        // the record opens on top of one once it has loaded (so ← Back works)
+        const visible = [...dashboardPages.main.values()].filter(d => !isDashboardHidden(d.key));
+        showDashboard(visible.includes(currentMainDashboard) ? currentMainDashboard : visible[0] || [...dashboardPages.main.values()][0]);
+        pendingFramePath = path;
+    } else {
+        openDashboardPath(path);
+    }
 }
 
 // Moves the frame to a page the way a click inside it would, so ← Back
@@ -7622,11 +8819,10 @@ document.getElementById('dashboard-frame').addEventListener('load', () => {
 });
 
 function showDashboard(dashboard) {
+    hideBoard();
     markCurrentDashboard(dashboard);
     const frame = document.getElementById('dashboard-frame');
-    // #bordered=false: no extra frame around the dashboard inside ours;
-    // titled=false: the toolbar above already names it
-    frame.src = `${API_BASE}${dashboard.path}#bordered=false&titled=false`;
+    frame.src = `${API_BASE}${dashboard.path}${frameHash()}`;
     frame.hidden = false;
     document.getElementById('dashboard-message').hidden = true;
 }
@@ -7664,6 +8860,7 @@ function detailPageLabel(detail, search) {
 let lastFrameAddress = '';
 function followDashboardFrame() {
     const frame = document.getElementById('dashboard-frame');
+    if (frame.hidden) return; // one of their own dashboards is showing
     let where;
     try { where = frame.contentWindow.location; } catch { return; } // not ours (yet)
     if (!where || where.href === lastFrameAddress) return;
@@ -7683,7 +8880,7 @@ function followDashboardFrame() {
         if (!detail.params.some(p => values.get(p.slug))) {
             const home = currentMainDashboard || [...dashboardPages.main.values()][0];
             if (home) {
-                frame.contentWindow.location.replace(`${API_BASE}${home.path}#bordered=false&titled=false`);
+                frame.contentWindow.location.replace(`${API_BASE}${home.path}${frameHash()}`);
                 showToast(`No filters left, so you're back on ${home.name}`);
                 return;
             }
@@ -7726,10 +8923,12 @@ function toggleDashboardDrawer(open) {
     }
 }
 
-// Escape closes whatever is open on top: the conversation, then the drawer
+// Escape closes whatever is open on top: the colors panel, the conversation,
+// then the drawer (a dialog such as the chart builder closes itself)
 document.addEventListener('keydown', e => {
-    if (e.key !== 'Escape') return;
-    if (assistantOpen()) toggleAssistant(false);
+    if (e.key !== 'Escape' || document.querySelector('dialog[open]')) return;
+    if (!document.getElementById('theme-panel').hidden) toggleThemePanel(false);
+    else if (assistantOpen()) toggleAssistant(false);
     else if (document.getElementById('dashboard-drawer').classList.contains('open')) toggleDashboardDrawer(false);
 });
 
@@ -7824,7 +9023,11 @@ async function sendPrompt() {
             }));
         }
 
-        appendMessage('ai-msg wide', html + answerTimingHtml(seconds, data.fromCache));
+        const answerId = appendMessage('ai-msg wide', html + answerTimingHtml(seconds, data.fromCache));
+
+        // Parent / child tickets and others linked to the ones in this answer, under it
+        const primary = answerTicketNumbers(data);
+        if (primary.length) showRelated(document.getElementById(answerId), primary, true);
 
         // The tickets in this answer pop up in Ticket results on Home
         if (data.shownTickets && data.shownTickets.length) ticketsShown(data.shownTickets);
@@ -7985,6 +9188,8 @@ const COLUMN_LABELS = {
     request: 'Parent Order (REQ)',
     request_item: 'Parent Request (RITM)',
     parent: 'Parent Ticket',
+    parent_incident: 'Parent Incident',
+    problem: 'Problem Record',
     sla_flag: 'SLA Breached',
     active: 'Still Active',
     fulfilled_time: 'Fulfilled',
@@ -8094,12 +9299,22 @@ function renderResults(rows, entity) {
         return `<div class="table-wrap"><table class="result-table detail"><tbody>${body}</tbody></table></div>`;
     }
 
-    // Everything else: a normal table with a header row
+    // Everything else: a normal table with a header row. A row with a ticket number
+    // opens, on click, into that ticket's full record and related tickets.
     const head = columns.map(c => {
         const cls = c.endsWith('.count') ? ' class="num"' : '';
         return `<th${cls}>${escapeHtml(columnLabel(c))}</th>`;
     }).join('');
-    const body = rows.map(r => `<tr>${columns.map(c => cellHtml(c, r[c], true)).join('')}</tr>`).join('');
+    const numberColumn = columns.find(c => c.endsWith('.number'));
+    const body = rows.map(r => {
+        const number = numberColumn && STARRABLE.test(String(r[numberColumn])) ? String(r[numberColumn]) : null;
+        if (!number) return `<tr>${columns.map(c => cellHtml(c, r[c], true)).join('')}</tr>`;
+        const cells = columns.map(c => c === numberColumn
+            ? `<td class="ticket-cell"><span class="expand-caret" aria-hidden="true">▸</span>${escapeHtml(number)}${starButtonHtml(number)}</td>`
+            : cellHtml(c, r[c], true)).join('');
+        return `<tr class="expandable" data-expand="${escapeHtml(number)}" tabindex="0" aria-expanded="false"` +
+            ` title="Click to see ${escapeHtml(number)}'s full record and related tickets">${cells}</tr>`;
+    }).join('');
     const caption = `${rows.length.toLocaleString()} ${rows.length === 1 ? 'row' : 'rows'}`;
 
     return `<div class="result-caption">${caption}</div>` +
@@ -8252,14 +9467,14 @@ const EXPORT_OPTIONS = [
     ]],
 ];
 
-function downloadBarHtml(exportId) {
+function downloadBarHtml(exportId, label = 'Download as') {
     const options = EXPORT_OPTIONS.map(([group, items]) =>
         `<optgroup label="${escapeHtml(group)}">` +
         items.map(([value, label]) => `<option value="${value}">${escapeHtml(label)}</option>`).join('') +
         `</optgroup>`
     ).join('');
     return `<div class="download-bar" id="${exportId}">` +
-        `<label for="${exportId}-format">Download as</label>` +
+        `<label for="${exportId}-format">${escapeHtml(label)}</label>` +
         `<select id="${exportId}-format">${options}</select>` +
         `<button type="button" onclick="downloadExport('${exportId}')">⬇ Download</button>` +
         `<span class="download-status" role="status"></span>` +
@@ -8624,10 +9839,10 @@ function formatStarredAt(iso) {
 }
 
 // Ticket numbers open the ticket; every row has a star. Rows whose number is
-// in `highlight` (e.g. the latest answer's tickets) are marked.
-function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set()) {
+// in `highlight` (e.g. the latest answer's tickets) get `highlightClass`.
+function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set(), highlightClass = 'fresh') {
     const head = columns.map(([label]) => `<th>${escapeHtml(label)}</th>`).join('');
-    const body = tickets.map(t => (highlight.has(t.number) ? '<tr class="fresh">' : '<tr>') + columns.map(([label, get], i) => {
+    const body = tickets.map(t => (highlight.has(t.number) ? `<tr class="${highlightClass}">` : '<tr>') + columns.map(([label, get], i) => {
         if (i === 0) {
             return `<td class="ticket-cell"><button type="button" class="ticket-link" data-ticket="${escapeHtml(t.number)}"` +
                 ` title="Open ${escapeHtml(t.number)}">${escapeHtml(t.number)}</button>${starButtonHtml(t.number)}</td>`;
@@ -8756,6 +9971,7 @@ function showTicketResults(quiet = false) {
 // Opening it counts as being shown, so it joins the list.
 function openTicketRecord(number) {
     openedRecord = number;
+    toggleAssistant(false); // clicked inside the chat (e.g. in a related family): show Home
     switchTab('home');
     setHomeMode('results');
     if (STARRABLE.test(number)) {
@@ -8768,8 +9984,8 @@ function openTicketRecord(number) {
     document.getElementById('home-view').scrollTop = 0;
 }
 
-function showOpenedRecord(number) {
-    return runHomeSearch('results', 'ticket-results', async () => {
+async function showOpenedRecord(number) {
+    await runHomeSearch('results', 'ticket-results', async () => {
         const data = await searchTickets(number, true);
         if (!data) return null;
         const back = '<div class="home-actions"><button type="button" class="home-action" onclick="closeTicketRecord()">← All ticket results</button></div>';
@@ -8777,6 +9993,122 @@ function showOpenedRecord(number) {
         if (data.found.length === 1) return back + ticketCardHtml(data.found[0], data.record);
         return back + ticketTableHtml(data.found);
     });
+    // Its parent / child tickets and other linked ones, under the record
+    const out = document.getElementById('ticket-results');
+    if (openedRecord === number && out.querySelector('.ticket-head')) showRelated(out, [number], false);
+}
+
+// =====================================================================
+// RELATED TICKETS: the families the server finds from the links in the data
+// (parent / child incidents, bundle and child requests, an order's requests,
+// a request's tasks, a change and its incidents, a problem record), with what
+// the members share and where they differ
+// =====================================================================
+
+const FAMILY_COLUMNS = [
+    ['Ticket', t => t.number],
+    ['Role', t => t.role],
+    ['Summary', t => t.summary],
+    ['State', t => t.state],
+    ['Priority / Risk', t => t.level],
+    ['Team', t => t.team],
+    ['Opened', t => t.opened ? formatValue('ticket.opened', t.opened) : ''],
+];
+
+// "Team ACN-INFRA-CLOUD-LINUX (3), ACN-SAP-BASIS (3)", "Opened Sep 1, 1:07 AM to 1:18 AM"
+function familyFact(fact) {
+    if (fact.range) return `${formatValue('ticket.opened', fact.range[0])} to ${formatValue('ticket.opened', fact.range[1])}`;
+    if (fact.note) return fact.note;
+    if (fact.values) {
+        return fact.values.map(v => `${v.value} (${v.count.toLocaleString()})`).join(', ') + (fact.others ? `, and ${fact.others.toLocaleString()} more` : '');
+    }
+    const value = fact.field === 'Opened' ? formatValue('ticket.opened', fact.value) : String(fact.value);
+    return value.length > 100 ? `${value.slice(0, 97)}…` : value;
+}
+
+const FAMILY_MEMBERS_SHOWN = 25; // listed on screen; downloads hold every member
+const FAMILY_EXPORT_COLUMNS = [...FAMILY_COLUMNS.slice(0, 2), ['Type', t => t.type], ...FAMILY_COLUMNS.slice(2)];
+
+// A family as download tables: every member, then what they share and where they differ.
+// Titles start with what the table is and the family's anchor number, because
+// Excel cuts worksheet names at 31 characters ("Members of PRB0051839 (96 tick…").
+function familyExportTables(f) {
+    return [
+        {
+            title: `Members of ${f.anchor} (${f.title})`,
+            columns: FAMILY_EXPORT_COLUMNS.map(([label]) => ({ label })),
+            rows: f.members.map(t => FAMILY_EXPORT_COLUMNS.map(([, get]) => String(get(t) || ''))),
+            footer: null,
+        },
+        {
+            title: `Same or different in ${f.anchor} (${f.title})`,
+            columns: [{ label: 'Field' }, { label: 'Same or different' }, { label: 'Value' }],
+            rows: [
+                ...f.same.map(fact => [fact.field, `Same in all ${f.total.toLocaleString()}`, familyFact(fact)]),
+                ...f.differ.map(fact => [fact.field, 'Different', familyFact(fact)]),
+            ],
+            footer: null,
+        },
+    ].filter(table => table.rows.length);
+}
+
+// "Related to INC1813970", or "Related to INC1, INC2, INC3 and 4 more"
+function relatedToLabel(focus) {
+    const list = [...focus];
+    return `Related to ${list.slice(0, 3).join(', ')}${list.length > 3 ? ` and ${list.length - 3} more` : ''}`;
+}
+
+// `focus`: the tickets the question or record was about, marked in each family
+function relatedHtml(families, focus) {
+    const about = relatedToLabel(focus);
+    // Several families: one file with all of them, besides each family's own
+    const all = families.length > 1
+        ? downloadBarHtml(registerExport({ title: `Related tickets: ${families.length} families`, question: about, tables: families.flatMap(familyExportTables) }),
+            `Download all ${families.length} families as`)
+        : '';
+    return '<div class="related"><div class="related-title">🔗 Related tickets</div>' + all + families.map(f => {
+        const facts = list => list.map(fact => `<span class="fact"><b>${escapeHtml(fact.field)}:</b> ${escapeHtml(familyFact(fact))}</span>`).join('');
+        const same = f.same.length
+            ? `<div class="family-line"><span class="same-label">Same in all ${f.total.toLocaleString()}</span>${facts(f.same)}</div>` : '';
+        const differ = f.differ.length
+            ? `<div class="family-line"><span class="differ-label">Different</span>${facts(f.differ)}</div>` : '';
+        const shown = f.members.slice(0, FAMILY_MEMBERS_SHOWN);
+        const more = f.members.length > shown.length
+            ? `<p class="family-more">Showing ${shown.length.toLocaleString()} of ${f.members.length.toLocaleString()}; the comparison above and the download cover all of them.</p>` : '';
+        const download = downloadBarHtml(registerExport({ title: f.title, question: about, tables: familyExportTables(f) }), 'Download this family as');
+        return `<section class="family"><div class="family-title">${escapeHtml(f.title)}</div>` +
+            `<p class="family-why">${escapeHtml(f.why)}</p>${same}${differ}` +
+            ticketTableHtml(shown, FAMILY_COLUMNS, focus, 'focus') + more + download + '</section>';
+    }).join('') + '</div>';
+}
+
+// Adds "Related tickets" to the end of `container` (an AI answer, or a record on
+// Home) once the server has looked; nothing at all if there are none.
+// conversation: true also tells the AI about them with the next question.
+async function showRelated(container, numbers, conversation) {
+    const slot = document.createElement('div');
+    slot.className = 'related-slot';
+    slot.innerHTML = '<p class="related-loading">🔗 Looking for related tickets…</p>';
+    container.appendChild(slot);
+    try {
+        const response = await fetch(`${API_BASE}/api/tickets/related`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ numbers, conversation }),
+        });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        if (!slot.isConnected) return; // the chat was cleared, or another record opened
+        if (!data.families.length) { slot.remove(); return; }
+        slot.innerHTML = relatedHtml(data.families, new Set(numbers));
+        // Keep the newest answer in view, as the chat does for new messages
+        const chatLog = document.getElementById('chat-log');
+        if (chatLog.contains(slot) && chatLog.lastElementChild === container) chatLog.scrollTop = chatLog.scrollHeight;
+    } catch (err) {
+        slot.remove();
+        console.error('Could not look for related tickets:', err);
+    }
 }
 
 function closeTicketRecord() {
@@ -8853,8 +10185,67 @@ document.addEventListener('click', e => {
     if (example) { askAssistant(example.dataset.example); return; }
 
     const record = e.target.closest('[data-open-dashboard]');
-    if (record) openInDashboards(record.dataset.openDashboard);
+    if (record) { openInDashboards(record.dataset.openDashboard); return; }
+
+    const close = e.target.closest('.row-detail-close');
+    if (close) { toggleTicketRow(close.closest('tr.row-detail').previousElementSibling); return; }
+
+    // A ticket's row in an AI answer: open (or fold away) its full record and
+    // related tickets. Buttons and menus inside the row keep their own jobs.
+    const row = e.target.closest('tr.expandable');
+    if (row && !e.target.closest('button, a, select, input, label')) toggleTicketRow(row);
 });
+
+// The same from the keyboard: Enter or Space on a focused ticket row
+document.addEventListener('keydown', e => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches?.('tr.expandable')) {
+        e.preventDefault();
+        toggleTicketRow(e.target);
+    }
+});
+
+// =====================================================================
+// TICKET ROWS IN AI ANSWERS: a click opens a detailed view under the row:
+// the ticket's full record, then its related tickets (families)
+// =====================================================================
+
+function toggleTicketRow(row) {
+    const open = row.nextElementSibling;
+    if (open && open.classList.contains('row-detail')) {
+        open.remove();
+        row.classList.remove('expanded');
+        row.setAttribute('aria-expanded', 'false');
+        return;
+    }
+    const number = row.dataset.expand;
+    const detail = document.createElement('tr');
+    detail.className = 'row-detail';
+    const cell = document.createElement('td');
+    cell.colSpan = row.cells.length;
+    cell.innerHTML = `<div class="row-detail-body"><button type="button" class="row-detail-close">▴ Close</button>` +
+        `<div class="row-detail-content"><p class="home-status">Loading ${escapeHtml(number)}…</p></div></div>`;
+    detail.appendChild(cell);
+    row.after(detail);
+    row.classList.add('expanded');
+    row.setAttribute('aria-expanded', 'true');
+    loadTicketDetail(cell.querySelector('.row-detail-content'), number);
+}
+
+async function loadTicketDetail(box, number) {
+    try {
+        const data = await searchTickets(number, true);
+        if (!data || !box.isConnected) return;
+        if (!data.found.length) {
+            box.innerHTML = `<p class="home-status">${escapeHtml(number)} is not in the data.</p>`;
+            return;
+        }
+        box.innerHTML = ticketCardHtml(data.found[0], data.record);
+        showRelated(box, [number], false);
+    } catch (err) {
+        if (box.isConnected) box.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        console.error(err);
+    }
+}
 
 // =====================================================================
 // START: a token from earlier in this tab skips the sign-in page; if it
@@ -8862,6 +10253,10 @@ document.addEventListener('click', e => {
 // =====================================================================
 
 document.getElementById('ticket-results').innerHTML = NO_TICKET_RESULTS_HTML;
+buildThemePanel();
+buildBuilder();
+renderHomeLayout();
+renderMyDashboards();
 showApp(Boolean(sessionTokenValue));
 loadCurrentUser();
 
@@ -10956,14 +12351,17 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 |---|---|
 | `server.mjs` | Express app (port 8000): sign-in routes, `/api/query` (one-shot translator with per-session conversation memory), `/api/export`, `/api/tickets/search` and `/api/stars` (home page), dashboards list, and a pass-through of Metabase public-dashboard pages |
 | `tickets.mjs` | Home page ticket search: parses INC/CHG/RITM/SCTASK/REQ numbers and builds its own Cube queries from them (never from model output); full records use Cube's `/meta` column list |
+| `relations.mjs` | Related tickets: from the link columns only (incident.parent_incident, sc_req_item.parent / request, sc_task.request_item, change_request.incident, incident.caused_by_change, *.problem), the families a ticket is in, with `same` / `differ` comparisons and every member (the page lists 25 but downloads all, via `familyExportTables` in app.js); one ticket gets all its families, a list only families 2+ of its tickets share. `POST /api/tickets/related` (conversation: true adds `describeFamilies` to Claude's pendingNote) |
 | `stars.mjs` | Each person's starred tickets, in `onetouch_auth` (`starred_tickets`, created on start); `addStars` stars many at once ("Star all", `PUT /api/stars`) up to `MAX_STARS` |
 | `seen.mjs` | Each person's "Ticket results": every ticket shown to them (`seen_tickets`, created on start). `/api/query` records the ticket numbers in each answer (`ticketNumbersIn`) before replying and returns them as `shownTickets`; `GET /api/seen-tickets` returns the list with summaries (`ticketSummaries`); `DELETE /api/seen-tickets` empties it ("Delete ticket results") |
+| `prefs.mjs` | Each person's preferences in `onetouch_auth` (`user_preferences`: one JSONB per user, saved in parts `theme` / `home` / `dashboards` via `PUT /api/preferences/:part`, reset with `DELETE`). `cleanPreference` drops unknown keys and caps sizes (20 dashboards x 30 charts, 30 Home sections); every chart goes through `sanitizeChart` |
+| `charts.mjs` | The charts people build: `CHART_SOURCES` (per ticket type, the fields to group / filter by and the time groupings), `sanitizeChart`, `chartData` (builds its own Cube query: count, one dimension, `equals` filters, open / closed states from `ENTITY_CATALOG`, a day range; top N plus an `other` total), `chartValues` (a filter's choices), `chartCatalog`. In-memory LRU cache, since the data is frozen. Routes: `/api/charts/catalog`, `/api/charts/data`, `/api/charts/values` |
 | `business_logic.mjs` | Everything Claude knows about the data: `ENTITY_CATALOG`, `buildSystemPrompt()` (sections A-E), `OUTPUT_SCHEMA`, and `normalizeAndValidate()`, which every Claude-built query passes through before Cube |
 | `empty_results.mjs` | When a query returns nothing: re-runs it minus one filter at a time, then Claude explains why |
 | `export.mjs` | Tables -> pdf/docx/xlsx/csv/txt/rtf, and zip/7z bundles (7-Zip) |
 | `auth.mjs` | Accounts and sessions in the `onetouch_auth` Postgres DB (its own role `onetouch_app`); scrypt hashes; `db/accounts.json` export/sync |
 | `remote.mjs` | "Remote mode" for clones: serves `public/` on localhost and forwards `/api`, `/public`, `/app` to a OneTouch server |
-| `public/` | The single-page UI (`index.html`, `app.js`, `style.css`); no build step. Home has the AI assistant's card (example question, Open chat, Delete chat; the chat opens as a panel over the page), ticket results (a clicked ticket's record) and starred tickets; Dashboards is the other tab. Delete chat resets the server conversation and bumps `chatEpoch` so a late answer is dropped |
+| `public/` | The single-page UI (`index.html`, `app.js`, `style.css`); no build step. Home has the AI assistant's card (example question, Open chat, Delete chat; the chat opens as a panel over the page; ticket rows in its answers open in place into the record plus related tickets via `toggleTicketRow`), ticket results (a clicked ticket's record) and starred tickets; Dashboards is the other tab. Delete chat resets the server conversation and bumps `chatEpoch` so a late answer is dropped. `customize.js` (colors panel, Customize Home, My dashboards, hiding team dashboards, the chart builder, saving preferences) and `charts.js` (SVG charts, tooltips, table view) load before `app.js`; their start-up work (`buildThemePanel`, `buildBuilder`) is called from `app.js` because they use its helpers. Every color in `style.css` is a variable (`:root`, `[data-theme="dark"]`, `[data-header=...]`); never hard-code one |
 | `db/` | `init-auth.sh`, `init-reporting.sh`, `reporting-views.sql` (typed `reporting.*` views for Metabase), `accounts.json` |
 | `scripts/users.mjs` | Account admin CLI (add, import CSV, export, sync, ...) |
 | `scripts/warmup.mjs` | `npm run warmup`: before a crowd, asks every question in `scripts/warmup-questions.txt` (so each is answered from the repeated-question cache) and opens every dashboard (filling Metabase's result cache); lists anything that failed |
@@ -11145,7 +12543,8 @@ const FILES = [
   'scripts/check.mjs', 'scripts/build-docs.mjs',
   // Added later; at the end so the guide's links to B.1-B.36 keep their numbers
   'tickets.mjs', 'stars.mjs', 'scripts/share.mjs', 'scripts/warmup.mjs', 'scripts/warmup-questions.txt',
-  'seen.mjs',
+  'seen.mjs', 'relations.mjs',
+  'prefs.mjs', 'charts.mjs', 'public/charts.js', 'public/customize.js',
 ];
 
 // Not copied in, and why (shown in the appendix)
@@ -11327,9 +12726,10 @@ export function parseTicketNumbers(text) {
   return { wanted, ignored: [...new Set(ignored)].slice(0, 20) };
 }
 
-const prefixOf = number => number.match(/^[A-Z]+/)[0];
+export const prefixOf = number => number.match(/^[A-Z]+/)[0];
 
-function toTicket(prefix, row) {
+// One Cube row -> the summary the ticket tables show (also used by relations.mjs)
+export function toTicket(prefix, row) {
   const { cube, label, fields } = TICKET_KINDS[prefix];
   const value = key => (fields[key] ? row[`${cube}.${fields[key]}`] ?? '' : '');
   return {
@@ -12037,6 +13437,2246 @@ export async function listSeen(userId) {
     [userId]);
   return rows.map(r => ({ number: r.number, shownAt: r.last_shown_at.toISOString(), question: r.question }));
 }
+```
+
+<a id="b43"></a>
+### B.43 `relations.mjs`
+
+```js
+// =====================================================================
+// RELATED TICKETS: the "families" a ticket belongs to, from the link columns
+// in the export (nothing guessed), and what each family's members have in
+// common and where they differ:
+//
+//   parent-incident  incident.parent_incident: a parent (master) incident and the
+//                    child incidents raised for the same issue (one level only)
+//   bundle-request   sc_req_item.parent: a bundle request and its child requests
+//   order            sc_req_item.request: requests ordered together in one REQ
+//   request-tasks    sc_task.request_item: a request and the tasks that fulfil it
+//   change-incident  change_request.incident (the incident a change fixes) and
+//                    incident.caused_by_change (incidents a change caused)
+//   problem          incident.problem / change_request.problem: tickets linked to
+//                    the same problem record (the PRB itself isn't in the export)
+//
+// One ticket gets every family it is in. A list of tickets gets only the
+// families that two or more of them share, so a long list isn't buried.
+// Every Cube query here is built from ticket numbers checked against
+// TICKET_NUMBER, never from model output.
+// =====================================================================
+
+import { TICKET_KINDS, toTicket, prefixOf } from './tickets.mjs';
+
+const TICKET_NUMBER = /^(INC|CHG|RITM|SCTASK)\d{7}$/;
+const MAX_TICKETS = 500;      // tickets looked at per request
+const MEMBER_LIMIT = 1000;    // members fetched per query (the largest problem has 870 incidents)
+const MAX_FAMILIES = 6;
+
+// Columns fetched besides the summary ones: the links, and the fields compared
+const EXTRA = {
+  INC: { system: 'configuration_item', subcategory: 'subcategory', location: 'location', parentIncident: 'parent_incident', problem: 'problem', causedByChange: 'caused_by_change' },
+  CHG: { system: 'configuration_item', fixesIncident: 'incident', problem: 'problem' },
+  RITM: { item: 'item', location: 'location', order: 'request', parentRequest: 'parent' },
+  SCTASK: { item: 'item', requestItem: 'request_item' },
+};
+
+// Compared across a family's members; each applies to some ticket types only.
+// (Each member's role already says its type, so type isn't compared.)
+const COMPARE = [
+  ['State', ['INC', 'CHG', 'RITM', 'SCTASK'], t => t.state],
+  ['Priority / risk', ['INC', 'CHG'], t => t.level],
+  ['Team', ['INC', 'CHG', 'SCTASK'], t => t.team],
+  ['Server / system', ['INC', 'CHG'], t => t.system],
+  ['Subcategory', ['INC'], t => t.subcategory],
+  ['Catalog item', ['RITM', 'SCTASK'], t => t.item],
+  ['Location', ['INC', 'RITM'], t => t.location],
+  ['Assigned to / requested for', ['INC', 'CHG', 'RITM', 'SCTASK'], t => t.person],
+];
+
+// "zzz" is the export's placeholder for "no server / system"
+const clean = v => {
+  const s = v === null || v === undefined ? '' : String(v).trim();
+  return s === 'zzz' ? '' : s;
+};
+
+// Tickets of one type matching every [column, values] filter, with their link columns
+async function queryTickets(prefix, filters, runQuery) {
+  if (filters.some(([, values]) => !values.length)) return [];
+  const { cube, fields } = TICKET_KINDS[prefix];
+  const columns = [...new Set(['number', ...Object.values(fields), ...Object.values(EXTRA[prefix])])];
+  const rows = await runQuery({
+    dimensions: columns.map(c => `${cube}.${c}`),
+    filters: filters.map(([column, values]) => ({ member: `${cube}.${column}`, operator: 'equals', values })),
+    order: { [`${cube}.number`]: 'asc' },
+    limit: MEMBER_LIMIT,
+  });
+  return rows.map(row => {
+    const t = toTicket(prefix, row);
+    for (const [key, column] of Object.entries(EXTRA[prefix])) t[key] = clean(row[`${cube}.${column}`]);
+    return t;
+  });
+}
+
+// What all members share, and where they differ (counts of each value)
+function compare(members) {
+  const same = [];
+  const differ = [];
+  for (const [field, kinds, get] of COMPARE) {
+    const present = members.filter(m => kinds.includes(m.kind));
+    if (present.length < 2) continue;
+    const counts = new Map();
+    for (const m of present) {
+      const v = clean(get(m)) || 'not set';
+      counts.set(v, (counts.get(v) || 0) + 1);
+    }
+    if (counts.size === 1) {
+      const [value] = counts.keys();
+      if (value !== 'not set') same.push({ field, value });
+    } else {
+      const values = [...counts].sort((a, b) => b[1] - a[1]).map(([value, count]) => ({ value, count }));
+      differ.push({ field, values: values.slice(0, 4), others: Math.max(values.length - 4, 0) });
+    }
+  }
+  const summaries = new Set(members.map(m => clean(m.summary)).filter(Boolean));
+  if (summaries.size === 1) same.push({ field: 'Summary', value: [...summaries][0] });
+  else if (summaries.size > 1) differ.push({ field: 'Summary', note: summaries.size === members.length ? 'each one is different' : `${summaries.size} different summaries` });
+  const opened = members.map(m => clean(m.opened)).filter(Boolean).sort();
+  if (opened.length > 1) {
+    if (opened[0] === opened.at(-1)) same.push({ field: 'Opened', value: opened[0] });
+    else differ.push({ field: 'Opened', range: [opened[0], opened.at(-1)] });
+  }
+  return { same, differ };
+}
+
+// A linked ticket that isn't in the export still gets a row, marked as such
+const missing = (number, type) => ({ number, kind: prefixOf(number), type, summary: 'Not in this export', state: '', level: '', team: '', person: '', opened: '', missing: true });
+
+function family(kind, anchor, title, why, members, wanted) {
+  const unique = [...new Map(members.map(m => [m.number, m])).values()];
+  const touched = unique.filter(m => wanted.has(m.number)).length;
+  const real = unique.filter(m => !m.missing);
+  // Members the question was about first, then the anchor, then by when they were opened
+  const ordered = [...unique].sort((a, b) =>
+    (wanted.has(b.number) - wanted.has(a.number)) || ((b.number === anchor) - (a.number === anchor)) || clean(a.opened).localeCompare(clean(b.opened)));
+  return {
+    kind, anchor, title, why, touched, total: unique.length,
+    // All of them (the page lists the first 25; downloads and the comparison use all)
+    members: ordered.map(({ number, kind: k, type, role, summary, state, level, team, opened, missing: gone }) =>
+      ({ number, kind: k, type, role, summary, state, level, team, opened, missing: Boolean(gone) })),
+    ...compare(real),
+  };
+}
+
+const plural = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
+const role = (t, label) => ({ ...t, role: label });
+
+export async function relatedFamilies(numbers, runQuery) {
+  const wantedList = [...new Set(numbers.map(n => String(n).toUpperCase()))].filter(n => TICKET_NUMBER.test(n)).slice(0, MAX_TICKETS);
+  if (!wantedList.length) return [];
+  const wanted = new Set(wantedList);
+  const single = wantedList.length === 1;
+  const of = prefix => wantedList.filter(n => prefixOf(n) === prefix);
+
+  // The tickets asked about, with their links
+  const [incs, chgs, ritms, tasks] = await Promise.all([
+    queryTickets('INC', [['number', of('INC')]], runQuery),
+    queryTickets('CHG', [['number', of('CHG')]], runQuery),
+    queryTickets('RITM', [['number', of('RITM')]], runQuery),
+    queryTickets('SCTASK', [['number', of('SCTASK')]], runQuery),
+  ]);
+
+  // Everything the families need, in one round of queries
+  const parentIncidents = [...new Set([...incs.map(t => t.parentIncident).filter(Boolean), ...incs.map(t => t.number)])];
+  const problems = [...new Set([...incs, ...chgs].map(t => t.problem).filter(Boolean))];
+  const changeNumbers = [...new Set([...chgs.map(t => t.number), ...incs.map(t => t.causedByChange).filter(Boolean)])];
+  const orders = [...new Set(ritms.map(t => t.order).filter(Boolean))];
+  const parentRequests = [...new Set([...ritms.map(t => t.parentRequest).filter(Boolean), ...ritms.map(t => t.number)])];
+  const requestItems = [...new Set([...ritms.map(t => t.number), ...tasks.map(t => t.requestItem).filter(Boolean)])];
+  const [childIncs, parentIncs, problemIncs, problemChgs, fixChanges, causedIncs, changes, fixedIncs,
+    orderRitms, childRitms, parentRitms, taskRitms, taskSiblings] = await Promise.all([
+    queryTickets('INC', [['parent_incident', parentIncidents]], runQuery),
+    queryTickets('INC', [['number', parentIncidents]], runQuery),
+    queryTickets('INC', [['problem', problems]], runQuery),
+    queryTickets('CHG', [['problem', problems]], runQuery),
+    queryTickets('CHG', [['incident', incs.map(t => t.number)]], runQuery),
+    queryTickets('INC', [['caused_by_change', changeNumbers]], runQuery),
+    queryTickets('CHG', [['number', changeNumbers]], runQuery),
+    queryTickets('INC', [['number', chgs.map(t => t.fixesIncident).filter(Boolean)]], runQuery),
+    queryTickets('RITM', [['request', orders]], runQuery),
+    queryTickets('RITM', [['parent', parentRequests]], runQuery),
+    queryTickets('RITM', [['number', parentRequests]], runQuery),
+    queryTickets('RITM', [['number', requestItems]], runQuery),
+    queryTickets('SCTASK', [['request_item', requestItems]], runQuery),
+  ]);
+  const byNumber = list => new Map(list.map(t => [t.number, t]));
+  const families = [];
+
+  // Parent incident and its children
+  const parentsByNumber = byNumber(parentIncs);
+  for (const p of parentIncidents) {
+    const children = childIncs.filter(c => c.parentIncident === p);
+    if (!children.length) continue;
+    const parent = parentsByNumber.get(p) || missing(p, 'Incident');
+    families.push(family('parent-incident', p,
+      `Parent incident ${p} and its ${plural(children.length, 'child incident', 'child incidents')}`,
+      `${p} is a parent (master) incident: it groups incidents raised for the same issue, such as several alerts or reports about one fault, so they are worked and resolved together.`,
+      [role(parent, 'Parent'), ...children.map(c => role(c, 'Child'))], wanted));
+  }
+
+  // Problem record
+  for (const prb of problems) {
+    const linked = [...problemIncs.filter(t => t.problem === prb).map(t => role(t, 'Incident')), ...problemChgs.filter(t => t.problem === prb).map(t => role(t, 'Change'))];
+    if (linked.length < 2) continue;
+    families.push(family('problem', prb,
+      `${plural(linked.length, 'ticket', 'tickets')} linked to problem ${prb}`,
+      `These tickets were all linked to problem ${prb}, the investigation into their shared root cause. The problem record itself isn't in this export.`,
+      linked, wanted));
+  }
+
+  // Change <-> incident: the incident a change fixes, and incidents it caused
+  const changesByNumber = byNumber([...changes, ...fixChanges]);
+  const fixedByNumber = byNumber(fixedIncs);
+  for (const c of new Set([...changeNumbers, ...fixChanges.map(t => t.number)])) {
+    const change = changesByNumber.get(c) || missing(c, 'Change');
+    const fixes = change.fixesIncident ? [fixedByNumber.get(change.fixesIncident) || incs.find(t => t.number === change.fixesIncident) || missing(change.fixesIncident, 'Incident')] : [];
+    const caused = causedIncs.filter(t => t.causedByChange === c);
+    if (!fixes.length && !caused.length) continue;
+    const parts = [fixes.length ? `raised to fix ${fixes[0].number}` : '', caused.length ? `the cause of ${plural(caused.length, 'incident', 'incidents')}` : ''].filter(Boolean);
+    families.push(family('change-incident', c,
+      `Change ${c}: ${parts.join(', and ')}`,
+      fixes.length && caused.length ? `${c} was raised to fix an incident, and other incidents name it as their cause.`
+        : fixes.length ? `${c} was raised to fix incident ${fixes[0].number}.` : `These incidents name change ${c} as their cause.`,
+      [role(change, 'Change'), ...fixes.map(t => role(t, 'Incident it fixes')), ...caused.map(t => role(t, 'Incident it caused'))], wanted));
+  }
+
+  // Requests ordered together
+  for (const order of orders) {
+    const together = orderRitms.filter(t => t.order === order);
+    if (together.length < 2) continue;
+    families.push(family('order', order,
+      `${plural(together.length, 'request', 'requests')} ordered together in ${order}`,
+      `${order} is one order (REQ); each request (RITM) in it is a separate item that was ordered at the same time.`,
+      together.map(t => role(t, 'Request')), wanted));
+  }
+
+  // Bundle request and its child requests
+  const parentRitmsByNumber = byNumber(parentRitms);
+  for (const p of parentRequests) {
+    const children = childRitms.filter(t => t.parentRequest === p);
+    if (!children.length) continue;
+    const parent = parentRitmsByNumber.get(p) || missing(p, 'Request');
+    families.push(family('bundle-request', p,
+      `Request ${p} and its ${plural(children.length, 'child request', 'child requests')}`,
+      `${p} is a bundle request; it was split into child requests, one for each part of the work (for example one per server to start or stop).`,
+      [role(parent, 'Parent request'), ...children.map(c => role(c, 'Child request'))], wanted));
+  }
+
+  // A request and the catalog tasks that fulfil it
+  const taskRitmsByNumber = byNumber(taskRitms);
+  for (const r of requestItems) {
+    const itsTasks = taskSiblings.filter(t => t.requestItem === r);
+    if (!itsTasks.length) continue;
+    const request = taskRitmsByNumber.get(r) || missing(r, 'Request');
+    families.push(family('request-tasks', r,
+      `Request ${r} and its ${plural(itsTasks.length, 'catalog task', 'catalog tasks')}`,
+      `Catalog tasks are the pieces of work that fulfil request ${r}; each is done by a fulfilment team.`,
+      [role(request, 'Request'), ...itsTasks.map(t => role(t, 'Task'))], wanted));
+  }
+
+  // One ticket: every family it is in. A list: families two or more of them share.
+  return families
+    .filter(f => (single ? f.touched >= 1 : f.touched >= 2))
+    .sort((a, b) => (b.touched - a.touched) || (b.total - a.total))
+    .slice(0, MAX_FAMILIES);
+}
+
+// One line per family, for Claude: what the next question can build on
+export function describeFamilies(families) {
+  return families.map(f => {
+    const same = f.same.filter(s => s.field !== 'Summary').map(s => `${s.field} ${s.value}`).join(', ');
+    const differ = f.differ.map(d => d.field).join(', ');
+    return `${f.title}${same ? `; all share ${same}` : ''}${differ ? `; they differ in ${differ}` : ''}.`;
+  }).join(' ');
+}
+```
+
+<a id="b44"></a>
+### B.44 `prefs.mjs`
+
+```js
+// =====================================================================
+// PREFERENCES: how each person has set up OneTouch - their color scheme,
+// their Home page, and their own dashboards - kept with their account in
+// the onetouch_auth database, so it survives a refresh, signing out and a
+// server restart, and follows them to any computer
+// =====================================================================
+
+import { pool } from './auth.mjs';
+import { sanitizeChart, newId } from './charts.mjs';
+
+// Saved separately, so changing colors never overwrites a dashboard
+export const PARTS = ['theme', 'home', 'dashboards'];
+
+export const MAX_BOARDS = 20;
+export const MAX_BOARD_CHARTS = 30;
+export const MAX_HOME_BLOCKS = 30;
+// A whole account's settings; far more than 20 full dashboards need
+const MAX_BYTES = 512 * 1024;
+
+const MODES = ['light', 'dark', 'system'];
+const HEADERS = ['dark', 'accent', 'light'];
+// Home's own sections, besides charts
+const HOME_SECTIONS = ['assistant', 'tickets', 'shortcuts'];
+const ID = /^[A-Za-z0-9_-]{1,40}$/;
+const DASHBOARD_KEY = /^[a-z0-9-]{1,60}$/;
+
+export class PreferenceError extends Error {}
+
+// Safe to run every start (after auth.ensureSchema, which creates users)
+export async function ensurePrefsSchema() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_preferences (
+      user_id     integer PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      settings    jsonb NOT NULL DEFAULT '{}'::jsonb,
+      updated_at  timestamptz NOT NULL DEFAULT now()
+    );
+  `);
+}
+
+// -> { theme?, home?, dashboards? }: only the parts this person has changed
+export async function getPreferences(userId) {
+  const { rows } = await pool.query('SELECT settings FROM user_preferences WHERE user_id = $1', [userId]);
+  return rows[0]?.settings || {};
+}
+
+export async function savePreference(userId, part, value) {
+  await pool.query(
+    `INSERT INTO user_preferences (user_id, settings) VALUES ($1, jsonb_build_object($2::text, $3::jsonb))
+     ON CONFLICT (user_id) DO UPDATE SET settings = user_preferences.settings || EXCLUDED.settings, updated_at = now()`,
+    [userId, part, JSON.stringify(value)]);
+}
+
+// Back to the default for that part
+export async function resetPreference(userId, part) {
+  await pool.query('UPDATE user_preferences SET settings = settings - $2::text, updated_at = now() WHERE user_id = $1', [userId, part]);
+}
+
+// ---------------------------------------------------------------------
+// Browser input -> exactly the shape the page expects. Unknown keys are
+// dropped, text is trimmed and capped, and every chart goes through
+// sanitizeChart, so a saved chart can always be drawn.
+// ---------------------------------------------------------------------
+
+function cleanTheme(t = {}) {
+  return {
+    mode: MODES.includes(t.mode) ? t.mode : 'light',
+    accent: /^#[0-9a-f]{6}$/i.test(t.accent) ? t.accent.toLowerCase() : '#10a37f',
+    header: HEADERS.includes(t.header) ? t.header : 'dark',
+  };
+}
+
+function cleanCharts(list, max) {
+  const charts = [];
+  for (const c of (Array.isArray(list) ? list : []).slice(0, max)) {
+    const chart = sanitizeChart(c);
+    if (charts.some(other => other.id === chart.id)) chart.id = newId();
+    charts.push(chart);
+  }
+  return charts;
+}
+
+function cleanHome(h = {}) {
+  const blocks = [];
+  for (const b of (Array.isArray(h.blocks) ? h.blocks : []).slice(0, MAX_HOME_BLOCKS)) {
+    if (HOME_SECTIONS.includes(b?.type)) {
+      if (!blocks.some(other => other.type === b.type)) blocks.push({ type: b.type });
+    } else if (b?.type === 'chart') {
+      const [chart] = cleanCharts([b.chart], 1);
+      if (blocks.some(other => other.chart?.id === chart.id)) chart.id = newId();
+      blocks.push({ type: 'chart', chart });
+    }
+  }
+  return { blocks };
+}
+
+function cleanDashboards(d = {}) {
+  const boards = [];
+  for (const b of (Array.isArray(d.boards) ? d.boards : []).slice(0, MAX_BOARDS)) {
+    if (!b || typeof b !== 'object') continue;
+    boards.push({
+      id: ID.test(b.id) && !boards.some(other => other.id === b.id) ? b.id : newId(),
+      name: String(b.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 60) || 'My dashboard',
+      charts: cleanCharts(b.charts, MAX_BOARD_CHARTS),
+    });
+  }
+  // Team dashboards this person hid from their list, and the one they had open last
+  const hidden = [...new Set((Array.isArray(d.hidden) ? d.hidden : []).filter(k => DASHBOARD_KEY.test(k)))].slice(0, 200);
+  const last = typeof d.last === 'string' && (DASHBOARD_KEY.test(d.last) || /^my:[A-Za-z0-9_-]{1,40}$/.test(d.last)) ? d.last : '';
+  return { boards, hidden, last };
+}
+
+const CLEANERS = { theme: cleanTheme, home: cleanHome, dashboards: cleanDashboards };
+
+export function cleanPreference(part, value) {
+  if (!PARTS.includes(part)) throw new PreferenceError('Unknown setting.');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new PreferenceError('The setting must be an object.');
+  const clean = CLEANERS[part](value);
+  if (JSON.stringify(clean).length > MAX_BYTES) throw new PreferenceError('That is more than OneTouch can save for one account. Remove some charts first.');
+  return clean;
+}
+```
+
+<a id="b45"></a>
+### B.45 `charts.mjs`
+
+```js
+// =====================================================================
+// CHARTS: the data behind the charts people build themselves (on their
+// own dashboards and on Home). A chart is a set of choices from
+// CHART_SOURCES: which tickets to count, which ones to include, and what
+// to group them by. Every Cube query here is built by this file from
+// those choices (checked by sanitizeChart), never from text the browser
+// sends, so nothing unchecked reaches Cube.
+// =====================================================================
+
+import { ENTITY_CATALOG } from './business_logic.mjs';
+
+// What can be counted, per ticket type: `fields` group into categories and
+// can also filter; `times` group by when (oldest first). `day` is the
+// opened date the date range filters on.
+export const CHART_SOURCES = {
+  incident: {
+    label: 'Incidents', one: 'incident', many: 'incidents', day: 'created_day',
+    fields: {
+      priority: 'Priority', state: 'State', category: 'Category', subcategory: 'Subcategory',
+      assignment_group: 'Team', assigned_to: 'Assigned to', contact_type: 'How it was reported',
+      location: 'Location', configuration_item: 'System (CI)', impact: 'Impact', urgency: 'Urgency',
+      close_code: 'How it was closed', cause_code: 'Cause', on_hold_reason: 'On-hold reason', was_p1: 'Was ever P1',
+    },
+    times: {
+      created_day: 'Day opened', created_week: 'Week opened', created_month: 'Month opened',
+      resolved_day: 'Day resolved', resolved_month: 'Month resolved',
+    },
+  },
+  change_request: {
+    label: 'Changes', one: 'change', many: 'changes', day: 'created_day',
+    fields: {
+      risk: 'Risk', state: 'State', type: 'Type', sub_type: 'Sub-type', owner_group: 'Team',
+      approval: 'Approval', environment: 'Environment', close_code: 'Outcome', failure_code: 'Failure reason',
+      outage: 'Outage', configuration_item: 'System (CI)', requested_by: 'Requested by',
+    },
+    times: {
+      created_day: 'Day opened', created_week: 'Week opened', created_month: 'Month opened',
+      planned_start_month: 'Month planned to start',
+    },
+  },
+  sc_req_item: {
+    label: 'Requests', one: 'request', many: 'requests', day: 'opened_day',
+    fields: { item: 'Catalog item', state: 'State', stage: 'Stage', approval: 'Approval', location: 'Location' },
+    times: { opened_day: 'Day opened', opened_week: 'Week opened', opened_month: 'Month opened', closed_month: 'Month closed' },
+  },
+  sc_task: {
+    label: 'Catalog tasks', one: 'catalog task', many: 'catalog tasks', day: 'created_day',
+    fields: { state: 'State', assignment_group: 'Team', assigned_to: 'Assigned to', item: 'Catalog item', sla_flag: 'SLA breached' },
+    times: { created_day: 'Day opened', created_week: 'Week opened', created_month: 'Month opened' },
+  },
+};
+
+// The ways a chart can look and be cut; anything else falls back to the default
+export const DISPLAYS = ['bar', 'hbar', 'line', 'area', 'donut', 'table', 'number'];
+const SIZES = ['small', 'medium', 'large'];
+const LIMITS = [5, 10, 15, 20, 30, 50];
+const COLORS = ['accent', '1', '2', '3', '4', '5', '6', '7', '8'];
+const STATUSES = ['all', 'open', 'closed'];
+const DATE_PRESETS = ['all', '7', '30', '90', 'custom'];
+const MAX_FILTERS = 6;
+const MAX_FILTER_VALUES = 50;
+// Plenty for any field (the biggest, people, has a few thousand); the tail beyond
+// the chart's top N comes back as one "Other" count
+const MAX_GROUPS = 5000;
+// Day by day over the whole export is about 100 points
+const MAX_TIME_POINTS = 400;
+
+const ID = /^[A-Za-z0-9_-]{1,40}$/;
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+export class ChartError extends Error {}
+
+export function newId() {
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+}
+
+// Browser input -> a chart with every setting checked and filled in.
+// Throws ChartError for what can't be a chart at all (an unknown ticket type).
+export function sanitizeChart(input) {
+  const c = input && typeof input === 'object' ? input : {};
+  const src = CHART_SOURCES[c.source];
+  if (!src) throw new ChartError('Choose what to count: incidents, changes, requests or catalog tasks.');
+  const groupBy = typeof c.groupBy === 'string' && (src.fields[c.groupBy] || src.times[c.groupBy]) ? c.groupBy : '';
+
+  const filters = [];
+  for (const f of (Array.isArray(c.filters) ? c.filters : []).slice(0, MAX_FILTERS)) {
+    if (!f || !src.fields[f.field] || filters.some(g => g.field === f.field)) continue;
+    const values = [...new Set((Array.isArray(f.values) ? f.values : []).map(v => String(v).slice(0, 200)))].slice(0, MAX_FILTER_VALUES);
+    if (values.length) filters.push({ field: f.field, values });
+  }
+
+  const dates = c.dates && typeof c.dates === 'object' ? c.dates : {};
+  const preset = DATE_PRESETS.includes(String(dates.preset)) ? String(dates.preset) : 'all';
+  let from = DAY.test(dates.from) ? dates.from : '';
+  let to = DAY.test(dates.to) ? dates.to : '';
+  if (from && to && from > to) [from, to] = [to, from];
+
+  // One number needs nothing to group by; everything else does
+  let display = DISPLAYS.includes(c.display) ? c.display : (groupBy ? 'bar' : 'number');
+  if (!groupBy) display = 'number';
+
+  return {
+    id: ID.test(c.id) ? c.id : newId(),
+    title: String(c.title ?? '').replace(/\s+/g, ' ').trim().slice(0, 80),
+    source: c.source,
+    status: STATUSES.includes(c.status) ? c.status : 'all',
+    dates: preset === 'custom' ? { preset, from, to } : { preset },
+    filters,
+    groupBy,
+    display,
+    limit: LIMITS.includes(Number(c.limit)) ? Number(c.limit) : 10,
+    sort: c.sort === 'label' ? 'label' : 'count',
+    size: SIZES.includes(c.size) ? c.size : 'medium',
+    color: COLORS.includes(String(c.color)) ? String(c.color) : 'accent',
+  };
+}
+
+// ---------------------------------------------------------------------
+// Results are cached: the data is a frozen export, so the same question
+// always has the same answer (a server restart empties the cache)
+// ---------------------------------------------------------------------
+
+const CACHE_SIZE = 400;
+const cache = new Map();
+
+async function cached(key, work) {
+  if (cache.has(key)) {
+    const hit = cache.get(key);
+    cache.delete(key);
+    cache.set(key, hit); // most recently used last
+    return hit;
+  }
+  const pending = work();
+  cache.set(key, pending);
+  if (cache.size > CACHE_SIZE) cache.delete(cache.keys().next().value);
+  try {
+    return await pending;
+  } catch (error) {
+    cache.delete(key); // try again next time
+    throw error;
+  }
+}
+
+// The first and last day each ticket type has (for "last 30 days" and the date pickers)
+async function dataDays(cube, runQuery) {
+  return cached(`days:${cube}`, async () => {
+    const member = `${cube}.${CHART_SOURCES[cube].day}`;
+    const ends = await Promise.all(['asc', 'desc'].map(direction => runQuery({
+      dimensions: [member],
+      filters: [{ member, operator: 'set' }],
+      order: { [member]: direction },
+      limit: 1,
+    })));
+    return { first: ends[0][0]?.[member] || '', last: ends[1][0]?.[member] || '' };
+  });
+}
+
+// '2026-09-01' minus 29 days -> '2026-08-03'
+function daysBefore(day, n) {
+  const d = new Date(`${day}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+
+// The chart's "which ones" as Cube filters
+async function cubeFilters(chart, runQuery) {
+  const cube = chart.source;
+  const filters = [];
+  if (chart.status !== 'all') {
+    const states = chart.status === 'open' ? ENTITY_CATALOG[cube].openStates : ENTITY_CATALOG[cube].closedStates;
+    filters.push({ member: `${cube}.state`, operator: 'equals', values: states });
+  }
+  for (const f of chart.filters) filters.push({ member: `${cube}.${f.field}`, operator: 'equals', values: f.values });
+
+  const day = `${cube}.${CHART_SOURCES[cube].day}`;
+  const { preset } = chart.dates;
+  if (preset === 'custom') {
+    if (chart.dates.from) filters.push({ member: day, operator: 'gte', values: [chart.dates.from] });
+    if (chart.dates.to) filters.push({ member: day, operator: 'lte', values: [chart.dates.to] });
+  } else if (preset !== 'all') {
+    // "Last 30 days" of the export, counting back from its newest day
+    const { last } = await dataDays(cube, runQuery);
+    if (last) filters.push({ member: day, operator: 'gte', values: [daysBefore(last, Number(preset) - 1)] });
+  }
+  return filters;
+}
+
+// No value, or the export's placeholder for "no system": both show as "(Not set)"
+function cleanValue(field, value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (field === 'configuration_item' && value === 'zzz') return null;
+  return String(value);
+}
+
+// The order a field's values naturally go in (P1 before P2, New before Closed)
+function naturalOrder(cube, field) {
+  const known = ENTITY_CATALOG[cube]?.enums?.[field] || [];
+  return (a, b) => {
+    if (a.value === null || b.value === null) return a.value === null ? 1 : -1;
+    const ia = known.indexOf(a.value), ib = known.indexOf(b.value);
+    if (ia !== -1 || ib !== -1) return (ia === -1 ? Infinity : ia) - (ib === -1 ? Infinity : ib);
+    return a.value.localeCompare(b.value, 'en', { numeric: true, sensitivity: 'base' });
+  };
+}
+
+// chart -> { chart, total, rows: [{ value, count }], other: { count, groups } | null, days }
+// rows: for a time grouping every period, oldest first; otherwise the chart's
+// top N by count, in the chart's order, with the rest as one "other" count.
+export async function chartData(input, runQuery) {
+  const chart = sanitizeChart(input);
+  const cube = chart.source;
+  const count = `${cube}.count`;
+  const filters = await cubeFilters(chart, runQuery);
+  const days = await dataDays(cube, runQuery);
+
+  if (!chart.groupBy) {
+    const total = await cached(JSON.stringify(['total', cube, filters]), async () => {
+      const rows = await runQuery({ measures: [count], filters });
+      return Number(rows[0]?.[count]) || 0;
+    });
+    return { chart, total, rows: [], other: null, days };
+  }
+
+  const member = `${cube}.${chart.groupBy}`;
+  const isTime = Boolean(CHART_SOURCES[cube].times[chart.groupBy]);
+  const groups = await cached(JSON.stringify(['groups', cube, chart.groupBy, filters]), async () => {
+    const rows = await runQuery({
+      measures: [count],
+      dimensions: [member],
+      filters,
+      order: isTime ? { [member]: 'asc' } : { [count]: 'desc' },
+      limit: isTime ? MAX_TIME_POINTS : MAX_GROUPS,
+    });
+    // Merge what shows the same ("(Not set)" can be several raw values)
+    const merged = new Map();
+    for (const r of rows) {
+      const value = cleanValue(chart.groupBy, r[member]);
+      merged.set(value, (merged.get(value) || 0) + (Number(r[count]) || 0));
+    }
+    const list = [...merged].map(([value, n]) => ({ value, count: n }));
+    if (isTime) return list.filter(g => g.value !== null); // tickets with no date aren't a point in time
+    return list.sort((a, b) => b.count - a.count);
+  });
+
+  const total = groups.reduce((sum, g) => sum + g.count, 0);
+  if (isTime) return { chart, total, rows: groups, other: null, days };
+
+  const top = groups.slice(0, chart.limit);
+  const rest = groups.slice(chart.limit);
+  if (chart.sort === 'label') top.sort(naturalOrder(cube, chart.groupBy));
+  const other = rest.length ? { count: rest.reduce((sum, g) => sum + g.count, 0), groups: rest.length } : null;
+  return { chart, total, rows: top, other, days };
+}
+
+// The values a filter can pick from, most common first: [{ value, count }]
+export async function chartValues(source, field, runQuery) {
+  const src = CHART_SOURCES[source];
+  if (!src || !src.fields[field]) throw new ChartError('That field cannot be used as a filter.');
+  const member = `${source}.${field}`;
+  const count = `${source}.count`;
+  return cached(JSON.stringify(['values', source, field]), async () => {
+    const rows = await runQuery({ measures: [count], dimensions: [member], order: { [count]: 'desc' }, limit: 500 });
+    return rows
+      .map(r => ({ value: cleanValue(field, r[member]), count: Number(r[count]) || 0 }))
+      .filter(v => v.value !== null);
+  });
+}
+
+// What the chart builder offers, with each ticket type's open / closed
+// states and the dates its data covers
+export async function chartCatalog(runQuery) {
+  const sources = {};
+  for (const [key, src] of Object.entries(CHART_SOURCES)) {
+    sources[key] = {
+      label: src.label, one: src.one, many: src.many,
+      fields: Object.entries(src.fields),
+      times: Object.entries(src.times),
+      openStates: ENTITY_CATALOG[key].openStates,
+      closedStates: ENTITY_CATALOG[key].closedStates,
+      days: await dataDays(key, runQuery),
+    };
+  }
+  return { sources };
+}
+```
+
+<a id="b46"></a>
+### B.46 `public/charts.js`
+
+```js
+// =====================================================================
+// CHARTS: the charts people build themselves (their own dashboards, and
+// Home), drawn as plain SVG in the page's colors, so they follow each
+// person's color scheme. Thin marks, a hairline grid, a tooltip on every
+// mark (hover or keyboard focus), and a table view for every chart.
+// The numbers come from /api/charts/data (charts.mjs on the server).
+// Loaded before app.js, whose helpers (escapeHtml, API_BASE, ...) these
+// functions use when they run.
+// =====================================================================
+
+const DONUT_SLICES = 6; // part-to-whole reads at a glance only up to about six
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const CHART_FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+
+// What the builder offers and how each ticket type is named (from /api/charts/catalog)
+let chartCatalog = null;
+let chartCatalogLoading = null;
+function loadChartCatalog() {
+    if (chartCatalog) return Promise.resolve(chartCatalog);
+    if (!chartCatalogLoading) {
+        chartCatalogLoading = (async () => {
+            const response = await fetch(`${API_BASE}/api/charts/catalog`, { headers: authHeaders() });
+            if (handleUnauthorized(response)) return null;
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+            chartCatalog = data;
+            return data;
+        })().finally(() => { chartCatalogLoading = null; });
+    }
+    return chartCatalogLoading;
+}
+
+// ---------------------------------------------------------------------
+// Words: titles, descriptions and labels people read
+// ---------------------------------------------------------------------
+
+const isTimeField = field => /_(day|week|month)$/.test(field || '');
+
+function fieldLabel(source, field) {
+    const src = chartCatalog?.sources[source];
+    const pair = src && [...src.fields, ...src.times].find(([key]) => key === field);
+    return pair ? pair[1] : field;
+}
+
+// "Team" -> "team", but "System (CI)" -> "system (CI)" and "SLA breached" stays
+const lowerFirst = text => text.replace(/^[A-Z](?=[a-z])/, c => c.toLowerCase());
+
+// The Monday of an ISO week: 2026, 27 -> Jun 29, 2026
+function isoWeekMonday(year, week) {
+    const jan4 = new Date(Date.UTC(year, 0, 4));
+    const monday = new Date(jan4);
+    monday.setUTCDate(jan4.getUTCDate() - ((jan4.getUTCDay() || 7) - 1) + (week - 1) * 7);
+    return monday;
+}
+
+// '2026-07' -> 'Jul 2026', '2026-07-05' -> 'Jul 5', '2026-W27' -> 'Jun 29' (its Monday).
+// long: the tooltip's fuller version.
+function periodLabel(field, value, long = false) {
+    let m;
+    if ((m = String(value).match(/^(\d{4})-W(\d{2})$/))) {
+        const d = isoWeekMonday(Number(m[1]), Number(m[2]));
+        const day = `${SHORT_MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`;
+        return long ? `Week of ${day}, ${d.getUTCFullYear()}` : day;
+    }
+    if ((m = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/))) {
+        const day = `${SHORT_MONTHS[Number(m[2]) - 1]} ${Number(m[3])}`;
+        return long ? `${day}, ${m[1]}` : day;
+    }
+    if ((m = String(value).match(/^(\d{4})-(\d{2})$/))) return `${SHORT_MONTHS[Number(m[2]) - 1]} ${m[1]}`;
+    return String(value);
+}
+
+function groupLabel(chart, value, long = false) {
+    if (value === null || value === undefined) return '(Not set)';
+    if (isTimeField(chart.groupBy)) return periodLabel(chart.groupBy, value, long);
+    if (value === 'true') return 'Yes';
+    if (value === 'false') return 'No';
+    return String(value);
+}
+
+// "Open incidents by priority", "Requests by catalog item", "Closed changes"
+function chartAutoTitle(chart) {
+    const src = chartCatalog?.sources[chart.source];
+    if (!src) return 'Chart';
+    const what = chart.status === 'open' ? `Open ${src.many}` : chart.status === 'closed' ? `Closed ${src.many}` : src.label;
+    if (!chart.groupBy || chart.display === 'number') return what;
+    return `${what} by ${lowerFirst(fieldLabel(chart.source, chart.groupBy))}`;
+}
+
+function chartTitle(chart) {
+    return chart.title || chartAutoTitle(chart);
+}
+
+const fmtDay = day => periodLabel('x_day', day, true);
+
+// Which tickets a chart counts, in words: "Open only · Priority: P1 - Critical · Opened Aug 3 – Sep 1, 2026"
+function chartDescription(chart) {
+    const src = chartCatalog?.sources[chart.source];
+    const parts = [];
+    if (chart.status === 'open') parts.push(`Open ${src ? src.many : ''} only (${src ? src.openStates.join(', ') : ''})`);
+    if (chart.status === 'closed') parts.push(`Closed ${src ? src.many : ''} only`);
+    for (const f of chart.filters || []) {
+        const shown = f.values.slice(0, 3).map(v => groupLabel({ groupBy: f.field }, v)).join(', ');
+        parts.push(`${fieldLabel(chart.source, f.field)}: ${shown}${f.values.length > 3 ? ` and ${f.values.length - 3} more` : ''}`);
+    }
+    const dates = chart.dates || { preset: 'all' };
+    if (dates.preset === 'custom' && (dates.from || dates.to)) {
+        parts.push(dates.from && dates.to ? `Opened ${fmtDay(dates.from)} to ${fmtDay(dates.to)}`
+            : dates.from ? `Opened on or after ${fmtDay(dates.from)}` : `Opened on or before ${fmtDay(dates.to)}`);
+    } else if (dates.preset !== 'all' && dates.preset !== 'custom') {
+        parts.push(`Opened in the data's last ${dates.preset} days`);
+    }
+    return parts.length ? parts.join(' · ') : `All ${src ? src.many : 'tickets'}`;
+}
+
+// 0 / 950 / 1.2K / 12K / 1.5M
+function compactNumber(n) {
+    if (n >= 1e6) return `${+(n / 1e6).toFixed(1)}M`;
+    if (n >= 1e3) return `${+(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}K`;
+    return String(n);
+}
+
+// ---------------------------------------------------------------------
+// Data: one request per distinct question, kept for the page's life
+// (the data is a frozen export, so an answer never changes)
+// ---------------------------------------------------------------------
+
+const chartDataCache = new Map();
+
+// What changes the numbers; how it looks (display, color, size) doesn't
+function chartDataKey(chart) {
+    const { source, status, dates, filters, groupBy, limit, sort } = chart;
+    return JSON.stringify({ source, status, dates, filters, groupBy, limit, sort });
+}
+
+function fetchChartData(chart) {
+    const key = chartDataKey(chart);
+    if (!chartDataCache.has(key)) {
+        const pending = (async () => {
+            const response = await fetch(`${API_BASE}/api/charts/data`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                body: JSON.stringify({ chart }),
+            });
+            if (handleUnauthorized(response)) return null;
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+            return data;
+        })();
+        chartDataCache.set(key, pending);
+        pending.then(data => { if (!data) chartDataCache.delete(key); }, () => chartDataCache.delete(key));
+        if (chartDataCache.size > 300) chartDataCache.delete(chartDataCache.keys().next().value);
+    }
+    return chartDataCache.get(key);
+}
+
+// ---------------------------------------------------------------------
+// Drawing helpers
+// ---------------------------------------------------------------------
+
+const measureContext = document.createElement('canvas').getContext('2d');
+function textWidth(text, size = 12, weight = 400) {
+    measureContext.font = `${weight} ${size}px ${CHART_FONT}`;
+    return measureContext.measureText(String(text)).width;
+}
+
+// The text, cut with "…" so it fits in `width` (labels never overflow their space)
+function fitText(text, width, size = 12) {
+    text = String(text);
+    if (textWidth(text, size) <= width) return text;
+    let lo = 0, hi = text.length;
+    while (lo < hi) {
+        const mid = Math.ceil((lo + hi) / 2);
+        if (textWidth(`${text.slice(0, mid)}…`, size) <= width) lo = mid; else hi = mid - 1;
+    }
+    return lo ? `${text.slice(0, lo)}…` : '';
+}
+
+// Round axis steps (1, 2, 5 x 10^n), from zero to just above the biggest value
+function niceScale(max, target = 4) {
+    if (max <= 0) return { top: 1, ticks: [0, 1] };
+    const rough = max / target;
+    const power = 10 ** Math.floor(Math.log10(rough));
+    const n = rough / power;
+    const step = Math.max(1, (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * power);
+    const top = Math.ceil(max / step) * step;
+    const ticks = [];
+    for (let v = 0; v <= top + step / 2; v += step) ticks.push(v);
+    return { top, ticks };
+}
+
+// A single-series chart's color: the person's accent, or one of the chart colors
+function seriesColor(chart) {
+    return chart.color && chart.color !== 'accent' ? `var(--series-${chart.color})` : 'var(--accent)';
+}
+
+const r1 = n => Math.round(n * 10) / 10;
+
+// A column with a rounded top and a square foot on the baseline
+function columnPath(x, top, w, h, radius = 4) {
+    const r = Math.min(radius, w / 2, h);
+    return `M${r1(x)},${r1(top + h)}V${r1(top + r)}Q${r1(x)},${r1(top)} ${r1(x + r)},${r1(top)}H${r1(x + w - r)}` +
+        `Q${r1(x + w)},${r1(top)} ${r1(x + w)},${r1(top + r)}V${r1(top + h)}Z`;
+}
+// A sideways bar with a rounded end
+function barPath(x, y, w, h, radius = 4) {
+    const r = Math.min(radius, h / 2, w);
+    return `M${r1(x)},${r1(y)}H${r1(x + w - r)}Q${r1(x + w)},${r1(y)} ${r1(x + w)},${r1(y + r)}V${r1(y + h - r)}` +
+        `Q${r1(x + w)},${r1(y + h)} ${r1(x + w - r)},${r1(y + h)}H${r1(x)}Z`;
+}
+
+// A mark's tooltip, as attributes (shown on hover and keyboard focus)
+function tipAttrs(chart, row, total) {
+    const share = total ? ` (${((row.count / total) * 100).toFixed(1)}%)` : '';
+    return ` data-tip-value="${escapeHtml(row.count.toLocaleString() + share)}" data-tip-label="${escapeHtml(row.label || groupLabel(chart, row.value, true))}"`;
+}
+
+function svgOpen(width, height, label) {
+    return `<svg class="chart-svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(label)}">`;
+}
+
+// Hairline gridlines with their values at the left
+function gridHtml(ticks, y, left, right) {
+    return ticks.map(t => `<line class="chart-grid" x1="${left}" x2="${right}" y1="${r1(y(t))}" y2="${r1(y(t))}"/>` +
+        `<text class="chart-tick" x="${left - 6}" y="${r1(y(t) + 4)}" text-anchor="end">${compactNumber(t)}</text>`).join('');
+}
+
+// Labels along the bottom: as many as fit, evenly spaced, each cut to its room
+function xLabelsHtml(chart, rows, xAt, room, baseY) {
+    const every = Math.max(1, Math.ceil(rows.length / Math.max(1, Math.floor(room.total / 72))));
+    return rows.map((row, i) => i % every ? '' :
+        `<text class="chart-tick" x="${r1(xAt(i))}" y="${baseY}" text-anchor="middle">${escapeHtml(fitText(groupLabel(chart, row.value), room.each * every - 6, 11))}</text>`).join('');
+}
+
+// ---------------------------------------------------------------------
+// The chart forms
+// ---------------------------------------------------------------------
+
+function chartHeight(chart) {
+    return chart.size === 'small' ? 200 : 260;
+}
+
+// One number: the total
+function numberHtml(chart, data) {
+    const src = chartCatalog?.sources[chart.source];
+    const noun = src ? (data.total === 1 ? src.one : src.many) : 'tickets';
+    const state = chart.status === 'open' ? 'open ' : chart.status === 'closed' ? 'closed ' : '';
+    return `<div class="chart-stat"><span class="chart-stat-value">${data.total.toLocaleString()}</span>` +
+        `<span class="chart-stat-label">${escapeHtml(state + noun)}</span></div>`;
+}
+
+// Columns: categories or periods along the bottom
+function columnsHtml(chart, data, width) {
+    const rows = data.rows;
+    const height = chartHeight(chart);
+    const { top, ticks } = niceScale(Math.max(...rows.map(r => r.count)));
+    const m = { top: 20, right: 8, bottom: 26, left: Math.ceil(Math.max(...ticks.map(t => textWidth(compactNumber(t), 11)))) + 12 };
+    const plotW = width - m.left - m.right, plotH = height - m.top - m.bottom;
+    const band = plotW / rows.length;
+    const barW = Math.max(2, Math.min(24, band * 0.7));
+    const y = v => m.top + plotH - (v / top) * plotH;
+    const max = Math.max(...rows.map(r => r.count));
+    // Values on the caps when they fit; otherwise only the biggest is labeled
+    const labelAll = rows.length <= 12 && rows.every(r => textWidth(r.count.toLocaleString(), 11) <= band + 2);
+    const focusable = rows.length <= 40 ? ' tabindex="0"' : '';
+    let html = svgOpen(width, height, chartTitle(chart)) + gridHtml(ticks, y, m.left, width - m.right);
+    rows.forEach((row, i) => {
+        const x = m.left + i * band + (band - barW) / 2;
+        const h = y(0) - y(row.count);
+        if (h > 0) html += `<path class="chart-mark" d="${columnPath(x, y(row.count), barW, h)}" style="fill:${seriesColor(chart)}"/>`;
+        if (labelAll || (row.count === max && i === rows.findIndex(r => r.count === max))) {
+            html += `<text class="chart-value" x="${r1(x + barW / 2)}" y="${r1(y(row.count) - 6)}" text-anchor="middle">${row.count.toLocaleString()}</text>`;
+        }
+        html += `<rect class="chart-hit" x="${r1(m.left + i * band)}" y="${m.top}" width="${r1(band)}" height="${plotH}"${focusable}${tipAttrs(chart, row, data.total)}/>`;
+    });
+    html += `<line class="chart-axis" x1="${m.left}" x2="${width - m.right}" y1="${r1(y(0))}" y2="${r1(y(0))}"/>`;
+    html += xLabelsHtml(chart, rows, i => m.left + i * band + band / 2, { total: plotW, each: band }, height - 8);
+    return html + '</svg>';
+}
+
+// Sideways bars: long category names read best this way
+function barsHtml(chart, data, width) {
+    const rows = data.rows;
+    const rowH = 28, barH = 16;
+    const labels = rows.map(r => groupLabel(chart, r.value));
+    const labelW = Math.min(width * 0.4, Math.max(...labels.map(l => textWidth(l, 12))) + 4);
+    const valueW = Math.max(...rows.map(r => textWidth(r.count.toLocaleString(), 11))) + 10;
+    const left = labelW + 10;
+    const plotW = Math.max(20, width - left - valueW);
+    const height = rows.length * rowH + 4;
+    const max = Math.max(...rows.map(r => r.count)) || 1;
+    let html = svgOpen(width, height, chartTitle(chart));
+    rows.forEach((row, i) => {
+        const y = i * rowH + (rowH - barH) / 2;
+        const w = (row.count / max) * plotW;
+        html += `<text class="chart-label" x="${r1(labelW)}" y="${r1(y + barH / 2 + 4)}" text-anchor="end">${escapeHtml(fitText(labels[i], labelW, 12))}</text>`;
+        if (w > 0) html += `<path class="chart-mark" d="${barPath(left, y, w, barH)}" style="fill:${seriesColor(chart)}"/>`;
+        html += `<text class="chart-value" x="${r1(left + w + 6)}" y="${r1(y + barH / 2 + 4)}">${row.count.toLocaleString()}</text>`;
+        html += `<rect class="chart-hit" x="0" y="${i * rowH}" width="${width}" height="${rowH}" tabindex="0"${tipAttrs(chart, row, data.total)}/>`;
+    });
+    html += `<line class="chart-axis" x1="${left}" x2="${left}" y1="0" y2="${height}"/>`;
+    return html + '</svg>';
+}
+
+// A line (or a line over a light wash, for "area"): best over time.
+// The pointer (or arrow keys) moves a crosshair from point to point.
+function lineHtml(chart, data, width, area) {
+    const rows = data.rows;
+    const height = chartHeight(chart);
+    const { top, ticks } = niceScale(Math.max(...rows.map(r => r.count)));
+    const m = { top: 22, right: 14, bottom: 26, left: Math.ceil(Math.max(...ticks.map(t => textWidth(compactNumber(t), 11)))) + 12 };
+    const plotW = width - m.left - m.right, plotH = height - m.top - m.bottom;
+    const step = rows.length > 1 ? plotW / (rows.length - 1) : 0;
+    const x = i => rows.length > 1 ? m.left + i * step : m.left + plotW / 2;
+    const y = v => m.top + plotH - (v / top) * plotH;
+    const color = seriesColor(chart);
+    const points = rows.map((r, i) => `${r1(x(i))},${r1(y(r.count))}`);
+    let html = svgOpen(width, height, chartTitle(chart)) + gridHtml(ticks, y, m.left, width - m.right);
+    if (area && rows.length > 1) {
+        html += `<path class="chart-area" d="M${points.join('L')}L${r1(x(rows.length - 1))},${r1(y(0))}L${r1(x(0))},${r1(y(0))}Z" style="fill:${color}"/>`;
+    }
+    html += `<line class="chart-axis" x1="${m.left}" x2="${width - m.right}" y1="${r1(y(0))}" y2="${r1(y(0))}"/>`;
+    if (rows.length > 1) html += `<path class="chart-line" d="M${points.join('L')}" style="stroke:${color}"/>`;
+    // Labeled: the peak and the latest value (not every point)
+    const last = rows.length - 1;
+    const peak = rows.reduce((best, r, i) => r.count > rows[best].count ? i : best, 0);
+    for (const i of new Set([peak, last])) {
+        const anchor = i === last ? 'end' : i === 0 ? 'start' : 'middle';
+        html += `<text class="chart-value" x="${r1(i === last ? x(i) + 4 : x(i))}" y="${r1(y(rows[i].count) - 9)}" text-anchor="${anchor}">${rows[i].count.toLocaleString()}</text>`;
+    }
+    html += `<circle class="chart-dot" cx="${r1(x(last))}" cy="${r1(y(rows[last].count))}" r="4" style="fill:${color}"/>`;
+    html += xLabelsHtml(chart, rows, x, { total: plotW, each: Math.max(step, 1) }, height - 8);
+    // The crosshair, moved by the pointer or the arrow keys
+    html += `<line class="chart-cross" x1="0" x2="0" y1="${m.top}" y2="${r1(y(0))}" visibility="hidden"/>` +
+        `<circle class="chart-dot chart-cross-dot" r="4" visibility="hidden" style="fill:${color}"/>` +
+        `<rect class="chart-hit line-hit" x="${m.left - 6}" y="${m.top}" width="${plotW + 12}" height="${plotH}" tabindex="0"` +
+        ` aria-label="Move along the line with the arrow keys" data-left="${m.left}" data-step="${r1(step)}" data-plot-h="${plotH}" data-top="${m.top}" data-max="${top}"/>`;
+    return html + '</svg>';
+}
+
+// Donut: share of the whole, at most six slices (the rest folds into "Other")
+function donutHtml(chart, data, width) {
+    let parts = data.rows.map((r, i) => ({ ...r, label: groupLabel(chart, r.value), slot: i + 1 }));
+    let otherCount = data.other?.count || 0;
+    let otherGroups = data.other?.groups || 0;
+    if (parts.length + (otherCount ? 1 : 0) > DONUT_SLICES) {
+        const folded = parts.slice(DONUT_SLICES - 1);
+        parts = parts.slice(0, DONUT_SLICES - 1);
+        otherCount += folded.reduce((s, r) => s + r.count, 0);
+        otherGroups += folded.length;
+    }
+    if (otherCount) parts.push({ value: '__other', label: `Other (${otherGroups.toLocaleString()})`, count: otherCount, other: true });
+    const total = data.total || 1;
+    const side = width >= 440;
+    const size = Math.min(side ? 190 : 170, side ? width * 0.42 : width - 20);
+    const r = size / 2, inner = r * 0.62, cx = r + 2, cy = r + 2;
+    const fill = p => p.other ? 'var(--chart-other)' : `var(--series-${p.slot})`;
+    let angle = -Math.PI / 2;
+    let slices = '';
+    for (const p of parts) {
+        const sweep = (p.count / total) * Math.PI * 2;
+        if (sweep <= 0) continue;
+        const tip = tipAttrs(chart, p, data.total);
+        if (sweep >= Math.PI * 2 - 1e-6) {
+            // One slice is everything: a full ring
+            slices += `<path class="chart-mark slice" tabindex="0" d="M${cx},${cy - r}A${r},${r} 0 1 1 ${cx - 0.01},${cy - r}Z M${cx},${cy - inner}A${inner},${inner} 0 1 0 ${cx + 0.01},${cy - inner}Z" fill-rule="evenodd" style="fill:${fill(p)}"${tip}/>`;
+            break;
+        }
+        const a0 = angle, a1 = angle + sweep;
+        const large = sweep > Math.PI ? 1 : 0;
+        const pt = (rad, a) => `${r1(cx + rad * Math.cos(a))},${r1(cy + rad * Math.sin(a))}`;
+        slices += `<path class="chart-mark slice" tabindex="0" d="M${pt(r, a0)}A${r1(r)},${r1(r)} 0 ${large} 1 ${pt(r, a1)}L${pt(inner, a1)}A${r1(inner)},${r1(inner)} 0 ${large} 0 ${pt(inner, a0)}Z" style="fill:${fill(p)}"${tip}/>`;
+        angle = a1;
+    }
+    const src = chartCatalog?.sources[chart.source];
+    const svg = `<svg class="chart-svg donut" width="${size + 4}" height="${size + 4}" viewBox="0 0 ${size + 4} ${size + 4}" role="img" aria-label="${escapeHtml(chartTitle(chart))}">` +
+        slices +
+        `<text class="chart-donut-total" x="${cx}" y="${cy + 2}" text-anchor="middle">${data.total < 100000 ? data.total.toLocaleString() : compactNumber(data.total)}</text>` +
+        `<text class="chart-tick" x="${cx}" y="${cy + 18}" text-anchor="middle">${escapeHtml(src ? src.many : 'tickets')}</text></svg>`;
+    // The legend names every slice, with its number and share
+    const legend = parts.map(p => `<li><span class="legend-key" style="background:${fill(p)}"></span>` +
+        `<span class="legend-name" title="${escapeHtml(p.label)}">${escapeHtml(p.label)}</span>` +
+        `<span class="legend-value">${p.count.toLocaleString()}</span>` +
+        `<span class="legend-share">${((p.count / total) * 100).toFixed(1)}%</span></li>`).join('');
+    return `<div class="chart-donut${side ? ' side' : ''}">${svg}<ul class="chart-legend">${legend}</ul></div>`;
+}
+
+// The table view: every chart has one (and "Table" charts are only this)
+function chartTableHtml(chart, data) {
+    const label = chart.groupBy ? fieldLabel(chart.source, chart.groupBy) : 'Tickets';
+    const total = data.total || 1;
+    const rows = data.rows.map(r => `<tr><td>${escapeHtml(groupLabel(chart, r.value, true))}</td>` +
+        `<td class="num">${r.count.toLocaleString()}</td><td class="num">${((r.count / total) * 100).toFixed(1)}%</td></tr>`);
+    if (data.other) {
+        rows.push(`<tr class="chart-other-row"><td>Other (${data.other.groups.toLocaleString()} more)</td>` +
+            `<td class="num">${data.other.count.toLocaleString()}</td><td class="num">${((data.other.count / total) * 100).toFixed(1)}%</td></tr>`);
+    }
+    const exportId = registerExport({
+        title: chartTitle(chart),
+        question: chartDescription(chart),
+        tables: [{
+            title: null,
+            columns: [{ label }, { label: 'Count' }, { label: 'Share' }],
+            rows: [...data.rows.map(r => [groupLabel(chart, r.value, true), String(r.count), `${((r.count / total) * 100).toFixed(1)}%`]),
+                ...(data.other ? [[`Other (${data.other.groups} more)`, String(data.other.count), `${((data.other.count / total) * 100).toFixed(1)}%`]] : [])],
+            footer: ['Total', String(data.total), '100%'],
+        }],
+    });
+    return `<div class="table-wrap chart-table"><table class="result-table"><thead><tr><th>${escapeHtml(label)}</th><th class="num">Count</th><th class="num">Share</th></tr></thead>` +
+        `<tbody>${rows.join('')}</tbody><tfoot><tr><td>Total</td><td class="num">${data.total.toLocaleString()}</td><td class="num">100%</td></tr></tfoot></table></div>` +
+        downloadBarHtml(exportId);
+}
+
+// ---------------------------------------------------------------------
+// Drawing a chart into its box (again when the box changes width)
+// ---------------------------------------------------------------------
+
+const resizeWatcher = new ResizeObserver(entries => {
+    for (const entry of entries) {
+        const box = entry.target;
+        const drawn = box._drawn;
+        if (!drawn || !box.clientWidth || drawn.asTable || !['bar', 'hbar', 'line', 'area', 'donut'].includes(drawn.chart.display)) continue;
+        if (Math.abs(box.clientWidth - drawn.width) > 4) drawChart(box, drawn.chart, drawn.data, false);
+    }
+});
+
+// asTable: the table view instead of the chart
+function drawChart(box, chart, data, asTable) {
+    const width = Math.max(Math.floor(box.clientWidth) || 0, 220);
+    box._drawn = { chart, data, asTable, width };
+    resizeWatcher.observe(box);
+    if (!data.total) {
+        box.innerHTML = '<p class="chart-empty">No tickets match these choices.</p>';
+        return;
+    }
+    const display = asTable ? 'table' : chart.display;
+    if (display === 'number' || !chart.groupBy) box.innerHTML = numberHtml(chart, data);
+    else if (display === 'table') box.innerHTML = chartTableHtml(chart, data);
+    else if (display === 'hbar') box.innerHTML = barsHtml(chart, data, width);
+    else if (display === 'line' || display === 'area') box.innerHTML = lineHtml(chart, data, width, display === 'area');
+    else if (display === 'donut') box.innerHTML = donutHtml(chart, data, width);
+    else box.innerHTML = columnsHtml(chart, data, width);
+}
+
+// What isn't drawn: "Showing the top 10 of 105; the other 95 add up to 9,860"
+// (donuts and tables show it themselves)
+function chartNote(chart, data) {
+    if (!data.other || ['donut', 'table', 'number'].includes(chart.display) || !chart.groupBy) return '';
+    const all = data.rows.length + data.other.groups;
+    return `Showing the top ${data.rows.length} of ${all.toLocaleString()}; the other ${data.other.groups.toLocaleString()} add up to ${data.other.count.toLocaleString()}.`;
+}
+
+// ---------------------------------------------------------------------
+// The tooltip: one for the whole page, filled with textContent
+// ---------------------------------------------------------------------
+
+function chartTip() {
+    let tip = document.getElementById('chart-tip');
+    if (!tip) {
+        tip = document.createElement('div');
+        tip.id = 'chart-tip';
+        tip.className = 'chart-tip';
+        tip.innerHTML = '<strong></strong><span></span>';
+        document.body.appendChild(tip);
+    }
+    return tip;
+}
+
+function showChartTip(value, label, x, y) {
+    const tip = chartTip();
+    tip.querySelector('strong').textContent = value;
+    tip.querySelector('span').textContent = label;
+    tip.classList.add('show');
+    const w = tip.offsetWidth, h = tip.offsetHeight;
+    tip.style.left = `${Math.max(8, Math.min(x + 14, innerWidth - w - 8))}px`;
+    tip.style.top = `${y - h - 12 < 8 ? y + 18 : y - h - 12}px`;
+}
+
+function hideChartTip() {
+    document.getElementById('chart-tip')?.classList.remove('show');
+}
+
+function markTip(mark, x, y) {
+    mark.classList.add('hover');
+    showChartTip(mark.dataset.tipValue, mark.dataset.tipLabel, x, y);
+}
+
+// Where along a line chart the crosshair is: the pointer's nearest point, or a key press
+function moveCrosshair(hit, index) {
+    const svg = hit.ownerSVGElement;
+    const box = svg.closest('.tile-body, .builder-preview-body');
+    const drawn = box?._drawn;
+    if (!drawn) return;
+    const rows = drawn.data.rows;
+    index = Math.max(0, Math.min(rows.length - 1, index));
+    hit._index = index;
+    const left = Number(hit.dataset.left), step = Number(hit.dataset.step);
+    const top = Number(hit.dataset.top), plotH = Number(hit.dataset.plotH), max = Number(hit.dataset.max);
+    const x = rows.length > 1 ? left + index * step : left + (Number(hit.getAttribute('width')) - 12) / 2;
+    const y = top + plotH - (rows[index].count / max) * plotH;
+    const cross = svg.querySelector('.chart-cross');
+    const dot = svg.querySelector('.chart-cross-dot');
+    cross.setAttribute('x1', x); cross.setAttribute('x2', x); cross.setAttribute('visibility', 'visible');
+    dot.setAttribute('cx', x); dot.setAttribute('cy', y); dot.setAttribute('visibility', 'visible');
+    const rect = svg.getBoundingClientRect();
+    const scale = rect.width / Number(svg.getAttribute('width'));
+    const row = rows[index];
+    showChartTip(row.count.toLocaleString() + ` (${((row.count / drawn.data.total) * 100).toFixed(1)}%)`,
+        groupLabel(drawn.chart, row.value, true), rect.left + x * scale, rect.top + y * scale);
+}
+
+function hideCrosshair(svg) {
+    svg?.querySelectorAll('.chart-cross, .chart-cross-dot').forEach(el => el.setAttribute('visibility', 'hidden'));
+}
+
+document.addEventListener('pointermove', e => {
+    const hit = e.target.closest?.('.line-hit');
+    if (hit) {
+        const svg = hit.ownerSVGElement;
+        const rect = svg.getBoundingClientRect();
+        const scale = rect.width / Number(svg.getAttribute('width'));
+        const step = Number(hit.dataset.step) || 1;
+        moveCrosshair(hit, Math.round(((e.clientX - rect.left) / scale - Number(hit.dataset.left)) / step));
+        return;
+    }
+    const mark = e.target.closest?.('[data-tip-value]');
+    if (mark) markTip(mark, e.clientX, e.clientY);
+});
+document.addEventListener('pointerout', e => {
+    const mark = e.target.closest?.('[data-tip-value], .line-hit');
+    if (!mark) return;
+    mark.classList.remove('hover');
+    if (mark.classList.contains('line-hit')) hideCrosshair(mark.ownerSVGElement);
+    hideChartTip();
+});
+document.addEventListener('focusin', e => {
+    const mark = e.target.closest?.('[data-tip-value]');
+    if (mark && !mark.classList.contains('line-hit')) {
+        const r = mark.getBoundingClientRect();
+        markTip(mark, r.left + r.width / 2, r.top);
+    } else if (e.target.classList?.contains('line-hit')) {
+        moveCrosshair(e.target, e.target._index ?? e.target.ownerSVGElement.closest('.tile-body, .builder-preview-body')?._drawn?.data.rows.length - 1);
+    }
+});
+document.addEventListener('focusout', e => {
+    if (e.target.closest?.('[data-tip-value], .line-hit')) {
+        e.target.classList.remove('hover');
+        if (e.target.classList.contains('line-hit')) hideCrosshair(e.target.ownerSVGElement);
+        hideChartTip();
+    }
+});
+document.addEventListener('keydown', e => {
+    if (!e.target.classList?.contains('line-hit') || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    e.preventDefault();
+    const rows = e.target.ownerSVGElement.closest('.tile-body, .builder-preview-body')?._drawn?.data.rows || [];
+    const now = e.target._index ?? rows.length - 1;
+    moveCrosshair(e.target, e.key === 'Home' ? 0 : e.key === 'End' ? rows.length - 1 : now + (e.key === 'ArrowLeft' ? -1 : 1));
+});
+// A scrolled page leaves the tooltip behind, so it goes
+document.addEventListener('scroll', hideChartTip, true);
+```
+
+<a id="b47"></a>
+### B.47 `public/customize.js`
+
+```js
+// =====================================================================
+// CUSTOMIZING: each person's color scheme, their Home page (which
+// sections show, in what order, and charts of their own) and their own
+// dashboards (the data each chart shows and how it's shown). Everything is
+// saved to their account (prefs.mjs on the server), so it is the same after
+// a refresh, signing out, a server restart, and on any computer.
+// Loaded before app.js, whose helpers these functions use when they run.
+// =====================================================================
+
+// ---------------------------------------------------------------------
+// Saved preferences: loaded at sign-in, each part saved as it changes
+// ---------------------------------------------------------------------
+
+const THEME_DEFAULTS = { mode: 'light', accent: '#10a37f', header: 'dark' };
+const defaultHome = () => ({ blocks: [{ type: 'assistant' }, { type: 'tickets' }] });
+const defaultDashboards = () => ({ boards: [], hidden: [], last: '' });
+
+const prefs = { theme: { ...THEME_DEFAULTS }, home: defaultHome(), dashboards: defaultDashboards() };
+let prefsReady = Promise.resolve();
+// When loading failed, saving is off: it would replace what's saved with the defaults
+let prefsLoadFailed = false;
+
+const PART_NAMES = { theme: 'colors', home: 'Home page', dashboards: 'dashboards' };
+
+function loadPreferences() {
+    const token = sessionTokenValue;
+    prefsLoadFailed = false;
+    // Home waits for this person's layout, but never for long
+    const reveal = setTimeout(() => document.getElementById('home-blocks').classList.remove('waiting'), 3000);
+    prefsReady = (async () => {
+        try {
+            const response = await fetch(`${API_BASE}/api/preferences`, { headers: authHeaders() });
+            if (handleUnauthorized(response)) return;
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+            if (token !== sessionTokenValue) return; // signed out meanwhile
+            const saved = data.preferences || {};
+            prefs.theme = { ...THEME_DEFAULTS, ...saved.theme };
+            prefs.home = Array.isArray(saved.home?.blocks) ? saved.home : defaultHome();
+            prefs.dashboards = { ...defaultDashboards(), ...saved.dashboards };
+        } catch (err) {
+            prefsLoadFailed = true;
+            console.error('Could not load the saved layout and colors:', err);
+            showToast(`❌ ${err.message} Showing the defaults; refresh the page to try again.`);
+        }
+        applyTheme(prefs.theme);
+        rememberTheme();
+        paintThemePanel();
+        renderHomeLayout();
+        renderMyDashboards();
+        clearTimeout(reveal);
+        document.getElementById('home-blocks').classList.remove('waiting');
+    })();
+    return prefsReady;
+}
+
+// One save at a time per part; changes made meanwhile go in one more save
+const prefSaves = {};
+function savePreference(part) {
+    if (prefsLoadFailed) {
+        showToast(`Your ${PART_NAMES[part]} can't be saved because your settings didn't load. Refresh the page to try again.`);
+        return Promise.resolve(false);
+    }
+    const state = prefSaves[part] || (prefSaves[part] = { running: null, again: false });
+    if (state.running) {
+        state.again = true;
+        return state.running;
+    }
+    const token = sessionTokenValue;
+    state.running = (async () => {
+        do {
+            state.again = false;
+            if (!token || token !== sessionTokenValue) return false;
+            try {
+                const response = await fetch(`${API_BASE}/api/preferences/${part}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                    body: JSON.stringify({ value: prefs[part] }),
+                });
+                if (handleUnauthorized(response)) return false;
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+            } catch (err) {
+                showToast(`❌ Your ${PART_NAMES[part]} could not be saved: ${err.message}`);
+                return false;
+            }
+        } while (state.again);
+        return true;
+    })().finally(() => { state.running = null; });
+    return state.running;
+}
+
+// For changes that come in a stream (dragging the custom color)
+const saveTimers = {};
+function savePreferenceSoon(part, delay = 500) {
+    clearTimeout(saveTimers[part]);
+    saveTimers[part] = setTimeout(() => savePreference(part), delay);
+}
+
+const newChartId = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+
+// A chart with every setting filled in (the server checks them again)
+function chartWithDefaults(c) {
+    return {
+        id: newChartId(), title: '', status: 'all', dates: { preset: 'all' }, filters: [], groupBy: '',
+        display: c.groupBy ? 'bar' : 'number', limit: 10, sort: 'count', size: 'medium', color: 'accent', ...c,
+    };
+}
+
+// Signing out leaves nothing of this person's on the page
+function resetCustomizing() {
+    Object.values(saveTimers).forEach(clearTimeout);
+    for (const state of Object.values(prefSaves)) state.again = false;
+    prefs.theme = { ...THEME_DEFAULTS };
+    prefs.home = defaultHome();
+    prefs.dashboards = defaultDashboards();
+    prefsReady = Promise.resolve();
+    prefsLoadFailed = false;
+    for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close('cancel');
+    applyTheme(prefs.theme);
+    try { localStorage.removeItem(THEME_CACHE_KEY); } catch { /* nothing kept */ }
+    toggleThemePanel(false);
+    toggleHomeEditing(false);
+    toggleDrawerEditing(false);
+    hideBoard();
+    renderHomeLayout();
+    renderMyDashboards();
+    document.getElementById('home-blocks').classList.add('waiting');
+    dashboardsLoading = null; // the next person's dashboards open where they left them
+}
+
+// ---------------------------------------------------------------------
+// COLOR SCHEME: light, dark or the computer's setting; an accent color
+// (buttons, the lit page button, charts); and the header's color
+// ---------------------------------------------------------------------
+
+const ACCENT_CHOICES = [
+    ['#10a37f', 'OneTouch green'], ['#2a78d6', 'Blue'], ['#6250d6', 'Violet'], ['#d55181', 'Pink'],
+    ['#e34948', 'Red'], ['#eb6834', 'Orange'], ['#0f8a8a', 'Teal'], ['#4a5568', 'Slate'],
+];
+const THEME_MODES = [['light', '☀️ Light'], ['dark', '🌙 Dark'], ['system', '💻 Match my computer']];
+const HEADER_STYLES = [['dark', 'Dark'], ['accent', 'Accent color'], ['light', 'Same as the page']];
+// This browser's copy of the last scheme, so a reload doesn't flash the
+// default colors before the account's arrive (read by index.html's head)
+const THEME_CACHE_KEY = 'onetouch-theme';
+const systemDark = matchMedia('(prefers-color-scheme: dark)');
+
+// White text on the accent when it reads well enough (3:1, like the default
+// green), otherwise near-black: a pale custom color still has readable buttons
+function readableOn(hex) {
+    const channel = i => {
+        const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+        return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    };
+    const luminance = 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
+    return 1.05 / (luminance + 0.05) >= 3 ? '#ffffff' : '#1a202c';
+}
+
+function applyTheme(theme) {
+    const t = { ...THEME_DEFAULTS, ...theme };
+    const root = document.documentElement;
+    const wasDark = root.dataset.theme === 'dark';
+    const dark = t.mode === 'dark' || (t.mode === 'system' && systemDark.matches);
+    root.dataset.theme = dark ? 'dark' : 'light';
+    root.dataset.header = t.header;
+    root.style.setProperty('--accent', t.accent);
+    root.style.setProperty('--on-accent', readableOn(t.accent));
+    // The Metabase dashboards have their own light and dark looks
+    if (wasDark !== dark) refreshDashboardTheme();
+}
+systemDark.addEventListener('change', () => applyTheme(prefs.theme));
+
+function rememberTheme() {
+    try {
+        localStorage.setItem(THEME_CACHE_KEY, JSON.stringify({ ...prefs.theme, onAccent: readableOn(prefs.theme.accent) }));
+    } catch { /* the default colors show briefly on a reload; that's fine */ }
+}
+
+function setTheme(change, gradual = false) {
+    prefs.theme = { ...prefs.theme, ...change };
+    applyTheme(prefs.theme);
+    rememberTheme();
+    paintThemePanel();
+    if (gradual) savePreferenceSoon('theme');
+    else savePreference('theme');
+}
+
+function resetTheme() {
+    setTheme({ ...THEME_DEFAULTS });
+    showToast('Colors are back to the default');
+}
+
+// The 🎨 Colors panel under the header
+function buildThemePanel() {
+    const radios = (name, choices) => choices.map(([value, label]) =>
+        `<label class="choice-pill"><input type="radio" name="${name}" value="${value}"><span>${escapeHtml(label)}</span></label>`).join('');
+    document.getElementById('theme-modes').innerHTML = radios('theme-mode', THEME_MODES);
+    document.getElementById('theme-headers').innerHTML = radios('theme-header', HEADER_STYLES);
+    document.getElementById('theme-accents').innerHTML = ACCENT_CHOICES.map(([hex, name]) =>
+        `<label class="swatch" title="${escapeHtml(name)}"><input type="radio" name="theme-accent" value="${hex}" aria-label="${escapeHtml(name)}">` +
+        `<span style="background:${hex}"></span></label>`).join('');
+    const panel = document.getElementById('theme-panel');
+    panel.addEventListener('change', e => {
+        if (e.target.name === 'theme-mode') setTheme({ mode: e.target.value });
+        if (e.target.name === 'theme-header') setTheme({ header: e.target.value });
+        if (e.target.name === 'theme-accent') setTheme({ accent: e.target.value });
+    });
+    document.getElementById('theme-custom').addEventListener('input', e => setTheme({ accent: e.target.value.toLowerCase() }, true));
+    paintThemePanel();
+}
+
+function paintThemePanel() {
+    const t = prefs.theme;
+    document.querySelectorAll('#theme-panel input[name="theme-mode"]').forEach(r => { r.checked = r.value === t.mode; });
+    document.querySelectorAll('#theme-panel input[name="theme-header"]').forEach(r => { r.checked = r.value === t.header; });
+    document.querySelectorAll('#theme-panel input[name="theme-accent"]').forEach(r => { r.checked = r.value === t.accent; });
+    const custom = document.getElementById('theme-custom');
+    if (custom && document.activeElement !== custom) custom.value = t.accent;
+    const isPreset = ACCENT_CHOICES.some(([hex]) => hex === t.accent);
+    custom?.closest('.swatch-custom')?.classList.toggle('on', !isPreset);
+}
+
+function toggleThemePanel(open) {
+    const panel = document.getElementById('theme-panel');
+    const button = document.getElementById('theme-btn');
+    const willOpen = typeof open === 'boolean' ? open : panel.hidden;
+    panel.hidden = !willOpen;
+    button.setAttribute('aria-expanded', String(willOpen));
+    if (willOpen) panel.querySelector('input:checked, input')?.focus();
+    else if (panel.contains(document.activeElement)) button.focus();
+}
+
+// A click outside the panel closes it
+document.addEventListener('pointerdown', e => {
+    const panel = document.getElementById('theme-panel');
+    if (!panel.hidden && !panel.contains(e.target) && !e.target.closest('#theme-btn')) toggleThemePanel(false);
+});
+
+// ---------------------------------------------------------------------
+// A small "name it" box (new dashboard, rename)
+// ---------------------------------------------------------------------
+
+function askText({ title, label, value = '', action = 'Save' }) {
+    const dialog = document.getElementById('ask-dialog');
+    const input = document.getElementById('ask-input');
+    dialog.querySelector('.ask-title').textContent = title;
+    dialog.querySelector('.ask-label').textContent = label;
+    document.getElementById('ask-ok').textContent = action;
+    input.value = value;
+    dialog.returnValue = '';
+    dialog.showModal();
+    input.select();
+    return new Promise(resolve => {
+        dialog.addEventListener('close', () => resolve(dialog.returnValue === 'ok' ? input.value.replace(/\s+/g, ' ').trim() : null), { once: true });
+    });
+}
+
+// ---------------------------------------------------------------------
+// CHART TILES: one chart, its title, what it counts, and its buttons
+// ---------------------------------------------------------------------
+
+const TILE_BUTTONS = {
+    table: ['▦', 'Show as a table'],
+    edit: ['✎', 'Edit this chart'],
+    earlier: ['◀', 'Move earlier'],
+    later: ['▶', 'Move later'],
+    pin: ['📌', 'Add a copy to Home'],
+    remove: ['🗑', 'Remove this chart'],
+};
+const HOME_TILE_BUTTONS = ['table', 'edit', 'earlier', 'later', 'remove'];
+const BOARD_TILE_BUTTONS = ['table', 'edit', 'earlier', 'later', 'pin', 'remove'];
+
+function tileHtml(chart, buttons, extraClass = '') {
+    const actions = buttons.map(a => `<button type="button" class="tile-btn" data-tile-action="${a}" title="${TILE_BUTTONS[a][1]}" aria-label="${TILE_BUTTONS[a][1]}">${TILE_BUTTONS[a][0]}</button>`).join('');
+    return `<article class="chart-tile size-${chart.size} ${extraClass}" data-chart-id="${escapeHtml(chart.id)}">` +
+        `<div class="tile-head"><div class="tile-titles"><h3 class="tile-title"></h3><p class="tile-sub"></p></div>` +
+        (actions ? `<div class="tile-actions">${actions}</div>` : '') + `</div>` +
+        `<div class="tile-body"><p class="chart-loading">Loading…</p></div><p class="chart-note" hidden></p></article>`;
+}
+
+// Fetches (or reuses) the chart's numbers and draws it. While new numbers
+// load, the old drawing stays, dimmed, instead of jumping to "Loading…".
+async function fillTile(tile, chart, asTable = tile._asTable || false) {
+    const body = tile.querySelector('.tile-body');
+    const run = (body._run || 0) + 1;
+    body._run = run;
+    tile._asTable = asTable;
+    if (body._drawn) body.classList.add('refreshing');
+    try {
+        await loadChartCatalog();
+        if (body._run !== run) return;
+        tile.querySelector('.tile-title').textContent = chartTitle(chart);
+        tile.querySelector('.tile-sub').textContent = chartDescription(chart);
+        const data = await fetchChartData(chart);
+        if (!data || body._run !== run || !tile.isConnected) return;
+        drawChart(body, chart, data, asTable);
+        const note = tile.querySelector('.chart-note');
+        note.textContent = asTable ? '' : chartNote(chart, data);
+        note.hidden = !note.textContent;
+        const tableButton = tile.querySelector('[data-tile-action="table"]');
+        if (tableButton) {
+            tableButton.hidden = chart.display === 'table' || chart.display === 'number' || !chart.groupBy;
+            tableButton.setAttribute('aria-pressed', String(asTable));
+            tableButton.title = asTable ? 'Show the chart' : 'Show as a table';
+            tableButton.setAttribute('aria-label', tableButton.title);
+        }
+    } catch (err) {
+        if (body._run !== run) return;
+        body._drawn = null;
+        body.innerHTML = `<p class="chart-empty error">❌ ${escapeHtml(err.message)}</p>`;
+        console.error(err);
+    } finally {
+        if (body._run === run) body.classList.remove('refreshing');
+    }
+}
+
+// The list a tile belongs to: Home's sections, or the open dashboard's charts
+function tilePlace(tile) {
+    if (tile.closest('#home-blocks')) {
+        const list = prefs.home.blocks;
+        return { where: 'home', list, index: list.findIndex(b => b.chart?.id === tile.dataset.chartId), chartOf: b => b.chart };
+    }
+    const board = currentBoard();
+    const list = board ? board.charts : [];
+    return { where: 'board', list, index: list.findIndex(c => c.id === tile.dataset.chartId), chartOf: c => c };
+}
+
+function savePlace(where) {
+    if (where === 'home') {
+        renderHomeLayout();
+        savePreference('home');
+    } else {
+        renderBoard();
+        renderMyDashboards();
+        savePreference('dashboards');
+    }
+}
+
+function tileAction(tile, action) {
+    const { where, list, index, chartOf } = tilePlace(tile);
+    if (index < 0) return;
+    const chart = chartOf(list[index]);
+    if (action === 'table') {
+        fillTile(tile, chart, !tile._asTable);
+    } else if (action === 'edit') {
+        openBuilder({
+            chart,
+            onSave: updated => {
+                if (where === 'home') list[index] = { type: 'chart', chart: updated };
+                else list[index] = updated;
+                savePlace(where);
+            },
+        });
+    } else if (action === 'earlier' || action === 'later') {
+        const to = index + (action === 'earlier' ? -1 : 1);
+        if (to < 0 || to >= list.length) return;
+        [list[index], list[to]] = [list[to], list[index]];
+        savePlace(where);
+        // Keep the keyboard on the chart that moved
+        document.querySelector(`.chart-tile[data-chart-id="${CSS.escape(chart.id)}"] [data-tile-action="${action}"]`)?.focus();
+    } else if (action === 'pin') {
+        prefs.home.blocks.push({ type: 'chart', chart: { ...structuredClone(chart), id: newChartId() } });
+        renderHomeLayout();
+        savePreference('home');
+        showToast(`📌 "${chartTitle(chart)}" is now on your Home page too`);
+    } else if (action === 'remove') {
+        if (!confirm(`Remove the chart "${chartTitle(chart)}"?`)) return;
+        list.splice(index, 1);
+        savePlace(where);
+        showToast('Chart removed');
+    }
+}
+
+document.addEventListener('click', e => {
+    const button = e.target.closest('[data-tile-action]');
+    if (button) tileAction(button.closest('.chart-tile'), button.dataset.tileAction);
+});
+
+// ---------------------------------------------------------------------
+// HOME LAYOUT: the AI assistant, your tickets, dashboard shortcuts and
+// your own charts, in the order you choose; "Customize Home" edits it
+// ---------------------------------------------------------------------
+
+const HOME_SECTIONS = {
+    assistant: '💬 AI assistant',
+    tickets: '🎫 Your tickets',
+    shortcuts: '📊 Your dashboards',
+};
+
+function renderHomeLayout() {
+    const container = document.getElementById('home-blocks');
+    const sections = new Map([...container.querySelectorAll(':scope > [data-block]')].map(el => [el.dataset.block, el]));
+    container.querySelectorAll(':scope > .chart-tile').forEach(tile => tile.remove());
+    const blocks = prefs.home.blocks;
+    blocks.forEach((block, i) => {
+        let el;
+        if (block.type === 'chart') {
+            container.insertAdjacentHTML('beforeend', tileHtml(block.chart, HOME_TILE_BUTTONS, 'home-block'));
+            el = container.lastElementChild;
+            fillTile(el, block.chart);
+        } else {
+            el = sections.get(block.type);
+            if (!el) return;
+            el.hidden = false;
+            container.appendChild(el);
+            addSectionBar(el);
+            el.querySelector('[data-block-action="up"]').disabled = i === 0;
+            el.querySelector('[data-block-action="down"]').disabled = i === blocks.length - 1;
+        }
+    });
+    for (const [type, el] of sections) {
+        if (!blocks.some(b => b.type === type)) el.hidden = true;
+    }
+    // Hidden sections can be added back while customizing
+    const missing = Object.keys(HOME_SECTIONS).filter(type => !blocks.some(b => b.type === type));
+    document.getElementById('home-add-back').innerHTML = missing.map(type =>
+        `<button type="button" class="home-action" data-add-section="${type}">＋ ${escapeHtml(HOME_SECTIONS[type])}</button>`).join('');
+    const empty = document.getElementById('home-empty');
+    empty.hidden = blocks.length > 0;
+    renderShortcuts();
+}
+
+// Each section's bar while customizing: its name, move up / down, hide
+function addSectionBar(section) {
+    if (section.querySelector(':scope > .block-bar')) return;
+    section.insertAdjacentHTML('afterbegin', `<div class="block-bar"><span class="block-name">${escapeHtml(HOME_SECTIONS[section.dataset.block])}</span>` +
+        '<button type="button" class="home-action" data-block-action="up">▲ Move up</button>' +
+        '<button type="button" class="home-action" data-block-action="down">▼ Move down</button>' +
+        '<button type="button" class="home-action" data-block-action="hide">Hide</button></div>');
+}
+
+function toggleHomeEditing(on) {
+    const home = document.getElementById('home');
+    const editing = typeof on === 'boolean' ? on : !home.classList.contains('editing');
+    home.classList.toggle('editing', editing);
+    document.getElementById('home-edit-bar').hidden = !editing;
+    const button = document.getElementById('customize-home-btn');
+    button.setAttribute('aria-pressed', String(editing));
+    button.textContent = editing ? '✓ Done' : '✏️ Customize Home';
+}
+
+function addHomeChart() {
+    openBuilder({
+        onSave: chart => {
+            prefs.home.blocks.push({ type: 'chart', chart });
+            renderHomeLayout();
+            savePreference('home');
+            document.querySelector(`#home-blocks .chart-tile[data-chart-id="${CSS.escape(chart.id)}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        },
+    });
+}
+
+function resetHomeLayout() {
+    if (!confirm('Reset Home? The sections go back to the default order, and the charts you added to Home are removed. Your dashboards are not affected.')) return;
+    prefs.home = defaultHome();
+    renderHomeLayout();
+    savePreference('home');
+    showToast('Home is back to the default');
+}
+
+document.addEventListener('click', e => {
+    const action = e.target.closest('[data-block-action]');
+    if (action) {
+        const type = action.closest('[data-block]').dataset.block;
+        const blocks = prefs.home.blocks;
+        const index = blocks.findIndex(b => b.type === type);
+        if (index < 0) return;
+        const what = action.dataset.blockAction;
+        if (what === 'hide') {
+            blocks.splice(index, 1);
+            showToast(`${HOME_SECTIONS[type]} is hidden. Add it back from Customize Home.`);
+        } else {
+            const to = index + (what === 'up' ? -1 : 1);
+            if (to < 0 || to >= blocks.length) return;
+            [blocks[index], blocks[to]] = [blocks[to], blocks[index]];
+        }
+        renderHomeLayout();
+        savePreference('home');
+        if (what !== 'hide') document.querySelector(`[data-block="${type}"] [data-block-action="${what}"]:not(:disabled)`)?.focus();
+        return;
+    }
+    const add = e.target.closest('[data-add-section]');
+    if (add) {
+        prefs.home.blocks.push({ type: add.dataset.addSection });
+        renderHomeLayout();
+        savePreference('home');
+    }
+});
+
+// The "Your dashboards" section: one button per dashboard of your own
+function renderShortcuts() {
+    const list = document.getElementById('home-shortcuts');
+    const boards = prefs.dashboards.boards;
+    list.innerHTML = boards.map(b => `<button type="button" class="shortcut" data-open-board="${escapeHtml(b.id)}">` +
+        `<span class="shortcut-name">${escapeHtml(b.name)}</span><span class="shortcut-desc">${chartCount(b.charts.length)}</span></button>`).join('') +
+        '<button type="button" class="shortcut new" onclick="newBoard()"><span class="shortcut-name">＋ New dashboard</span><span class="shortcut-desc">Pick the data and how it\'s shown</span></button>' +
+        '<button type="button" class="shortcut" onclick="switchTab(\'dashboard\')"><span class="shortcut-name">📈 Team dashboards</span><span class="shortcut-desc">The shared Metabase dashboards</span></button>';
+}
+
+const chartCount = n => `${n} ${n === 1 ? 'chart' : 'charts'}`;
+
+// ---------------------------------------------------------------------
+// MY DASHBOARDS: dashboards each person builds from their own charts,
+// listed at the top of the Dashboards drawer
+// ---------------------------------------------------------------------
+
+let currentBoardId = null;
+
+function currentBoard() {
+    return prefs.dashboards.boards.find(b => b.id === currentBoardId) || null;
+}
+
+// The drawer's "My dashboards" list (and Home's shortcuts)
+function renderMyDashboards() {
+    const list = document.getElementById('my-dashboards-list');
+    const boards = prefs.dashboards.boards;
+    list.innerHTML = boards.length
+        ? boards.map(b => `<button type="button" class="dashboard-choice${b.id === currentBoardId ? ' active' : ''}" data-board="${escapeHtml(b.id)}"${b.id === currentBoardId ? ' aria-current="page"' : ''}>` +
+            `<span class="dashboard-choice-name">${escapeHtml(b.name)}</span><span class="dashboard-choice-desc">${chartCount(b.charts.length)}</span></button>`).join('')
+        : '<p class="drawer-note">Build a dashboard of your own: choose the data each chart shows and how it\'s drawn.</p>';
+    renderShortcuts();
+}
+
+function showBoard(id) {
+    const board = prefs.dashboards.boards.find(b => b.id === id);
+    if (!board) return false;
+    currentBoardId = id;
+    document.getElementById('dashboard-frame').hidden = true;
+    document.getElementById('dashboard-message').hidden = true;
+    document.getElementById('dashboard-star').hidden = true;
+    document.getElementById('board-view').hidden = false;
+    document.querySelectorAll('.dashboard-choice').forEach(b => {
+        const on = b.dataset.board === id;
+        b.classList.toggle('active', on);
+        if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+    });
+    rememberDashboard(`my:${id}`);
+    renderBoard();
+    return true;
+}
+
+// Back to the team dashboards' frame
+function hideBoard() {
+    currentBoardId = null;
+    document.getElementById('board-view').hidden = true;
+    document.querySelectorAll('.dashboard-choice[data-board]').forEach(b => { b.classList.remove('active'); b.removeAttribute('aria-current'); });
+}
+
+// From Home's shortcuts
+async function openBoard(id) {
+    toggleAssistant(false);
+    switchTab('dashboard');
+    await loadDashboards();
+    showBoard(id);
+}
+
+function renderBoard() {
+    const board = currentBoard();
+    if (!board) return;
+    setDashboardHeading('My dashboards', board.name, chartCount(board.charts.length), false);
+    document.getElementById('dashboard-hint').hidden = true;
+    const grid = document.getElementById('board-grid');
+    if (!board.charts.length) {
+        grid.innerHTML = '<div class="board-empty"><p class="board-empty-title">This dashboard has no charts yet.</p>' +
+            '<p>Add a chart and choose what it counts (incidents, changes, requests or tasks), which ones, how to group them, and how to draw it. Or start from a ready-made set and change it from there.</p>' +
+            '<div class="board-empty-actions"><button type="button" class="primary-btn" onclick="addBoardChart()">＋ Add a chart</button>' +
+            '<button type="button" class="home-action" onclick="addSuggestedCharts()">✨ Add suggested charts</button></div></div>';
+        return;
+    }
+    grid.innerHTML = board.charts.map(c => tileHtml(c, BOARD_TILE_BUTTONS)).join('');
+    grid.querySelectorAll('.chart-tile').forEach((tile, i) => fillTile(tile, board.charts[i]));
+}
+
+const SUGGESTED_CHARTS = [
+    { source: 'incident', status: 'open', display: 'number', size: 'small' },
+    { source: 'change_request', status: 'open', display: 'number', size: 'small' },
+    { source: 'sc_task', status: 'open', display: 'number', size: 'small' },
+    { source: 'incident', groupBy: 'created_day', display: 'area', size: 'large' },
+    { source: 'incident', status: 'open', groupBy: 'priority', sort: 'label', display: 'bar' },
+    { source: 'change_request', groupBy: 'risk', display: 'donut' },
+    { source: 'sc_req_item', groupBy: 'item', display: 'hbar' },
+    { source: 'sc_task', status: 'open', groupBy: 'assignment_group', display: 'hbar', color: '7' },
+];
+
+function addSuggestedCharts() {
+    const board = currentBoard();
+    if (!board) return;
+    board.charts.push(...SUGGESTED_CHARTS.map(chartWithDefaults));
+    savePlace('board');
+}
+
+async function newBoard() {
+    if (prefs.dashboards.boards.length >= 20) {
+        showToast('You can have up to 20 dashboards of your own. Delete one first.');
+        return;
+    }
+    const name = await askText({ title: 'New dashboard', label: 'Name', value: `My dashboard ${prefs.dashboards.boards.length + 1}`, action: 'Create' });
+    if (!name) return;
+    const board = { id: newChartId(), name: name.slice(0, 60), charts: [] };
+    prefs.dashboards.boards.push(board);
+    savePreference('dashboards');
+    renderMyDashboards();
+    toggleAssistant(false);
+    switchTab('dashboard');
+    await loadDashboards();
+    toggleDashboardDrawer(false);
+    showBoard(board.id);
+}
+
+async function renameBoard() {
+    const board = currentBoard();
+    if (!board) return;
+    const name = await askText({ title: 'Rename dashboard', label: 'Name', value: board.name });
+    if (!name) return;
+    board.name = name.slice(0, 60);
+    savePlace('board');
+}
+
+function deleteBoard() {
+    const board = currentBoard();
+    if (!board || !confirm(`Delete the dashboard "${board.name}" and its ${chartCount(board.charts.length)}? This can't be undone.`)) return;
+    prefs.dashboards.boards = prefs.dashboards.boards.filter(b => b !== board);
+    hideBoard();
+    renderMyDashboards();
+    savePreference('dashboards');
+    showToast(`Deleted "${board.name}"`);
+    showFirstDashboard();
+}
+
+function addBoardChart() {
+    const board = currentBoard();
+    if (!board) return;
+    if (board.charts.length >= 30) {
+        showToast('A dashboard can hold up to 30 charts. Remove one or start another dashboard.');
+        return;
+    }
+    openBuilder({
+        onSave: chart => {
+            board.charts.push(chart);
+            savePlace('board');
+            document.querySelector(`#board-grid .chart-tile[data-chart-id="${CSS.escape(chart.id)}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        },
+    });
+}
+
+document.addEventListener('click', e => {
+    const choice = e.target.closest('[data-board]');
+    if (choice && choice.closest('#my-dashboards-list')) {
+        showBoard(choice.dataset.board);
+        toggleDashboardDrawer(false);
+        return;
+    }
+    const shortcut = e.target.closest('[data-open-board]');
+    if (shortcut) openBoard(shortcut.dataset.openBoard);
+});
+
+// ---------------------------------------------------------------------
+// Team dashboards each person hides from their drawer ("Show or hide")
+// ---------------------------------------------------------------------
+
+let drawerEditing = false;
+
+const isDashboardHidden = key => prefs.dashboards.hidden.includes(key);
+
+function applyHiddenDashboards() {
+    document.querySelectorAll('#dashboard-picker .dashboard-choice').forEach(b => {
+        const hidden = isDashboardHidden(b.dataset.key);
+        b.classList.toggle('is-hidden', hidden);
+        b.hidden = hidden && !drawerEditing;
+        b.title = drawerEditing ? (hidden ? 'Hidden: click to show it in your list' : 'Shown: click to hide it from your list') : '';
+        if (drawerEditing) b.setAttribute('aria-pressed', String(!hidden)); else b.removeAttribute('aria-pressed');
+    });
+    document.querySelectorAll('#dashboard-picker .drawer-group').forEach(g => {
+        g.hidden = !drawerEditing && [...g.querySelectorAll('.dashboard-choice')].every(b => b.hidden);
+    });
+    const count = prefs.dashboards.hidden.length;
+    document.getElementById('drawer-hidden-note').textContent = !drawerEditing && count
+        ? `${count} team ${count === 1 ? 'dashboard is' : 'dashboards are'} hidden.` : '';
+}
+
+function toggleDrawerEditing(on) {
+    drawerEditing = typeof on === 'boolean' ? on : !drawerEditing;
+    document.getElementById('dashboard-drawer').classList.toggle('editing', drawerEditing);
+    const button = document.getElementById('drawer-customize');
+    button.textContent = drawerEditing ? '✓ Done' : '👁 Show or hide team dashboards';
+    button.setAttribute('aria-pressed', String(drawerEditing));
+    applyHiddenDashboards();
+}
+
+function toggleDashboardHidden(key) {
+    const hidden = prefs.dashboards.hidden;
+    prefs.dashboards.hidden = hidden.includes(key) ? hidden.filter(k => k !== key) : [...hidden, key];
+    applyHiddenDashboards();
+    savePreference('dashboards');
+}
+
+// ---------------------------------------------------------------------
+// THE CHART BUILDER: what to count, which ones, grouped by what, and how
+// it's drawn, with a live preview
+// ---------------------------------------------------------------------
+
+const DISPLAY_CHOICES = [
+    ['bar', 'Columns', '<rect x="3" y="12" width="4" height="9" rx="1"/><rect x="10" y="6" width="4" height="15" rx="1"/><rect x="17" y="9" width="4" height="12" rx="1"/>'],
+    ['hbar', 'Sideways bars', '<rect x="3" y="3" width="15" height="4" rx="1"/><rect x="3" y="10" width="10" height="4" rx="1"/><rect x="3" y="17" width="18" height="4" rx="1"/>'],
+    ['line', 'Line', '<polyline points="3,18 9,11 14,14 21,5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>'],
+    ['area', 'Area', '<path d="M3,18 L9,11 L14,14 L21,5 L21,21 L3,21Z" opacity="0.35"/><polyline points="3,18 9,11 14,14 21,5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>'],
+    ['donut', 'Donut', '<path d="M12 3a9 9 0 1 1-9 9h4.5A4.5 4.5 0 1 0 12 7.5Z"/><path d="M3 12a9 9 0 0 1 9-9v4.5A4.5 4.5 0 0 0 7.5 12Z" opacity="0.45"/>'],
+    ['table', 'Table', '<rect x="3" y="4" width="18" height="3" rx="1"/><rect x="3" y="10" width="18" height="2" rx="1" opacity="0.6"/><rect x="3" y="15" width="18" height="2" rx="1" opacity="0.6"/>'],
+    ['number', 'One number', '<text x="12" y="17" text-anchor="middle" font-size="13" font-weight="700" font-family="sans-serif">123</text>'],
+];
+const COLOR_CHOICES = [['accent', 'Your accent color'], ...['Blue', 'Orange', 'Aqua', 'Yellow', 'Pink', 'Green', 'Violet', 'Red'].map((name, i) => [String(i + 1), name])];
+const DATE_CHOICES = [['all', 'Any time'], ['7', 'In the last 7 days of the data'], ['30', 'In the last 30 days of the data'], ['90', 'In the last 90 days of the data'], ['custom', 'Between two dates…']];
+const LIMIT_CHOICES = [5, 10, 15, 20, 30, 50];
+const MAX_CHART_FILTERS = 6;
+
+let builder = null; // { draft, onSave }
+const filterValueCache = new Map();
+
+function loadFilterValues(source, field) {
+    const key = `${source}.${field}`;
+    if (!filterValueCache.has(key)) {
+        const pending = (async () => {
+            const response = await fetch(`${API_BASE}/api/charts/values`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                body: JSON.stringify({ source, field }),
+            });
+            if (handleUnauthorized(response)) return [];
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+            return data.values;
+        })();
+        filterValueCache.set(key, pending);
+        pending.catch(() => filterValueCache.delete(key));
+    }
+    return filterValueCache.get(key);
+}
+
+// The builder's fixed choices, drawn once
+function buildBuilder() {
+    const radios = (name, choices, cls = 'choice-pill') => choices.map(([value, label]) =>
+        `<label class="${cls}"><input type="radio" name="${name}" value="${value}"><span>${escapeHtml(label)}</span></label>`).join('');
+    document.getElementById('b-status').innerHTML = radios('b-status', [['all', 'All'], ['open', 'Open only'], ['closed', 'Closed only']]);
+    document.getElementById('b-dates').innerHTML = DATE_CHOICES.map(([v, l]) => `<option value="${v}">${escapeHtml(l)}</option>`).join('');
+    document.getElementById('b-limit').innerHTML = LIMIT_CHOICES.map(n => `<option value="${n}">Top ${n}</option>`).join('');
+    document.getElementById('b-display').innerHTML = DISPLAY_CHOICES.map(([value, label, icon]) =>
+        `<label class="display-choice"><input type="radio" name="b-display" value="${value}">` +
+        `<span><svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor" aria-hidden="true">${icon}</svg>${escapeHtml(label)}</span></label>`).join('');
+    document.getElementById('b-colors').innerHTML = COLOR_CHOICES.map(([value, name]) =>
+        `<label class="swatch" title="${escapeHtml(name)}"><input type="radio" name="b-color" value="${value}" aria-label="${escapeHtml(name)}">` +
+        `<span style="background:${value === 'accent' ? 'var(--accent)' : `var(--series-${value})`}"></span></label>`).join('');
+    document.getElementById('b-sizes').innerHTML = radios('b-size', [['small', 'Small'], ['medium', 'Medium'], ['large', 'Wide']]);
+
+    const form = document.getElementById('builder-form');
+    form.addEventListener('input', builderInput);
+    form.addEventListener('change', builderInput);
+    form.addEventListener('submit', e => {
+        e.preventDefault();
+        saveBuilder();
+    });
+    // Enter in the choices' search box searches; it doesn't save the chart
+    form.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && e.target.matches('.filter-search')) e.preventDefault();
+    });
+    document.getElementById('b-add-filter').addEventListener('click', () => {
+        const src = chartCatalog.sources[builder.draft.source];
+        const used = new Set(builder.draft.filters.map(f => f.field));
+        const field = src.fields.find(([key]) => !used.has(key));
+        if (!field || builder.draft.filters.length >= MAX_CHART_FILTERS) return;
+        builder.draft.filters.push({ field: field[0], values: [] });
+        paintFilters();
+        document.querySelector('#b-filters .filter-row:last-child select')?.focus();
+    });
+    document.getElementById('b-filters').addEventListener('click', e => {
+        const remove = e.target.closest('[data-remove-filter]');
+        if (!remove) return;
+        builder.draft.filters.splice(Number(remove.dataset.removeFilter), 1);
+        paintFilters();
+        previewSoon();
+    });
+}
+
+async function openBuilder({ chart = null, onSave }) {
+    try {
+        if (!await loadChartCatalog()) return;
+    } catch (err) {
+        showToast(`❌ ${err.message}`);
+        return;
+    }
+    builder = {
+        draft: structuredClone(chart || chartWithDefaults({ source: 'incident', groupBy: 'priority', sort: 'label', display: 'bar' })),
+        onSave,
+    };
+    builder.draft.filters = builder.draft.filters.map(f => ({ ...f, values: [...f.values] }));
+    document.getElementById('builder-title').textContent = chart ? 'Edit chart' : 'Add a chart';
+    document.getElementById('b-save').textContent = chart ? 'Save changes' : 'Add chart';
+    document.getElementById('b-source').innerHTML = Object.entries(chartCatalog.sources)
+        .map(([key, s]) => `<option value="${key}">${escapeHtml(s.label)}</option>`).join('');
+    paintBuilder();
+    document.getElementById('chart-builder').showModal();
+    document.getElementById('b-source').focus();
+    previewSoon(0);
+}
+
+function closeBuilder() {
+    document.getElementById('chart-builder').close();
+}
+
+// The form, from the draft
+function paintBuilder() {
+    const d = builder.draft;
+    const src = chartCatalog.sources[d.source];
+    document.getElementById('b-title').value = d.title;
+    document.getElementById('b-source').value = d.source;
+    document.querySelectorAll('input[name="b-status"]').forEach(r => { r.checked = r.value === d.status; });
+    document.getElementById('b-status-note').textContent = `Open = ${src.openStates.join(', ')}. Closed = ${src.closedStates.join(', ')}.`;
+    document.getElementById('b-dates').value = d.dates.preset;
+    const from = document.getElementById('b-from'), to = document.getElementById('b-to');
+    for (const input of [from, to]) { input.min = src.days.first; input.max = src.days.last; }
+    from.value = d.dates.from || '';
+    to.value = d.dates.to || '';
+    document.getElementById('b-range').hidden = d.dates.preset !== 'custom';
+    document.getElementById('b-dates-note').textContent = `This data covers ${fmtDay(src.days.first)} to ${fmtDay(src.days.last)}.`;
+    document.getElementById('b-group').innerHTML =
+        `<option value="">Nothing: show one total</option>` +
+        `<optgroup label="Group by">${src.fields.map(([k, l]) => `<option value="${k}">${escapeHtml(l)}</option>`).join('')}</optgroup>` +
+        `<optgroup label="Over time">${src.times.map(([k, l]) => `<option value="${k}">${escapeHtml(l)}</option>`).join('')}</optgroup>`;
+    document.getElementById('b-group').value = d.groupBy;
+    document.getElementById('b-limit').value = String(d.limit);
+    document.getElementById('b-sort').value = d.sort;
+    document.querySelectorAll('input[name="b-size"]').forEach(r => { r.checked = r.value === d.size; });
+    document.querySelectorAll('input[name="b-color"]').forEach(r => { r.checked = r.value === d.color; });
+    paintFilters();
+    paintDisplay();
+}
+
+// The parts that depend on the grouping and the drawing
+function paintDisplay() {
+    const d = builder.draft;
+    const grouped = Boolean(d.groupBy);
+    if (!grouped) d.display = 'number';
+    document.querySelectorAll('input[name="b-display"]').forEach(r => {
+        r.checked = r.value === d.display;
+        r.disabled = !grouped && r.value !== 'number';
+    });
+    document.getElementById('b-display-note').textContent = grouped
+        ? (isTimeField(d.groupBy) && ['bar', 'hbar', 'donut'].includes(d.display) ? 'Tip: Line or Area shows a trend over time best.' : '')
+        : 'Choose something to group by to draw a chart; with nothing to group by, the chart is one number.';
+    // Top N and order: only for categories (time always shows every period, oldest first)
+    document.getElementById('b-cut').hidden = !grouped || isTimeField(d.groupBy) || d.display === 'number';
+    document.getElementById('b-color-row').hidden = !['bar', 'hbar', 'line', 'area'].includes(d.display);
+    document.getElementById('b-title').placeholder = `${chartAutoTitle(d)} (automatic)`;
+}
+
+async function paintFilters() {
+    const d = builder.draft;
+    const src = chartCatalog.sources[d.source];
+    const box = document.getElementById('b-filters');
+    box.innerHTML = d.filters.map((f, i) => {
+        const others = new Set(d.filters.filter((_, j) => j !== i).map(g => g.field));
+        const options = src.fields.filter(([k]) => !others.has(k)).map(([k, l]) => `<option value="${k}"${k === f.field ? ' selected' : ''}>${escapeHtml(l)}</option>`).join('');
+        return `<div class="filter-row" data-filter="${i}"><div class="filter-top">` +
+            `<label class="filter-field"><span>Only where</span><select data-filter-field="${i}">${options}</select></label>` +
+            `<span class="filter-count" data-filter-count="${i}"></span>` +
+            `<button type="button" class="tile-btn" data-remove-filter="${i}" title="Remove this condition" aria-label="Remove this condition">✕</button></div>` +
+            `<input type="search" class="filter-search" data-filter-search="${i}" placeholder="Search the choices…" aria-label="Search the choices">` +
+            `<div class="filter-values" data-filter-values="${i}"><p class="chart-loading">Loading choices…</p></div></div>`;
+    }).join('');
+    document.getElementById('b-add-filter').hidden = d.filters.length >= Math.min(MAX_CHART_FILTERS, src.fields.length);
+    d.filters.forEach((f, i) => paintFilterValues(i));
+}
+
+async function paintFilterValues(i) {
+    const d = builder.draft;
+    const f = d.filters[i];
+    const box = document.querySelector(`[data-filter-values="${i}"]`);
+    if (!f || !box) return;
+    try {
+        const values = await loadFilterValues(d.source, f.field);
+        if (builder?.draft !== d || d.filters[i] !== f || !box.isConnected) return;
+        const search = (document.querySelector(`[data-filter-search="${i}"]`)?.value || '').trim().toLowerCase();
+        const chosen = new Set(f.values);
+        // Chosen ones first, then the rest by how common they are
+        const list = [...values.filter(v => chosen.has(v.value)), ...values.filter(v => !chosen.has(v.value))]
+            .filter(v => !search || v.value.toLowerCase().includes(search));
+        const shown = list.slice(0, 100);
+        box.innerHTML = shown.map(v => `<label class="filter-value"><input type="checkbox" data-filter-value="${i}" value="${escapeHtml(v.value)}"${chosen.has(v.value) ? ' checked' : ''}>` +
+            `<span class="filter-value-name">${escapeHtml(groupLabel({ groupBy: f.field }, v.value))}</span><span class="filter-value-count">${v.count.toLocaleString()}</span></label>`).join('') +
+            (list.length > shown.length ? `<p class="filter-more">${(list.length - shown.length).toLocaleString()} more: search to find them</p>` : '') +
+            (!list.length ? '<p class="filter-more">Nothing matches that search.</p>' : '');
+        paintFilterCount(i);
+    } catch (err) {
+        box.innerHTML = `<p class="chart-empty error">❌ ${escapeHtml(err.message)}</p>`;
+    }
+}
+
+function paintFilterCount(i) {
+    const f = builder.draft.filters[i];
+    const count = document.querySelector(`[data-filter-count="${i}"]`);
+    if (f && count) count.textContent = f.values.length ? `${f.values.length} chosen` : 'Pick one or more';
+}
+
+// Every change in the form updates the draft, the dependent parts, and the preview
+function builderInput(e) {
+    const t = e.target;
+    const d = builder?.draft;
+    if (!d) return;
+    if (t.id === 'b-title') { d.title = t.value; previewSoon(); return; }
+    if (t.matches('.filter-search')) { if (e.type === 'input') paintFilterValues(Number(t.dataset.filterSearch)); return; }
+    if (e.type === 'input' && t.type !== 'color' && t.type !== 'date') return; // selects and radios: on change
+    if (t.id === 'b-source') {
+        d.source = t.value;
+        const src = chartCatalog.sources[d.source];
+        if (![...src.fields, ...src.times].some(([k]) => k === d.groupBy)) d.groupBy = src.fields[0][0];
+        d.filters = []; // the fields differ between ticket types
+        paintBuilder();
+    } else if (t.name === 'b-status') {
+        d.status = t.value;
+        paintDisplay();
+    } else if (t.id === 'b-dates') {
+        d.dates = t.value === 'custom' ? { preset: 'custom', from: document.getElementById('b-from').value, to: document.getElementById('b-to').value } : { preset: t.value };
+        document.getElementById('b-range').hidden = t.value !== 'custom';
+    } else if (t.id === 'b-from' || t.id === 'b-to') {
+        d.dates = { preset: 'custom', from: document.getElementById('b-from').value, to: document.getElementById('b-to').value };
+    } else if (t.matches('[data-filter-field]')) {
+        d.filters[Number(t.dataset.filterField)] = { field: t.value, values: [] };
+        paintFilters();
+    } else if (t.matches('[data-filter-value]')) {
+        const f = d.filters[Number(t.dataset.filterValue)];
+        f.values = t.checked ? [...f.values, t.value] : f.values.filter(v => v !== t.value);
+        paintFilterCount(Number(t.dataset.filterValue));
+    } else if (t.id === 'b-group') {
+        const wasGrouped = Boolean(d.groupBy);
+        d.groupBy = t.value;
+        if (d.groupBy && !wasGrouped) d.display = isTimeField(d.groupBy) ? 'line' : 'bar';
+        else if (isTimeField(d.groupBy) && ['hbar', 'donut'].includes(d.display)) d.display = 'line';
+        paintDisplay();
+    } else if (t.name === 'b-display') {
+        d.display = t.value;
+        paintDisplay();
+    } else if (t.id === 'b-limit') {
+        d.limit = Number(t.value);
+    } else if (t.id === 'b-sort') {
+        d.sort = t.value;
+    } else if (t.name === 'b-color') {
+        d.color = t.value;
+    } else if (t.name === 'b-size') {
+        d.size = t.value;
+    } else {
+        return;
+    }
+    previewSoon();
+}
+
+// The chart as it will be saved (conditions with nothing chosen are left out)
+function builderChart() {
+    const d = builder.draft;
+    return { ...d, title: d.title.replace(/\s+/g, ' ').trim().slice(0, 80), filters: d.filters.filter(f => f.values.length).map(f => ({ ...f })) };
+}
+
+let previewTimer = null;
+function previewSoon(delay = 250) {
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(renderPreview, delay);
+}
+
+function renderPreview() {
+    if (!builder) return;
+    const chart = builderChart();
+    const box = document.getElementById('b-preview');
+    let tile = box.querySelector('.chart-tile');
+    if (!tile || !tile.classList.contains(`size-${chart.size}`)) {
+        box.innerHTML = tileHtml(chart, [], 'preview');
+        tile = box.querySelector('.chart-tile');
+    }
+    fillTile(tile, chart, false);
+}
+
+function saveBuilder() {
+    if (!builder) return;
+    const chart = builderChart();
+    const onSave = builder.onSave;
+    closeBuilder();
+    onSave(chart);
+}
+
+document.getElementById('chart-builder').addEventListener('close', () => {
+    builder = null;
+    clearTimeout(previewTimer);
+    document.getElementById('b-preview').innerHTML = '';
+    hideChartTip();
+});
 ```
 
 ## Appendix C: images

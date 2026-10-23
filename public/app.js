@@ -30,12 +30,13 @@ function showLoginError(message) {
     document.getElementById('login-error').textContent = message || '';
 }
 
-// Signed in: the home page, with this person's starred tickets
+// Signed in: the home page, with this person's starred tickets, layout and colors
 function showApp(signedIn) {
     document.body.classList.toggle('signed-out', !signedIn);
     if (signedIn) {
         switchTab('home');
         loadStars();
+        loadPreferences();
     } else {
         document.getElementById('login-email').focus();
     }
@@ -124,6 +125,7 @@ function signOut(message) {
     clearChat();
     setCurrentUser(null);
     resetHome();
+    resetCustomizing();
     showLoginError(typeof message === 'string' ? message : '');
     showApp(false);
 }
@@ -191,11 +193,13 @@ async function deleteChat() {
 function goHome() {
     toggleAssistant(false);
     toggleDashboardDrawer(false);
+    toggleThemePanel(false);
     switchTab('home');
     document.getElementById('home-view').scrollTop = 0;
 }
 
-// Pages: Home (the logo) and Dashboards (its button); the AI assistant opens over either
+// Pages: Home (the logo, or its button) and Dashboards; the page showing lights up.
+// The AI assistant opens over either.
 function switchTab(viewName) {
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === viewName));
     document.querySelectorAll('.view-panel').forEach(panel => panel.classList.toggle('active', panel.id === `${viewName}-view`));
@@ -254,20 +258,37 @@ function updateChatControls() {
 // shown through the OneTouch server (so they work from any address)
 // =====================================================================
 
-const LAST_DASHBOARD_KEY = 'onetouch-dashboard';
-
 // Every page the frame can show, by its public id: the drawer's dashboards,
 // and the detail pages a click on a chart opens
 const dashboardPages = { main: new Map(), details: new Map() };
 let currentMainDashboard = null;
 const pageId = path => (String(path).match(/\/public\/dashboard\/([0-9a-f-]{36})/) || [])[1];
 
-// The last dashboard this browser showed (storage can be blocked: then none)
+// The dashboard each person had open last ("my:<id>" for one of their own),
+// saved to their account so it opens there next time, on any computer
 function rememberedDashboard() {
-    try { return localStorage.getItem(LAST_DASHBOARD_KEY); } catch { return null; }
+    return prefs.dashboards.last || '';
 }
 function rememberDashboard(key) {
-    try { localStorage.setItem(LAST_DASHBOARD_KEY, key); } catch { /* not remembered; that's fine */ }
+    if (prefs.dashboards.last === key || !sessionTokenValue || prefsLoadFailed) return;
+    prefs.dashboards.last = key;
+    savePreference('dashboards');
+}
+
+// How the frame shows a dashboard: no extra border or title (the toolbar
+// above names it), and Metabase's dark look when OneTouch is dark
+function frameHash() {
+    return `#bordered=false&titled=false${document.documentElement.dataset.theme === 'dark' ? '&theme=night' : ''}`;
+}
+
+// Light <-> dark: the dashboard in the frame reloads in the matching look
+function refreshDashboardTheme() {
+    if (!frameHasPage()) return;
+    try {
+        const where = document.getElementById('dashboard-frame').contentWindow.location;
+        where.replace(`${where.pathname}${where.search}${frameHash()}`);
+        where.reload();
+    } catch { /* not ours */ }
 }
 
 // Loads the drawer once; resolves true when the dashboards are there.
@@ -292,10 +313,11 @@ async function buildDashboards() {
         const { dashboards, details = [] } = await response.json();
         for (const d of dashboards) dashboardPages.main.set(pageId(d.path), d);
         for (const d of details) dashboardPages.details.set(pageId(d.path), d);
+        // Which team dashboards this person hid, and which one they had open
+        await prefsReady;
         if (!dashboards.length) {
-            message.textContent = 'No dashboards yet. Whoever runs this OneTouch server can create them with: ' +
-                'docker exec analytics_node_app node scripts/metabase-setup.mjs';
-            document.getElementById('dashboard-drawer-toggle').hidden = true;
+            message.textContent = 'No team dashboards yet. Whoever runs this OneTouch server can create them with: ' +
+                'docker exec analytics_node_app node scripts/metabase-setup.mjs. You can still build your own under ☰ Dashboards.';
             return false;
         }
 
@@ -317,10 +339,12 @@ async function buildDashboards() {
                 button.type = 'button';
                 button.className = 'dashboard-choice';
                 button.dataset.key = d.key;
-                button.innerHTML = '<span class="dashboard-choice-name"></span><span class="dashboard-choice-desc"></span>';
+                button.innerHTML = '<span class="choice-check" aria-hidden="true"></span><span class="dashboard-choice-name"></span><span class="dashboard-choice-desc"></span>';
                 button.querySelector('.dashboard-choice-name').textContent = d.name;
                 button.querySelector('.dashboard-choice-desc').textContent = d.description || '';
                 button.onclick = () => {
+                    // "Show or hide team dashboards": a click shows or hides it in the list
+                    if (drawerEditing) return toggleDashboardHidden(d.key);
                     showDashboard(d);
                     toggleDashboardDrawer(false);
                 };
@@ -329,10 +353,15 @@ async function buildDashboards() {
             picker.appendChild(section);
         }
 
-        const remembered = dashboards.find(d => d.key === rememberedDashboard());
-        showDashboard(remembered || dashboards[0]);
+        applyHiddenDashboards();
+
+        const last = rememberedDashboard();
+        if (last.startsWith('my:') && showBoard(last.slice(3))) return true;
+        const remembered = dashboards.find(d => d.key === last && !isDashboardHidden(d.key));
+        if (remembered) showDashboard(remembered);
+        else showFirstDashboard();
         // First visit: open the drawer so people see everything that's there
-        if (!remembered) toggleDashboardDrawer(true);
+        if (!last) toggleDashboardDrawer(true);
         return true;
     } catch (err) {
         message.textContent = 'Could not load the dashboards. Please try again.';
@@ -341,18 +370,44 @@ async function buildDashboards() {
     }
 }
 
+// The first team dashboard in this person's list; with every one hidden, a
+// dashboard of their own, or a note saying how to bring the team ones back
+function showFirstDashboard() {
+    const visible = [...dashboardPages.main.values()].filter(d => !isDashboardHidden(d.key));
+    if (visible.length) return showDashboard(visible[0]);
+    if (prefs.dashboards.boards.length) return showBoard(prefs.dashboards.boards[0].id);
+    hideBoard();
+    document.getElementById('dashboard-frame').hidden = true;
+    const message = document.getElementById('dashboard-message');
+    message.textContent = 'Every team dashboard is hidden from your list. Open ☰ Dashboards and click "Show or hide team dashboards" ' +
+        'to bring some back, or create a dashboard of your own.';
+    message.hidden = false;
+    setDashboardHeading('', '', '', false);
+    document.getElementById('dashboard-hint').hidden = true;
+}
+
 // The record pages a ticket number can open (built by scripts/metabase-setup.mjs)
 const RECORD_PAGES = { INC: 'incident-detail', CHG: 'change-detail', RITM: 'request-detail' };
 
 // Home page -> that ticket's record in the Dashboards tab
 async function openInDashboards(number) {
+    toggleAssistant(false); // opened from a ticket inside the chat: show the page behind it
     switchTab('dashboard');
     if (!await loadDashboards()) return;
     const key = RECORD_PAGES[(number.match(/^[A-Z]+/) || [])[0]];
     const page = [...dashboardPages.details.values()].find(d => d.key === key);
     if (!page) return;
     toggleDashboardDrawer(false);
-    openDashboardPath(`${page.path}?number=${encodeURIComponent(number)}#titled=false&bordered=false`);
+    const path = `${page.path}?number=${encodeURIComponent(number)}${frameHash()}`;
+    if (currentBoardId || document.getElementById('dashboard-frame').hidden) {
+        // One of their own dashboards is showing: back to the team dashboards, and
+        // the record opens on top of one once it has loaded (so ← Back works)
+        const visible = [...dashboardPages.main.values()].filter(d => !isDashboardHidden(d.key));
+        showDashboard(visible.includes(currentMainDashboard) ? currentMainDashboard : visible[0] || [...dashboardPages.main.values()][0]);
+        pendingFramePath = path;
+    } else {
+        openDashboardPath(path);
+    }
 }
 
 // Moves the frame to a page the way a click inside it would, so ← Back
@@ -378,11 +433,10 @@ document.getElementById('dashboard-frame').addEventListener('load', () => {
 });
 
 function showDashboard(dashboard) {
+    hideBoard();
     markCurrentDashboard(dashboard);
     const frame = document.getElementById('dashboard-frame');
-    // #bordered=false: no extra frame around the dashboard inside ours;
-    // titled=false: the toolbar above already names it
-    frame.src = `${API_BASE}${dashboard.path}#bordered=false&titled=false`;
+    frame.src = `${API_BASE}${dashboard.path}${frameHash()}`;
     frame.hidden = false;
     document.getElementById('dashboard-message').hidden = true;
 }
@@ -420,6 +474,7 @@ function detailPageLabel(detail, search) {
 let lastFrameAddress = '';
 function followDashboardFrame() {
     const frame = document.getElementById('dashboard-frame');
+    if (frame.hidden) return; // one of their own dashboards is showing
     let where;
     try { where = frame.contentWindow.location; } catch { return; } // not ours (yet)
     if (!where || where.href === lastFrameAddress) return;
@@ -439,7 +494,7 @@ function followDashboardFrame() {
         if (!detail.params.some(p => values.get(p.slug))) {
             const home = currentMainDashboard || [...dashboardPages.main.values()][0];
             if (home) {
-                frame.contentWindow.location.replace(`${API_BASE}${home.path}#bordered=false&titled=false`);
+                frame.contentWindow.location.replace(`${API_BASE}${home.path}${frameHash()}`);
                 showToast(`No filters left, so you're back on ${home.name}`);
                 return;
             }
@@ -482,10 +537,12 @@ function toggleDashboardDrawer(open) {
     }
 }
 
-// Escape closes whatever is open on top: the conversation, then the drawer
+// Escape closes whatever is open on top: the colors panel, the conversation,
+// then the drawer (a dialog such as the chart builder closes itself)
 document.addEventListener('keydown', e => {
-    if (e.key !== 'Escape') return;
-    if (assistantOpen()) toggleAssistant(false);
+    if (e.key !== 'Escape' || document.querySelector('dialog[open]')) return;
+    if (!document.getElementById('theme-panel').hidden) toggleThemePanel(false);
+    else if (assistantOpen()) toggleAssistant(false);
     else if (document.getElementById('dashboard-drawer').classList.contains('open')) toggleDashboardDrawer(false);
 });
 
@@ -580,7 +637,11 @@ async function sendPrompt() {
             }));
         }
 
-        appendMessage('ai-msg wide', html + answerTimingHtml(seconds, data.fromCache));
+        const answerId = appendMessage('ai-msg wide', html + answerTimingHtml(seconds, data.fromCache));
+
+        // Parent / child tickets and others linked to the ones in this answer, under it
+        const primary = answerTicketNumbers(data);
+        if (primary.length) showRelated(document.getElementById(answerId), primary, true);
 
         // The tickets in this answer pop up in Ticket results on Home
         if (data.shownTickets && data.shownTickets.length) ticketsShown(data.shownTickets);
@@ -741,6 +802,8 @@ const COLUMN_LABELS = {
     request: 'Parent Order (REQ)',
     request_item: 'Parent Request (RITM)',
     parent: 'Parent Ticket',
+    parent_incident: 'Parent Incident',
+    problem: 'Problem Record',
     sla_flag: 'SLA Breached',
     active: 'Still Active',
     fulfilled_time: 'Fulfilled',
@@ -850,12 +913,22 @@ function renderResults(rows, entity) {
         return `<div class="table-wrap"><table class="result-table detail"><tbody>${body}</tbody></table></div>`;
     }
 
-    // Everything else: a normal table with a header row
+    // Everything else: a normal table with a header row. A row with a ticket number
+    // opens, on click, into that ticket's full record and related tickets.
     const head = columns.map(c => {
         const cls = c.endsWith('.count') ? ' class="num"' : '';
         return `<th${cls}>${escapeHtml(columnLabel(c))}</th>`;
     }).join('');
-    const body = rows.map(r => `<tr>${columns.map(c => cellHtml(c, r[c], true)).join('')}</tr>`).join('');
+    const numberColumn = columns.find(c => c.endsWith('.number'));
+    const body = rows.map(r => {
+        const number = numberColumn && STARRABLE.test(String(r[numberColumn])) ? String(r[numberColumn]) : null;
+        if (!number) return `<tr>${columns.map(c => cellHtml(c, r[c], true)).join('')}</tr>`;
+        const cells = columns.map(c => c === numberColumn
+            ? `<td class="ticket-cell"><span class="expand-caret" aria-hidden="true">▸</span>${escapeHtml(number)}${starButtonHtml(number)}</td>`
+            : cellHtml(c, r[c], true)).join('');
+        return `<tr class="expandable" data-expand="${escapeHtml(number)}" tabindex="0" aria-expanded="false"` +
+            ` title="Click to see ${escapeHtml(number)}'s full record and related tickets">${cells}</tr>`;
+    }).join('');
     const caption = `${rows.length.toLocaleString()} ${rows.length === 1 ? 'row' : 'rows'}`;
 
     return `<div class="result-caption">${caption}</div>` +
@@ -1008,14 +1081,14 @@ const EXPORT_OPTIONS = [
     ]],
 ];
 
-function downloadBarHtml(exportId) {
+function downloadBarHtml(exportId, label = 'Download as') {
     const options = EXPORT_OPTIONS.map(([group, items]) =>
         `<optgroup label="${escapeHtml(group)}">` +
         items.map(([value, label]) => `<option value="${value}">${escapeHtml(label)}</option>`).join('') +
         `</optgroup>`
     ).join('');
     return `<div class="download-bar" id="${exportId}">` +
-        `<label for="${exportId}-format">Download as</label>` +
+        `<label for="${exportId}-format">${escapeHtml(label)}</label>` +
         `<select id="${exportId}-format">${options}</select>` +
         `<button type="button" onclick="downloadExport('${exportId}')">⬇ Download</button>` +
         `<span class="download-status" role="status"></span>` +
@@ -1380,10 +1453,10 @@ function formatStarredAt(iso) {
 }
 
 // Ticket numbers open the ticket; every row has a star. Rows whose number is
-// in `highlight` (e.g. the latest answer's tickets) are marked.
-function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set()) {
+// in `highlight` (e.g. the latest answer's tickets) get `highlightClass`.
+function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set(), highlightClass = 'fresh') {
     const head = columns.map(([label]) => `<th>${escapeHtml(label)}</th>`).join('');
-    const body = tickets.map(t => (highlight.has(t.number) ? '<tr class="fresh">' : '<tr>') + columns.map(([label, get], i) => {
+    const body = tickets.map(t => (highlight.has(t.number) ? `<tr class="${highlightClass}">` : '<tr>') + columns.map(([label, get], i) => {
         if (i === 0) {
             return `<td class="ticket-cell"><button type="button" class="ticket-link" data-ticket="${escapeHtml(t.number)}"` +
                 ` title="Open ${escapeHtml(t.number)}">${escapeHtml(t.number)}</button>${starButtonHtml(t.number)}</td>`;
@@ -1512,6 +1585,7 @@ function showTicketResults(quiet = false) {
 // Opening it counts as being shown, so it joins the list.
 function openTicketRecord(number) {
     openedRecord = number;
+    toggleAssistant(false); // clicked inside the chat (e.g. in a related family): show Home
     switchTab('home');
     setHomeMode('results');
     if (STARRABLE.test(number)) {
@@ -1524,8 +1598,8 @@ function openTicketRecord(number) {
     document.getElementById('home-view').scrollTop = 0;
 }
 
-function showOpenedRecord(number) {
-    return runHomeSearch('results', 'ticket-results', async () => {
+async function showOpenedRecord(number) {
+    await runHomeSearch('results', 'ticket-results', async () => {
         const data = await searchTickets(number, true);
         if (!data) return null;
         const back = '<div class="home-actions"><button type="button" class="home-action" onclick="closeTicketRecord()">← All ticket results</button></div>';
@@ -1533,6 +1607,122 @@ function showOpenedRecord(number) {
         if (data.found.length === 1) return back + ticketCardHtml(data.found[0], data.record);
         return back + ticketTableHtml(data.found);
     });
+    // Its parent / child tickets and other linked ones, under the record
+    const out = document.getElementById('ticket-results');
+    if (openedRecord === number && out.querySelector('.ticket-head')) showRelated(out, [number], false);
+}
+
+// =====================================================================
+// RELATED TICKETS: the families the server finds from the links in the data
+// (parent / child incidents, bundle and child requests, an order's requests,
+// a request's tasks, a change and its incidents, a problem record), with what
+// the members share and where they differ
+// =====================================================================
+
+const FAMILY_COLUMNS = [
+    ['Ticket', t => t.number],
+    ['Role', t => t.role],
+    ['Summary', t => t.summary],
+    ['State', t => t.state],
+    ['Priority / Risk', t => t.level],
+    ['Team', t => t.team],
+    ['Opened', t => t.opened ? formatValue('ticket.opened', t.opened) : ''],
+];
+
+// "Team ACN-INFRA-CLOUD-LINUX (3), ACN-SAP-BASIS (3)", "Opened Sep 1, 1:07 AM to 1:18 AM"
+function familyFact(fact) {
+    if (fact.range) return `${formatValue('ticket.opened', fact.range[0])} to ${formatValue('ticket.opened', fact.range[1])}`;
+    if (fact.note) return fact.note;
+    if (fact.values) {
+        return fact.values.map(v => `${v.value} (${v.count.toLocaleString()})`).join(', ') + (fact.others ? `, and ${fact.others.toLocaleString()} more` : '');
+    }
+    const value = fact.field === 'Opened' ? formatValue('ticket.opened', fact.value) : String(fact.value);
+    return value.length > 100 ? `${value.slice(0, 97)}…` : value;
+}
+
+const FAMILY_MEMBERS_SHOWN = 25; // listed on screen; downloads hold every member
+const FAMILY_EXPORT_COLUMNS = [...FAMILY_COLUMNS.slice(0, 2), ['Type', t => t.type], ...FAMILY_COLUMNS.slice(2)];
+
+// A family as download tables: every member, then what they share and where they differ.
+// Titles start with what the table is and the family's anchor number, because
+// Excel cuts worksheet names at 31 characters ("Members of PRB0051839 (96 tick…").
+function familyExportTables(f) {
+    return [
+        {
+            title: `Members of ${f.anchor} (${f.title})`,
+            columns: FAMILY_EXPORT_COLUMNS.map(([label]) => ({ label })),
+            rows: f.members.map(t => FAMILY_EXPORT_COLUMNS.map(([, get]) => String(get(t) || ''))),
+            footer: null,
+        },
+        {
+            title: `Same or different in ${f.anchor} (${f.title})`,
+            columns: [{ label: 'Field' }, { label: 'Same or different' }, { label: 'Value' }],
+            rows: [
+                ...f.same.map(fact => [fact.field, `Same in all ${f.total.toLocaleString()}`, familyFact(fact)]),
+                ...f.differ.map(fact => [fact.field, 'Different', familyFact(fact)]),
+            ],
+            footer: null,
+        },
+    ].filter(table => table.rows.length);
+}
+
+// "Related to INC1813970", or "Related to INC1, INC2, INC3 and 4 more"
+function relatedToLabel(focus) {
+    const list = [...focus];
+    return `Related to ${list.slice(0, 3).join(', ')}${list.length > 3 ? ` and ${list.length - 3} more` : ''}`;
+}
+
+// `focus`: the tickets the question or record was about, marked in each family
+function relatedHtml(families, focus) {
+    const about = relatedToLabel(focus);
+    // Several families: one file with all of them, besides each family's own
+    const all = families.length > 1
+        ? downloadBarHtml(registerExport({ title: `Related tickets: ${families.length} families`, question: about, tables: families.flatMap(familyExportTables) }),
+            `Download all ${families.length} families as`)
+        : '';
+    return '<div class="related"><div class="related-title">🔗 Related tickets</div>' + all + families.map(f => {
+        const facts = list => list.map(fact => `<span class="fact"><b>${escapeHtml(fact.field)}:</b> ${escapeHtml(familyFact(fact))}</span>`).join('');
+        const same = f.same.length
+            ? `<div class="family-line"><span class="same-label">Same in all ${f.total.toLocaleString()}</span>${facts(f.same)}</div>` : '';
+        const differ = f.differ.length
+            ? `<div class="family-line"><span class="differ-label">Different</span>${facts(f.differ)}</div>` : '';
+        const shown = f.members.slice(0, FAMILY_MEMBERS_SHOWN);
+        const more = f.members.length > shown.length
+            ? `<p class="family-more">Showing ${shown.length.toLocaleString()} of ${f.members.length.toLocaleString()}; the comparison above and the download cover all of them.</p>` : '';
+        const download = downloadBarHtml(registerExport({ title: f.title, question: about, tables: familyExportTables(f) }), 'Download this family as');
+        return `<section class="family"><div class="family-title">${escapeHtml(f.title)}</div>` +
+            `<p class="family-why">${escapeHtml(f.why)}</p>${same}${differ}` +
+            ticketTableHtml(shown, FAMILY_COLUMNS, focus, 'focus') + more + download + '</section>';
+    }).join('') + '</div>';
+}
+
+// Adds "Related tickets" to the end of `container` (an AI answer, or a record on
+// Home) once the server has looked; nothing at all if there are none.
+// conversation: true also tells the AI about them with the next question.
+async function showRelated(container, numbers, conversation) {
+    const slot = document.createElement('div');
+    slot.className = 'related-slot';
+    slot.innerHTML = '<p class="related-loading">🔗 Looking for related tickets…</p>';
+    container.appendChild(slot);
+    try {
+        const response = await fetch(`${API_BASE}/api/tickets/related`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ numbers, conversation }),
+        });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        if (!slot.isConnected) return; // the chat was cleared, or another record opened
+        if (!data.families.length) { slot.remove(); return; }
+        slot.innerHTML = relatedHtml(data.families, new Set(numbers));
+        // Keep the newest answer in view, as the chat does for new messages
+        const chatLog = document.getElementById('chat-log');
+        if (chatLog.contains(slot) && chatLog.lastElementChild === container) chatLog.scrollTop = chatLog.scrollHeight;
+    } catch (err) {
+        slot.remove();
+        console.error('Could not look for related tickets:', err);
+    }
 }
 
 function closeTicketRecord() {
@@ -1609,8 +1799,67 @@ document.addEventListener('click', e => {
     if (example) { askAssistant(example.dataset.example); return; }
 
     const record = e.target.closest('[data-open-dashboard]');
-    if (record) openInDashboards(record.dataset.openDashboard);
+    if (record) { openInDashboards(record.dataset.openDashboard); return; }
+
+    const close = e.target.closest('.row-detail-close');
+    if (close) { toggleTicketRow(close.closest('tr.row-detail').previousElementSibling); return; }
+
+    // A ticket's row in an AI answer: open (or fold away) its full record and
+    // related tickets. Buttons and menus inside the row keep their own jobs.
+    const row = e.target.closest('tr.expandable');
+    if (row && !e.target.closest('button, a, select, input, label')) toggleTicketRow(row);
 });
+
+// The same from the keyboard: Enter or Space on a focused ticket row
+document.addEventListener('keydown', e => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches?.('tr.expandable')) {
+        e.preventDefault();
+        toggleTicketRow(e.target);
+    }
+});
+
+// =====================================================================
+// TICKET ROWS IN AI ANSWERS: a click opens a detailed view under the row:
+// the ticket's full record, then its related tickets (families)
+// =====================================================================
+
+function toggleTicketRow(row) {
+    const open = row.nextElementSibling;
+    if (open && open.classList.contains('row-detail')) {
+        open.remove();
+        row.classList.remove('expanded');
+        row.setAttribute('aria-expanded', 'false');
+        return;
+    }
+    const number = row.dataset.expand;
+    const detail = document.createElement('tr');
+    detail.className = 'row-detail';
+    const cell = document.createElement('td');
+    cell.colSpan = row.cells.length;
+    cell.innerHTML = `<div class="row-detail-body"><button type="button" class="row-detail-close">▴ Close</button>` +
+        `<div class="row-detail-content"><p class="home-status">Loading ${escapeHtml(number)}…</p></div></div>`;
+    detail.appendChild(cell);
+    row.after(detail);
+    row.classList.add('expanded');
+    row.setAttribute('aria-expanded', 'true');
+    loadTicketDetail(cell.querySelector('.row-detail-content'), number);
+}
+
+async function loadTicketDetail(box, number) {
+    try {
+        const data = await searchTickets(number, true);
+        if (!data || !box.isConnected) return;
+        if (!data.found.length) {
+            box.innerHTML = `<p class="home-status">${escapeHtml(number)} is not in the data.</p>`;
+            return;
+        }
+        box.innerHTML = ticketCardHtml(data.found[0], data.record);
+        showRelated(box, [number], false);
+    } catch (err) {
+        if (box.isConnected) box.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        console.error(err);
+    }
+}
 
 // =====================================================================
 // START: a token from earlier in this tab skips the sign-in page; if it
@@ -1618,6 +1867,10 @@ document.addEventListener('click', e => {
 // =====================================================================
 
 document.getElementById('ticket-results').innerHTML = NO_TICKET_RESULTS_HTML;
+buildThemePanel();
+buildBuilder();
+renderHomeLayout();
+renderMyDashboards();
 showApp(Boolean(sessionTokenValue));
 loadCurrentUser();
 

@@ -55,9 +55,10 @@ export function parseTicketNumbers(text) {
   return { wanted, ignored: [...new Set(ignored)].slice(0, 20) };
 }
 
-const prefixOf = number => number.match(/^[A-Z]+/)[0];
+export const prefixOf = number => number.match(/^[A-Z]+/)[0];
 
-function toTicket(prefix, row) {
+// One Cube row -> the summary the ticket tables show (also used by relations.mjs)
+export function toTicket(prefix, row) {
   const { cube, label, fields } = TICKET_KINDS[prefix];
   const value = key => (fields[key] ? row[`${cube}.${fields[key]}`] ?? '' : '');
   return {

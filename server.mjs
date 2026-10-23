@@ -16,6 +16,9 @@ import * as auth from './auth.mjs';
 import * as stars from './stars.mjs';
 import * as seen from './seen.mjs';
 import { findTickets, ticketRecord, ticketSummaries, ticketNumbersIn, STARRABLE } from './tickets.mjs';
+import { relatedFamilies, describeFamilies } from './relations.mjs';
+import * as prefs from './prefs.mjs';
+import { chartData, chartValues, chartCatalog, ChartError } from './charts.mjs';
 import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
 
 dotenv.config();
@@ -64,6 +67,8 @@ app.use(async (req, res, next) => {
 });
 // Exports carry whole result tables back up, so that route gets a bigger limit
 app.use('/api/export', express.json({ limit: '25mb' }));
+// A whole set of dashboards is saved at once
+app.use('/api/preferences', express.json({ limit: '1mb' }));
 app.use(express.json());
 app.use(express.static('public'));
 
@@ -195,7 +200,7 @@ async function requireLogin(req, res, next) {
   next();
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts'], requireLogin);
 
 // Who is signed in (the page shows their display name)
 app.get('/api/me', (req, res) => {
@@ -602,6 +607,33 @@ app.post('/api/tickets/search', async (req, res) => {
   }
 });
 
+// { numbers, conversation } -> { families }: the parent/child, order, task,
+// change and problem families those tickets belong to (relations.mjs), with
+// what each family's members share and where they differ. conversation: true
+// (an AI answer's tickets) also tells Claude about them with the next question.
+app.post('/api/tickets/related', async (req, res) => {
+  const numbers = Array.isArray(req.body?.numbers) ? req.body.numbers.slice(0, 500).map(String) : [];
+  if (!numbers.length) return res.status(400).json({ error: 'No ticket numbers to look at.' });
+  try {
+    const families = await relatedFamilies(numbers, runCubeQuery);
+    if (req.body.conversation && families.length) {
+      // Queued behind the answer that showed these tickets, and only for that
+      // same conversation (not one started by "New chat" in the meantime)
+      const session = req.session;
+      const conversation = session.conversation;
+      session.queue = session.queue.then(() => {
+        if (session.conversation !== conversation) return;
+        const note = `Related tickets OneTouch showed the user under that answer: ${describeFamilies(families)}`;
+        conversation.pendingNote = conversation.pendingNote ? `${conversation.pendingNote} ${note}` : note;
+      });
+    }
+    res.json({ families });
+  } catch (error) {
+    console.error('🔗 Could not find related tickets:', error.message);
+    res.status(502).json({ error: `Could not look for related tickets right now: ${error.message}` });
+  }
+});
+
 // Every ticket this person has been shown, newest first, with each one's
 // summary, when it was shown, and the question that showed it
 app.get('/api/seen-tickets', async (req, res) => {
@@ -688,6 +720,81 @@ app.delete('/api/stars/:number', async (req, res) => {
   }
 });
 
+// =====================================================================
+// PREFERENCES AND CHARTS: each person's colors, Home page and own
+// dashboards (prefs.mjs), and the data their charts show (charts.mjs)
+// =====================================================================
+
+app.get('/api/preferences', async (req, res) => {
+  try {
+    res.json({ preferences: await prefs.getPreferences(req.user.id) });
+  } catch (error) {
+    console.error('🎨 Could not load preferences:', error.message);
+    res.status(503).json({ error: 'Your saved layout and colors could not be loaded right now.' });
+  }
+});
+
+// { value } -> the value as saved (checked and cleaned by prefs.cleanPreference)
+app.put('/api/preferences/:part', async (req, res) => {
+  let value;
+  try {
+    value = prefs.cleanPreference(req.params.part, req.body?.value);
+  } catch (error) {
+    const known = error instanceof prefs.PreferenceError || error instanceof ChartError;
+    return res.status(400).json({ error: known ? error.message : 'That setting could not be read.' });
+  }
+  try {
+    await prefs.savePreference(req.user.id, req.params.part, value);
+    res.json({ value });
+  } catch (error) {
+    console.error('🎨 Could not save preferences:', error.message);
+    res.status(503).json({ error: 'That change could not be saved right now.' });
+  }
+});
+
+app.delete('/api/preferences/:part', async (req, res) => {
+  if (!prefs.PARTS.includes(req.params.part)) return res.status(400).json({ error: 'Unknown setting.' });
+  try {
+    await prefs.resetPreference(req.user.id, req.params.part);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('🎨 Could not reset preferences:', error.message);
+    res.status(503).json({ error: 'That could not be reset right now.' });
+  }
+});
+
+// What the chart builder can offer (ticket types, fields, the dates the data covers)
+app.get('/api/charts/catalog', async (_req, res) => {
+  try {
+    res.json(await chartCatalog(runCubeQuery));
+  } catch (error) {
+    console.error('📊 Chart catalog failed:', error.message);
+    res.status(502).json({ error: `The chart options could not be loaded right now: ${error.message}` });
+  }
+});
+
+// { chart } -> its numbers
+app.post('/api/charts/data', async (req, res) => {
+  try {
+    res.json(await chartData(req.body?.chart, runCubeQuery));
+  } catch (error) {
+    if (error instanceof ChartError) return res.status(400).json({ error: error.message });
+    console.error('📊 Chart data failed:', error.message);
+    res.status(502).json({ error: `This chart could not be loaded right now: ${error.message}` });
+  }
+});
+
+// { source, field } -> the values a filter can choose from
+app.post('/api/charts/values', async (req, res) => {
+  try {
+    res.json({ values: await chartValues(String(req.body?.source), String(req.body?.field), runCubeQuery) });
+  } catch (error) {
+    if (error instanceof ChartError) return res.status(400).json({ error: error.message });
+    console.error('📊 Filter values failed:', error.message);
+    res.status(502).json({ error: `The choices could not be loaded right now: ${error.message}` });
+  }
+});
+
 // The tables shown in the chat -> a downloadable file (see export.mjs)
 app.post('/api/export', async (req, res) => {
   const problem = validateExport(req.body);
@@ -720,6 +827,7 @@ async function prepareAccounts(attempt = 1) {
     await auth.ensureSchema();
     await stars.ensureStarsSchema();
     await seen.ensureSeenSchema();
+    await prefs.ensurePrefsSchema();
   } catch (error) {
     const wait = Math.min(attempt * 2, 15);
     console.error(`🔐 Account database not reachable yet (${error.message}); retrying in ${wait}s`);
