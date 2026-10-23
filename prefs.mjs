@@ -6,10 +6,11 @@
 // =====================================================================
 
 import { pool } from './auth.mjs';
-import { sanitizeChart, newId } from './charts.mjs';
+import { sanitizeChart, sanitizeScope, newId } from './charts.mjs';
 
-// Saved separately, so changing colors never overwrites a dashboard
-export const PARTS = ['theme', 'home', 'dashboards'];
+// Saved separately, so changing colors never overwrites a dashboard.
+// tour: whether the first-visit tour has been seen.
+export const PARTS = ['theme', 'home', 'dashboards', 'tour'];
 
 export const MAX_BOARDS = 20;
 export const MAX_BOARD_CHARTS = 30;
@@ -93,23 +94,31 @@ function cleanHome(h = {}) {
   return { blocks };
 }
 
+// One dashboard: its name, its charts, and its filter row (scope: dates, teams)
+export function cleanBoard(b, takenIds = []) {
+  return {
+    id: typeof b.id === 'string' && ID.test(b.id) && !takenIds.includes(b.id) ? b.id : newId(),
+    name: String(b.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 60) || 'My dashboard',
+    charts: cleanCharts(b.charts, MAX_BOARD_CHARTS),
+    scope: sanitizeScope(b.scope),
+  };
+}
+
 function cleanDashboards(d = {}) {
   const boards = [];
   for (const b of (Array.isArray(d.boards) ? d.boards : []).slice(0, MAX_BOARDS)) {
     if (!b || typeof b !== 'object') continue;
-    boards.push({
-      id: ID.test(b.id) && !boards.some(other => other.id === b.id) ? b.id : newId(),
-      name: String(b.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 60) || 'My dashboard',
-      charts: cleanCharts(b.charts, MAX_BOARD_CHARTS),
-    });
+    boards.push(cleanBoard(b, boards.map(other => other.id)));
   }
   // Team dashboards this person hid from their list, and the one they had open last
-  const hidden = [...new Set((Array.isArray(d.hidden) ? d.hidden : []).filter(k => DASHBOARD_KEY.test(k)))].slice(0, 200);
+  const hidden = [...new Set((Array.isArray(d.hidden) ? d.hidden : []).filter(k => typeof k === 'string' && DASHBOARD_KEY.test(k)))].slice(0, 200);
   const last = typeof d.last === 'string' && (DASHBOARD_KEY.test(d.last) || /^my:[A-Za-z0-9_-]{1,40}$/.test(d.last)) ? d.last : '';
   return { boards, hidden, last };
 }
 
-const CLEANERS = { theme: cleanTheme, home: cleanHome, dashboards: cleanDashboards };
+const cleanTour = (t = {}) => ({ done: t.done === true });
+
+const CLEANERS = { theme: cleanTheme, home: cleanHome, dashboards: cleanDashboards, tour: cleanTour };
 
 export function cleanPreference(part, value) {
   if (!PARTS.includes(part)) throw new PreferenceError('Unknown setting.');

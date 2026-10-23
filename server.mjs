@@ -18,7 +18,8 @@ import * as seen from './seen.mjs';
 import { findTickets, ticketRecord, ticketSummaries, ticketNumbersIn, STARRABLE } from './tickets.mjs';
 import { relatedFamilies, describeFamilies } from './relations.mjs';
 import * as prefs from './prefs.mjs';
-import { chartData, chartValues, chartCatalog, ChartError } from './charts.mjs';
+import { chartData, chartValues, chartCatalog, chartTickets, chartFromQuery, teamValues, ChartError } from './charts.mjs';
+import * as shares from './shares.mjs';
 import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
 
 dotenv.config();
@@ -67,8 +68,8 @@ app.use(async (req, res, next) => {
 });
 // Exports carry whole result tables back up, so that route gets a bigger limit
 app.use('/api/export', express.json({ limit: '25mb' }));
-// A whole set of dashboards is saved at once
-app.use('/api/preferences', express.json({ limit: '1mb' }));
+// A whole set of dashboards is saved (or a dashboard shared) at once
+app.use(['/api/preferences', '/api/shares'], express.json({ limit: '1mb' }));
 app.use(express.json());
 app.use(express.static('public'));
 
@@ -200,7 +201,7 @@ async function requireLogin(req, res, next) {
   next();
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares'], requireLogin);
 
 // Who is signed in (the page shows their display name)
 app.get('/api/me', (req, res) => {
@@ -544,6 +545,9 @@ async function answerQuestion(conversation, userPrompt, reply, user) {
         .catch(error => console.error('🎫 Could not remember the shown tickets:', error.message));
     }
 
+    // A count of one ticket type by one field can be shown as a chart, and saved as one
+    const chartable = verdict.queries.length === 1 ? chartFromQuery(verdict.queries[0].entity, verdict.queries[0].cubeQuery) : null;
+
     reply.send(200, {
       intent: 'query',
       // `entity` / `results` describe the single-type case; `sections` and
@@ -561,6 +565,8 @@ async function answerQuestion(conversation, userPrompt, reply, user) {
       allEmpty: emptyQueries.length === verdict.queries.length,
       // Ticket numbers in this answer (now in the person's Ticket results)
       shownTickets,
+      // { chart, dropped }: the answer as a saveable chart (charts.mjs), or null
+      chartable,
       ...timing(),
     });
 
@@ -776,11 +782,79 @@ app.get('/api/charts/catalog', async (_req, res) => {
 // { chart } -> its numbers
 app.post('/api/charts/data', async (req, res) => {
   try {
-    res.json(await chartData(req.body?.chart, runCubeQuery));
+    res.json(await chartData(req.body?.chart, runCubeQuery, req.body?.scope));
   } catch (error) {
     if (error instanceof ChartError) return res.status(400).json({ error: error.message });
     console.error('📊 Chart data failed:', error.message);
     res.status(502).json({ error: `This chart could not be loaded right now: ${error.message}` });
+  }
+});
+
+// { chart, value, scope } -> the tickets behind one bar, slice or point
+// (value null: "(Not set)"; a chart with no grouping: all of its tickets)
+app.post('/api/charts/tickets', async (req, res) => {
+  try {
+    res.json(await chartTickets(req.body?.chart, req.body?.value ?? null, runCubeQuery, req.body?.scope));
+  } catch (error) {
+    if (error instanceof ChartError) return res.status(400).json({ error: error.message });
+    console.error('📊 Chart tickets failed:', error.message);
+    res.status(502).json({ error: `Those tickets could not be loaded right now: ${error.message}` });
+  }
+});
+
+// Every team (for a dashboard's Team filter)
+app.get('/api/charts/teams', async (_req, res) => {
+  try {
+    res.json({ values: await teamValues(runCubeQuery) });
+  } catch (error) {
+    console.error('📊 Team list failed:', error.message);
+    res.status(502).json({ error: `The teams could not be loaded right now: ${error.message}` });
+  }
+});
+
+// =====================================================================
+// SHARED DASHBOARDS (shares.mjs): a link to a copy of someone's dashboard
+// =====================================================================
+
+app.get('/api/shares', async (req, res) => {
+  try {
+    res.json({ shares: await shares.listShares(req.user.id) });
+  } catch (error) {
+    console.error('🔗 Could not list shares:', error.message);
+    res.status(503).json({ error: 'Your shared dashboards could not be loaded right now.' });
+  }
+});
+
+// { board } -> { token }: shares it, or updates what its link shows
+app.put('/api/shares', async (req, res) => {
+  try {
+    const token = await shares.shareBoard(req.user.id, req.body?.board);
+    res.json({ token });
+  } catch (error) {
+    if (error instanceof shares.ShareError || error instanceof ChartError) return res.status(400).json({ error: error.message });
+    console.error('🔗 Could not share:', error.message);
+    res.status(503).json({ error: 'That dashboard could not be shared right now.' });
+  }
+});
+
+app.get('/api/shares/:token', async (req, res) => {
+  try {
+    const share = await shares.getShare(String(req.params.token), req.user.id);
+    if (!share) return res.status(404).json({ error: 'That shared dashboard no longer exists. Its owner may have stopped sharing it.' });
+    res.json(share);
+  } catch (error) {
+    console.error('🔗 Could not open a share:', error.message);
+    res.status(503).json({ error: 'That shared dashboard could not be loaded right now.' });
+  }
+});
+
+app.delete('/api/shares/:token', async (req, res) => {
+  try {
+    if (!await shares.unshare(req.user.id, String(req.params.token))) return res.status(404).json({ error: 'That link is not one of yours.' });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('🔗 Could not stop sharing:', error.message);
+    res.status(503).json({ error: 'That could not be done right now.' });
   }
 });
 
@@ -828,6 +902,7 @@ async function prepareAccounts(attempt = 1) {
     await stars.ensureStarsSchema();
     await seen.ensureSeenSchema();
     await prefs.ensurePrefsSchema();
+    await shares.ensureSharesSchema();
   } catch (error) {
     const wait = Math.min(attempt * 2, 15);
     console.error(`🔐 Account database not reachable yet (${error.message}); retrying in ${wait}s`);

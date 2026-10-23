@@ -1341,6 +1341,197 @@ dialog.ask-dialog {
 .ask-dialog .builder-foot { padding: 14px 0 16px; border-top: none; }
 
 /* =====================================================================
+   AI ANSWERS AS CHARTS, CLICKING THROUGH TO TICKETS, DASHBOARD FILTERS,
+   SHARING AND THE TOUR
+   ===================================================================== */
+
+.home-head-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* "Show as": the answer's table or one of its charts */
+.answer-views { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 8px; }
+.answer-views-label { font-size: 0.8rem; color: var(--muted); margin-right: 2px; }
+.view-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px 11px;
+    font: inherit;
+    font-size: 0.8rem;
+    color: var(--text-2);
+    cursor: pointer;
+}
+.view-btn svg { color: var(--muted); }
+.view-btn:hover { border-color: var(--faint); }
+.view-btn.active { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.view-btn.active svg { color: var(--on-accent); }
+.view-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.view-btn.save { margin-left: auto; color: var(--accent-ink); border-style: dashed; }
+.view-btn.save:hover { background: var(--accent-softer); border-color: var(--accent); }
+.answer-chart { background: var(--panel-bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; }
+.answer-chart .chart-note { margin-bottom: 0; }
+
+/* Marks that open their tickets */
+.drillable .chart-hit:not(.line-hit),
+.drillable .slice,
+.drillable .line-hit,
+.drillable .chart-stat { cursor: pointer; }
+.drillable .chart-stat:hover .chart-stat-value { color: var(--accent-ink); }
+.chart-stat:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+
+/* The tooltip of a chart with several series: one row per series */
+.tip-rows:empty, .tip-hint:empty { display: none; }
+.tip-rows { display: grid; gap: 2px; margin-top: 4px; }
+.tip-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 6px; align-items: center; color: var(--text-2); }
+.tip-row b { font-variant-numeric: tabular-nums; color: var(--text); }
+.tip-key { width: 10px; height: 3px; border-radius: 2px; }
+.tip-hint { margin-top: 4px; font-size: 0.75rem; color: var(--accent-ink); }
+
+/* The legend above a chart of several series */
+.chart-series-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0 0 8px; font-size: 0.82rem; color: var(--text-2); }
+.series-item { display: inline-flex; align-items: center; gap: 6px; }
+.series-key { width: 10px; height: 10px; border-radius: 3px; }
+.series-key.line { width: 14px; height: 3px; border-radius: 2px; }
+
+/* Pictures of charts are drawn here, off screen, always in the light colors */
+.picture-host {
+    position: fixed;
+    left: -20000px;
+    top: 0;
+    width: 912px;
+    visibility: hidden;
+    color-scheme: light;
+    --bg-primary: #f4f6f9;
+    --panel-bg: #ffffff;
+    --text: #2d3748;
+    --text-2: #4a5568;
+    --muted: #718096;
+    --faint: #a0aec0;
+    --border: #e2e8f0;
+    --chart-grid: #edf0f3;
+    --chart-axis: #cbd2d9;
+    --chart-other: #a0aec0;
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
+    --series-3: #1baf7a;
+    --series-4: #eda100;
+    --series-5: #e87ba4;
+    --series-6: #008300;
+    --series-7: #6250d6;
+    --series-8: #e34948;
+}
+
+/* ⤓ under a chart */
+.tile-download { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.tile-download .download-bar { margin-top: 0; }
+.download-note { color: var(--muted); font-size: 0.78rem; }
+.download-note:empty { display: none; }
+.download-bar option:disabled { color: var(--faint); }
+
+/* A dashboard's filter row */
+.board-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    margin: -4px 0 14px;
+    padding: 8px 12px;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.85rem;
+    color: var(--text-2);
+}
+.board-filters-label { font-weight: 700; color: var(--text); }
+.board-filter { display: inline-flex; align-items: center; gap: 6px; }
+.board-filters select,
+.board-filters input[type="date"],
+.team-pop input[type="search"] {
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel-bg);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.85rem;
+}
+.team-picker { position: relative; }
+#bf-team-btn.on,
+#board-share-btn.on { border-color: var(--accent); background: var(--accent-softer); color: var(--accent-ink); }
+.team-pop {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 5;
+    width: min(340px, calc(100vw - 48px));
+    padding: 10px;
+    box-sizing: border-box;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 12px 30px var(--shadow-strong);
+}
+.team-pop input[type="search"] { width: 100%; box-sizing: border-box; }
+.team-pop .filter-values { max-height: 240px; }
+.team-pop-note { margin: 6px 2px 0; font-size: 0.75rem; color: var(--muted); }
+.team-pop-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; }
+
+/* The builder: a note at the top, conditions with how they match, where to save */
+.builder-note { margin: 0 0 12px; padding: 8px 12px; background: var(--accent-softer); border-left: 3px solid var(--accent); border-radius: 4px; font-size: 0.85rem; color: var(--text-2); line-height: 1.45; }
+.filter-top .filter-op { flex: 0 0 auto; }
+.filter-text { width: 100%; box-sizing: border-box; margin-top: 4px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-bg); color: var(--text); font: inherit; font-size: 0.9rem; }
+.builder-dest { display: inline-flex; align-items: center; gap: 8px; margin-right: auto; font-size: 0.85rem; color: var(--text-2); }
+.builder-dest select { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-bg); color: var(--text); font: inherit; font-size: 0.85rem; max-width: 260px; }
+
+/* The tickets behind a chart, and a shared dashboard's preview */
+.drill-body, .shared-body { padding: 14px 20px 20px; overflow-y: auto; max-height: calc(100vh - 130px); box-sizing: border-box; }
+.drill-what { margin: 0 0 6px; font-size: 0.82rem; color: var(--muted); }
+.drill-body .table-wrap { max-height: 420px; }
+.shared-dialog .builder-foot { position: sticky; bottom: 0; background: var(--panel-bg); }
+
+/* Sharing: the link and its copy button */
+.share-text { margin: 0 0 12px; font-size: 0.88rem; color: var(--text-2); line-height: 1.5; }
+.share-link { display: flex; gap: 8px; }
+.share-link input { flex: 1; min-width: 0; }
+
+/* THE TOUR: everything else dimmed around a spotlight, and a card beside it */
+.tour { position: fixed; inset: 0; z-index: 80; }
+.tour-blocker { position: absolute; inset: 0; }
+.tour-spot {
+    position: fixed;
+    border-radius: 10px;
+    box-shadow: 0 0 0 9999px rgba(10, 12, 16, 0.6);
+    outline: 2px solid var(--accent);
+    pointer-events: none;
+    transition: left 0.2s, top 0.2s, width 0.2s, height 0.2s;
+}
+.tour-card {
+    position: fixed;
+    width: min(360px, calc(100vw - 16px));
+    box-sizing: border-box;
+    padding: 14px 16px;
+    background: var(--panel-bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+}
+.tour-step { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.tour-card h2 { margin: 4px 0 6px; font-size: 1.05rem; }
+.tour-card p { margin: 0 0 12px; font-size: 0.9rem; line-height: 1.5; color: var(--text-2); }
+.tour-actions { display: flex; align-items: center; gap: 8px; }
+.tour-spacer { flex: 1; }
+@media (prefers-reduced-motion: reduce) {
+    .tour-spot { transition: none; }
+}
+@media (max-width: 640px) {
+    .view-btn.save { margin-left: 0; }
+    .builder-dest { width: 100%; }
+}
+
+/* =====================================================================
    SIGN-IN PAGE (from styles2.css; every rule is scoped to .login-page
    so it cannot restyle the app behind it)
    ===================================================================== */

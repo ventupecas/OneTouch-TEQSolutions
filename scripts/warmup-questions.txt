@@ -13,6 +13,22 @@ What are the most common incident subcategories?
 Which servers or systems have the most incidents?
 How many incidents were reopened?
 Show me incident INC1814467
+How many incidents came in through each channel?
+Which locations have the most incidents?
+How many incidents are on hold, by on-hold reason?
+How many incidents breached SLA, and why?
+How many incidents were resolved each day in August 2026?
+What causes the most incidents?
+Which incidents were P1 at some point but are not P1 now?
+How many incidents were reassigned at least once, by team?
+List the P2 incidents for the ACN-INFRA-CLOUD-WINTEL team
+
+# Problems and related tickets
+Which problem records have the most incidents?
+Show me the incidents linked to problem PRB0051839
+Show me the child incidents of INC1813985
+What is the parent request of RITM0440458?
+Show me the catalog tasks for RITM0440498
 
 # Changes
 How many changes are there by type?
@@ -20,19 +36,44 @@ How many changes were created in August 2026 by risk?
 List the emergency changes
 Which changes caused incidents?
 Show me change CHG1101321
+Which changes were unsuccessful, and why?
+How many changes are waiting for approval?
+What changes are planned to start in September 2026?
+Which teams own the most changes?
+How many production changes had an outage?
+How many changes affect SAP?
+How many changes touch breweries?
+
+# Approvals
+Which groups approve the most changes?
+How many requests were rejected?
+How many requests are still waiting for approval?
 
 # Requests and catalog tasks
 What are the top 5 most requested catalog items?
 How many requests were opened each month?
 Show open catalog tasks that breached SLA
 Which teams have the most open catalog tasks?
+Which locations submit the most requests?
+How many open requests are there by stage?
+How many VDI - Pool Access requests were opened in August 2026?
+Show me request RITM0440498
+Show me catalog task SCTASK0595823
+How many catalog tasks were created each week in August 2026?
+Which catalog items create the most tasks?
 
 # Across ticket types
 How many incidents, changes and requests were opened in August 2026?
 How many requests and incidents were opened each week in August 2026?
+How many tickets of each type are open right now?
+Show open tickets for the ACN-INFRA-CLOUD-WINTEL team
+How many tickets were opened at Milwaukee Brewery in August 2026?
 
 # Nothing found: OneTouch works out why and says so
 Show me changes owned by the TCS-ServiceDesk-L1-NA-WE team
 
 # Outside the data's dates: Claude says what the export covers
 How many incidents were opened in January 2026?
+
+# Not in the data: Claude explains and offers the nearest question it can answer
+What is the average time to resolve a P3 incident?

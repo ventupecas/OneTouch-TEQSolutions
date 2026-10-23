@@ -591,7 +591,9 @@ async function sendPrompt() {
 
         // Clarification or unsupported question: show the explanation only
         if (data.intent === 'clarify' || data.intent === 'unsupported') {
-            appendMessage('ai-msg', `🙋 ${escapeHtml(data.message || 'I need a little more detail to run that.')}` + answerTimingHtml(seconds, data.fromCache));
+            const message = data.message || 'I need a little more detail to run that.';
+            const download = downloadBarHtml(registerExport({ title: 'OneTouch answer', question: userPromptText, tables: buildExportTables(data, message) }));
+            appendMessage('ai-msg', `🙋 ${escapeHtml(message)}` + download + answerTimingHtml(seconds, data.fromCache));
             return;
         }
 
@@ -601,20 +603,24 @@ async function sendPrompt() {
         // Nothing found anywhere: the server's explanation replaces the empty tables
         const explanationHtml = data.explanation
             ? `<div class="result-explanation">${escapeHtml(data.explanation)}</div>` : '';
+        let tablesHtml = '';
         if (data.explanation && data.allEmpty) {
             html += explanationHtml;
         } else if (data.combined) {
             // Counts across several ticket types: one table, one column per type
-            html += renderCombined(data.combined);
+            tablesHtml = renderCombined(data.combined);
         } else if (data.sections && data.sections.length > 1) {
             // Lists across several ticket types: one titled table per type
-            html += data.sections.map(s =>
+            tablesHtml = data.sections.map(s =>
                 `<div class="section-title">${escapeHtml(capitalize(nounFor(s.entity, 2)))}</div>` +
                 renderResults(s.rows, s.entity)
             ).join('');
         } else {
-            html += renderResults(data.results || [], data.entity);
+            tablesHtml = renderResults(data.results || [], data.entity);
         }
+        // Counts by one thing can also be shown as a chart (and back)
+        const answer = { data, question: userPromptText, tablesHtml, view: 'table', model: tablesHtml ? answerChartModel(data, userPromptText) : null };
+        if (tablesHtml) html += (answer.model ? answerViewsHtml(answer.model, data.chartable) : '') + `<div class="answer-view">${tablesHtml}</div>`;
         // Some ticket types found nothing: explain those under the tables
         if (data.explanation && !data.allEmpty) html += explanationHtml;
 
@@ -627,21 +633,26 @@ async function sendPrompt() {
         // Star every ticket the answer lists, or all of one type
         html += starAllHtml(answerTicketNumbers(data));
 
-        // Offer the same tables as a download in any of the export formats
+        // Offer the same tables as a download in any of the export formats, and,
+        // while a chart is showing, a picture of it (also placed in PDF, Word and Excel)
         const tables = buildExportTables(data);
         if (tables.length) {
             html += downloadBarHtml(registerExport({
                 title: data.message || 'One Touch results',
                 question: userPromptText,
                 tables,
-            }));
+                picture: answer.model ? () => answerPicture(answer) : undefined,
+            }), 'Download as', { pictures: Boolean(answer.model) });
         }
 
         const answerId = appendMessage('ai-msg wide', html + answerTimingHtml(seconds, data.fromCache));
+        const answerEl = document.getElementById(answerId);
+        answerEl._answer = answer;
+        paintPictureOptions(answerEl);
 
         // Parent / child tickets and others linked to the ones in this answer, under it
         const primary = answerTicketNumbers(data);
-        if (primary.length) showRelated(document.getElementById(answerId), primary, true);
+        if (primary.length) showRelated(answerEl, primary, true);
 
         // The tickets in this answer pop up in Ticket results on Home
         if (data.shownTickets && data.shownTickets.length) ticketsShown(data.shownTickets);
@@ -945,6 +956,154 @@ function capitalize(s) {
     return s ? s[0].toUpperCase() + s.slice(1) : s;
 }
 
+// =====================================================================
+// AI ANSWERS AS CHARTS: an answer that counts one ticket type by one thing
+// (or compares ticket types) can be shown as columns, bars, a line, a donut
+// and back to the table. One that is exactly a chart (chartable from the
+// server) can be saved to Home or a dashboard, and a click on its chart
+// lists the tickets behind a bar or slice.
+// =====================================================================
+
+const ANSWER_VIEW_NAMES = { table: 'Table', bar: 'Columns', hbar: 'Sideways bars', line: 'Line', area: 'Area', donut: 'Donut', stacked: 'Stacked columns' };
+const STACKED_ICON = '<rect x="4" y="13" width="5" height="8" rx="1"/><rect x="4" y="6" width="5" height="6" rx="1" opacity="0.5"/><rect x="14" y="9" width="5" height="12" rx="1"/><rect x="14" y="3" width="5" height="5" rx="1" opacity="0.5"/>';
+// More than this many categories: the biggest are drawn, the rest add up in a note
+const MAX_ANSWER_BARS = 30;
+
+// -> { kind: 'single', chart, data, views, drill } | { kind: 'series', chart, series, views } | null
+function answerChartModel(data, question) {
+    const title = data.message || question;
+    const base = { id: 'answer', title, color: 'accent', size: 'large', status: 'all', filters: [], dates: { preset: 'all' } };
+    const rows = data.results || [];
+    // One ticket type counted by one field
+    if (!data.combined && data.entity !== 'multiple' && rows.length >= 2) {
+        const columns = Object.keys(rows[0]);
+        const counts = columns.filter(c => c.endsWith('.count'));
+        const fields = columns.filter(c => !c.endsWith('.count'));
+        if (counts.length === 1 && fields.length === 1) {
+            const field = splitMember(fields[0]).column;
+            const time = isTimeField(field);
+            const list = rows.map(r => ({ value: r[fields[0]] ?? null, count: Number(r[counts[0]]) || 0 }));
+            const total = list.reduce((t, r) => t + r.count, 0);
+            let other = null;
+            if (time) list.sort((a, b) => String(a.value).localeCompare(String(b.value)));
+            else if (list.length > MAX_ANSWER_BARS) {
+                list.sort((a, b) => b.count - a.count);
+                const rest = list.splice(MAX_ANSWER_BARS);
+                other = { count: rest.reduce((t, r) => t + r.count, 0), groups: rest.length };
+            }
+            return {
+                kind: 'single',
+                chart: { ...base, source: data.entity, groupBy: field, display: time ? 'line' : 'bar', limit: list.length },
+                data: { total, rows: list, other },
+                views: time ? ['table', 'line', 'area', 'bar'] : ['table', 'bar', 'hbar', 'donut', 'line'],
+                drill: data.chartable && !data.chartable.dropped.length ? data.chartable.chart : null,
+            };
+        }
+    }
+    const combined = data.combined;
+    if (combined && combined.rows.length) {
+        const { dimension, entities, totals } = combined;
+        const name = e => capitalize(nounFor(e, 2));
+        // A total per ticket type
+        if (!dimension && entities.length >= 2) {
+            return {
+                kind: 'single',
+                chart: { ...base, source: 'tickets', groupBy: 'ticket_type', display: 'bar', limit: entities.length },
+                data: { total: totals.total, rows: entities.map(e => ({ value: name(e), count: totals.counts[e] || 0, slot: ENTITY_SLOTS[e] || 1 })), other: null },
+                views: ['table', 'bar', 'hbar', 'donut'],
+                drill: null,
+            };
+        }
+        // Ticket types side by side, per week, team, ...
+        if (dimension && combined.rows.length >= 2) {
+            const time = isTimeField(splitMember(dimension).column);
+            const ordered = time ? [...combined.rows].sort((a, b) => String(a.key).localeCompare(String(b.key))) : combined.rows;
+            return {
+                kind: 'series',
+                chart: { ...base, groupLabel: columnLabel(dimension) },
+                series: {
+                    categories: ordered.map(r => ({ value: r.key, label: time ? periodLabel(dimension, r.key) : formatValue(dimension, r.key) })),
+                    series: entities.map(e => ({ name: name(e), slot: ENTITY_SLOTS[e] || 1, values: ordered.map(r => r.counts[e] || 0) })),
+                    total: totals.total,
+                },
+                views: time ? ['table', 'line', 'bar', 'stacked'] : ['table', 'bar', 'stacked', 'line'],
+            };
+        }
+    }
+    return null;
+}
+
+function answerViewsHtml(model, chartable) {
+    const icon = view => {
+        const svg = view === 'stacked' ? STACKED_ICON : (DISPLAY_CHOICES.find(([v]) => v === view) || [])[2] || '';
+        return `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">${svg}</svg>`;
+    };
+    const buttons = model.views.map(v => `<button type="button" class="view-btn${v === 'table' ? ' active' : ''}" data-answer-view="${v}" aria-pressed="${v === 'table'}">` +
+        `${icon(v)}<span>${ANSWER_VIEW_NAMES[v]}</span></button>`).join('');
+    const save = model.kind === 'single' && chartable
+        ? '<button type="button" class="view-btn save" data-answer-save title="Put this on Home or one of your dashboards, as a chart that stays">📌 Save as a chart</button>' : '';
+    return `<div class="answer-views" role="group" aria-label="Show this answer as"><span class="answer-views-label">Show as</span>${buttons}${save}</div>`;
+}
+
+function setAnswerView(el, view) {
+    const answer = el._answer;
+    if (!answer?.model || !answer.model.views.includes(view)) return;
+    answer.view = view;
+    el.querySelectorAll('[data-answer-view]').forEach(b => {
+        const on = b.dataset.answerView === view;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-pressed', String(on));
+    });
+    const box = el.querySelector('.answer-view');
+    resizeWatcher.unobserve(box);
+    box._drawn = null;
+    box._pick = null;
+    if (view === 'table') {
+        box.className = 'answer-view';
+        box.innerHTML = answer.tablesHtml;
+        refreshStarButtons();
+    } else {
+        box.className = 'answer-view tile-body answer-chart';
+        const model = answer.model;
+        if (model.kind === 'series') drawSeriesChart(box, model.chart, model.series, view);
+        else drawChart(box, { ...model.chart, display: view }, model.data, false);
+        // An answer that is exactly a chart: a click lists the tickets behind a mark
+        if (model.drill) box._pick = row => openDrill({ chart: model.drill, value: row ? row.value : null, label: row ? groupLabel(model.drill, row.value, true) : '' });
+        box.classList.toggle('drillable', Boolean(box._pick));
+        if (model.data?.other) {
+            box.insertAdjacentHTML('beforeend', `<p class="chart-note">${escapeHtml(`Showing the biggest ${model.data.rows.length}; the other ${model.data.other.groups.toLocaleString()} add up to ${model.data.other.count.toLocaleString()} (all of them are in the table).`)}</p>`);
+        }
+    }
+    paintPictureOptions(el);
+}
+
+// The picture of the answer's chart, while one is showing
+function answerPicture(answer) {
+    if (!answer.model || answer.view === 'table') return null;
+    const model = answer.model;
+    const subtitle = `Question: ${answer.question}`;
+    return model.kind === 'series'
+        ? { chart: model.chart, series: model.series, display: answer.view, title: model.chart.title, subtitle }
+        : { chart: { ...model.chart, display: answer.view }, data: model.data, title: model.chart.title, subtitle };
+}
+
+// "📌 Save as a chart": the chart builder, filled in from the answer, saving to Home or a dashboard
+function saveAnswerChart(el) {
+    const answer = el._answer;
+    const chartable = answer?.data.chartable;
+    if (!chartable) return;
+    const display = ['bar', 'hbar', 'line', 'area', 'donut'].includes(answer.view) ? answer.view : chartable.chart.display;
+    toggleAssistant(false);
+    openBuilder({
+        chart: { ...chartable.chart, id: newChartId(), title: '', display },
+        note: chartable.dropped.length
+            ? `From the answer. Not carried over, because a chart can't hold it: ${chartable.dropped.join('; ')}. The chart counts without it.`
+            : 'From the answer: the same numbers. Change anything you like, then choose where to save it.',
+        destination: true,
+        onSave: saveChartTo,
+    });
+}
+
 // Counts merged across ticket types (see combineResults in business_logic.mjs)
 function renderCombined(combined) {
     const { dimension, entities, rows, totals } = combined;
@@ -1054,16 +1213,33 @@ function exportTableFromCombined(combined) {
     };
 }
 
-function buildExportTables(data) {
+// Every kind of answer downloads: its tables, why something was empty, and how
+// the question was read (notes: kept out of CSV files that have data). A
+// text-only answer (a question back, or something the data can't answer)
+// downloads as its text.
+function buildExportTables(data, textAnswer = null) {
     let tables;
-    if (data.combined) {
+    if (textAnswer) {
+        tables = [noteTable('Answer', 'Answer', [textAnswer])];
+    } else if (data.combined) {
         tables = [exportTableFromCombined(data.combined)];
     } else if (data.sections && data.sections.length > 1) {
         tables = data.sections.map(s => exportTableFromRows(s.rows, capitalize(nounFor(s.entity, 2))));
     } else {
         tables = [exportTableFromRows(data.results || [], null)];
     }
-    return tables.filter(Boolean);
+    tables = tables.filter(Boolean);
+    if (data.explanation) {
+        tables.push(noteTable(data.allEmpty ? 'Why nothing was found' : 'Why some of it is empty', 'Explanation', [data.explanation]));
+    }
+    if (data.assumptions && data.assumptions.length) {
+        tables.push(noteTable('How I read your question', 'Assumption', data.assumptions));
+    }
+    return tables;
+}
+
+function noteTable(title, label, lines) {
+    return { title, note: true, columns: [{ label }], rows: lines.map(l => [String(l)]), footer: null };
 }
 
 const EXPORT_OPTIONS = [
@@ -1081,8 +1257,16 @@ const EXPORT_OPTIONS = [
     ]],
 ];
 
-function downloadBarHtml(exportId, label = 'Download as') {
-    const options = EXPORT_OPTIONS.map(([group, items]) =>
+// Pictures of the chart (drawn in the browser by charts.js)
+const PICTURE_FORMATS = ['png', 'svg'];
+const PICTURE_OPTIONS = ['Picture of the chart', [['png', 'Picture (.png)'], ['svg', 'Picture, any size (.svg)']]];
+// Formats that also carry the chart picture, when a chart is showing
+const FORMATS_WITH_PICTURE = ['pdf', 'docx', 'xlsx', 'rtf', 'zip', '7z'];
+
+// pictures: the result can be shown as a chart, so offer its picture too
+function downloadBarHtml(exportId, label = 'Download as', { pictures = false } = {}) {
+    const groups = pictures ? [EXPORT_OPTIONS[0], PICTURE_OPTIONS, ...EXPORT_OPTIONS.slice(1)] : EXPORT_OPTIONS;
+    const options = groups.map(([group, items]) =>
         `<optgroup label="${escapeHtml(group)}">` +
         items.map(([value, label]) => `<option value="${value}">${escapeHtml(label)}</option>`).join('') +
         `</optgroup>`
@@ -1092,7 +1276,35 @@ function downloadBarHtml(exportId, label = 'Download as') {
         `<select id="${exportId}-format">${options}</select>` +
         `<button type="button" onclick="downloadExport('${exportId}')">⬇ Download</button>` +
         `<span class="download-status" role="status"></span>` +
+        (pictures ? '<span class="download-note" data-picture-note></span>' : '') +
         `</div>`;
+}
+
+// The picture choices work while a chart is showing; with the table showing,
+// they say how to get one
+function paintPictureOptions(container) {
+    const bar = container.querySelector(':scope > .download-bar, .answer-download .download-bar, .tile-download .download-bar') || container.querySelector('.download-bar');
+    if (!bar) return;
+    const payload = exportPayloads.get(bar.id);
+    const on = Boolean(payload?.picture?.());
+    bar.querySelectorAll('option').forEach(o => {
+        if (!PICTURE_FORMATS.includes(o.value)) return;
+        o.disabled = !on;
+        o.textContent = (o.value === 'png' ? 'Picture (.png)' : 'Picture, any size (.svg)') + (on ? '' : ' — show a chart first');
+    });
+    const select = bar.querySelector('select');
+    if (!on && PICTURE_FORMATS.includes(select.value)) select.value = 'xlsx';
+    const note = bar.querySelector('[data-picture-note]');
+    if (note) note.textContent = on ? 'PDF, Word, Excel, RTF and archives include the chart.' : '';
+}
+
+// "one-touch-how-many-open-incidents-2026-10-22", like the server's file names
+function pictureFileName(payload) {
+    const slug = String(payload.question || payload.title || 'chart').toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'chart';
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    return `one-touch-${slug}-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 async function downloadExport(exportId) {
@@ -1108,11 +1320,19 @@ async function downloadExport(exportId) {
     status.textContent = `Preparing ${format.toUpperCase()} file…`;
 
     try {
+        // The chart on screen, if any: its picture is drawn here, in the browser
+        const picture = payload.picture ? payload.picture() : null;
+        if (PICTURE_FORMATS.includes(format)) {
+            if (!picture) throw new Error('Show the answer as a chart first, then download its picture.');
+            status.textContent = `Downloaded ${await downloadPicture(picture, format, pictureFileName(payload))}`;
+            return;
+        }
+        const chart = picture && FORMATS_WITH_PICTURE.includes(format) ? await picturePng(chartPicture(picture)) : null;
         const response = await fetch(`${API_BASE}/api/export`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...authHeaders() },
             // The browser's time zone: the file's "Generated" time and date use it
-            body: JSON.stringify({ ...payload, format, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
+            body: JSON.stringify({ ...payload, format, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, chart }),
         });
         if (handleUnauthorized(response)) {
             status.textContent = '';
@@ -1794,6 +2014,11 @@ document.addEventListener('click', e => {
     const ticket = e.target.closest('[data-ticket]');
     if (ticket) { openTicketRecord(ticket.dataset.ticket); return; }
 
+    const view = e.target.closest('[data-answer-view]');
+    if (view) { setAnswerView(view.closest('.msg'), view.dataset.answerView); return; }
+    const saveChart = e.target.closest('[data-answer-save]');
+    if (saveChart) { saveAnswerChart(saveChart.closest('.msg')); return; }
+
     // Home's example question is asked in the chat
     const example = e.target.closest('[data-example]');
     if (example) { askAssistant(example.dataset.example); return; }
@@ -1869,6 +2094,7 @@ async function loadTicketDetail(box, number) {
 document.getElementById('ticket-results').innerHTML = NO_TICKET_RESULTS_HTML;
 buildThemePanel();
 buildBuilder();
+buildBoardFilters();
 renderHomeLayout();
 renderMyDashboards();
 showApp(Boolean(sessionTokenValue));
