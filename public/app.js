@@ -37,10 +37,49 @@ function showApp(signedIn) {
         switchTab('home');
         loadStars();
         loadPreferences();
-    } else {
+    } else if (!fillSignInLink()) {
         document.getElementById('login-email').focus();
     }
 }
+
+// A sign-in link (…/#user=jsmith&pass=secret) fills in the form, and the
+// person still clicks the button. The part after "#" is never sent to the
+// server (or the tunnel), and it is taken out of the address bar at once.
+let signInLink = null;
+function readSignInLink() {
+    let details = location.hash.slice(1);
+    // Some apps escape the "=" and "&" when they open a link (#user%3Djsmith%26pass%3D…)
+    if (!/[=&]/.test(details) && /%3D/i.test(details)) {
+        try { details = decodeURIComponent(details); } catch { /* read as it is */ }
+    }
+    const params = new URLSearchParams(details);
+    if (!params.has('user')) return false;
+    signInLink = { user: params.get('user') || '', pass: params.get('pass') || '' };
+    history.replaceState(null, '', location.pathname + location.search);
+    return true;
+}
+function fillSignInLink() {
+    if (!signInLink || !document.body.classList.contains('signed-out')) return false;
+    document.getElementById('login-email').value = signInLink.user;
+    document.getElementById('login-password').value = signInLink.pass;
+    // A link with just the username: the password is typed next
+    document.getElementById(signInLink.pass ? 'login-btn' : 'login-password').focus();
+    signInLink = null;
+    showLoginError('');
+    return true;
+}
+// Opened while someone is signed in in this tab: their session stays, and the
+// form is filled in when they sign out
+function signInLinkWhileSignedIn() {
+    if (!signInLink || !currentUsername) return;
+    const user = signInLink.user.trim().toLowerCase().replace(/@molsoncoors\.com$/, '');
+    if (user === currentUsername) signInLink = null;
+    else showToast(`That link signs in as ${user}. You're signed in as ${currentUsername}: sign out to use it.`);
+}
+window.addEventListener('hashchange', () => {
+    if (!readSignInLink()) return;
+    if (!fillSignInLink()) signInLinkWhileSignedIn();
+});
 
 // The signed-in person's name, shown in the header and the greetings
 // (their display name, or their username if they don't have one)
@@ -71,7 +110,10 @@ async function loadCurrentUser() {
     try {
         const response = await fetch(`${API_BASE}/api/me`, { headers: authHeaders() });
         if (handleUnauthorized(response)) return;
-        if (response.ok) setCurrentUser(await response.json());
+        if (response.ok) {
+            setCurrentUser(await response.json());
+            signInLinkWhileSignedIn();
+        }
     } catch (err) {
         console.error('Could not load the signed-in user:', err);
     }
@@ -203,7 +245,8 @@ function goHome() {
 function switchTab(viewName) {
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === viewName));
     document.querySelectorAll('.view-panel').forEach(panel => panel.classList.toggle('active', panel.id === `${viewName}-view`));
-    if (viewName === 'dashboard') loadDashboards();
+    // The first time someone sees Dashboards: its tour (customize.js)
+    if (viewName === 'dashboard') loadDashboards().then(() => maybeStartTour('dashboards'));
     // Stars may have changed elsewhere (the chat, a dashboard, another computer)
     if (viewName === 'home') {
         if (homeMode === 'starred') showStarred();
@@ -281,12 +324,22 @@ function frameHash() {
     return `#bordered=false&titled=false${document.documentElement.dataset.theme === 'dark' ? '&theme=night' : ''}`;
 }
 
+// A page's own hash with OneTouch's look in it, keeping everything else it
+// says (a detail page hides some of its filters there). Kept as written,
+// because Metabase reads it without turning "+" into spaces.
+function themedFrameHash(hash) {
+    const options = hash.replace(/^#/, '').split('&').filter(o => o && !o.startsWith('theme='));
+    if (document.documentElement.dataset.theme === 'dark') options.push('theme=night');
+    return `#${options.join('&')}`;
+}
+const frameHashIsDark = hash => /(^#|&)theme=night(&|$)/.test(hash);
+
 // Light <-> dark: the dashboard in the frame reloads in the matching look
 function refreshDashboardTheme() {
     if (!frameHasPage()) return;
     try {
         const where = document.getElementById('dashboard-frame').contentWindow.location;
-        where.replace(`${where.pathname}${where.search}${frameHash()}`);
+        where.replace(`${where.pathname}${where.search}${themedFrameHash(where.hash)}`);
         where.reload();
     } catch { /* not ours */ }
 }
@@ -356,12 +409,14 @@ async function buildDashboards() {
         applyHiddenDashboards();
 
         const last = rememberedDashboard();
+        if (last === 'families') { showFamilies(); return true; }
         if (last.startsWith('my:') && showBoard(last.slice(3))) return true;
         const remembered = dashboards.find(d => d.key === last && !isDashboardHidden(d.key));
         if (remembered) showDashboard(remembered);
         else showFirstDashboard();
         // First visit: open the drawer so people see everything that's there
-        if (!last) toggleDashboardDrawer(true);
+        // (unless the Dashboards tour is about to show it to them)
+        if (!last && (prefs.tour.dashboards || prefsLoadFailed)) toggleDashboardDrawer(true);
         return true;
     } catch (err) {
         message.textContent = 'Could not load the dashboards. Please try again.';
@@ -434,6 +489,8 @@ document.getElementById('dashboard-frame').addEventListener('load', () => {
 
 function showDashboard(dashboard) {
     hideBoard();
+    hideFamilies();
+    showRecordFamily('');
     markCurrentDashboard(dashboard);
     const frame = document.getElementById('dashboard-frame');
     frame.src = `${API_BASE}${dashboard.path}${frameHash()}`;
@@ -477,10 +534,17 @@ function followDashboardFrame() {
     if (frame.hidden) return; // one of their own dashboards is showing
     let where;
     try { where = frame.contentWindow.location; } catch { return; } // not ours (yet)
-    if (!where || where.href === lastFrameAddress) return;
+    if (!where) return;
+    // A click's link can't know OneTouch is dark, so its page opens light: put the
+    // look back in place (no reload, and ← Back still returns to the page before)
+    const id = pageId(where.pathname);
+    if (id && frameHashIsDark(where.hash) !== (document.documentElement.dataset.theme === 'dark')) {
+        where.replace(`${where.pathname}${where.search}${themedFrameHash(where.hash)}`);
+        return;
+    }
+    if (where.href === lastFrameAddress) return;
     lastFrameAddress = where.href;
 
-    const id = pageId(where.pathname);
     const main = dashboardPages.main.get(id);
     const detail = dashboardPages.details.get(id);
     if (main) {
@@ -511,9 +575,27 @@ function followDashboardFrame() {
         star.dataset.star = number;
         paintStar(star);
     }
+    // …and its parent, children and other linked tickets above it (families.js)
+    showRecordFamily(star.hidden ? '' : number);
 }
 setInterval(followDashboardFrame, 400);
 document.getElementById('dashboard-frame').addEventListener('load', followDashboardFrame);
+
+// Follows a click inside the frame as it happens rather than at the next
+// look, so a page that opened light turns dark before it is seen
+document.getElementById('dashboard-frame').addEventListener('load', () => {
+    try {
+        const w = document.getElementById('dashboard-frame').contentWindow;
+        if (w.oneTouchFollows) return;
+        w.oneTouchFollows = true;
+        const pushState = w.history.pushState;
+        w.history.pushState = function (...args) {
+            pushState.apply(this, args);
+            queueMicrotask(followDashboardFrame);
+        };
+        w.addEventListener('popstate', () => setTimeout(followDashboardFrame));
+    } catch { /* not ours */ }
+});
 
 function dashboardBack() {
     // Only from a detail page: on a drawer dashboard there is nothing to go back to
@@ -896,8 +978,18 @@ function cellHtml(member, raw, truncate) {
     if (truncate && LONG_TEXT.has(column) && text.length > 120) {
         return `<td${cls} title="${escapeHtml(text)}">${escapeHtml(text.slice(0, 117))}…</td>`;
     }
-    // A ticket number gets a star next to it
-    return `<td${cls}>${escapeHtml(text)}${starFor(raw)}</td>`;
+    // A ticket number opens that ticket (its record and family), with a star next to it
+    return `<td${cls}>${ticketValueHtml(raw, text)}</td>`;
+}
+
+// A value that is a ticket number (a parent, a request, a change…): a link that
+// opens that ticket's record and family, and its star. self: the record's own number.
+function ticketValueHtml(raw, text, self = null) {
+    const value = String(raw ?? '');
+    if (/^(INC|CHG|RITM|SCTASK|REQ)\d{7}$/.test(value) && value !== self) {
+        return `<button type="button" class="ticket-link" data-ticket="${escapeHtml(value)}" title="Open ${escapeHtml(value)}: its record and family">${escapeHtml(text)}</button>${starFor(raw)}`;
+    }
+    return `${escapeHtml(text)}${starFor(raw)}`;
 }
 
 function renderResults(rows, entity) {
@@ -919,7 +1011,7 @@ function renderResults(rows, entity) {
             const { column } = splitMember(c);
             const text = formatValue(c, rows[0][c]);
             const cls = LONG_TEXT.has(column) ? ' class="long"' : '';
-            return `<tr><th>${escapeHtml(columnLabel(c))}</th><td${cls}>${escapeHtml(text)}${starFor(rows[0][c])}</td></tr>`;
+            return `<tr><th>${escapeHtml(columnLabel(c))}</th><td${cls}>${ticketValueHtml(rows[0][c], text)}</td></tr>`;
         }).join('');
         return `<div class="table-wrap"><table class="result-table detail"><tbody>${body}</tbody></table></div>`;
     }
@@ -1701,10 +1793,12 @@ function formatStarredAt(iso) {
 // in `highlight` (e.g. the latest answer's tickets) get `highlightClass`.
 // select: the list's name ('results', 'starred'): each row gets a checkbox,
 // and the header's ticks them all.
-function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set(), highlightClass = 'fresh', { select = null } = {}) {
+function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set(), highlightClass = 'fresh', { select = null, rowClass = null } = {}) {
     const head = (select ? `<th class="select-cell"><input type="checkbox" class="select-all" data-select-list="${select}" aria-label="Select all"></th>` : '') +
         columns.map(([label]) => `<th>${escapeHtml(label)}</th>`).join('');
-    const body = tickets.map(t => (highlight.has(t.number) ? `<tr class="${highlightClass}">` : '<tr>') +
+    const body = tickets.map((t, i) => {
+        const cls = [highlight.has(t.number) ? highlightClass : '', rowClass ? rowClass(t, i) : ''].filter(Boolean).join(' ');
+        return (cls ? `<tr class="${cls}">` : '<tr>') +
         (select ? `<td class="select-cell"><input type="checkbox" class="row-select" data-select-list="${select}" value="${escapeHtml(t.number)}" aria-label="Select ${escapeHtml(t.number)}"></td>` : '') +
         columns.map(([label, get, html], i) => {
         if (i === 0) {
@@ -1717,7 +1811,8 @@ function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set(
             return `<td title="${escapeHtml(text)}">${escapeHtml(text.slice(0, 117))}…</td>`;
         }
         return `<td>${escapeHtml(text || '—')}</td>`;
-    }).join('') + '</tr>').join('');
+    }).join('') + '</tr>';
+    }).join('');
     return `<div class="table-wrap"><table class="result-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
@@ -1749,8 +1844,10 @@ function ticketCardHtml(t, record) {
     const fields = Object.entries(record.fields);
     const body = fields.map(([member, value]) => {
         const cls = LONG_TEXT.has(splitMember(member).column) ? ' class="long"' : '';
-        return `<tr><th>${escapeHtml(columnLabel(member))}</th><td${cls}>${escapeHtml(formatValue(member, value))}${starFor(value)}</td></tr>`;
+        return `<tr><th>${escapeHtml(columnLabel(member))}</th><td${cls}>${ticketValueHtml(value, formatValue(member, value), t.number)}</td></tr>`;
     }).join('');
+    // Its family (parent, children, …) goes above this, once found (showRelated)
+    html += '<div class="record-fields"><div class="record-fields-title">Full record</div>';
     html += `<div class="table-wrap tall"><table class="result-table detail"><tbody>${body}</tbody></table></div>`;
     html += downloadBarHtml(registerExport({
         title: `${t.type} ${t.number}`,
@@ -1761,7 +1858,7 @@ function ticketCardHtml(t, record) {
             footer: null,
         }],
     }));
-    return html;
+    return html + '</div>';
 }
 
 
@@ -1858,9 +1955,9 @@ async function showOpenedRecord(number) {
         if (data.found.length === 1) return back + ticketCardHtml(data.found[0], data.record);
         return back + ticketTableHtml(data.found);
     });
-    // Its parent / child tickets and other linked ones, under the record
+    // Its parent / child tickets and other linked ones, above its fields
     const out = document.getElementById('ticket-results');
-    if (openedRecord === number && out.querySelector('.ticket-head')) showRelated(out, [number], false);
+    if (openedRecord === number && out.querySelector('.ticket-head')) showRelated(out, [number], false, out.querySelector('.record-fields'));
 }
 
 // =====================================================================
@@ -1931,30 +2028,73 @@ function relatedHtml(families, focus) {
         ? downloadBarHtml(registerExport({ title: `Related tickets: ${families.length} families`, question: about, tables: families.flatMap(familyExportTables) }),
             `Download all ${families.length} families as`)
         : '';
-    return '<div class="related"><div class="related-title">🔗 Related tickets</div>' + all + families.map(f => {
+    const single = focus.size === 1 ? [...focus][0] : null;
+    const heading = single ? `👪 ${single}'s family: parent, children and other linked tickets` : '🔗 Related tickets';
+    return `<div class="related"><div class="related-title">${escapeHtml(heading)}</div>` + all + families.map(f => {
         const facts = list => list.map(fact => `<span class="fact"><b>${escapeHtml(fact.field)}:</b> ${escapeHtml(familyFact(fact))}</span>`).join('');
         const same = f.same.length
             ? `<div class="family-line"><span class="same-label">Same in all ${f.total.toLocaleString()}</span>${facts(f.same)}</div>` : '';
         const differ = f.differ.length
             ? `<div class="family-line"><span class="differ-label">Different</span>${facts(f.differ)}</div>` : '';
-        const shown = f.members.slice(0, FAMILY_MEMBERS_SHOWN);
-        const more = f.members.length > shown.length
-            ? `<p class="family-more">Showing ${shown.length.toLocaleString()} of ${f.members.length.toLocaleString()}; the comparison above and the download cover all of them.</p>` : '';
+        // The parent (or the order, request, change…) first, then the ticket(s) asked about
+        const members = [...f.members].sort((a, b) => ((b.number === f.anchor) - (a.number === f.anchor)) || (focus.has(b.number) - focus.has(a.number)));
+        const extra = members.length - FAMILY_MEMBERS_SHOWN;
+        const more = extra > 0
+            ? `<button type="button" class="home-action family-show-all" data-show-all>Show all ${members.length.toLocaleString()}</button>` : '';
+        const where = single ? familyRoleLine(f, single) : '';
         const download = downloadBarHtml(registerExport({ title: f.title, question: about, tables: familyExportTables(f) }), 'Download this family as');
-        return `<section class="family"><div class="family-title">${escapeHtml(f.title)}</div>` +
+        return `<section class="family${extra > 0 ? ' collapsed' : ''}"><div class="family-title">${escapeHtml(f.title)}</div>` +
+            (where ? `<p class="family-where">${escapeHtml(where)}</p>` : '') +
             `<p class="family-why">${escapeHtml(f.why)}</p>${same}${differ}` +
-            ticketTableHtml(shown, FAMILY_COLUMNS, focus, 'focus') + more + download + '</section>';
+            ticketTableHtml(members, FAMILY_COLUMNS, focus, 'focus', { rowClass: (t, i) => i >= FAMILY_MEMBERS_SHOWN ? 'more-member' : '' }) +
+            more + download + '</section>';
     }).join('') + '</div>';
+}
+
+// Where one ticket sits in a family: "INC1813970 is a child incident. Its parent is
+// INC1813985 (the first row), and it has 4 other child incidents."
+function familyRoleLine(f, number) {
+    const me = f.members.find(m => m.number === number);
+    if (!me) return '';
+    const count = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
+    const kids = f.members.filter(m => ['Child', 'Child request', 'Task'].includes(m.role)).length;
+    switch (f.kind) {
+        case 'parent-incident':
+            return number === f.anchor
+                ? `${number} is the parent incident. Its ${count(kids, 'child incident is', 'child incidents are')} listed under it.`
+                : `${number} is a child incident. Its parent is ${f.anchor} (the first row)${kids > 1 ? `, which has ${count(kids - 1, 'other child incident', 'other child incidents')}` : ''}.`;
+        case 'bundle-request':
+            return number === f.anchor
+                ? `${number} is a bundle request. Its ${count(kids, 'child request is', 'child requests are')} listed under it.`
+                : `${number} is a child request. Its parent is bundle request ${f.anchor} (the first row)${kids > 1 ? `, which has ${count(kids - 1, 'other child request', 'other child requests')}` : ''}.`;
+        case 'request-tasks':
+            return number === f.anchor
+                ? `${number} is fulfilled by ${count(kids, 'catalog task', 'catalog tasks')}, listed under it.`
+                : `${number} is a catalog task of request ${f.anchor} (the first row)${kids > 1 ? `, which has ${count(kids - 1, 'other task', 'other tasks')}` : ''}.`;
+        case 'order':
+            return `${number} was ordered together with ${count(f.total - 1, 'other request', 'other requests')} in order ${f.anchor}.`;
+        case 'problem':
+            return `${number} is one of ${count(f.total, 'ticket', 'tickets')} linked to problem ${f.anchor}.`;
+        case 'change-incident':
+            if (number === f.anchor) return `${number} is the change; the incidents it fixes or caused are listed under it.`;
+            return me.role === 'Incident it fixes'
+                ? `${number} is the incident that change ${f.anchor} (the first row) was raised to fix.`
+                : `${number} was caused by change ${f.anchor} (the first row).`;
+        default:
+            return '';
+    }
 }
 
 // Adds "Related tickets" to the end of `container` (an AI answer, or a record on
 // Home) once the server has looked; nothing at all if there are none.
 // conversation: true also tells the AI about them with the next question.
-async function showRelated(container, numbers, conversation) {
+// before: put it above this element (a record's fields) instead of at the end;
+// there, a ticket with no family says so
+async function showRelated(container, numbers, conversation, before = null) {
     const slot = document.createElement('div');
     slot.className = 'related-slot';
-    slot.innerHTML = '<p class="related-loading">🔗 Looking for related tickets…</p>';
-    container.appendChild(slot);
+    slot.innerHTML = `<p class="related-loading">${before ? '👪 Looking for its parent, children and other linked tickets…' : '🔗 Looking for related tickets…'}</p>`;
+    if (before) before.before(slot); else container.appendChild(slot);
     try {
         const response = await fetch(`${API_BASE}/api/tickets/related`, {
             method: 'POST',
@@ -1965,7 +2105,11 @@ async function showRelated(container, numbers, conversation) {
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
         if (!slot.isConnected) return; // the chat was cleared, or another record opened
-        if (!data.families.length) { slot.remove(); return; }
+        if (!data.families.length) {
+            if (before) slot.innerHTML = '<p class="related-none">👪 No parent, child or other linked tickets.</p>';
+            else slot.remove();
+            return;
+        }
         slot.innerHTML = relatedHtml(data.families, new Set(numbers));
         // Keep the newest answer in view, as the chat does for new messages
         const chatLog = document.getElementById('chat-log');
@@ -2068,10 +2212,48 @@ const selections = { results: new Set(), starred: new Set() };
 const lastTicked = { results: null, starred: null };
 const LIST_BOXES = { results: 'ticket-results', starred: 'starred-result' };
 
+// The bar over a list: what's ticked, then 💬 ask the AI about them, the list's own
+// action (remove / unstar), unstar and remove, and clear the ticks
 function selectBarHtml(list) {
     return `<div class="select-bar" data-select-bar="${list}"><span class="select-count" aria-live="polite"></span>` +
+        `<button type="button" class="home-action" data-ask-open="${list}" aria-expanded="false" disabled></button>` +
         `<button type="button" class="home-action danger" data-selected-action="${list}" disabled></button>` +
-        `<button type="button" class="home-action" data-select-none="${list}" disabled>Clear selection</button></div>`;
+        `<button type="button" class="home-action danger" data-selected-both="${list}" disabled title="Unstar the ticked tickets and remove them from Ticket results"></button>` +
+        `<button type="button" class="home-action" data-select-none="${list}" disabled>Clear selection</button></div>` +
+        askBoxHtml(list);
+}
+
+// 💬 A question about the ticked tickets, asked in the chat with their numbers
+const ASK_SUGGESTIONS = [
+    'What do these tickets have in common?',
+    'Which of these are still open?',
+    'Who is working on these, and in which teams?',
+    'Show me the full details of these tickets',
+];
+const MAX_ASK_TICKETS = 100;
+
+function askBoxHtml(list) {
+    return `<div class="ask-selected" data-ask-box="${list}" hidden>` +
+        `<div class="ask-selected-row"><input type="text" class="ask-selected-input" data-ask-input="${list}" maxlength="300"` +
+        ` placeholder="Ask anything about the ticked tickets…" aria-label="Your question about the ticked tickets">` +
+        `<button type="button" class="primary-btn" data-ask-go="${list}">Ask</button></div>` +
+        `<div class="ask-suggestions">${ASK_SUGGESTIONS.map(q => `<button type="button" class="ask-chip" data-ask-suggest="${list}" data-question="${escapeHtml(q)}">${escapeHtml(q)}</button>`).join('')}</div></div>`;
+}
+
+// The ticked tickets, in the list's order
+function tickedInOrder(list) {
+    return [...document.getElementById(LIST_BOXES[list]).querySelectorAll('.row-select:checked')].map(b => b.value);
+}
+
+function askAboutTicked(list, question) {
+    const numbers = tickedInOrder(list);
+    question = String(question || '').trim();
+    if (!numbers.length || !question) return;
+    if (numbers.length > MAX_ASK_TICKETS) {
+        showToast(`Ask about up to ${MAX_ASK_TICKETS} tickets at a time; ${numbers.length.toLocaleString()} are ticked.`);
+        return;
+    }
+    askAssistant(`About ${numbers.length === 1 ? 'ticket' : 'tickets'} ${numbers.join(', ')}: ${question}`);
 }
 
 // The ticks, the header checkbox and the bar, from the list's selection
@@ -2094,10 +2276,20 @@ function paintSelection(list) {
     if (!bar) return;
     bar.querySelector('.select-count').textContent = n ? `${n.toLocaleString()} selected`
         : list === 'results' ? 'Tick tickets to remove them from this list.' : 'Tick tickets to unstar them together.';
+    const count = n ? ` ${n.toLocaleString()}` : '';
     const action = bar.querySelector('[data-selected-action]');
     action.disabled = !n;
-    action.textContent = list === 'results' ? (n ? `✕ Remove ${n.toLocaleString()} from Ticket results` : '✕ Remove from Ticket results')
-        : (n ? `☆ Unstar ${n.toLocaleString()}` : '☆ Unstar selected');
+    action.textContent = list === 'results' ? `✕ Remove${count} from Ticket results` : (n ? `☆ Unstar${count}` : '☆ Unstar selected');
+    const both = bar.querySelector('[data-selected-both]');
+    both.disabled = !n;
+    both.textContent = `☆ Unstar and ✕ remove${count} from Ticket results`;
+    const ask = bar.querySelector('[data-ask-open]');
+    ask.disabled = !n;
+    ask.textContent = n ? `💬 Ask the AI about${count}` : '💬 Ask the AI about them';
+    if (!n) {
+        out.querySelector('.ask-selected').hidden = true;
+        ask.setAttribute('aria-expanded', 'false');
+    }
     bar.querySelector('[data-select-none]').disabled = !n;
 }
 
@@ -2125,6 +2317,29 @@ document.addEventListener('click', e => {
         paintSelection(none.dataset.selectNone);
         return;
     }
+    const both = e.target.closest?.('[data-selected-both]');
+    if (both) {
+        unstarAndRemove(tickedInOrder(both.dataset.selectedBoth));
+        return;
+    }
+    const askOpen = e.target.closest?.('[data-ask-open]');
+    if (askOpen) {
+        const box = document.querySelector(`[data-ask-box="${askOpen.dataset.askOpen}"]`);
+        box.hidden = !box.hidden;
+        askOpen.setAttribute('aria-expanded', String(!box.hidden));
+        if (!box.hidden) box.querySelector('input').focus();
+        return;
+    }
+    const askGo = e.target.closest?.('[data-ask-go]');
+    if (askGo) {
+        askAboutTicked(askGo.dataset.askGo, document.querySelector(`[data-ask-input="${askGo.dataset.askGo}"]`).value);
+        return;
+    }
+    const suggestion = e.target.closest?.('[data-ask-suggest]');
+    if (suggestion) {
+        askAboutTicked(suggestion.dataset.askSuggest, suggestion.dataset.question);
+        return;
+    }
     const act = e.target.closest?.('[data-selected-action]');
     if (act) {
         const list = act.dataset.selectedAction;
@@ -2140,11 +2355,20 @@ document.addEventListener('click', e => {
     }
 });
 
-// The ticked tickets leave Ticket results (on every computer); their stars stay
-async function removeFromResults(numbers) {
-    if (!numbers.length) return;
+// Enter in the question box asks
+document.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && e.target.matches?.('[data-ask-input]')) {
+        e.preventDefault();
+        askAboutTicked(e.target.dataset.askInput, e.target.value);
+    }
+});
+
+// The ticked tickets leave Ticket results (on every computer); their stars stay.
+// quiet: no list refresh or note (unstarAndRemove does both itself). -> true when done
+async function removeFromResults(numbers, { quiet = false } = {}) {
+    if (!numbers.length) return false;
     const total = document.querySelectorAll('#ticket-results .row-select').length;
-    if (numbers.length === total && !confirm(`Remove all ${total.toLocaleString()} tickets from your ticket results? Your starred tickets stay starred.`)) return;
+    if (!quiet && numbers.length === total && !confirm(`Remove all ${total.toLocaleString()} tickets from your ticket results? Your starred tickets stay starred.`)) return false;
     try {
         const response = await fetch(`${API_BASE}/api/seen-tickets/remove`, {
             method: 'POST',
@@ -2158,17 +2382,33 @@ async function removeFromResults(numbers) {
             selections.results.delete(n);
             latestShown.delete(n);
         }
+        if (quiet) return true;
         await showTicketResults(true);
         showToast(`Removed ${numbers.length.toLocaleString()} ${numbers.length === 1 ? 'ticket' : 'tickets'} from Ticket results`);
+        return true;
     } catch (err) {
         showToast(`❌ ${err.message}`);
+        return false;
     }
 }
 
-// Unstars many in one request; the screen changes at once, and back if the server says no
-async function unstarMany(numbers, what) {
+// "Unstar and remove from Ticket results": both, for the ticked tickets, after asking
+async function unstarAndRemove(numbers) {
+    if (!numbers.length) return;
+    const what = `${numbers.length.toLocaleString()} ${numbers.length === 1 ? 'ticket' : 'tickets'}`;
+    if (!confirm(`Unstar ${what} and remove ${numbers.length === 1 ? 'it' : 'them'} from your Ticket results?`)) return;
+    const unstarred = numbers.some(n => starredTickets.has(n)) ? await unstarMany(numbers, what, { quiet: true }) : true;
+    const removed = await removeFromResults(numbers, { quiet: true });
+    for (const n of numbers) selections.starred.delete(n);
+    if (homeMode === 'starred') await showStarred(true); else await showTicketResults(true);
+    if (unstarred && removed) showToast(`☆ Unstarred ${what} and removed ${numbers.length === 1 ? 'it' : 'them'} from Ticket results`);
+}
+
+// Unstars many in one request; the screen changes at once, and back if the server says no.
+// quiet: no list refresh or note. -> true when done
+async function unstarMany(numbers, what, { quiet = false } = {}) {
     const toRemove = numbers.filter(n => starredTickets.has(n));
-    if (!toRemove.length) return;
+    if (!toRemove.length) return true;
     const before = new Map(toRemove.map(n => [n, starredTickets.get(n)]));
     for (const n of toRemove) starredTickets.delete(n);
     refreshStarButtons();
@@ -2182,12 +2422,15 @@ async function unstarMany(numbers, what) {
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
         for (const n of toRemove) selections.starred.delete(n);
+        if (quiet) return true;
         if (homeMode === 'starred') await showStarred(true);
         showToast(`☆ Unstarred ${what}`);
+        return true;
     } catch (err) {
         for (const [n, at] of before) starredTickets.set(n, at);
         refreshStarButtons();
         showToast(`❌ ${err.message}`);
+        return false;
     }
 }
 
@@ -2211,6 +2454,13 @@ document.addEventListener('click', e => {
 
     const ticket = e.target.closest('[data-ticket]');
     if (ticket) { openTicketRecord(ticket.dataset.ticket); return; }
+
+    const showAll = e.target.closest('[data-show-all]');
+    if (showAll) {
+        showAll.closest('.family').classList.remove('collapsed');
+        showAll.remove();
+        return;
+    }
 
     const view = e.target.closest('[data-answer-view]');
     if (view) { setAnswerView(view.closest('.msg'), view.dataset.answerView); return; }
@@ -2277,7 +2527,7 @@ async function loadTicketDetail(box, number) {
             return;
         }
         box.innerHTML = ticketCardHtml(data.found[0], data.record);
-        showRelated(box, [number], false);
+        showRelated(box, [number], false, box.querySelector('.record-fields'));
     } catch (err) {
         if (box.isConnected) box.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
         console.error(err);
@@ -2295,6 +2545,7 @@ buildBuilder();
 buildBoardFilters();
 renderHomeLayout();
 renderMyDashboards();
+readSignInLink();
 showApp(Boolean(sessionTokenValue));
 loadCurrentUser();
 

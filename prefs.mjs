@@ -9,7 +9,7 @@ import { pool } from './auth.mjs';
 import { sanitizeChart, sanitizeScope, newId } from './charts.mjs';
 
 // Saved separately, so changing colors never overwrites a dashboard.
-// tour: whether the first-visit tour has been seen.
+// tour: which tours have been seen (Home's, and the Dashboards page's).
 export const PARTS = ['theme', 'home', 'dashboards', 'tour'];
 
 export const MAX_BOARDS = 20;
@@ -116,7 +116,8 @@ function cleanDashboards(d = {}) {
   return { boards, hidden, last };
 }
 
-const cleanTour = (t = {}) => ({ done: t.done === true });
+// done: Home's tour has been seen; dashboards: the Dashboards page's
+const cleanTour = (t = {}) => ({ done: t.done === true, dashboards: t.dashboards === true });
 
 const CLEANERS = { theme: cleanTheme, home: cleanHome, dashboards: cleanDashboards, tour: cleanTour };
 

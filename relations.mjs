@@ -124,6 +124,54 @@ function family(kind, anchor, title, why, members, wanted) {
 const plural = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 const role = (t, label) => ({ ...t, role: label });
 
+// The six kinds of family, built the same way for a ticket's related tickets
+// and for the Ticket families page
+function parentIncidentFamily(p, parent, children, wanted) {
+  return family('parent-incident', p,
+    `Parent incident ${p} and its ${plural(children.length, 'child incident', 'child incidents')}`,
+    `${p} is a parent (master) incident: it groups incidents raised for the same issue, such as several alerts or reports about one fault, so they are worked and resolved together.`,
+    [role(parent || missing(p, 'Incident'), 'Parent'), ...children.map(c => role(c, 'Child'))], wanted);
+}
+
+function problemFamily(prb, incidents, changes, wanted) {
+  const linked = [...incidents.map(t => role(t, 'Incident')), ...changes.map(t => role(t, 'Change'))];
+  return family('problem', prb,
+    `${plural(linked.length, 'ticket', 'tickets')} linked to problem ${prb}`,
+    `These tickets were all linked to problem ${prb}, the investigation into their shared root cause. The problem record itself isn't in this export.`,
+    linked, wanted);
+}
+
+// A change, the incident it was raised to fix (if any), and the incidents it caused
+function changeFamily(c, change, fixes, caused, wanted) {
+  const parts = [fixes.length ? `raised to fix ${fixes[0].number}` : '', caused.length ? `the cause of ${plural(caused.length, 'incident', 'incidents')}` : ''].filter(Boolean);
+  return family('change-incident', c,
+    `Change ${c}: ${parts.join(', and ')}`,
+    fixes.length && caused.length ? `${c} was raised to fix an incident, and other incidents name it as their cause.`
+      : fixes.length ? `${c} was raised to fix incident ${fixes[0].number}.` : `These incidents name change ${c} as their cause.`,
+    [role(change || missing(c, 'Change'), 'Change'), ...fixes.map(t => role(t, 'Incident it fixes')), ...caused.map(t => role(t, 'Incident it caused'))], wanted);
+}
+
+function orderFamily(order, together, wanted) {
+  return family('order', order,
+    `${plural(together.length, 'request', 'requests')} ordered together in ${order}`,
+    `${order} is one order (REQ); each request (RITM) in it is a separate item that was ordered at the same time.`,
+    together.map(t => role(t, 'Request')), wanted);
+}
+
+function bundleFamily(p, parent, children, wanted) {
+  return family('bundle-request', p,
+    `Request ${p} and its ${plural(children.length, 'child request', 'child requests')}`,
+    `${p} is a bundle request; it was split into child requests, one for each part of the work (for example one per server to start or stop).`,
+    [role(parent || missing(p, 'Request'), 'Parent request'), ...children.map(c => role(c, 'Child request'))], wanted);
+}
+
+function requestTasksFamily(r, request, tasks, wanted) {
+  return family('request-tasks', r,
+    `Request ${r} and its ${plural(tasks.length, 'catalog task', 'catalog tasks')}`,
+    `Catalog tasks are the pieces of work that fulfil request ${r}; each is done by a fulfilment team.`,
+    [role(request || missing(r, 'Request'), 'Request'), ...tasks.map(t => role(t, 'Task'))], wanted);
+}
+
 export async function relatedFamilies(numbers, runQuery) {
   const wantedList = [...new Set(numbers.map(n => String(n).toUpperCase()))].filter(n => TICKET_NUMBER.test(n)).slice(0, MAX_TICKETS);
   if (!wantedList.length) return [];
@@ -169,22 +217,14 @@ export async function relatedFamilies(numbers, runQuery) {
   const parentsByNumber = byNumber(parentIncs);
   for (const p of parentIncidents) {
     const children = childIncs.filter(c => c.parentIncident === p);
-    if (!children.length) continue;
-    const parent = parentsByNumber.get(p) || missing(p, 'Incident');
-    families.push(family('parent-incident', p,
-      `Parent incident ${p} and its ${plural(children.length, 'child incident', 'child incidents')}`,
-      `${p} is a parent (master) incident: it groups incidents raised for the same issue, such as several alerts or reports about one fault, so they are worked and resolved together.`,
-      [role(parent, 'Parent'), ...children.map(c => role(c, 'Child'))], wanted));
+    if (children.length) families.push(parentIncidentFamily(p, parentsByNumber.get(p), children, wanted));
   }
 
   // Problem record
   for (const prb of problems) {
-    const linked = [...problemIncs.filter(t => t.problem === prb).map(t => role(t, 'Incident')), ...problemChgs.filter(t => t.problem === prb).map(t => role(t, 'Change'))];
-    if (linked.length < 2) continue;
-    families.push(family('problem', prb,
-      `${plural(linked.length, 'ticket', 'tickets')} linked to problem ${prb}`,
-      `These tickets were all linked to problem ${prb}, the investigation into their shared root cause. The problem record itself isn't in this export.`,
-      linked, wanted));
+    const incidents = problemIncs.filter(t => t.problem === prb);
+    const linkedChanges = problemChgs.filter(t => t.problem === prb);
+    if (incidents.length + linkedChanges.length >= 2) families.push(problemFamily(prb, incidents, linkedChanges, wanted));
   }
 
   // Change <-> incident: the incident a change fixes, and incidents it caused
@@ -194,47 +234,27 @@ export async function relatedFamilies(numbers, runQuery) {
     const change = changesByNumber.get(c) || missing(c, 'Change');
     const fixes = change.fixesIncident ? [fixedByNumber.get(change.fixesIncident) || incs.find(t => t.number === change.fixesIncident) || missing(change.fixesIncident, 'Incident')] : [];
     const caused = causedIncs.filter(t => t.causedByChange === c);
-    if (!fixes.length && !caused.length) continue;
-    const parts = [fixes.length ? `raised to fix ${fixes[0].number}` : '', caused.length ? `the cause of ${plural(caused.length, 'incident', 'incidents')}` : ''].filter(Boolean);
-    families.push(family('change-incident', c,
-      `Change ${c}: ${parts.join(', and ')}`,
-      fixes.length && caused.length ? `${c} was raised to fix an incident, and other incidents name it as their cause.`
-        : fixes.length ? `${c} was raised to fix incident ${fixes[0].number}.` : `These incidents name change ${c} as their cause.`,
-      [role(change, 'Change'), ...fixes.map(t => role(t, 'Incident it fixes')), ...caused.map(t => role(t, 'Incident it caused'))], wanted));
+    if (fixes.length || caused.length) families.push(changeFamily(c, change, fixes, caused, wanted));
   }
 
   // Requests ordered together
   for (const order of orders) {
     const together = orderRitms.filter(t => t.order === order);
-    if (together.length < 2) continue;
-    families.push(family('order', order,
-      `${plural(together.length, 'request', 'requests')} ordered together in ${order}`,
-      `${order} is one order (REQ); each request (RITM) in it is a separate item that was ordered at the same time.`,
-      together.map(t => role(t, 'Request')), wanted));
+    if (together.length >= 2) families.push(orderFamily(order, together, wanted));
   }
 
   // Bundle request and its child requests
   const parentRitmsByNumber = byNumber(parentRitms);
   for (const p of parentRequests) {
     const children = childRitms.filter(t => t.parentRequest === p);
-    if (!children.length) continue;
-    const parent = parentRitmsByNumber.get(p) || missing(p, 'Request');
-    families.push(family('bundle-request', p,
-      `Request ${p} and its ${plural(children.length, 'child request', 'child requests')}`,
-      `${p} is a bundle request; it was split into child requests, one for each part of the work (for example one per server to start or stop).`,
-      [role(parent, 'Parent request'), ...children.map(c => role(c, 'Child request'))], wanted));
+    if (children.length) families.push(bundleFamily(p, parentRitmsByNumber.get(p), children, wanted));
   }
 
   // A request and the catalog tasks that fulfil it
   const taskRitmsByNumber = byNumber(taskRitms);
   for (const r of requestItems) {
     const itsTasks = taskSiblings.filter(t => t.requestItem === r);
-    if (!itsTasks.length) continue;
-    const request = taskRitmsByNumber.get(r) || missing(r, 'Request');
-    families.push(family('request-tasks', r,
-      `Request ${r} and its ${plural(itsTasks.length, 'catalog task', 'catalog tasks')}`,
-      `Catalog tasks are the pieces of work that fulfil request ${r}; each is done by a fulfilment team.`,
-      [role(request, 'Request'), ...itsTasks.map(t => role(t, 'Task'))], wanted));
+    if (itsTasks.length) families.push(requestTasksFamily(r, taskRitmsByNumber.get(r), itsTasks, wanted));
   }
 
   // One ticket: every family it is in. A list: families two or more of them share.
@@ -372,4 +392,111 @@ export async function ticketLinks(numbers, runQuery) {
     }
   }
   return new Map(wanted.map(n => [n, linkCache.get(n)]));
+}
+
+// =====================================================================
+// THE TICKET FAMILIES PAGE (the Dashboards tab): every family of one kind,
+// biggest first, and one family with all its members. The lists come from
+// one grouped count per kind and are kept (the data never changes).
+// =====================================================================
+
+export const FAMILY_KINDS = ['parent-incident', 'bundle-request', 'request-tasks', 'order', 'problem', 'change-incident'];
+// What each kind's families are anchored on
+export const FAMILY_ANCHOR = {
+  'parent-incident': /^INC\d{7}$/, 'bundle-request': /^RITM\d{7}$/, 'request-tasks': /^RITM\d{7}$/,
+  order: /^REQ\d{7}$/, problem: /^PRB\d{7}$/, 'change-incident': /^CHG\d{7}$/,
+};
+// ticketLinks names two kinds differently
+export const LINK_KIND = { 'parent-incident': 'parent-incident', bundle: 'bundle-request', 'request-tasks': 'request-tasks', order: 'order', problem: 'problem', change: 'change-incident' };
+
+// How many tickets of a type have each value in a link column (every value)
+async function allCounts(cube, column, runQuery) {
+  const rows = await runQuery({
+    measures: [`${cube}.count`],
+    dimensions: [`${cube}.${column}`],
+    filters: [{ member: `${cube}.${column}`, operator: 'set' }],
+    limit: 50000,
+  });
+  return new Map(rows.map(r => [clean(r[`${cube}.${column}`]), Number(r[`${cube}.count`]) || 0]).filter(([key]) => key));
+}
+
+// kind -> [{ anchor, children, size }], biggest first. children: the tickets
+// besides the anchor (for an order or a problem, every ticket in it).
+async function buildFamilyList(kind, runQuery) {
+  const entries = map => [...map];
+  let list = [];
+  if (kind === 'parent-incident') list = entries(await allCounts('incident', 'parent_incident', runQuery)).map(([anchor, n]) => ({ anchor, children: n, size: n + 1 }));
+  if (kind === 'bundle-request') list = entries(await allCounts('sc_req_item', 'parent', runQuery)).map(([anchor, n]) => ({ anchor, children: n, size: n + 1 }));
+  if (kind === 'request-tasks') list = entries(await allCounts('sc_task', 'request_item', runQuery)).map(([anchor, n]) => ({ anchor, children: n, size: n + 1 }));
+  if (kind === 'order') list = entries(await allCounts('sc_req_item', 'request', runQuery)).filter(([, n]) => n >= 2).map(([anchor, n]) => ({ anchor, children: n, size: n }));
+  if (kind === 'problem') {
+    const [incs, chgs] = await Promise.all([allCounts('incident', 'problem', runQuery), allCounts('change_request', 'problem', runQuery)]);
+    list = [...new Set([...incs.keys(), ...chgs.keys()])].map(anchor => {
+      const n = (incs.get(anchor) || 0) + (chgs.get(anchor) || 0);
+      return { anchor, children: n, size: n };
+    });
+  }
+  if (kind === 'change-incident') {
+    const [fixRows, caused] = await Promise.all([
+      runQuery({ dimensions: ['change_request.number', 'change_request.incident'], filters: [{ member: 'change_request.incident', operator: 'set' }], limit: 50000 }),
+      allCounts('incident', 'caused_by_change', runQuery),
+    ]);
+    const fixes = new Set(fixRows.map(r => clean(r['change_request.number'])).filter(Boolean));
+    list = [...new Set([...fixes, ...caused.keys()])].map(anchor => {
+      const n = (fixes.has(anchor) ? 1 : 0) + (caused.get(anchor) || 0);
+      return { anchor, children: n, size: n + 1 };
+    });
+  }
+  return list.filter(f => FAMILY_ANCHOR[kind].test(f.anchor)).sort((a, b) => (b.size - a.size) || b.anchor.localeCompare(a.anchor));
+}
+
+const familyLists = new Map();
+export function familyList(kind, runQuery) {
+  if (!familyLists.has(kind)) {
+    const pending = buildFamilyList(kind, runQuery);
+    familyLists.set(kind, pending);
+    pending.catch(() => familyLists.delete(kind));
+  }
+  return familyLists.get(kind);
+}
+
+// For the page's tabs: per kind, how many families and how many tickets they hold
+export async function familySummary(runQuery) {
+  const lists = await Promise.all(FAMILY_KINDS.map(kind => familyList(kind, runQuery)));
+  return Object.fromEntries(FAMILY_KINDS.map((kind, i) => [kind, {
+    families: lists[i].length,
+    tickets: lists[i].reduce((sum, f) => sum + f.children, 0),
+  }]));
+}
+
+// One family with every member, compared (the same shape as relatedFamilies'), or null
+export async function familyOf(kind, anchor, runQuery) {
+  if (!FAMILY_KINDS.includes(kind) || !FAMILY_ANCHOR[kind].test(anchor)) return null;
+  const wanted = new Set([anchor]);
+  const one = async (prefix, column) => (await queryTickets(prefix, [[column, [anchor]]], runQuery));
+  if (kind === 'parent-incident') {
+    const [parent, children] = await Promise.all([one('INC', 'number'), one('INC', 'parent_incident')]);
+    return children.length ? parentIncidentFamily(anchor, parent[0], children, wanted) : null;
+  }
+  if (kind === 'bundle-request') {
+    const [parent, children] = await Promise.all([one('RITM', 'number'), one('RITM', 'parent')]);
+    return children.length ? bundleFamily(anchor, parent[0], children, wanted) : null;
+  }
+  if (kind === 'request-tasks') {
+    const [request, tasks] = await Promise.all([one('RITM', 'number'), one('SCTASK', 'request_item')]);
+    return tasks.length ? requestTasksFamily(anchor, request[0], tasks, wanted) : null;
+  }
+  if (kind === 'order') {
+    const together = await one('RITM', 'request');
+    return together.length ? orderFamily(anchor, together, wanted) : null;
+  }
+  if (kind === 'problem') {
+    const [incidents, changes] = await Promise.all([one('INC', 'problem'), one('CHG', 'problem')]);
+    return incidents.length + changes.length ? problemFamily(anchor, incidents, changes, wanted) : null;
+  }
+  const [change, caused] = await Promise.all([one('CHG', 'number'), one('INC', 'caused_by_change')]);
+  const fixesNumber = change[0]?.fixesIncident;
+  const fixes = fixesNumber ? (await queryTickets('INC', [['number', [fixesNumber]]], runQuery)) : [];
+  const fixed = fixesNumber ? [fixes[0] || missing(fixesNumber, 'Incident')] : [];
+  return fixed.length || caused.length ? changeFamily(anchor, change[0], fixed, caused, wanted) : null;
 }

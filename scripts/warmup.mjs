@@ -151,6 +151,21 @@ for (const d of list.dashboards || []) {
   }
 }
 
+// 👪 Ticket families (built into OneTouch): its lists are worked out once, then kept
+{
+  const t0 = performance.now();
+  const r = await fetch(`${base}/api/families`, { headers: auth });
+  const data = await r.json().catch(() => ({}));
+  if (r.ok) {
+    const kinds = Object.keys(data.kinds || {});
+    await Promise.all(kinds.map(kind => fetch(`${base}/api/families/${kind}`, { headers: auth })));
+    console.log(`  ✓ Ticket families  (${kinds.length} kinds of family, ${secs(performance.now() - t0)})`);
+  } else {
+    problems.push(`Ticket families: ${data.error || `the server answered ${r.status}`}`);
+    console.log(`  ✗ Ticket families  (${data.error || r.status})`);
+  }
+}
+
 await fetch(`${base}/api/logout`, { method: 'POST', headers: auth });
 
 console.log('\n' + '='.repeat(64));

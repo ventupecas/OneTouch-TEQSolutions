@@ -35,7 +35,8 @@ const FILES = [
   // Added later; at the end so the guide's links to B.1-B.36 keep their numbers
   'tickets.mjs', 'stars.mjs', 'scripts/share.mjs', 'scripts/warmup.mjs', 'scripts/warmup-questions.txt',
   'seen.mjs', 'relations.mjs',
-  'prefs.mjs', 'charts.mjs', 'public/charts.js', 'public/customize.js', 'shares.mjs',
+  'prefs.mjs', 'charts.mjs', 'public/charts.js', 'public/customize.js', 'shares.mjs', 'public/families.js',
+  'scripts/signin-links.mjs',
 ];
 
 // Not copied in, and why (shown in the appendix)

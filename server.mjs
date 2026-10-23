@@ -1,5 +1,6 @@
 import dns from 'node:dns/promises';
-import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -16,7 +17,7 @@ import * as auth from './auth.mjs';
 import * as stars from './stars.mjs';
 import * as seen from './seen.mjs';
 import { findTickets, ticketRecord, ticketSummaries, ticketNumbersIn, STARRABLE } from './tickets.mjs';
-import { relatedFamilies, describeFamilies, ticketLinks } from './relations.mjs';
+import { relatedFamilies, describeFamilies, ticketLinks, FAMILY_KINDS, LINK_KIND, familyList, familySummary, familyOf } from './relations.mjs';
 import * as prefs from './prefs.mjs';
 import { chartData, chartValues, chartCatalog, chartTickets, chartFromQuery, teamValues, ChartError } from './charts.mjs';
 import * as shares from './shares.mjs';
@@ -71,6 +72,32 @@ app.use('/api/export', express.json({ limit: '25mb' }));
 // A whole set of dashboards is saved (or a dashboard shared) at once
 app.use(['/api/preferences', '/api/shares'], express.json({ limit: '1mb' }));
 app.use(express.json());
+
+// The page names its scripts and stylesheet with a version made from their
+// contents (app.js?v=1a2b3c4d5e). Cloudflare tells browsers to keep those
+// files for hours, so a changed file needs a new address to reach people
+// straight away. The page itself is never kept, so it always names the latest.
+const VERSIONED_ASSET = /(<script src="|<link rel="stylesheet" href=")([\w-]+\.(?:js|css))(")/g;
+const assetVersions = new Map(); // file -> { mtimeMs, version }
+function assetVersion(file) {
+  const full = `public/${file}`;
+  const { mtimeMs } = statSync(full);
+  const known = assetVersions.get(file);
+  if (known?.mtimeMs === mtimeMs) return known.version;
+  const version = createHash('sha256').update(readFileSync(full)).digest('hex').slice(0, 10);
+  assetVersions.set(file, { mtimeMs, version });
+  return version;
+}
+app.get(['/', '/index.html'], (req, res, next) => {
+  try {
+    const html = readFileSync('public/index.html', 'utf8')
+      .replace(VERSIONED_ASSET, (match, before, file, after) => `${before}${file}?v=${assetVersion(file)}${after}`);
+    res.set('Cache-Control', 'no-cache').type('html').send(html);
+  } catch (error) {
+    console.error(`📄 Could not version the page's files: ${error.message}`);
+    next(); // the plain page, from express.static
+  }
+});
 app.use(express.static('public'));
 
 // =====================================================================
@@ -201,7 +228,7 @@ async function requireLogin(req, res, next) {
   next();
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families'], requireLogin);
 
 // Who is signed in (the page shows their display name)
 app.get('/api/me', (req, res) => {
@@ -637,6 +664,77 @@ app.post('/api/tickets/related', async (req, res) => {
   } catch (error) {
     console.error('🔗 Could not find related tickets:', error.message);
     res.status(502).json({ error: `Could not look for related tickets right now: ${error.message}` });
+  }
+});
+
+// =====================================================================
+// THE TICKET FAMILIES PAGE (relations.mjs): every family of one kind,
+// one family with all its members, and the families a ticket is in
+// =====================================================================
+
+// Each family row with its anchor's summary (null for an order or a problem record)
+async function withAnchors(rows) {
+  const summaries = await ticketSummaries(rows.map(r => r.anchor), runCubeQuery);
+  return rows.map(r => ({ ...r, ticket: summaries.get(r.anchor) || null }));
+}
+
+function familiesFailed(res, error) {
+  console.error('👪 Ticket families failed:', error.message);
+  res.status(502).json({ error: `The ticket families could not be loaded right now: ${error.message}` });
+}
+
+// -> { kinds: { kind: { families, tickets } } }
+app.get('/api/families', async (_req, res) => {
+  try {
+    res.json({ kinds: await familySummary(runCubeQuery) });
+  } catch (error) {
+    familiesFailed(res, error);
+  }
+});
+
+// ?number=INC1813970 -> the families that ticket is in, as list rows
+app.get('/api/families/find', async (req, res) => {
+  const number = String(req.query.number || '').trim().toUpperCase();
+  if (!STARRABLE.test(number)) return res.status(400).json({ error: 'Type a ticket number, like INC1813970, CHG1100098, RITM0440458 or SCTASK0595823.' });
+  try {
+    const [links, found] = await Promise.all([ticketLinks([number], runCubeQuery), ticketSummaries([number], runCubeQuery)]);
+    const rows = [];
+    for (const f of links.get(number)?.families || []) {
+      const kind = LINK_KIND[f.kind];
+      const entry = (await familyList(kind, runCubeQuery)).find(e => e.anchor === f.anchor);
+      if (entry) rows.push({ kind, ...entry });
+    }
+    res.json({ number, known: found.has(number), families: await withAnchors(rows) });
+  } catch (error) {
+    familiesFailed(res, error);
+  }
+});
+
+// ?sort=size|newest|oldest&offset&limit -> { total, families: one page of rows }
+app.get('/api/families/:kind', async (req, res) => {
+  const kind = req.params.kind;
+  if (!FAMILY_KINDS.includes(kind)) return res.status(400).json({ error: 'Unknown kind of family.' });
+  const offset = Math.max(0, Number.parseInt(req.query.offset, 10) || 0);
+  const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 50));
+  try {
+    let list = await familyList(kind, runCubeQuery);
+    // Ticket numbers go up over time, so the newest parent has the highest number
+    if (req.query.sort === 'newest') list = [...list].sort((a, b) => b.anchor.localeCompare(a.anchor));
+    if (req.query.sort === 'oldest') list = [...list].sort((a, b) => a.anchor.localeCompare(b.anchor));
+    res.json({ kind, total: list.length, families: await withAnchors(list.slice(offset, offset + limit)) });
+  } catch (error) {
+    familiesFailed(res, error);
+  }
+});
+
+// -> { family }: every member, with what they share and where they differ
+app.get('/api/families/:kind/:anchor', async (req, res) => {
+  try {
+    const family = await familyOf(req.params.kind, String(req.params.anchor).toUpperCase(), runCubeQuery);
+    if (!family) return res.status(404).json({ error: 'That family is not in the data.' });
+    res.json({ family });
+  } catch (error) {
+    familiesFailed(res, error);
   }
 });
 

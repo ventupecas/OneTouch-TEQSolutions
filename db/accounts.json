@@ -227,6 +227,20 @@
       "updatedAt": "2026-10-20T15:26:10.457Z"
     },
     {
+      "username": "tester1",
+      "displayName": "Test Account 1",
+      "passwordHash": "scrypt$16384$8$1$Q2GyHpfgEWz/tjuyyQLwSQ==$SPzJH4fp4C6r2CY7olYXtZdj3V2iz+UncFL1Ra/zs/1eWFfWxTdc0tHYkWp/e6Pzl806WWmzjtwSVxB8ZDc4Ew==",
+      "active": true,
+      "updatedAt": "2026-10-23T19:30:54.359Z"
+    },
+    {
+      "username": "tester2",
+      "displayName": "Test Account 2",
+      "passwordHash": "scrypt$16384$8$1$4jSZatjRaLxC9NIkiqZBaA==$ZL4LXHEFWfDLbeKrTzq1iPuwBmwXq3qv/2yg9UzAA+alObm38XQxmR2kh+sSXJ+2CzCTk3w3MKWDKuxCL1t6xQ==",
+      "active": true,
+      "updatedAt": "2026-10-23T19:30:55.054Z"
+    },
+    {
       "username": "vperez",
       "displayName": "Ventura Perez",
       "passwordHash": "scrypt$16384$8$1$wbWfSRUURr514QZqlHZ2JQ==$NRQCtRuRe6Msy2avtv4t1l5kT+hm6o6HiSUAIiaCS4QVXeynqCnGXWq9ma2HCJJADYWildMMZIJuOGyFtF/jDA==",
