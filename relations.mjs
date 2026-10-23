@@ -252,3 +252,124 @@ export function describeFamilies(families) {
     return `${f.title}${same ? `; all share ${same}` : ''}${differ ? `; they differ in ${differ}` : ''}.`;
   }).join(' ');
 }
+
+// =====================================================================
+// PARENT AND FAMILY, for lists (Ticket results, Starred tickets): each
+// ticket's parent, and the families it is in with how many tickets each
+// has, from the ticket's own link columns plus one count per kind of
+// family. Lighter than relatedFamilies (no members are fetched), so it
+// works for a whole list. The export is frozen, so a ticket's answer is
+// kept and reused.
+// =====================================================================
+
+const MAX_LINK_TICKETS = 2000;
+// Each ticket's link columns
+const LINK_COLUMNS = {
+  INC: ['parent_incident', 'problem', 'caused_by_change'],
+  CHG: ['incident', 'problem'],
+  RITM: ['parent', 'request'],
+  SCTASK: ['request_item'],
+};
+const linkCache = new Map(); // number -> { parent, families }
+const LINK_CACHE_SIZE = 50000;
+
+async function linkRows(prefix, column, values, runQuery) {
+  if (!values.length) return [];
+  const { cube } = TICKET_KINDS[prefix];
+  const columns = ['number', ...LINK_COLUMNS[prefix]];
+  const rows = await runQuery({
+    dimensions: columns.map(c => `${cube}.${c}`),
+    filters: [{ member: `${cube}.${column}`, operator: 'equals', values }],
+    limit: 5000,
+  });
+  return rows.map(r => Object.fromEntries(columns.map(c => [c, clean(r[`${cube}.${c}`])])));
+}
+
+// How many tickets of a type have each of these values in a link column
+async function countBy(cube, column, values, runQuery) {
+  if (!values.length) return new Map();
+  const rows = await runQuery({
+    measures: [`${cube}.count`],
+    dimensions: [`${cube}.${column}`],
+    filters: [{ member: `${cube}.${column}`, operator: 'equals', values }],
+    limit: 5000,
+  });
+  return new Map(rows.map(r => [clean(r[`${cube}.${column}`]), Number(r[`${cube}.count`]) || 0]));
+}
+
+// numbers -> Map(number -> { parent: number or '', families: [{ key, kind, anchor, name, size }] }).
+// key (kind + anchor) is the same for every member of one family, so a list
+// can be grouped by issue.
+export async function ticketLinks(numbers, runQuery) {
+  const wanted = [...new Set(numbers.map(n => String(n).toUpperCase()))].filter(n => TICKET_NUMBER.test(n)).slice(0, MAX_LINK_TICKETS);
+  const todo = wanted.filter(n => !linkCache.has(n));
+  if (todo.length) {
+    const of = prefix => todo.filter(n => prefixOf(n) === prefix);
+    const uniq = list => [...new Set(list.filter(Boolean))];
+    const [incs, chgs, ritms, tasks, fixers] = await Promise.all([
+      linkRows('INC', 'number', of('INC'), runQuery),
+      linkRows('CHG', 'number', of('CHG'), runQuery),
+      linkRows('RITM', 'number', of('RITM'), runQuery),
+      linkRows('SCTASK', 'number', of('SCTASK'), runQuery),
+      // Changes raised to fix these incidents
+      linkRows('CHG', 'incident', of('INC'), runQuery),
+    ]);
+    const parentIncidents = uniq([...incs.map(t => t.parent_incident), ...incs.map(t => t.number)]);
+    const problems = uniq([...incs, ...chgs].map(t => t.problem));
+    const changes = uniq([...incs.map(t => t.caused_by_change), ...chgs.map(t => t.number), ...fixers.map(f => f.number)]);
+    const orders = uniq(ritms.map(t => t.request));
+    const bundles = uniq([...ritms.map(t => t.parent), ...ritms.map(t => t.number)]);
+    const requestItems = uniq([...ritms.map(t => t.number), ...tasks.map(t => t.request_item)]);
+    const [children, problemIncs, problemChgs, caused, orderSize, bundleSize, taskCount, changeRows] = await Promise.all([
+      countBy('incident', 'parent_incident', parentIncidents, runQuery),
+      countBy('incident', 'problem', problems, runQuery),
+      countBy('change_request', 'problem', problems, runQuery),
+      countBy('incident', 'caused_by_change', changes, runQuery),
+      countBy('sc_req_item', 'request', orders, runQuery),
+      countBy('sc_req_item', 'parent', bundles, runQuery),
+      countBy('sc_task', 'request_item', requestItems, runQuery),
+      linkRows('CHG', 'number', changes, runQuery),
+    ]);
+    const fixes = new Map(changeRows.map(c => [c.number, c.incident]));
+    const family = (kind, anchor, name, size) => ({ key: `${kind}:${anchor}`, kind, anchor, name, size });
+    const problemFamily = prb => family('problem', prb, `Problem ${prb}`, (problemIncs.get(prb) || 0) + (problemChgs.get(prb) || 0));
+    // A change, the incident it fixes, and the incidents it caused
+    const changeFamily = c => family('change', c, `Change ${c}`, 1 + (fixes.get(c) ? 1 : 0) + (caused.get(c) || 0));
+    const found = new Map();
+
+    for (const t of incs) {
+      const families = [];
+      const parent = t.parent_incident;
+      if (parent) families.push(family('parent-incident', parent, `Parent incident ${parent}`, (children.get(parent) || 0) + 1));
+      else if (children.get(t.number)) families.push(family('parent-incident', t.number, `Parent incident ${t.number}`, children.get(t.number) + 1));
+      if (t.problem) families.push(problemFamily(t.problem));
+      for (const c of uniq([t.caused_by_change, ...fixers.filter(f => f.incident === t.number).map(f => f.number)])) families.push(changeFamily(c));
+      found.set(t.number, { parent, families });
+    }
+    for (const t of chgs) {
+      const families = [];
+      if (t.incident || caused.get(t.number)) families.push(changeFamily(t.number));
+      if (t.problem) families.push(problemFamily(t.problem));
+      found.set(t.number, { parent: '', families });
+    }
+    for (const t of ritms) {
+      const families = [];
+      if (t.parent) families.push(family('bundle', t.parent, `Bundle request ${t.parent}`, (bundleSize.get(t.parent) || 0) + 1));
+      else if (bundleSize.get(t.number)) families.push(family('bundle', t.number, `Bundle request ${t.number}`, bundleSize.get(t.number) + 1));
+      if (t.request && (orderSize.get(t.request) || 0) >= 2) families.push(family('order', t.request, `Order ${t.request}`, orderSize.get(t.request)));
+      if (taskCount.get(t.number)) families.push(family('request-tasks', t.number, `Request ${t.number} and its tasks`, taskCount.get(t.number) + 1));
+      // A child request's parent is its bundle request; otherwise its order (REQ)
+      found.set(t.number, { parent: t.parent || t.request, families });
+    }
+    for (const t of tasks) {
+      const families = t.request_item
+        ? [family('request-tasks', t.request_item, `Request ${t.request_item} and its tasks`, (taskCount.get(t.request_item) || 0) + 1)] : [];
+      found.set(t.number, { parent: t.request_item, families });
+    }
+    for (const n of todo) {
+      linkCache.set(n, found.get(n) || { parent: '', families: [] });
+      if (linkCache.size > LINK_CACHE_SIZE) linkCache.delete(linkCache.keys().next().value);
+    }
+  }
+  return new Map(wanted.map(n => [n, linkCache.get(n)]));
+}

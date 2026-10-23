@@ -45,6 +45,12 @@ export async function clearSeen(userId) {
   return rowCount;
 }
 
+// The tickets someone ticked and removed from their list. -> how many went
+export async function removeSeen(userId, numbers) {
+  const { rowCount } = await pool.query('DELETE FROM seen_tickets WHERE user_id = $1 AND number = ANY($2::text[])', [userId, numbers]);
+  return rowCount;
+}
+
 // Newest first
 export async function listSeen(userId) {
   const { rows } = await pool.query(

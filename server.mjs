@@ -16,7 +16,7 @@ import * as auth from './auth.mjs';
 import * as stars from './stars.mjs';
 import * as seen from './seen.mjs';
 import { findTickets, ticketRecord, ticketSummaries, ticketNumbersIn, STARRABLE } from './tickets.mjs';
-import { relatedFamilies, describeFamilies } from './relations.mjs';
+import { relatedFamilies, describeFamilies, ticketLinks } from './relations.mjs';
 import * as prefs from './prefs.mjs';
 import { chartData, chartValues, chartCatalog, chartTickets, chartFromQuery, teamValues, ChartError } from './charts.mjs';
 import * as shares from './shares.mjs';
@@ -645,8 +645,9 @@ app.post('/api/tickets/related', async (req, res) => {
 app.get('/api/seen-tickets', async (req, res) => {
   try {
     const list = await seen.listSeen(req.user.id);
-    const summaries = await ticketSummaries(list.map(s => s.number), runCubeQuery);
-    res.json({ tickets: list.filter(s => summaries.has(s.number)).map(s => ({ ...summaries.get(s.number), shownAt: s.shownAt, question: s.question })) });
+    const numbers = list.map(s => s.number);
+    const [summaries, links] = await Promise.all([ticketSummaries(numbers, runCubeQuery), linksOrNone(numbers)]);
+    res.json({ tickets: list.filter(s => summaries.has(s.number)).map(s => ({ ...summaries.get(s.number), ...links.get(s.number), shownAt: s.shownAt, question: s.question })) });
   } catch (error) {
     console.error('🎫 Could not list the shown tickets:', error.message);
     res.status(503).json({ error: 'Your ticket results could not be loaded right now.' });
@@ -665,6 +666,31 @@ app.delete('/api/seen-tickets', async (req, res) => {
   }
 });
 
+// Each ticket's parent and families (relations.mjs) for a list; if that fails, the
+// list still shows, just without them
+async function linksOrNone(numbers) {
+  try {
+    return await ticketLinks(numbers, runCubeQuery);
+  } catch (error) {
+    console.error('🔗 Could not look up parents and families:', error.message);
+    return new Map();
+  }
+}
+
+// { numbers } -> the ones someone ticked leave their Ticket results (the rest stay)
+app.post('/api/seen-tickets/remove', async (req, res) => {
+  const numbers = (Array.isArray(req.body?.numbers) ? req.body.numbers : []).map(n => String(n).toUpperCase()).filter(n => STARRABLE.test(n)).slice(0, seen.MAX_SEEN);
+  if (!numbers.length) return res.status(400).json({ error: 'No tickets to remove.' });
+  try {
+    const removed = await seen.removeSeen(req.user.id, numbers);
+    console.log(`🎫 ${req.user.username} removed ${removed} from their ticket results`);
+    res.json({ ok: true, removed });
+  } catch (error) {
+    console.error('🎫 Could not remove from the ticket results:', error.message);
+    res.status(503).json({ error: 'Those tickets could not be removed right now.' });
+  }
+});
+
 // A ticket record someone opened (clicked a ticket number): it joins their Ticket results
 app.post('/api/seen-tickets', async (req, res) => {
   const numbers = (Array.isArray(req.body?.numbers) ? req.body.numbers : []).map(n => String(n).toUpperCase()).filter(n => STARRABLE.test(n)).slice(0, 50);
@@ -678,9 +704,19 @@ app.post('/api/seen-tickets', async (req, res) => {
   }
 });
 
+// ?details=1: also each starred ticket's summary, parent and families (for the
+// Starred tickets list), and the stars that aren't in the data
 app.get('/api/stars', async (req, res) => {
   try {
-    res.json({ stars: await stars.listStars(req.user.id) });
+    const list = await stars.listStars(req.user.id);
+    if (!req.query.details) return res.json({ stars: list });
+    const numbers = list.map(s => s.number);
+    const [summaries, links] = await Promise.all([ticketSummaries(numbers, runCubeQuery), linksOrNone(numbers)]);
+    res.json({
+      stars: list,
+      tickets: list.filter(s => summaries.has(s.number)).map(s => ({ ...summaries.get(s.number), ...links.get(s.number), starredAt: s.starredAt })),
+      notFound: numbers.filter(n => !summaries.has(n)),
+    });
   } catch (error) {
     console.error('⭐ Could not list stars:', error.message);
     res.status(503).json({ error: 'Your starred tickets could not be loaded right now.' });
@@ -698,6 +734,18 @@ app.put('/api/stars', async (req, res) => {
   } catch (error) {
     console.error('⭐ Could not star all:', error.message);
     res.status(503).json({ error: 'Those tickets could not be starred right now.' });
+  }
+});
+
+// { numbers } -> unstars them all at once (ticked ones, a whole family, or every star)
+app.post('/api/stars/remove', async (req, res) => {
+  const numbers = (Array.isArray(req.body?.numbers) ? req.body.numbers : []).map(n => String(n).toUpperCase()).filter(n => STARRABLE.test(n)).slice(0, stars.MAX_STARS);
+  if (!numbers.length) return res.status(400).json({ error: 'No tickets to unstar.' });
+  try {
+    res.json({ ok: true, removed: await stars.removeStars(req.user.id, numbers) });
+  } catch (error) {
+    console.error('⭐ Could not unstar many:', error.message);
+    res.status(503).json({ error: 'Those tickets could not be unstarred right now.' });
   }
 });
 

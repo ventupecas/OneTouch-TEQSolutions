@@ -63,3 +63,9 @@ export async function addStars(userId, numbers) {
 export async function removeStar(userId, number) {
   await pool.query('DELETE FROM starred_tickets WHERE user_id = $1 AND number = $2', [userId, number]);
 }
+
+// Unstars many at once (ticked ones, a whole family, or all). -> how many were unstarred
+export async function removeStars(userId, numbers) {
+  const { rowCount } = await pool.query('DELETE FROM starred_tickets WHERE user_id = $1 AND number = ANY($2::text[])', [userId, numbers]);
+  return rowCount;
+}
