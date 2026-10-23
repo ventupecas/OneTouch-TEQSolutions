@@ -1,9 +1,11 @@
 // =====================================================================
 // CHARTS: the charts people build themselves (their own dashboards, and
-// Home), drawn as plain SVG in the page's colors, so they follow each
-// person's color scheme. Thin marks, a hairline grid, a tooltip on every
-// mark (hover or keyboard focus), and a table view for every chart.
-// The numbers come from /api/charts/data (charts.mjs on the server).
+// Home) and AI answers shown as charts, drawn as plain SVG in the page's
+// colors, so they follow each person's color scheme. Thin marks, a
+// hairline grid, a tooltip on every mark (hover or keyboard focus), a
+// table view for every chart, a click on a mark to list its tickets, and
+// pictures (PNG / SVG) for downloads. The numbers come from
+// /api/charts/data (charts.mjs on the server) or from the AI answer.
 // Loaded before app.js, whose helpers (escapeHtml, API_BASE, ...) these
 // functions use when they run.
 // =====================================================================
@@ -11,6 +13,8 @@
 const DONUT_SLICES = 6; // part-to-whole reads at a glance only up to about six
 const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const CHART_FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+// Each ticket type keeps its color in every chart that compares types
+const ENTITY_SLOTS = { incident: 1, change_request: 2, sc_req_item: 3, sc_task: 4, change_approvals: 5, ritm_approvals: 7 };
 
 // What the builder offers and how each ticket type is named (from /api/charts/catalog)
 let chartCatalog = null;
@@ -39,7 +43,7 @@ const isTimeField = field => /_(day|week|month)$/.test(field || '');
 function fieldLabel(source, field) {
     const src = chartCatalog?.sources[source];
     const pair = src && [...src.fields, ...src.times].find(([key]) => key === field);
-    return pair ? pair[1] : field;
+    return pair ? pair[1] : String(field || '').replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
 }
 
 // "Team" -> "team", but "System (CI)" -> "system (CI)" and "SLA breached" stays
@@ -93,6 +97,18 @@ function chartTitle(chart) {
 
 const fmtDay = day => periodLabel('x_day', day, true);
 
+function datesText(dates) {
+    if (!dates || dates.preset === 'all') return '';
+    if (dates.preset === 'custom') {
+        if (dates.from && dates.to) return `Opened ${fmtDay(dates.from)} to ${fmtDay(dates.to)}`;
+        if (dates.from) return `Opened on or after ${fmtDay(dates.from)}`;
+        return dates.to ? `Opened on or before ${fmtDay(dates.to)}` : '';
+    }
+    return `Opened in the data's last ${dates.preset} days`;
+}
+
+const OP_TEXT = { equals: '', notEquals: ' is not', contains: ' contains' };
+
 // Which tickets a chart counts, in words: "Open only · Priority: P1 - Critical · Opened Aug 3 – Sep 1, 2026"
 function chartDescription(chart) {
     const src = chartCatalog?.sources[chart.source];
@@ -100,17 +116,22 @@ function chartDescription(chart) {
     if (chart.status === 'open') parts.push(`Open ${src ? src.many : ''} only (${src ? src.openStates.join(', ') : ''})`);
     if (chart.status === 'closed') parts.push(`Closed ${src ? src.many : ''} only`);
     for (const f of chart.filters || []) {
-        const shown = f.values.slice(0, 3).map(v => groupLabel({ groupBy: f.field }, v)).join(', ');
-        parts.push(`${fieldLabel(chart.source, f.field)}: ${shown}${f.values.length > 3 ? ` and ${f.values.length - 3} more` : ''}`);
+        const shown = f.values.slice(0, 3).map(v => f.op === 'contains' ? `"${v}"` : groupLabel({ groupBy: f.field }, v)).join(f.op === 'contains' ? ' or ' : ', ');
+        parts.push(`${fieldLabel(chart.source, f.field)}${OP_TEXT[f.op] || ''}: ${shown}${f.values.length > 3 ? ` and ${f.values.length - 3} more` : ''}`);
     }
-    const dates = chart.dates || { preset: 'all' };
-    if (dates.preset === 'custom' && (dates.from || dates.to)) {
-        parts.push(dates.from && dates.to ? `Opened ${fmtDay(dates.from)} to ${fmtDay(dates.to)}`
-            : dates.from ? `Opened on or after ${fmtDay(dates.from)}` : `Opened on or before ${fmtDay(dates.to)}`);
-    } else if (dates.preset !== 'all' && dates.preset !== 'custom') {
-        parts.push(`Opened in the data's last ${dates.preset} days`);
-    }
+    const dates = datesText(chart.dates);
+    if (dates) parts.push(dates);
     return parts.length ? parts.join(' · ') : `All ${src ? src.many : 'tickets'}`;
+}
+
+// A dashboard's filter row, in words: "Opened in the data's last 30 days · Team: ACN-SAP-BASIS"
+function scopeDescription(scope) {
+    if (!scope) return '';
+    const parts = [];
+    const dates = datesText(scope.dates);
+    if (dates) parts.push(dates);
+    if (scope.teams?.length) parts.push(`Team: ${scope.teams.slice(0, 3).join(', ')}${scope.teams.length > 3 ? ` and ${scope.teams.length - 3} more` : ''}`);
+    return parts.join(' · ');
 }
 
 // 0 / 950 / 1.2K / 12K / 1.5M
@@ -120,6 +141,8 @@ function compactNumber(n) {
     return String(n);
 }
 
+const share = (n, total) => `${((n / (total || 1)) * 100).toFixed(1)}%`;
+
 // ---------------------------------------------------------------------
 // Data: one request per distinct question, kept for the page's life
 // (the data is a frozen export, so an answer never changes)
@@ -128,19 +151,19 @@ function compactNumber(n) {
 const chartDataCache = new Map();
 
 // What changes the numbers; how it looks (display, color, size) doesn't
-function chartDataKey(chart) {
+function chartDataKey(chart, scope) {
     const { source, status, dates, filters, groupBy, limit, sort } = chart;
-    return JSON.stringify({ source, status, dates, filters, groupBy, limit, sort });
+    return JSON.stringify({ source, status, dates, filters, groupBy, limit, sort, scope: scope || null });
 }
 
-function fetchChartData(chart) {
-    const key = chartDataKey(chart);
+function fetchChartData(chart, scope = null) {
+    const key = chartDataKey(chart, scope);
     if (!chartDataCache.has(key)) {
         const pending = (async () => {
             const response = await fetch(`${API_BASE}/api/charts/data`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', ...authHeaders() },
-                body: JSON.stringify({ chart }),
+                body: JSON.stringify({ chart, scope }),
             });
             if (handleUnauthorized(response)) return null;
             const data = await response.json().catch(() => ({}));
@@ -209,14 +232,14 @@ function barPath(x, y, w, h, radius = 4) {
         `Q${r1(x + w)},${r1(y + h)} ${r1(x + w - r)},${r1(y + h)}H${r1(x)}Z`;
 }
 
-// A mark's tooltip, as attributes (shown on hover and keyboard focus)
-function tipAttrs(chart, row, total) {
-    const share = total ? ` (${((row.count / total) * 100).toFixed(1)}%)` : '';
-    return ` data-tip-value="${escapeHtml(row.count.toLocaleString() + share)}" data-tip-label="${escapeHtml(row.label || groupLabel(chart, row.value, true))}"`;
+// A mark's tooltip, and which row it is (for clicking through to its tickets)
+function tipAttrs(chart, row, total, index) {
+    return ` data-index="${index}" data-tip-value="${escapeHtml(`${row.count.toLocaleString()} (${share(row.count, total)})`)}"` +
+        ` data-tip-label="${escapeHtml(row.label || groupLabel(chart, row.value, true))}"`;
 }
 
-function svgOpen(width, height, label) {
-    return `<svg class="chart-svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(label)}">`;
+function svgOpen(width, height, label, cls = '') {
+    return `<svg class="chart-svg ${cls}" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(label)}">`;
 }
 
 // Hairline gridlines with their values at the left
@@ -226,14 +249,16 @@ function gridHtml(ticks, y, left, right) {
 }
 
 // Labels along the bottom: as many as fit, evenly spaced, each cut to its room
-function xLabelsHtml(chart, rows, xAt, room, baseY) {
-    const every = Math.max(1, Math.ceil(rows.length / Math.max(1, Math.floor(room.total / 72))));
-    return rows.map((row, i) => i % every ? '' :
-        `<text class="chart-tick" x="${r1(xAt(i))}" y="${baseY}" text-anchor="middle">${escapeHtml(fitText(groupLabel(chart, row.value), room.each * every - 6, 11))}</text>`).join('');
+function xLabelsHtml(labels, xAt, room, baseY) {
+    const every = Math.max(1, Math.ceil(labels.length / Math.max(1, Math.floor(room.total / 72))));
+    return labels.map((label, i) => i % every ? '' :
+        `<text class="chart-tick" x="${r1(xAt(i))}" y="${baseY}" text-anchor="middle">${escapeHtml(fitText(label, room.each * every - 6, 11))}</text>`).join('');
 }
 
+const tickWidth = ticks => Math.ceil(Math.max(...ticks.map(t => textWidth(compactNumber(t), 11)))) + 12;
+
 // ---------------------------------------------------------------------
-// The chart forms
+// One series (a count per category or per period)
 // ---------------------------------------------------------------------
 
 function chartHeight(chart) {
@@ -243,9 +268,10 @@ function chartHeight(chart) {
 // One number: the total
 function numberHtml(chart, data) {
     const src = chartCatalog?.sources[chart.source];
-    const noun = src ? (data.total === 1 ? src.one : src.many) : 'tickets';
+    const noun = src ? (data.total === 1 ? src.one : src.many) : (data.total === 1 ? 'ticket' : 'tickets');
     const state = chart.status === 'open' ? 'open ' : chart.status === 'closed' ? 'closed ' : '';
-    return `<div class="chart-stat"><span class="chart-stat-value">${data.total.toLocaleString()}</span>` +
+    return `<div class="chart-stat" data-index="all" tabindex="0" data-tip-value="${data.total.toLocaleString()}" data-tip-label="${escapeHtml(state + noun)}">` +
+        `<span class="chart-stat-value">${data.total.toLocaleString()}</span>` +
         `<span class="chart-stat-label">${escapeHtml(state + noun)}</span></div>`;
 }
 
@@ -253,13 +279,13 @@ function numberHtml(chart, data) {
 function columnsHtml(chart, data, width) {
     const rows = data.rows;
     const height = chartHeight(chart);
-    const { top, ticks } = niceScale(Math.max(...rows.map(r => r.count)));
-    const m = { top: 20, right: 8, bottom: 26, left: Math.ceil(Math.max(...ticks.map(t => textWidth(compactNumber(t), 11)))) + 12 };
+    const max = Math.max(...rows.map(r => r.count));
+    const { top, ticks } = niceScale(max);
+    const m = { top: 20, right: 8, bottom: 26, left: tickWidth(ticks) };
     const plotW = width - m.left - m.right, plotH = height - m.top - m.bottom;
     const band = plotW / rows.length;
     const barW = Math.max(2, Math.min(24, band * 0.7));
     const y = v => m.top + plotH - (v / top) * plotH;
-    const max = Math.max(...rows.map(r => r.count));
     // Values on the caps when they fit; otherwise only the biggest is labeled
     const labelAll = rows.length <= 12 && rows.every(r => textWidth(r.count.toLocaleString(), 11) <= band + 2);
     const focusable = rows.length <= 40 ? ' tabindex="0"' : '';
@@ -271,10 +297,10 @@ function columnsHtml(chart, data, width) {
         if (labelAll || (row.count === max && i === rows.findIndex(r => r.count === max))) {
             html += `<text class="chart-value" x="${r1(x + barW / 2)}" y="${r1(y(row.count) - 6)}" text-anchor="middle">${row.count.toLocaleString()}</text>`;
         }
-        html += `<rect class="chart-hit" x="${r1(m.left + i * band)}" y="${m.top}" width="${r1(band)}" height="${plotH}"${focusable}${tipAttrs(chart, row, data.total)}/>`;
+        html += `<rect class="chart-hit" x="${r1(m.left + i * band)}" y="${m.top}" width="${r1(band)}" height="${plotH}"${focusable}${tipAttrs(chart, row, data.total, i)}/>`;
     });
     html += `<line class="chart-axis" x1="${m.left}" x2="${width - m.right}" y1="${r1(y(0))}" y2="${r1(y(0))}"/>`;
-    html += xLabelsHtml(chart, rows, i => m.left + i * band + band / 2, { total: plotW, each: band }, height - 8);
+    html += xLabelsHtml(rows.map(r => groupLabel(chart, r.value)), i => m.left + i * band + band / 2, { total: plotW, each: band }, height - 8);
     return html + '</svg>';
 }
 
@@ -296,19 +322,26 @@ function barsHtml(chart, data, width) {
         html += `<text class="chart-label" x="${r1(labelW)}" y="${r1(y + barH / 2 + 4)}" text-anchor="end">${escapeHtml(fitText(labels[i], labelW, 12))}</text>`;
         if (w > 0) html += `<path class="chart-mark" d="${barPath(left, y, w, barH)}" style="fill:${seriesColor(chart)}"/>`;
         html += `<text class="chart-value" x="${r1(left + w + 6)}" y="${r1(y + barH / 2 + 4)}">${row.count.toLocaleString()}</text>`;
-        html += `<rect class="chart-hit" x="0" y="${i * rowH}" width="${width}" height="${rowH}" tabindex="0"${tipAttrs(chart, row, data.total)}/>`;
+        html += `<rect class="chart-hit" x="0" y="${i * rowH}" width="${width}" height="${rowH}" tabindex="0"${tipAttrs(chart, row, data.total, i)}/>`;
     });
     html += `<line class="chart-axis" x1="${left}" x2="${left}" y1="0" y2="${height}"/>`;
     return html + '</svg>';
 }
 
-// A line (or a line over a light wash, for "area"): best over time.
-// The pointer (or arrow keys) moves a crosshair from point to point.
+// The crosshair a line chart's pointer (or arrow keys) moves from point to point
+function crosshairHtml(m, plotW, plotH, y0, step, top, dots) {
+    return `<line class="chart-cross" x1="0" x2="0" y1="${m.top}" y2="${r1(y0)}" visibility="hidden"/>` +
+        dots.map(color => `<circle class="chart-dot chart-cross-dot" r="4" visibility="hidden" style="fill:${color}"/>`).join('') +
+        `<rect class="chart-hit line-hit" data-index="line" x="${m.left - 6}" y="${m.top}" width="${plotW + 12}" height="${plotH}" tabindex="0"` +
+        ` aria-label="Move along the line with the arrow keys" data-left="${m.left}" data-step="${r1(step)}" data-plot-h="${plotH}" data-top="${m.top}" data-max="${top}"/>`;
+}
+
+// A line (or a line over a light wash, for "area"): best over time
 function lineHtml(chart, data, width, area) {
     const rows = data.rows;
     const height = chartHeight(chart);
     const { top, ticks } = niceScale(Math.max(...rows.map(r => r.count)));
-    const m = { top: 22, right: 14, bottom: 26, left: Math.ceil(Math.max(...ticks.map(t => textWidth(compactNumber(t), 11)))) + 12 };
+    const m = { top: 22, right: 14, bottom: 26, left: tickWidth(ticks) };
     const plotW = width - m.left - m.right, plotH = height - m.top - m.bottom;
     const step = rows.length > 1 ? plotW / (rows.length - 1) : 0;
     const x = i => rows.length > 1 ? m.left + i * step : m.left + plotW / 2;
@@ -329,18 +362,14 @@ function lineHtml(chart, data, width, area) {
         html += `<text class="chart-value" x="${r1(i === last ? x(i) + 4 : x(i))}" y="${r1(y(rows[i].count) - 9)}" text-anchor="${anchor}">${rows[i].count.toLocaleString()}</text>`;
     }
     html += `<circle class="chart-dot" cx="${r1(x(last))}" cy="${r1(y(rows[last].count))}" r="4" style="fill:${color}"/>`;
-    html += xLabelsHtml(chart, rows, x, { total: plotW, each: Math.max(step, 1) }, height - 8);
-    // The crosshair, moved by the pointer or the arrow keys
-    html += `<line class="chart-cross" x1="0" x2="0" y1="${m.top}" y2="${r1(y(0))}" visibility="hidden"/>` +
-        `<circle class="chart-dot chart-cross-dot" r="4" visibility="hidden" style="fill:${color}"/>` +
-        `<rect class="chart-hit line-hit" x="${m.left - 6}" y="${m.top}" width="${plotW + 12}" height="${plotH}" tabindex="0"` +
-        ` aria-label="Move along the line with the arrow keys" data-left="${m.left}" data-step="${r1(step)}" data-plot-h="${plotH}" data-top="${m.top}" data-max="${top}"/>`;
+    html += xLabelsHtml(rows.map(r => groupLabel(chart, r.value)), x, { total: plotW, each: Math.max(step, 1) }, height - 8);
+    html += crosshairHtml(m, plotW, plotH, y(0), step, top, [color]);
     return html + '</svg>';
 }
 
-// Donut: share of the whole, at most six slices (the rest folds into "Other")
-function donutHtml(chart, data, width) {
-    let parts = data.rows.map((r, i) => ({ ...r, label: groupLabel(chart, r.value), slot: i + 1 }));
+// The donut's slices: at most six, the rest folded into "Other"
+function donutParts(chart, data) {
+    let parts = data.rows.map((r, i) => ({ ...r, label: groupLabel(chart, r.value), slot: r.slot || i + 1, index: i }));
     let otherCount = data.other?.count || 0;
     let otherGroups = data.other?.groups || 0;
     if (parts.length + (otherCount ? 1 : 0) > DONUT_SLICES) {
@@ -349,27 +378,34 @@ function donutHtml(chart, data, width) {
         otherCount += folded.reduce((s, r) => s + r.count, 0);
         otherGroups += folded.length;
     }
-    if (otherCount) parts.push({ value: '__other', label: `Other (${otherGroups.toLocaleString()})`, count: otherCount, other: true });
+    if (otherCount) parts.push({ value: '__other', label: `Other (${otherGroups.toLocaleString()})`, count: otherCount, other: true, index: 'other' });
+    return parts;
+}
+
+const donutFill = p => p.other ? 'var(--chart-other)' : `var(--series-${p.slot})`;
+
+// Donut: share of the whole, at most six slices (the rest folds into "Other")
+function donutHtml(chart, data, width) {
+    const parts = donutParts(chart, data);
     const total = data.total || 1;
     const side = width >= 440;
     const size = Math.min(side ? 190 : 170, side ? width * 0.42 : width - 20);
     const r = size / 2, inner = r * 0.62, cx = r + 2, cy = r + 2;
-    const fill = p => p.other ? 'var(--chart-other)' : `var(--series-${p.slot})`;
     let angle = -Math.PI / 2;
     let slices = '';
     for (const p of parts) {
         const sweep = (p.count / total) * Math.PI * 2;
         if (sweep <= 0) continue;
-        const tip = tipAttrs(chart, p, data.total);
+        const tip = tipAttrs(chart, p, data.total, p.index);
         if (sweep >= Math.PI * 2 - 1e-6) {
             // One slice is everything: a full ring
-            slices += `<path class="chart-mark slice" tabindex="0" d="M${cx},${cy - r}A${r},${r} 0 1 1 ${cx - 0.01},${cy - r}Z M${cx},${cy - inner}A${inner},${inner} 0 1 0 ${cx + 0.01},${cy - inner}Z" fill-rule="evenodd" style="fill:${fill(p)}"${tip}/>`;
+            slices += `<path class="chart-mark slice" tabindex="0" d="M${cx},${cy - r}A${r},${r} 0 1 1 ${cx - 0.01},${cy - r}Z M${cx},${cy - inner}A${inner},${inner} 0 1 0 ${cx + 0.01},${cy - inner}Z" fill-rule="evenodd" style="fill:${donutFill(p)}"${tip}/>`;
             break;
         }
         const a0 = angle, a1 = angle + sweep;
         const large = sweep > Math.PI ? 1 : 0;
         const pt = (rad, a) => `${r1(cx + rad * Math.cos(a))},${r1(cy + rad * Math.sin(a))}`;
-        slices += `<path class="chart-mark slice" tabindex="0" d="M${pt(r, a0)}A${r1(r)},${r1(r)} 0 ${large} 1 ${pt(r, a1)}L${pt(inner, a1)}A${r1(inner)},${r1(inner)} 0 ${large} 0 ${pt(inner, a0)}Z" style="fill:${fill(p)}"${tip}/>`;
+        slices += `<path class="chart-mark slice" tabindex="0" d="M${pt(r, a0)}A${r1(r)},${r1(r)} 0 ${large} 1 ${pt(r, a1)}L${pt(inner, a1)}A${r1(inner)},${r1(inner)} 0 ${large} 0 ${pt(inner, a0)}Z" style="fill:${donutFill(p)}"${tip}/>`;
         angle = a1;
     }
     const src = chartCatalog?.sources[chart.source];
@@ -378,37 +414,133 @@ function donutHtml(chart, data, width) {
         `<text class="chart-donut-total" x="${cx}" y="${cy + 2}" text-anchor="middle">${data.total < 100000 ? data.total.toLocaleString() : compactNumber(data.total)}</text>` +
         `<text class="chart-tick" x="${cx}" y="${cy + 18}" text-anchor="middle">${escapeHtml(src ? src.many : 'tickets')}</text></svg>`;
     // The legend names every slice, with its number and share
-    const legend = parts.map(p => `<li><span class="legend-key" style="background:${fill(p)}"></span>` +
+    const legend = parts.map(p => `<li><span class="legend-key" style="background:${donutFill(p)}"></span>` +
         `<span class="legend-name" title="${escapeHtml(p.label)}">${escapeHtml(p.label)}</span>` +
         `<span class="legend-value">${p.count.toLocaleString()}</span>` +
-        `<span class="legend-share">${((p.count / total) * 100).toFixed(1)}%</span></li>`).join('');
+        `<span class="legend-share">${share(p.count, total)}</span></li>`).join('');
     return `<div class="chart-donut${side ? ' side' : ''}">${svg}<ul class="chart-legend">${legend}</ul></div>`;
 }
 
 // The table view: every chart has one (and "Table" charts are only this)
 function chartTableHtml(chart, data) {
     const label = chart.groupBy ? fieldLabel(chart.source, chart.groupBy) : 'Tickets';
-    const total = data.total || 1;
     const rows = data.rows.map(r => `<tr><td>${escapeHtml(groupLabel(chart, r.value, true))}</td>` +
-        `<td class="num">${r.count.toLocaleString()}</td><td class="num">${((r.count / total) * 100).toFixed(1)}%</td></tr>`);
+        `<td class="num">${r.count.toLocaleString()}</td><td class="num">${share(r.count, data.total)}</td></tr>`);
     if (data.other) {
         rows.push(`<tr class="chart-other-row"><td>Other (${data.other.groups.toLocaleString()} more)</td>` +
-            `<td class="num">${data.other.count.toLocaleString()}</td><td class="num">${((data.other.count / total) * 100).toFixed(1)}%</td></tr>`);
+            `<td class="num">${data.other.count.toLocaleString()}</td><td class="num">${share(data.other.count, data.total)}</td></tr>`);
     }
-    const exportId = registerExport({
-        title: chartTitle(chart),
-        question: chartDescription(chart),
-        tables: [{
-            title: null,
-            columns: [{ label }, { label: 'Count' }, { label: 'Share' }],
-            rows: [...data.rows.map(r => [groupLabel(chart, r.value, true), String(r.count), `${((r.count / total) * 100).toFixed(1)}%`]),
-                ...(data.other ? [[`Other (${data.other.groups} more)`, String(data.other.count), `${((data.other.count / total) * 100).toFixed(1)}%`]] : [])],
-            footer: ['Total', String(data.total), '100%'],
-        }],
-    });
     return `<div class="table-wrap chart-table"><table class="result-table"><thead><tr><th>${escapeHtml(label)}</th><th class="num">Count</th><th class="num">Share</th></tr></thead>` +
-        `<tbody>${rows.join('')}</tbody><tfoot><tr><td>Total</td><td class="num">${data.total.toLocaleString()}</td><td class="num">100%</td></tr></tfoot></table></div>` +
-        downloadBarHtml(exportId);
+        `<tbody>${rows.join('')}</tbody><tfoot><tr><td>Total</td><td class="num">${data.total.toLocaleString()}</td><td class="num">100%</td></tr></tfoot></table></div>`;
+}
+
+// The same numbers as a download table
+function chartExportTable(chart, data) {
+    return {
+        title: null,
+        columns: [{ label: chart.groupBy ? fieldLabel(chart.source, chart.groupBy) : 'Tickets' }, { label: 'Count', num: true }, { label: 'Share' }],
+        rows: [...data.rows.map(r => [groupLabel(chart, r.value, true), r.count, share(r.count, data.total)]),
+            ...(data.other ? [[`Other (${data.other.groups} more)`, data.other.count, share(data.other.count, data.total)]] : [])],
+        footer: ['Total', data.total, '100%'],
+    };
+}
+
+// ---------------------------------------------------------------------
+// Several series: AI answers that compare ticket types (a count per type
+// for each week, team, ...). series: { categories: [{ value, label }],
+// series: [{ name, slot, values }], total }
+// ---------------------------------------------------------------------
+
+// The tooltip of one category: every series' value, then the total
+function seriesTip(s, i) {
+    const rows = s.series.map(x => [x.slot, x.name, x.values[i].toLocaleString()]);
+    const sum = s.series.reduce((t, x) => t + x.values[i], 0);
+    return ` data-index="${i}" data-tip-value="${escapeHtml(`${sum.toLocaleString()} in all`)}" data-tip-label="${escapeHtml(s.categories[i].label)}"` +
+        ` data-tip-rows="${escapeHtml(JSON.stringify(rows))}"`;
+}
+
+// The legend above a chart of several series: a swatch (bars) or a short line (lines) per series
+function seriesLegendHtml(s, lines) {
+    return `<div class="chart-series-legend">${s.series.map(x =>
+        `<span class="series-item"><span class="series-key${lines ? ' line' : ''}" style="background:var(--series-${x.slot})"></span>${escapeHtml(x.name)}</span>`).join('')}</div>`;
+}
+
+// Columns side by side (grouped) or on top of each other (stacked)
+function seriesColumnsHtml(chart, s, width, stacked) {
+    const n = s.series.length;
+    const cats = s.categories;
+    const height = 280;
+    const sums = cats.map((_, i) => s.series.reduce((t, x) => t + x.values[i], 0));
+    const max = stacked ? Math.max(...sums) : Math.max(...s.series.flatMap(x => x.values));
+    const { top, ticks } = niceScale(max);
+    const m = { top: 20, right: 8, bottom: 26, left: tickWidth(ticks) };
+    const plotW = width - m.left - m.right, plotH = height - m.top - m.bottom;
+    const band = plotW / cats.length;
+    const y = v => m.top + plotH - (v / top) * plotH;
+    let html = svgOpen(width, height, chartTitle(chart)) + gridHtml(ticks, y, m.left, width - m.right);
+    cats.forEach((cat, i) => {
+        if (stacked) {
+            const barW = Math.max(3, Math.min(28, band * 0.6));
+            const bx = m.left + i * band + (band - barW) / 2;
+            let base = 0;
+            const topIndex = s.series.map(one => one.values[i]).findLastIndex(v => v > 0);
+            s.series.forEach((one, k) => {
+                const v = one.values[i];
+                if (v <= 0) return;
+                // A 2px gap in the background color between stacked segments
+                const h = y(base) - y(base + v) - (k === topIndex ? 0 : 2);
+                if (h > 0) {
+                    html += k === topIndex
+                        ? `<path class="chart-mark" d="${columnPath(bx, y(base + v), barW, h)}" style="fill:var(--series-${one.slot})"/>`
+                        : `<rect class="chart-mark" x="${r1(bx)}" y="${r1(y(base + v) + 2)}" width="${r1(barW)}" height="${r1(h)}" style="fill:var(--series-${one.slot})"/>`;
+                }
+                base += v;
+            });
+            if (cats.length <= 12) html += `<text class="chart-value" x="${r1(bx + barW / 2)}" y="${r1(y(sums[i]) - 6)}" text-anchor="middle">${sums[i].toLocaleString()}</text>`;
+        } else {
+            const barW = Math.max(2, Math.min(24, (band * 0.8 - 2 * (n - 1)) / n));
+            const groupW = n * barW + 2 * (n - 1);
+            const start = m.left + i * band + (band - groupW) / 2;
+            s.series.forEach((x, k) => {
+                const h = y(0) - y(x.values[i]);
+                if (h > 0) html += `<path class="chart-mark" d="${columnPath(start + k * (barW + 2), y(x.values[i]), barW, h)}" style="fill:var(--series-${x.slot})"/>`;
+            });
+        }
+        html += `<rect class="chart-hit" x="${r1(m.left + i * band)}" y="${m.top}" width="${r1(band)}" height="${plotH}"${cats.length <= 40 ? ' tabindex="0"' : ''}${seriesTip(s, i)}/>`;
+    });
+    html += `<line class="chart-axis" x1="${m.left}" x2="${width - m.right}" y1="${r1(y(0))}" y2="${r1(y(0))}"/>`;
+    html += xLabelsHtml(cats.map(c => c.label), i => m.left + i * band + band / 2, { total: plotW, each: band }, height - 8);
+    return seriesLegendHtml(s, false) + html + '</svg>';
+}
+
+// One line per series, with one crosshair that reads every series at once
+function seriesLineHtml(chart, s, width) {
+    const cats = s.categories;
+    const height = 280;
+    const { top, ticks } = niceScale(Math.max(...s.series.flatMap(x => x.values)));
+    const m = { top: 22, right: 14, bottom: 26, left: tickWidth(ticks) };
+    const plotW = width - m.left - m.right, plotH = height - m.top - m.bottom;
+    const step = cats.length > 1 ? plotW / (cats.length - 1) : 0;
+    const x = i => cats.length > 1 ? m.left + i * step : m.left + plotW / 2;
+    const y = v => m.top + plotH - (v / top) * plotH;
+    let html = svgOpen(width, height, chartTitle(chart)) + gridHtml(ticks, y, m.left, width - m.right);
+    html += `<line class="chart-axis" x1="${m.left}" x2="${width - m.right}" y1="${r1(y(0))}" y2="${r1(y(0))}"/>`;
+    for (const series of s.series) {
+        const color = `var(--series-${series.slot})`;
+        if (cats.length > 1) html += `<path class="chart-line" d="M${series.values.map((v, i) => `${r1(x(i))},${r1(y(v))}`).join('L')}" style="stroke:${color}"/>`;
+        const last = cats.length - 1;
+        html += `<circle class="chart-dot" cx="${r1(x(last))}" cy="${r1(y(series.values[last]))}" r="4" style="fill:${color}"/>`;
+    }
+    html += xLabelsHtml(cats.map(c => c.label), x, { total: plotW, each: Math.max(step, 1) }, height - 8);
+    html += crosshairHtml(m, plotW, plotH, y(0), step, top, s.series.map(x => `var(--series-${x.slot})`));
+    return seriesLegendHtml(s, true) + html + '</svg>';
+}
+
+function seriesTableHtml(chart, s) {
+    const head = `<th>${escapeHtml(chart.groupLabel || '')}</th>${s.series.map(x => `<th class="num">${escapeHtml(x.name)}</th>`).join('')}<th class="num">Total</th>`;
+    const body = s.categories.map((c, i) => `<tr><td>${escapeHtml(c.label)}</td>${s.series.map(x => `<td class="num">${x.values[i].toLocaleString()}</td>`).join('')}` +
+        `<td class="num">${s.series.reduce((t, x) => t + x.values[i], 0).toLocaleString()}</td></tr>`).join('');
+    return `<div class="table-wrap chart-table"><table class="result-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 // ---------------------------------------------------------------------
@@ -419,27 +551,39 @@ const resizeWatcher = new ResizeObserver(entries => {
     for (const entry of entries) {
         const box = entry.target;
         const drawn = box._drawn;
-        if (!drawn || !box.clientWidth || drawn.asTable || !['bar', 'hbar', 'line', 'area', 'donut'].includes(drawn.chart.display)) continue;
-        if (Math.abs(box.clientWidth - drawn.width) > 4) drawChart(box, drawn.chart, drawn.data, false);
+        if (!drawn || !box.clientWidth || drawn.asTable || ['table', 'number'].includes(drawn.display)) continue;
+        if (Math.abs(box.clientWidth - drawn.width) <= 4) continue;
+        if (drawn.series) drawSeriesChart(box, drawn.chart, drawn.series, drawn.display);
+        else drawChart(box, drawn.chart, drawn.data, false);
     }
 });
 
 // asTable: the table view instead of the chart
 function drawChart(box, chart, data, asTable) {
     const width = Math.max(Math.floor(box.clientWidth) || 0, 220);
-    box._drawn = { chart, data, asTable, width };
+    const display = asTable ? 'table' : (chart.groupBy ? chart.display : 'number');
+    box._drawn = { chart, data, asTable, width, display };
     resizeWatcher.observe(box);
     if (!data.total) {
         box.innerHTML = '<p class="chart-empty">No tickets match these choices.</p>';
         return;
     }
-    const display = asTable ? 'table' : chart.display;
-    if (display === 'number' || !chart.groupBy) box.innerHTML = numberHtml(chart, data);
+    if (display === 'number') box.innerHTML = numberHtml(chart, data);
     else if (display === 'table') box.innerHTML = chartTableHtml(chart, data);
     else if (display === 'hbar') box.innerHTML = barsHtml(chart, data, width);
     else if (display === 'line' || display === 'area') box.innerHTML = lineHtml(chart, data, width, display === 'area');
     else if (display === 'donut') box.innerHTML = donutHtml(chart, data, width);
     else box.innerHTML = columnsHtml(chart, data, width);
+}
+
+// display: 'bar' (side by side), 'stacked', 'line' or 'table'
+function drawSeriesChart(box, chart, series, display) {
+    const width = Math.max(Math.floor(box.clientWidth) || 0, 220);
+    box._drawn = { chart, series, width, display };
+    resizeWatcher.observe(box);
+    if (display === 'table') box.innerHTML = seriesTableHtml(chart, series);
+    else if (display === 'line') box.innerHTML = seriesLineHtml(chart, series, width);
+    else box.innerHTML = seriesColumnsHtml(chart, series, width, display === 'stacked');
 }
 
 // What isn't drawn: "Showing the top 10 of 105; the other 95 add up to 9,860"
@@ -451,6 +595,39 @@ function chartNote(chart, data) {
 }
 
 // ---------------------------------------------------------------------
+// Clicking a mark: a box with a _pick function (a dashboard chart, or an AI
+// answer that is an exact chart) lists the tickets behind it
+// ---------------------------------------------------------------------
+
+function pickedRow(mark) {
+    const box = mark.closest('.tile-body');
+    const drawn = box?._drawn;
+    if (!drawn || !box._pick || drawn.series) return null;
+    const index = mark.dataset.index;
+    if (index === 'all') return { box, row: null };
+    if (index === 'other') return null;
+    const i = index === 'line' ? mark._index : Number(index);
+    const row = drawn.data.rows[i];
+    return row ? { box, row } : null;
+}
+
+document.addEventListener('click', e => {
+    const mark = e.target.closest?.('[data-index]');
+    if (!mark) return;
+    // A tap on a line (no pointer moved over it first): the point nearest the tap
+    if (mark.classList.contains('line-hit')) moveCrosshair(mark, lineIndexAt(mark, e.clientX));
+    const picked = pickedRow(mark);
+    if (picked) picked.box._pick(picked.row);
+});
+document.addEventListener('keydown', e => {
+    if ((e.key !== 'Enter' && e.key !== ' ') || !e.target.matches?.('[data-index]')) return;
+    const picked = pickedRow(e.target);
+    if (!picked) return;
+    e.preventDefault();
+    picked.box._pick(picked.row);
+});
+
+// ---------------------------------------------------------------------
 // The tooltip: one for the whole page, filled with textContent
 // ---------------------------------------------------------------------
 
@@ -460,16 +637,32 @@ function chartTip() {
         tip = document.createElement('div');
         tip.id = 'chart-tip';
         tip.className = 'chart-tip';
-        tip.innerHTML = '<strong></strong><span></span>';
+        tip.innerHTML = '<strong></strong><span class="tip-label"></span><div class="tip-rows"></div><span class="tip-hint"></span>';
         document.body.appendChild(tip);
     }
     return tip;
 }
 
-function showChartTip(value, label, x, y) {
+// rows: [[series slot, name, value]] for charts of several series
+function showChartTip(value, label, x, y, { rows = [], hint = '' } = {}) {
     const tip = chartTip();
     tip.querySelector('strong').textContent = value;
-    tip.querySelector('span').textContent = label;
+    tip.querySelector('.tip-label').textContent = label;
+    const list = tip.querySelector('.tip-rows');
+    list.replaceChildren(...rows.map(([slot, name, v]) => {
+        const row = document.createElement('div');
+        row.className = 'tip-row';
+        const key = document.createElement('span');
+        key.className = 'tip-key';
+        key.style.background = `var(--series-${Number(slot) || 1})`;
+        const nameEl = document.createElement('span');
+        nameEl.textContent = name;
+        const valueEl = document.createElement('b');
+        valueEl.textContent = v;
+        row.append(key, nameEl, valueEl);
+        return row;
+    }));
+    tip.querySelector('.tip-hint').textContent = hint;
     tip.classList.add('show');
     const w = tip.offsetWidth, h = tip.offsetHeight;
     tip.style.left = `${Math.max(8, Math.min(x + 14, innerWidth - w - 8))}px`;
@@ -480,47 +673,70 @@ function hideChartTip() {
     document.getElementById('chart-tip')?.classList.remove('show');
 }
 
+const DRILL_HINT = 'Click to see these tickets';
+
 function markTip(mark, x, y) {
     mark.classList.add('hover');
-    showChartTip(mark.dataset.tipValue, mark.dataset.tipLabel, x, y);
+    const drillable = mark.closest('.tile-body')?._pick && mark.dataset.index !== 'other' && !mark.dataset.tipRows;
+    showChartTip(mark.dataset.tipValue, mark.dataset.tipLabel, x, y, {
+        rows: mark.dataset.tipRows ? JSON.parse(mark.dataset.tipRows) : [],
+        hint: drillable ? DRILL_HINT : '',
+    });
 }
 
 // Where along a line chart the crosshair is: the pointer's nearest point, or a key press
 function moveCrosshair(hit, index) {
     const svg = hit.ownerSVGElement;
-    const box = svg.closest('.tile-body, .builder-preview-body');
+    const box = svg.closest('.tile-body');
     const drawn = box?._drawn;
     if (!drawn) return;
-    const rows = drawn.data.rows;
-    index = Math.max(0, Math.min(rows.length - 1, index));
+    const series = drawn.series ? drawn.series.series : [{ values: drawn.data.rows.map(r => r.count) }];
+    const count = series[0].values.length;
+    index = Math.max(0, Math.min(count - 1, index));
     hit._index = index;
     const left = Number(hit.dataset.left), step = Number(hit.dataset.step);
     const top = Number(hit.dataset.top), plotH = Number(hit.dataset.plotH), max = Number(hit.dataset.max);
-    const x = rows.length > 1 ? left + index * step : left + (Number(hit.getAttribute('width')) - 12) / 2;
-    const y = top + plotH - (rows[index].count / max) * plotH;
+    const x = count > 1 ? left + index * step : left + (Number(hit.getAttribute('width')) - 12) / 2;
     const cross = svg.querySelector('.chart-cross');
-    const dot = svg.querySelector('.chart-cross-dot');
     cross.setAttribute('x1', x); cross.setAttribute('x2', x); cross.setAttribute('visibility', 'visible');
-    dot.setAttribute('cx', x); dot.setAttribute('cy', y); dot.setAttribute('visibility', 'visible');
+    const dots = svg.querySelectorAll('.chart-cross-dot');
+    series.forEach((s, k) => {
+        dots[k]?.setAttribute('cx', x);
+        dots[k]?.setAttribute('cy', top + plotH - (s.values[index] / max) * plotH);
+        dots[k]?.setAttribute('visibility', 'visible');
+    });
     const rect = svg.getBoundingClientRect();
     const scale = rect.width / Number(svg.getAttribute('width'));
-    const row = rows[index];
-    showChartTip(row.count.toLocaleString() + ` (${((row.count / drawn.data.total) * 100).toFixed(1)}%)`,
-        groupLabel(drawn.chart, row.value, true), rect.left + x * scale, rect.top + y * scale);
+    const highest = Math.max(...series.map(s => s.values[index]));
+    const y = top + plotH - (highest / max) * plotH;
+    if (drawn.series) {
+        const s = drawn.series;
+        showChartTip(`${s.series.reduce((t, x) => t + x.values[index], 0).toLocaleString()} in all`, s.categories[index].label,
+            rect.left + x * scale, rect.top + y * scale, { rows: s.series.map(x => [x.slot, x.name, x.values[index].toLocaleString()]) });
+    } else {
+        const row = drawn.data.rows[index];
+        showChartTip(`${row.count.toLocaleString()} (${share(row.count, drawn.data.total)})`, groupLabel(drawn.chart, row.value, true),
+            rect.left + x * scale, rect.top + y * scale, { hint: box._pick ? DRILL_HINT : '' });
+    }
 }
 
 function hideCrosshair(svg) {
     svg?.querySelectorAll('.chart-cross, .chart-cross-dot').forEach(el => el.setAttribute('visibility', 'hidden'));
 }
 
+// The point of a line chart nearest to a pointer position
+function lineIndexAt(hit, clientX) {
+    const svg = hit.ownerSVGElement;
+    const rect = svg.getBoundingClientRect();
+    const scale = rect.width / Number(svg.getAttribute('width'));
+    const step = Number(hit.dataset.step) || 1;
+    return Math.round(((clientX - rect.left) / scale - Number(hit.dataset.left)) / step);
+}
+
 document.addEventListener('pointermove', e => {
     const hit = e.target.closest?.('.line-hit');
     if (hit) {
-        const svg = hit.ownerSVGElement;
-        const rect = svg.getBoundingClientRect();
-        const scale = rect.width / Number(svg.getAttribute('width'));
-        const step = Number(hit.dataset.step) || 1;
-        moveCrosshair(hit, Math.round(((e.clientX - rect.left) / scale - Number(hit.dataset.left)) / step));
+        moveCrosshair(hit, lineIndexAt(hit, e.clientX));
         return;
     }
     const mark = e.target.closest?.('[data-tip-value]');
@@ -534,12 +750,16 @@ document.addEventListener('pointerout', e => {
     hideChartTip();
 });
 document.addEventListener('focusin', e => {
+    if (e.target.classList?.contains('line-hit')) {
+        const drawn = e.target.ownerSVGElement.closest('.tile-body')?._drawn;
+        const count = drawn ? (drawn.series ? drawn.series.categories.length : drawn.data.rows.length) : 1;
+        moveCrosshair(e.target, e.target._index ?? count - 1);
+        return;
+    }
     const mark = e.target.closest?.('[data-tip-value]');
-    if (mark && !mark.classList.contains('line-hit')) {
+    if (mark) {
         const r = mark.getBoundingClientRect();
         markTip(mark, r.left + r.width / 2, r.top);
-    } else if (e.target.classList?.contains('line-hit')) {
-        moveCrosshair(e.target, e.target._index ?? e.target.ownerSVGElement.closest('.tile-body, .builder-preview-body')?._drawn?.data.rows.length - 1);
     }
 });
 document.addEventListener('focusout', e => {
@@ -552,9 +772,160 @@ document.addEventListener('focusout', e => {
 document.addEventListener('keydown', e => {
     if (!e.target.classList?.contains('line-hit') || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
     e.preventDefault();
-    const rows = e.target.ownerSVGElement.closest('.tile-body, .builder-preview-body')?._drawn?.data.rows || [];
-    const now = e.target._index ?? rows.length - 1;
-    moveCrosshair(e.target, e.key === 'Home' ? 0 : e.key === 'End' ? rows.length - 1 : now + (e.key === 'ArrowLeft' ? -1 : 1));
+    const drawn = e.target.ownerSVGElement.closest('.tile-body')?._drawn;
+    const count = drawn ? (drawn.series ? drawn.series.categories.length : drawn.data.rows.length) : 1;
+    const now = e.target._index ?? count - 1;
+    moveCrosshair(e.target, e.key === 'Home' ? 0 : e.key === 'End' ? count - 1 : now + (e.key === 'ArrowLeft' ? -1 : 1));
 });
 // A scrolled page leaves the tooltip behind, so it goes
 document.addEventListener('scroll', hideChartTip, true);
+
+// ---------------------------------------------------------------------
+// PICTURES: a chart as a standalone SVG or PNG, always on white (for
+// documents and slides), with its title, what it counts, and its legend.
+// The chart is drawn off screen at a fixed width, then every color and
+// font is written into the SVG, so the file needs no stylesheet.
+// spec: { chart, data } (one series) or { chart, series, display } (several);
+// title, subtitle
+// ---------------------------------------------------------------------
+
+const PICTURE_WIDTH = 960;
+const PICTURE_PAD = 24;
+const PICTURE_STYLES = ['fill', 'fill-opacity', 'stroke', 'stroke-width', 'stroke-opacity', 'stroke-linejoin',
+    'stroke-linecap', 'opacity', 'font-size', 'font-weight', 'font-family', 'font-variant-numeric'];
+
+// Copies the computed look of every element into the copy, then drops what only works on screen
+function standaloneSvg(svg) {
+    const copy = svg.cloneNode(true);
+    const from = [svg, ...svg.querySelectorAll('*')];
+    const to = [copy, ...copy.querySelectorAll('*')];
+    from.forEach((el, i) => {
+        const cs = getComputedStyle(el);
+        to[i].setAttribute('style', PICTURE_STYLES.map(p => `${p}:${cs.getPropertyValue(p)}`).join(';'));
+        for (const attr of ['class', 'tabindex', 'role', 'aria-label']) to[i].removeAttribute(attr);
+        for (const attr of [...to[i].attributes]) if (attr.name.startsWith('data-')) to[i].removeAttribute(attr.name);
+    });
+    copy.querySelectorAll('rect[style*="fill-opacity:0"], line[visibility="hidden"], circle[visibility="hidden"]').forEach(el => el.remove());
+    return copy;
+}
+
+const xmlText = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+// -> { svg: text, width, height }
+function chartPicture(spec) {
+    const host = document.createElement('div');
+    host.className = 'picture-host';
+    host.innerHTML = '<div class="tile-body"></div>';
+    document.body.appendChild(host);
+    const body = host.firstChild;
+    const W = PICTURE_WIDTH, inner = W - 2 * PICTURE_PAD;
+    const color = name => getComputedStyle(host).getPropertyValue(name).trim();
+    try {
+        const parts = [];
+        let y = PICTURE_PAD;
+        parts.push(`<text x="${PICTURE_PAD}" y="${y + 18}" style="font-size:18px;font-weight:700;fill:${color('--text')};font-family:${CHART_FONT.replace(/"/g, "'")}">${xmlText(fitText(spec.title || 'Chart', inner, 18))}</text>`);
+        y += 30;
+        if (spec.subtitle) {
+            parts.push(`<text x="${PICTURE_PAD}" y="${y + 12}" style="font-size:12px;fill:${color('--muted')};font-family:${CHART_FONT.replace(/"/g, "'")}">${xmlText(fitText(spec.subtitle, inner, 12))}</text>`);
+            y += 24;
+        }
+        y += 6;
+        const textStyle = (size, c, weight = 400) => `font-size:${size}px;font-weight:${weight};fill:${c};font-family:${CHART_FONT.replace(/"/g, "'")}`;
+
+        if (spec.series) {
+            // Legend row, then the chart
+            let x = PICTURE_PAD;
+            for (const s of spec.series.series) {
+                const key = spec.display === 'line'
+                    ? `<rect x="${x}" y="${y + 6}" width="14" height="3" rx="1.5" style="fill:${color(`--series-${s.slot}`)}"/>`
+                    : `<rect x="${x}" y="${y + 1}" width="12" height="12" rx="3" style="fill:${color(`--series-${s.slot}`)}"/>`;
+                parts.push(key + `<text x="${x + 18}" y="${y + 11}" style="${textStyle(12, color('--text-2'))}">${xmlText(s.name)}</text>`);
+                x += 18 + textWidth(s.name, 12) + 18;
+            }
+            y += 24;
+            drawSeriesChart(body, spec.chart, spec.series, spec.display);
+            const svg = body.querySelector('svg');
+            parts.push(`<g transform="translate(${PICTURE_PAD},${y})">${new XMLSerializer().serializeToString(standaloneSvg(svg))}</g>`);
+            y += Number(svg.getAttribute('height'));
+        } else if (spec.chart.display === 'number' || !spec.chart.groupBy) {
+            drawChart(body, spec.chart, spec.data, false);
+            const label = body.querySelector('.chart-stat-label')?.textContent || '';
+            parts.push(`<text x="${PICTURE_PAD}" y="${y + 52}" style="${textStyle(56, color('--text'), 700)}">${spec.data.total.toLocaleString()}</text>`);
+            parts.push(`<text x="${PICTURE_PAD}" y="${y + 80}" style="${textStyle(16, color('--muted'))}">${xmlText(label)}</text>`);
+            y += 92;
+        } else if (spec.chart.display === 'donut') {
+            drawChart(body, spec.chart, spec.data, false);
+            const svg = body.querySelector('svg');
+            const size = Number(svg.getAttribute('height'));
+            parts.push(`<g transform="translate(${PICTURE_PAD},${y})">${new XMLSerializer().serializeToString(standaloneSvg(svg))}</g>`);
+            // The legend beside it: swatch, name, number, share
+            const items = donutParts(spec.chart, spec.data);
+            const lx = PICTURE_PAD + size + 32;
+            const nameW = inner - size - 32 - 150;
+            items.forEach((p, i) => {
+                const ly = y + 14 + i * 24;
+                const fill = p.other ? color('--chart-other') : color(`--series-${p.slot}`);
+                parts.push(`<rect x="${lx}" y="${ly - 10}" width="12" height="12" rx="3" style="fill:${fill}"/>` +
+                    `<text x="${lx + 20}" y="${ly}" style="${textStyle(13, color('--text-2'))}">${xmlText(fitText(p.label, nameW, 13))}</text>` +
+                    `<text x="${lx + 20 + nameW + 80}" y="${ly}" text-anchor="end" style="${textStyle(13, color('--text'), 600)}">${p.count.toLocaleString()}</text>` +
+                    `<text x="${lx + 20 + nameW + 140}" y="${ly}" text-anchor="end" style="${textStyle(13, color('--muted'))}">${share(p.count, spec.data.total)}</text>`);
+            });
+            y += Math.max(size, items.length * 24 + 8);
+        } else {
+            drawChart(body, spec.chart, spec.data, false);
+            const svg = body.querySelector('svg');
+            parts.push(`<g transform="translate(${PICTURE_PAD},${y})">${new XMLSerializer().serializeToString(standaloneSvg(svg))}</g>`);
+            y += Number(svg.getAttribute('height'));
+            const note = spec.data && chartNote(spec.chart, spec.data);
+            if (note) {
+                parts.push(`<text x="${PICTURE_PAD}" y="${y + 20}" style="${textStyle(11, color('--muted'))}">${xmlText(note)}</text>`);
+                y += 24;
+            }
+        }
+        y += 14;
+        const stamp = `OneTouch · ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+        parts.push(`<text x="${W - PICTURE_PAD}" y="${y + 6}" text-anchor="end" style="${textStyle(10, color('--faint'))}">${xmlText(stamp)}</text>`);
+        const height = Math.ceil(y + PICTURE_PAD);
+        const svgText = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${height}" viewBox="0 0 ${W} ${height}">` +
+            `<rect width="${W}" height="${height}" style="fill:${color('--panel-bg')}"/>${parts.join('')}</svg>`;
+        return { svg: svgText, width: W, height };
+    } finally {
+        resizeWatcher.unobserve(body);
+        host.remove();
+    }
+}
+
+// -> { png: data URL, width, height } (drawn at twice the size, for sharp printing)
+async function picturePng(picture) {
+    const url = URL.createObjectURL(new Blob([picture.svg], { type: 'image/svg+xml;charset=utf-8' }));
+    try {
+        const img = new Image();
+        await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = () => reject(new Error('The chart could not be turned into a picture.')); img.src = url; });
+        const canvas = document.createElement('canvas');
+        canvas.width = picture.width * 2;
+        canvas.height = picture.height * 2;
+        const ctx = canvas.getContext('2d');
+        ctx.scale(2, 2);
+        ctx.drawImage(img, 0, 0, picture.width, picture.height);
+        return { png: canvas.toDataURL('image/png'), width: picture.width, height: picture.height };
+    } finally {
+        URL.revokeObjectURL(url);
+    }
+}
+
+// Saves the picture as name.png or name.svg
+async function downloadPicture(spec, format, name) {
+    const picture = chartPicture(spec);
+    const blob = format === 'svg'
+        ? new Blob([picture.svg], { type: 'image/svg+xml;charset=utf-8' })
+        : await (await fetch((await picturePng(picture)).png)).blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${name}.${format}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return `${name}.${format}`;
+}

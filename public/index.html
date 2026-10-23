@@ -113,7 +113,10 @@
             <div class="home" id="home">
                 <div class="home-head">
                     <h2 class="home-welcome" id="home-welcome">Welcome!</h2>
-                    <button type="button" class="home-action" id="customize-home-btn" onclick="toggleHomeEditing()" aria-pressed="false">✏️ Customize Home</button>
+                    <div class="home-head-actions">
+                        <button type="button" class="home-action" id="tour-btn" onclick="startTour()" title="A short tour of OneTouch">❔ Tour</button>
+                        <button type="button" class="home-action" id="customize-home-btn" onclick="toggleHomeEditing()" aria-pressed="false">✏️ Customize Home</button>
+                    </div>
                 </div>
                 <!-- While customizing: add charts, bring back hidden sections, reset -->
                 <div class="home-edit-bar" id="home-edit-bar" hidden>
@@ -224,8 +227,30 @@
                     <div class="board-view" id="board-view" hidden>
                         <div class="board-bar">
                             <button type="button" class="primary-btn" onclick="addBoardChart()">＋ Add a chart</button>
+                            <button type="button" class="home-action" id="board-share-btn" onclick="shareCurrentBoard()">🔗 Share</button>
                             <button type="button" class="home-action" onclick="renameBoard()">✎ Rename</button>
                             <button type="button" class="home-action danger" onclick="deleteBoard()">🗑 Delete dashboard</button>
+                        </div>
+                        <!-- Filters for every chart on the dashboard (saved with it) -->
+                        <div class="board-filters" role="group" aria-label="Filters for every chart on this dashboard">
+                            <span class="board-filters-label">Every chart:</span>
+                            <label class="board-filter">Opened <select id="bf-dates"></select></label>
+                            <span class="board-filter" id="bf-range" hidden>
+                                <input type="date" id="bf-from" aria-label="Opened from"> to <input type="date" id="bf-to" aria-label="Opened to">
+                            </span>
+                            <div class="team-picker">
+                                <button type="button" class="home-action" id="bf-team-btn" aria-expanded="false" aria-controls="bf-team-pop">Team: any ▾</button>
+                                <div class="team-pop" id="bf-team-pop" hidden>
+                                    <input type="search" id="bf-team-search" placeholder="Search teams…" aria-label="Search teams">
+                                    <div class="filter-values" id="bf-team-list"></div>
+                                    <p class="team-pop-note">Requests have no team, so their charts ignore this.</p>
+                                    <div class="team-pop-foot">
+                                        <button type="button" class="home-action" id="bf-team-clear">Any team</button>
+                                        <button type="button" class="primary-btn" id="bf-team-done">Done</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <button type="button" class="home-action" id="bf-clear" hidden>✕ Clear filters</button>
                         </div>
                         <div class="tile-grid" id="board-grid"></div>
                     </div>
@@ -265,6 +290,7 @@
             </div>
             <div class="builder-body">
                 <div class="builder-fields">
+                    <p class="builder-note" id="b-note" hidden></p>
                     <fieldset>
                         <legend>1. What to count</legend>
                         <select id="b-source" aria-label="What to count"></select>
@@ -320,9 +346,11 @@
                 <div class="builder-preview">
                     <div class="builder-preview-label">Preview</div>
                     <div id="b-preview"></div>
+                    <p class="field-note" id="b-scope-note" hidden></p>
                 </div>
             </div>
             <div class="builder-foot">
+                <label class="builder-dest" id="b-dest-row" hidden>Save to <select id="b-dest"></select></label>
                 <button type="button" class="home-action" onclick="closeBuilder()">Cancel</button>
                 <button type="submit" class="primary-btn" id="b-save">Add chart</button>
             </div>
@@ -342,6 +370,63 @@
             </div>
         </form>
     </dialog>
+
+    <!-- The tickets behind a bar, slice, point or number of a chart -->
+    <dialog class="builder drill-dialog" id="drill-dialog" aria-labelledby="drill-title">
+        <div class="builder-head">
+            <h2 id="drill-title"></h2>
+            <button type="button" class="drawer-close" onclick="this.closest('dialog').close()" aria-label="Close">✕</button>
+        </div>
+        <div class="drill-body" id="drill-body"></div>
+    </dialog>
+
+    <!-- Sharing one of your dashboards: its link -->
+    <dialog class="ask-dialog share-dialog" id="share-dialog" aria-labelledby="share-title">
+        <h2 id="share-title">Share this dashboard</h2>
+        <p class="share-text">Anyone who signs in to OneTouch can open this link, see the dashboard, and add a copy to
+            their own dashboards. When you change the dashboard, the link shows the change; copies people already added stay as they were.</p>
+        <div class="share-link">
+            <input type="text" id="share-link" readonly aria-label="Link to the dashboard">
+            <button type="button" class="primary-btn" onclick="copyShareLink()">Copy link</button>
+        </div>
+        <div class="builder-foot">
+            <button type="button" class="home-action danger" id="share-stop">Stop sharing</button>
+            <button type="button" class="home-action" onclick="this.closest('dialog').close()">Done</button>
+        </div>
+    </dialog>
+
+    <!-- A dashboard someone shared with you (opened from its link) -->
+    <dialog class="builder shared-dialog" id="shared-dialog" aria-labelledby="shared-title">
+        <div class="builder-head">
+            <h2 id="shared-title"></h2>
+            <button type="button" class="drawer-close" onclick="this.closest('dialog').close()" aria-label="Close">✕</button>
+        </div>
+        <div class="shared-body">
+            <p class="home-status" id="shared-about"></p>
+            <div class="tile-grid" id="shared-grid"></div>
+        </div>
+        <div class="builder-foot">
+            <button type="button" class="home-action" onclick="this.closest('dialog').close()">Close</button>
+            <button type="button" class="primary-btn" id="shared-add">＋ Add to my dashboards</button>
+        </div>
+    </dialog>
+
+    <!-- The tour: a spotlight on one part of the page, and what it does -->
+    <div class="tour" id="tour" hidden>
+        <div class="tour-blocker"></div>
+        <div class="tour-spot" id="tour-spot"></div>
+        <div class="tour-card" id="tour-card" role="dialog" aria-modal="true" aria-labelledby="tour-title" aria-describedby="tour-text">
+            <div class="tour-step" id="tour-step"></div>
+            <h2 id="tour-title"></h2>
+            <p id="tour-text"></p>
+            <div class="tour-actions">
+                <button type="button" class="home-action" onclick="closeTour()">Skip the tour</button>
+                <span class="tour-spacer"></span>
+                <button type="button" class="home-action" id="tour-back" onclick="tourMove(-1)">Back</button>
+                <button type="button" class="primary-btn" id="tour-next" onclick="tourMove(1)">Next</button>
+            </div>
+        </div>
+    </div>
 
     <script src="charts.js"></script>
     <script src="customize.js"></script>

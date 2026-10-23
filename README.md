@@ -216,7 +216,12 @@ which is why Metabase keeps each chart's result (see [Dashboards](#dashboards-me
    ```
    It signs in as the **warmup** account (username `warmup`, password from
    `WARMUP_PASSWORD` in `.env`, or it asks), then asks every question in
-   `scripts/warmup-questions.txt` and opens every dashboard. That takes about a minute.
+   `scripts/warmup-questions.txt` and opens every dashboard. The 55 questions cover
+   incidents (priority, teams, channels, sites, on-hold, SLA breaches, causes, reassignment),
+   problem records and parent / child tickets, changes (type, risk, failures, approvals,
+   upcoming work, outages, SAP and breweries), approvals, requests and catalog tasks,
+   whole-team views across ticket types, and one each of "nothing found", "outside the
+   data's dates" and "not in the data". From scratch that takes about two minutes.
    To use another account instead: `npm run warmup -- --user <username>`.
    Afterwards those questions answer instantly for everyone, provided they're asked with
    the same words (capitals, spacing and a closing "?" don't matter), and every dashboard
@@ -386,16 +391,45 @@ The team dashboards switch to Metabase's own dark look when OneTouch is dark.
   or **✨ Add suggested charts** fills it with a starter set: open incidents, open changes,
   open catalog tasks, incidents per day, open incidents by priority, changes by risk, the
   top catalog items, and open tasks by team. Change any of them afterwards.
-- **✎ Rename** and **🗑 Delete dashboard** (it asks first) are above the charts.
+- **✎ Rename** and **🗑 Delete dashboard** (it asks first) are above the charts, with
+  **🔗 Share** (see below).
+- **Filters for every chart** (the row under those buttons): **Opened** (any time, the
+  data's last 7 / 30 / 90 days, or between two dates) and **Team** (pick one or more from
+  every team in incidents, changes and catalog tasks, with a search box). They apply to
+  every chart on the dashboard at once, on top of each chart's own choices, and are saved
+  with the dashboard. Requests have no team, so a request chart ignores the Team filter and
+  says so under it. **✕ Clear filters** removes them.
 - Each person can have up to 20 dashboards of up to 30 charts each.
+
+**Click a chart to see its tickets.** On any of your charts (Home, your dashboards, a
+shared dashboard, and AI answers that are exactly a chart), a click on a bar, donut slice
+or point of a line, or on a big number, opens a list of the tickets behind it (with the
+dashboard's filters too): how many there are, the newest 200 with ☆ stars and **Star all**,
+and a download. The tooltip says "Click to see these tickets". Click a ticket number to open
+its full record on Home (the list closes). The keyboard works too: Tab to a bar and press
+Enter.
+
+**Sharing a dashboard.** **🔗 Share** gives a link (**Copy link**). Anyone who signs in to
+OneTouch and opens it sees the dashboard, with its filters, and can click its charts; **＋ Add
+to my dashboards** gives them their own copy to change as they like. When you change the
+dashboard, the link shows the change; copies people already added don't change. The button
+reads **🔗 Shared** while it is shared; **Stop sharing** (in the same box) turns the link off,
+and so does deleting the dashboard. Shared links live in the `shared_dashboards` table of
+`onetouch_auth` (up to 20 per person).
+
+**The tour.** On a first visit, a short tour of six steps points at Home and Dashboards, the
+AI assistant, your tickets, Customize Home, Dashboards and Colors. **Skip the tour**, **Next**
+/ **Back**, and Escape work; once it is closed it doesn't come back by itself (that is saved
+to your account), and **❔ Tour** on Home shows it again.
 
 **The chart builder** has a live preview that redraws as you choose:
 1. **What to count**: incidents, changes, requests or catalog tasks.
 2. **Which ones**: All, **Open only** or **Closed only** (each ticket type's own states, shown
    under the buttons); when they were opened (any time, the data's last 7 / 30 / 90 days,
-   or between two dates); and **＋ Only include some…**: up to six conditions such as
-   "Priority is P1 or P2" or "Team is one of …". Each condition lists every choice with how
-   many tickets have it, most common first, with a search box.
+   or between two dates); and **＋ Only include some…**: up to six conditions. Each matches
+   in one of three ways: **is one of** or **is none of** ("Priority is one of P1, P2"; every
+   choice is listed with how many tickets have it, most common first, with a search box),
+   or **contains** ("Team contains WINTEL"; type a word, or several separated by commas).
 3. **Group by**: a field (priority, state, team, category, catalog item, risk, location,
    …), a period (day, week or month opened; month resolved, closed or planned to start), or
    nothing, for one total.
@@ -406,9 +440,11 @@ The team dashboards switch to Metabase's own dark look when OneTouch is dark.
 5. **Title**: or leave it empty for an automatic one such as "Open incidents by priority".
 
 Every chart shows a tooltip with the number and its share when you point at a bar, slice
-or line (or tab to it). Its buttons appear when you point at it: **▦** shows it as a table
-(with a download), **✎** edits it, **◀ ▶** move it, **📌** (on a dashboard) puts a copy on
-Home, and **🗑** removes it.
+or line (or tab to it). Its buttons appear when you point at it: **▦** shows it as a table,
+**⤓** downloads it (its numbers in any format, a picture of it, and PDF / Word / Excel with
+the picture in them; see [2.5 Downloads](#25-downloads)), **✎** edits it, **◀ ▶** move it,
+**📌** (on a dashboard) puts a copy on Home, and **🗑** removes it. A builder opened from a
+dashboard with filters shows them under the preview, and the preview uses them.
 
 **Hiding team dashboards.** **👁 Show or hide team dashboards** at the bottom of the drawer
 turns each team dashboard into a checkbox; untick the ones you don't use and click
@@ -591,6 +627,7 @@ it in the tab's `sessionStorage`, so:
   and "Hello, *first name*!" at the top of the chat.
 - **Icons:** favicons, an Apple touch icon and a web-app manifest, so OneTouch can be
   pinned to a phone's home screen as "One Touch".
+- **Tour:** a six-step tour on a first visit (remembered per account), and **❔ Tour** on Home.
 
 ## 2.3 The AI Assistant (chat)
 
@@ -692,7 +729,26 @@ last 500 such questions in memory; restarting it starts the list over.
 - **Star all:** when the answer lists two or more tickets, buttons to star them all, or all
   of one type (see [Home page and the AI assistant](#home-page-and-the-ai-assistant)).
   The tickets also go to Ticket results on Home.
-- **Download as:** see 2.5.
+- **Show as (charts):** an answer that counts things by one field or period ("open incidents
+  by priority", "requests per month") has a **Show as** row: **Table**, **Columns**,
+  **Sideways bars**, **Donut** and **Line** (or **Line**, **Area** and **Columns** for
+  periods). Click one to redraw the answer that way, and **Table** to go back. An answer that
+  compares ticket types ("requests and incidents per week") offers **Line**, **Columns**
+  (side by side) and **Stacked columns**, with a legend, and one tooltip that reads every
+  type at once; a total per type offers columns, bars or a donut. More than 30 categories:
+  the biggest 30 are drawn and a note gives the rest (all of them stay in the table). Every
+  chart has a tooltip on each bar, slice or point.
+- **Click a bar for its tickets:** when the answer is exactly a chart (the server's
+  `chartable` says nothing was left out), a click on a bar, slice or point of its chart
+  lists the tickets behind it (see [Making it your own](#making-it-your-own-colors-home-and-your-own-dashboards)).
+- **📌 Save as a chart:** on an answer that counts one ticket type by one field. It opens the
+  chart builder filled in from the answer (the same ticket type, grouping, open / closed
+  states, conditions and dates), in the chart type showing, with **Save to**: your Home
+  page, one of your dashboards, or a new one. A condition a chart can't hold (for example
+  "summary contains password") is named at the top, and the chart counts without it.
+- **Download as:** see 2.5. Every kind of answer downloads, including a question back or
+  an explanation of something the data can't answer, and, while a chart is showing, a
+  picture of it.
 
 ### What it understands
 
@@ -786,19 +842,34 @@ why instead of just saying "no records" (`empty_results.mjs`):
 
 ## 2.5 Downloads
 
-Every result with a table has a **Download as** menu and a **⬇ Download** button.
-The file contains exactly what is on screen, with the same column names and formatting,
-except that long text is never cut and counts stay real numbers.
+Every AI answer has a **Download as** menu and a **⬇ Download** button: tables, a single
+number, a breakdown across ticket types, a ticket record, and also an answer that is only
+text (a question back, or an explanation of something the data can't answer), which
+downloads as its text. Besides the data, the file has **Why nothing was found** (when that
+happened) and **How I read your question** (Claude's assumptions), as extra tables; CSV
+leaves those out when there is data, so it stays one clean table. The file contains exactly
+what is on screen, with the same column names and formatting, except that long text is
+never cut and counts stay real numbers.
+
+**Pictures of charts.** While an answer is shown as a chart (or on any chart's **⤓**), the
+menu also has **Picture (.png)** and **Picture, any size (.svg)**. The picture has the chart's
+title, the question (or what the chart counts), the legend and the date, on a white
+background whatever your colors, so it works in documents and slides. The PNG is drawn at
+twice the size for sharp printing; the SVG scales to any size. PDF, Word, Excel, RTF and the
+archives then **include the chart picture** above the tables (Excel puts it on its own
+**Chart** sheet; archives also hold it as a .png). With the table showing, the picture
+choices are greyed out ("show a chart first") and the documents hold only the tables.
 
 | Format | What you get |
 |---|---|
-| Excel (.xlsx) | One worksheet per table, named after it. The header row is bold, shaded, frozen and has filters. Columns are sized to their content (up to 60 characters), counts use `#,##0`, very long text wraps, and the Total row is bold. |
+| Excel (.xlsx) | One worksheet per table, named after it. The header row is bold, shaded, frozen and has filters. Columns are sized to their content (up to 60 characters), counts use `#,##0`, very long text wraps, and the Total row is bold. A chart's picture, when there is one, goes on a **Chart** sheet first. |
 | CSV (.csv) | UTF-8 with a byte-order mark, so Excel opens it correctly. Several tables are separated by a blank line, each under its title. |
-| PDF (.pdf) | US Letter, landscape. Title, the question and the time it was generated, then each table with its row count, and "Page X of Y" at the bottom. Characters outside Western European ones show as "?". |
-| Word (.docx) | Landscape, with the same headings. Tables use smaller text when they have more than 8 columns. |
-| Rich Text (.rtf) | Opens in Word, WordPad, Pages and LibreOffice, with the same layout. |
+| PDF (.pdf) | US Letter, landscape. Title, the question and the time it was generated, the chart picture (if any), then each table with its row count, and "Page X of Y" at the bottom. Characters outside Western European ones show as "?". |
+| Word (.docx) | Landscape, with the same headings and the chart picture. Tables use smaller text when they have more than 8 columns. |
+| Rich Text (.rtf) | Opens in Word, WordPad, Pages and LibreOffice, with the same layout and the chart picture. |
 | Plain Text (.txt) | Aligned columns. Values longer than 60 characters wrap inside their column, and numbers are right-aligned. |
-| ZIP (.zip) / 7-Zip (.7z) | All six formats above in one archive. |
+| Picture (.png / .svg) | The chart on screen (see above). Made in the browser; nothing is sent to the server. |
+| ZIP (.zip) / 7-Zip (.7z) | All six document formats above in one archive, plus the chart picture as a .png. |
 
 Files are named `one-touch-<the question>-<date>.<format>`, e.g.
 `one-touch-how-many-open-p1s-2026-10-21.xlsx`. The date, and the "Generated" time inside
@@ -1302,8 +1373,13 @@ Check: `node --check business_logic.mjs` prints nothing.
   - `/api/export` → `export.mjs`.
   - `/api/preferences` (each person's colors, Home layout and own dashboards: `GET` all,
     `PUT /api/preferences/:part` saves `theme`, `home` or `dashboards`, `DELETE` resets one)
-    → `prefs.mjs`. `/api/charts/catalog`, `/api/charts/data` and `/api/charts/values` (what
-    the chart builder offers, a chart's numbers, a condition's choices) → `charts.mjs`.
+    → `prefs.mjs`. `/api/charts/catalog`, `/api/charts/data` (with `scope`: a dashboard's filter
+    row), `/api/charts/values`, `/api/charts/teams` and `/api/charts/tickets` (what the chart
+    builder offers, a chart's numbers, a condition's choices, every team, the tickets behind
+    a bar) → `charts.mjs`. `/api/shares` (`PUT` shares a dashboard or updates its link,
+    `GET /api/shares/:token` opens a link, `DELETE` stops sharing) → `shares.mjs`. Each
+    `/api/query` answer also carries `chartable`: the answer as a chart (`chartFromQuery`),
+    with any conditions a chart can't hold, or null.
   - Passes Metabase's public dashboard pages through, so the Dashboards tab works wherever
     OneTouch does.
   - On start it creates the account, starred-ticket, shown-ticket and preference tables,
@@ -1333,7 +1409,13 @@ Check: `node --check business_logic.mjs` prints nothing.
   ticket type can be grouped and filtered by; `sanitizeChart` checks a chart's choices;
   `chartData` builds the Cube query from them (count, one grouping, "equals" conditions,
   open / closed states from `business_logic.mjs`, a date range) and returns the top N
-  plus an "other" total. Results are cached in memory, because the data never changes.
+  plus an "other" total. `chartTickets` lists the tickets behind one bar or slice;
+  `chartFromQuery` turns a validated AI query (a count of one ticket type by one field) into
+  a chart, listing in plain English any condition it can't hold. Results are cached in
+  memory, because the data never changes.
+- `shares.mjs` ([B.48](#b48)): shared dashboards, in the `shared_dashboards` table of
+  `onetouch_auth`: a random link token per dashboard (re-sharing updates what it shows),
+  readable by anyone signed in, removed by its owner.
 - `public/index.html` ([B.25](#b25)): the sign-in page, the header (logo and name, which go
   back to Home; the signed-in name; the Home and Dashboards buttons; Colors and Sign out at
   the right), the colors panel, the Home tab (welcome, Customize Home, then the AI
@@ -1344,11 +1426,15 @@ Check: `node --check business_logic.mjs` prints nothing.
 - `public/style.css` ([B.26](#b26)): the styling. Every color is a variable at the top,
   with a dark set and the header variants, so a color scheme changes them all.
 - `public/charts.js` ([B.46](#b46)): draws the charts as SVG in the page's colors (columns,
-  sideways bars, line, area, donut, table, one number), with tooltips, the table view and
-  redrawing when a chart's width changes.
+  sideways bars, line, area, donut, table, one number; and for answers comparing ticket
+  types, lines, side-by-side or stacked columns), with tooltips, the table view, a click
+  through to a mark's tickets, redrawing when a chart's width changes, and pictures:
+  `chartPicture` redraws a chart off screen in the light colors and writes every color into
+  a standalone SVG; `picturePng` turns that into a PNG.
 - `public/customize.js` ([B.47](#b47)): loads and saves each person's preferences, the
-  colors panel, Customize Home, My dashboards, hiding team dashboards and the chart
-  builder. It loads before `app.js`, which builds the colors panel and the builder when it
+  colors panel, Customize Home, My dashboards and their filter row, hiding team dashboards,
+  the chart builder, the list of tickets behind a chart, saving an AI answer as a chart,
+  sharing, and the tour. It loads before `app.js`, which builds the colors panel and the builder when it
   starts.
 - `public/app.js` ([B.27](#b27)): sign-in, ticket results and stars, the AI assistant
   chat (sending questions, turning the results into tables with English column names and
@@ -1713,6 +1799,7 @@ Create each file at the path shown, with exactly this content. Files are in the 
 - [B.45 `charts.mjs`](#b45)
 - [B.46 `public/charts.js`](#b46)
 - [B.47 `public/customize.js`](#b47)
+- [B.48 `shares.mjs`](#b48)
 
 <a id="b1"></a>
 ### B.1 `.gitignore`
@@ -4485,10 +4572,14 @@ export async function explainEmpty({ anthropic, model, question, searchedFor, fa
 // column labels, formatted values). Every format is built from that one
 // shape:
 //
-//   { title, question, tables: [{ title, columns: [{ label, num }], rows: [[cell]], footer }] }
+//   { title, question, tables: [{ title, columns: [{ label, num }], rows: [[cell]], footer }],
+//     chart: { png: 'data:image/png;base64,...', width, height } }
 //
 // Document formats (pdf, docx, xlsx, csv, txt, rtf) are built in memory.
 // Archive formats (zip, 7z) bundle all six document formats together.
+// `chart` is optional: a picture of the chart on screen (drawn by the
+// browser), placed above the tables in PDF, Word, Excel and RTF, and added
+// to archives as its own .png file.
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -4499,7 +4590,7 @@ import ExcelJS from 'exceljs';
 import PdfPrinter from 'pdfmake';
 import sevenZipBin from '7zip-bin';
 import {
-  AlignmentType, Document, HeadingLevel, Packer, PageOrientation,
+  AlignmentType, Document, HeadingLevel, ImageRun, Packer, PageOrientation,
   Paragraph, ShadingType, Table, TableCell, TableRow, TextRun, WidthType,
 } from 'docx';
 
@@ -4533,6 +4624,9 @@ if (process.platform !== 'win32' && !process.env.SEVEN_ZIP_PATH) {
 // ---------------------------------------------------------------------
 
 const MAX_CELLS = 2_000_000;
+// A chart picture: a PNG of at most this many characters of base64 (about 7.5 MB)
+const MAX_CHART_CHARS = 10_000_000;
+const PNG_DATA_URL = /^data:image\/png;base64,[A-Za-z0-9+/]+=*$/;
 
 // Returns an error message, or null when the payload is usable
 export function validateExport(body) {
@@ -4547,7 +4641,27 @@ export function validateExport(body) {
     cells += t.rows.length * t.columns.length;
   }
   if (cells > MAX_CELLS) return 'That result is too large to export.';
+  if (body.chart !== undefined && body.chart !== null) {
+    const c = body.chart;
+    if (typeof c !== 'object' || typeof c.png !== 'string' || c.png.length > MAX_CHART_CHARS || !PNG_DATA_URL.test(c.png)) {
+      return 'The chart picture is not a usable PNG.';
+    }
+    if (!(c.width > 0 && c.width <= 10000 && c.height > 0 && c.height <= 10000)) return 'The chart picture has no usable size.';
+  }
   return null;
+}
+
+// The chart picture's bytes, and its size scaled to fit a width (in pixels)
+function chartImage(payload, maxWidth) {
+  const c = payload.chart;
+  if (!c) return null;
+  const scale = Math.min(1, maxWidth / c.width);
+  return {
+    dataUrl: c.png,
+    buffer: Buffer.from(c.png.slice(c.png.indexOf(',') + 1), 'base64'),
+    width: Math.round(c.width * scale),
+    height: Math.round(c.height * scale),
+  };
 }
 
 // ---------------------------------------------------------------------
@@ -4617,8 +4731,10 @@ function csvField(value) {
 }
 
 function buildCsv(payload) {
-  const multi = payload.tables.length > 1;
-  const blocks = payload.tables.map(t => {
+  // Notes (the AI's reading of the question, explanations) stay out of a CSV that has data
+  const tables = payload.tables.some(t => !t.note) ? payload.tables.filter(t => !t.note) : payload.tables;
+  const multi = tables.length > 1;
+  const blocks = tables.map(t => {
     const lines = [];
     if (multi && t.title) lines.push(csvField(t.title));
     lines.push(t.columns.map(c => csvField(c.label)).join(','));
@@ -4755,6 +4871,12 @@ function buildRtf(payload) {
     `\\pard{\\b\\fs32\\cf1 ${rtfEscape(title)}}\\par\n`;
   for (const line of rest) s += `\\pard{\\fs18\\cf3 ${rtfEscape(line)}}\\par\n`;
   s += '\\pard\\par\n';
+  // 1 pixel = 15 twips
+  const image = chartImage(payload, 900);
+  if (image) {
+    s += `\\pard{\\pict\\pngblip\\picw${payload.chart.width}\\pich${payload.chart.height}` +
+      `\\picwgoal${image.width * 15}\\pichgoal${image.height * 15}\n${image.buffer.toString('hex')}}\\par\\pard\\par\n`;
+  }
 
   for (const t of payload.tables) {
     if (t.title) s += `\\pard{\\b\\fs24 ${rtfEscape(t.title)}}\\par\n`;
@@ -4781,6 +4903,14 @@ async function buildXlsx(payload) {
   wb.creator = 'One Touch';
   wb.created = new Date();
   const used = new Set();
+
+  const image = chartImage(payload, 1000);
+  if (image) {
+    const ws = wb.addWorksheet(sheetName('Chart', 0, used));
+    ws.getCell('A1').value = payload.title || 'Chart';
+    ws.getCell('A1').font = { bold: true, size: 14 };
+    ws.addImage(wb.addImage({ base64: image.dataUrl, extension: 'png' }), { tl: { col: 0, row: 2 }, ext: { width: image.width, height: image.height } });
+  }
 
   payload.tables.forEach((t, idx) => {
     const ws = wb.addWorksheet(sheetName(t.title, idx, used), { views: [{ state: 'frozen', ySplit: 1 }] });
@@ -4849,6 +4979,13 @@ async function buildDocx(payload) {
     ...rest.map(l => docxParagraph(l, { size: 18 })),
     new Paragraph(''),
   ];
+  // Landscape letter with 0.5" margins: 10" across, 960 pixels
+  const image = chartImage(payload, 900);
+  if (image) {
+    children.push(new Paragraph({
+      children: [new ImageRun({ type: 'png', data: image.buffer, transformation: { width: image.width, height: image.height } })],
+    }), new Paragraph(''));
+  }
   for (const t of payload.tables) {
     if (t.title) children.push(new Paragraph({ text: t.title, heading: HeadingLevel.HEADING_2 }));
     children.push(docxParagraph(rowCountText(t), { size: 16 }), docxTable(t), new Paragraph(''));
@@ -4929,6 +5066,8 @@ function buildPdf(payload) {
     ...rest.map(l => ({ text: pdfSafe(l), fontSize: 9, color: '#718096' })),
     { text: ' ', margin: [0, 0, 0, 6] },
   ];
+  // Landscape letter less margins: 720 x 536 points
+  if (payload.chart) content.push({ image: payload.chart.png, fit: [720, 400], margin: [0, 0, 0, 12] });
   for (const t of payload.tables) {
     if (t.title) content.push({ text: pdfSafe(t.title), fontSize: 12, bold: true, margin: [0, 6, 0, 2] });
     content.push({ text: rowCountText(t), fontSize: 8, color: '#718096', margin: [0, 0, 0, 4] }, pdfTable(t));
@@ -4970,6 +5109,11 @@ async function buildArchive(payload, format, baseName) {
       const name = `${baseName}.${fmt}`;
       await writeFile(path.join(filesDir, name), await BUILDERS[fmt](payload));
       names.push(name);
+    }
+    const image = chartImage(payload, Infinity);
+    if (image) {
+      await writeFile(path.join(filesDir, `${baseName}.png`), image.buffer);
+      names.push(`${baseName}.png`);
     }
 
     const out = path.join(dir, `archive.${format}`);
@@ -5559,7 +5703,8 @@ import * as seen from './seen.mjs';
 import { findTickets, ticketRecord, ticketSummaries, ticketNumbersIn, STARRABLE } from './tickets.mjs';
 import { relatedFamilies, describeFamilies } from './relations.mjs';
 import * as prefs from './prefs.mjs';
-import { chartData, chartValues, chartCatalog, ChartError } from './charts.mjs';
+import { chartData, chartValues, chartCatalog, chartTickets, chartFromQuery, teamValues, ChartError } from './charts.mjs';
+import * as shares from './shares.mjs';
 import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
 
 dotenv.config();
@@ -5608,8 +5753,8 @@ app.use(async (req, res, next) => {
 });
 // Exports carry whole result tables back up, so that route gets a bigger limit
 app.use('/api/export', express.json({ limit: '25mb' }));
-// A whole set of dashboards is saved at once
-app.use('/api/preferences', express.json({ limit: '1mb' }));
+// A whole set of dashboards is saved (or a dashboard shared) at once
+app.use(['/api/preferences', '/api/shares'], express.json({ limit: '1mb' }));
 app.use(express.json());
 app.use(express.static('public'));
 
@@ -5741,7 +5886,7 @@ async function requireLogin(req, res, next) {
   next();
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares'], requireLogin);
 
 // Who is signed in (the page shows their display name)
 app.get('/api/me', (req, res) => {
@@ -6085,6 +6230,9 @@ async function answerQuestion(conversation, userPrompt, reply, user) {
         .catch(error => console.error('🎫 Could not remember the shown tickets:', error.message));
     }
 
+    // A count of one ticket type by one field can be shown as a chart, and saved as one
+    const chartable = verdict.queries.length === 1 ? chartFromQuery(verdict.queries[0].entity, verdict.queries[0].cubeQuery) : null;
+
     reply.send(200, {
       intent: 'query',
       // `entity` / `results` describe the single-type case; `sections` and
@@ -6102,6 +6250,8 @@ async function answerQuestion(conversation, userPrompt, reply, user) {
       allEmpty: emptyQueries.length === verdict.queries.length,
       // Ticket numbers in this answer (now in the person's Ticket results)
       shownTickets,
+      // { chart, dropped }: the answer as a saveable chart (charts.mjs), or null
+      chartable,
       ...timing(),
     });
 
@@ -6317,11 +6467,79 @@ app.get('/api/charts/catalog', async (_req, res) => {
 // { chart } -> its numbers
 app.post('/api/charts/data', async (req, res) => {
   try {
-    res.json(await chartData(req.body?.chart, runCubeQuery));
+    res.json(await chartData(req.body?.chart, runCubeQuery, req.body?.scope));
   } catch (error) {
     if (error instanceof ChartError) return res.status(400).json({ error: error.message });
     console.error('📊 Chart data failed:', error.message);
     res.status(502).json({ error: `This chart could not be loaded right now: ${error.message}` });
+  }
+});
+
+// { chart, value, scope } -> the tickets behind one bar, slice or point
+// (value null: "(Not set)"; a chart with no grouping: all of its tickets)
+app.post('/api/charts/tickets', async (req, res) => {
+  try {
+    res.json(await chartTickets(req.body?.chart, req.body?.value ?? null, runCubeQuery, req.body?.scope));
+  } catch (error) {
+    if (error instanceof ChartError) return res.status(400).json({ error: error.message });
+    console.error('📊 Chart tickets failed:', error.message);
+    res.status(502).json({ error: `Those tickets could not be loaded right now: ${error.message}` });
+  }
+});
+
+// Every team (for a dashboard's Team filter)
+app.get('/api/charts/teams', async (_req, res) => {
+  try {
+    res.json({ values: await teamValues(runCubeQuery) });
+  } catch (error) {
+    console.error('📊 Team list failed:', error.message);
+    res.status(502).json({ error: `The teams could not be loaded right now: ${error.message}` });
+  }
+});
+
+// =====================================================================
+// SHARED DASHBOARDS (shares.mjs): a link to a copy of someone's dashboard
+// =====================================================================
+
+app.get('/api/shares', async (req, res) => {
+  try {
+    res.json({ shares: await shares.listShares(req.user.id) });
+  } catch (error) {
+    console.error('🔗 Could not list shares:', error.message);
+    res.status(503).json({ error: 'Your shared dashboards could not be loaded right now.' });
+  }
+});
+
+// { board } -> { token }: shares it, or updates what its link shows
+app.put('/api/shares', async (req, res) => {
+  try {
+    const token = await shares.shareBoard(req.user.id, req.body?.board);
+    res.json({ token });
+  } catch (error) {
+    if (error instanceof shares.ShareError || error instanceof ChartError) return res.status(400).json({ error: error.message });
+    console.error('🔗 Could not share:', error.message);
+    res.status(503).json({ error: 'That dashboard could not be shared right now.' });
+  }
+});
+
+app.get('/api/shares/:token', async (req, res) => {
+  try {
+    const share = await shares.getShare(String(req.params.token), req.user.id);
+    if (!share) return res.status(404).json({ error: 'That shared dashboard no longer exists. Its owner may have stopped sharing it.' });
+    res.json(share);
+  } catch (error) {
+    console.error('🔗 Could not open a share:', error.message);
+    res.status(503).json({ error: 'That shared dashboard could not be loaded right now.' });
+  }
+});
+
+app.delete('/api/shares/:token', async (req, res) => {
+  try {
+    if (!await shares.unshare(req.user.id, String(req.params.token))) return res.status(404).json({ error: 'That link is not one of yours.' });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('🔗 Could not stop sharing:', error.message);
+    res.status(503).json({ error: 'That could not be done right now.' });
   }
 });
 
@@ -6369,6 +6587,7 @@ async function prepareAccounts(attempt = 1) {
     await stars.ensureStarsSchema();
     await seen.ensureSeenSchema();
     await prefs.ensurePrefsSchema();
+    await shares.ensureSharesSchema();
   } catch (error) {
     const wait = Math.min(attempt * 2, 15);
     console.error(`🔐 Account database not reachable yet (${error.message}); retrying in ${wait}s`);
@@ -6516,7 +6735,10 @@ prepareAccounts();
             <div class="home" id="home">
                 <div class="home-head">
                     <h2 class="home-welcome" id="home-welcome">Welcome!</h2>
-                    <button type="button" class="home-action" id="customize-home-btn" onclick="toggleHomeEditing()" aria-pressed="false">✏️ Customize Home</button>
+                    <div class="home-head-actions">
+                        <button type="button" class="home-action" id="tour-btn" onclick="startTour()" title="A short tour of OneTouch">❔ Tour</button>
+                        <button type="button" class="home-action" id="customize-home-btn" onclick="toggleHomeEditing()" aria-pressed="false">✏️ Customize Home</button>
+                    </div>
                 </div>
                 <!-- While customizing: add charts, bring back hidden sections, reset -->
                 <div class="home-edit-bar" id="home-edit-bar" hidden>
@@ -6627,8 +6849,30 @@ prepareAccounts();
                     <div class="board-view" id="board-view" hidden>
                         <div class="board-bar">
                             <button type="button" class="primary-btn" onclick="addBoardChart()">＋ Add a chart</button>
+                            <button type="button" class="home-action" id="board-share-btn" onclick="shareCurrentBoard()">🔗 Share</button>
                             <button type="button" class="home-action" onclick="renameBoard()">✎ Rename</button>
                             <button type="button" class="home-action danger" onclick="deleteBoard()">🗑 Delete dashboard</button>
+                        </div>
+                        <!-- Filters for every chart on the dashboard (saved with it) -->
+                        <div class="board-filters" role="group" aria-label="Filters for every chart on this dashboard">
+                            <span class="board-filters-label">Every chart:</span>
+                            <label class="board-filter">Opened <select id="bf-dates"></select></label>
+                            <span class="board-filter" id="bf-range" hidden>
+                                <input type="date" id="bf-from" aria-label="Opened from"> to <input type="date" id="bf-to" aria-label="Opened to">
+                            </span>
+                            <div class="team-picker">
+                                <button type="button" class="home-action" id="bf-team-btn" aria-expanded="false" aria-controls="bf-team-pop">Team: any ▾</button>
+                                <div class="team-pop" id="bf-team-pop" hidden>
+                                    <input type="search" id="bf-team-search" placeholder="Search teams…" aria-label="Search teams">
+                                    <div class="filter-values" id="bf-team-list"></div>
+                                    <p class="team-pop-note">Requests have no team, so their charts ignore this.</p>
+                                    <div class="team-pop-foot">
+                                        <button type="button" class="home-action" id="bf-team-clear">Any team</button>
+                                        <button type="button" class="primary-btn" id="bf-team-done">Done</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <button type="button" class="home-action" id="bf-clear" hidden>✕ Clear filters</button>
                         </div>
                         <div class="tile-grid" id="board-grid"></div>
                     </div>
@@ -6668,6 +6912,7 @@ prepareAccounts();
             </div>
             <div class="builder-body">
                 <div class="builder-fields">
+                    <p class="builder-note" id="b-note" hidden></p>
                     <fieldset>
                         <legend>1. What to count</legend>
                         <select id="b-source" aria-label="What to count"></select>
@@ -6723,9 +6968,11 @@ prepareAccounts();
                 <div class="builder-preview">
                     <div class="builder-preview-label">Preview</div>
                     <div id="b-preview"></div>
+                    <p class="field-note" id="b-scope-note" hidden></p>
                 </div>
             </div>
             <div class="builder-foot">
+                <label class="builder-dest" id="b-dest-row" hidden>Save to <select id="b-dest"></select></label>
                 <button type="button" class="home-action" onclick="closeBuilder()">Cancel</button>
                 <button type="submit" class="primary-btn" id="b-save">Add chart</button>
             </div>
@@ -6745,6 +6992,63 @@ prepareAccounts();
             </div>
         </form>
     </dialog>
+
+    <!-- The tickets behind a bar, slice, point or number of a chart -->
+    <dialog class="builder drill-dialog" id="drill-dialog" aria-labelledby="drill-title">
+        <div class="builder-head">
+            <h2 id="drill-title"></h2>
+            <button type="button" class="drawer-close" onclick="this.closest('dialog').close()" aria-label="Close">✕</button>
+        </div>
+        <div class="drill-body" id="drill-body"></div>
+    </dialog>
+
+    <!-- Sharing one of your dashboards: its link -->
+    <dialog class="ask-dialog share-dialog" id="share-dialog" aria-labelledby="share-title">
+        <h2 id="share-title">Share this dashboard</h2>
+        <p class="share-text">Anyone who signs in to OneTouch can open this link, see the dashboard, and add a copy to
+            their own dashboards. When you change the dashboard, the link shows the change; copies people already added stay as they were.</p>
+        <div class="share-link">
+            <input type="text" id="share-link" readonly aria-label="Link to the dashboard">
+            <button type="button" class="primary-btn" onclick="copyShareLink()">Copy link</button>
+        </div>
+        <div class="builder-foot">
+            <button type="button" class="home-action danger" id="share-stop">Stop sharing</button>
+            <button type="button" class="home-action" onclick="this.closest('dialog').close()">Done</button>
+        </div>
+    </dialog>
+
+    <!-- A dashboard someone shared with you (opened from its link) -->
+    <dialog class="builder shared-dialog" id="shared-dialog" aria-labelledby="shared-title">
+        <div class="builder-head">
+            <h2 id="shared-title"></h2>
+            <button type="button" class="drawer-close" onclick="this.closest('dialog').close()" aria-label="Close">✕</button>
+        </div>
+        <div class="shared-body">
+            <p class="home-status" id="shared-about"></p>
+            <div class="tile-grid" id="shared-grid"></div>
+        </div>
+        <div class="builder-foot">
+            <button type="button" class="home-action" onclick="this.closest('dialog').close()">Close</button>
+            <button type="button" class="primary-btn" id="shared-add">＋ Add to my dashboards</button>
+        </div>
+    </dialog>
+
+    <!-- The tour: a spotlight on one part of the page, and what it does -->
+    <div class="tour" id="tour" hidden>
+        <div class="tour-blocker"></div>
+        <div class="tour-spot" id="tour-spot"></div>
+        <div class="tour-card" id="tour-card" role="dialog" aria-modal="true" aria-labelledby="tour-title" aria-describedby="tour-text">
+            <div class="tour-step" id="tour-step"></div>
+            <h2 id="tour-title"></h2>
+            <p id="tour-text"></p>
+            <div class="tour-actions">
+                <button type="button" class="home-action" onclick="closeTour()">Skip the tour</button>
+                <span class="tour-spacer"></span>
+                <button type="button" class="home-action" id="tour-back" onclick="tourMove(-1)">Back</button>
+                <button type="button" class="primary-btn" id="tour-next" onclick="tourMove(1)">Next</button>
+            </div>
+        </div>
+    </div>
 
     <script src="charts.js"></script>
     <script src="customize.js"></script>
@@ -8100,6 +8404,197 @@ dialog.ask-dialog {
 .ask-dialog .builder-foot { padding: 14px 0 16px; border-top: none; }
 
 /* =====================================================================
+   AI ANSWERS AS CHARTS, CLICKING THROUGH TO TICKETS, DASHBOARD FILTERS,
+   SHARING AND THE TOUR
+   ===================================================================== */
+
+.home-head-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* "Show as": the answer's table or one of its charts */
+.answer-views { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 8px; }
+.answer-views-label { font-size: 0.8rem; color: var(--muted); margin-right: 2px; }
+.view-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px 11px;
+    font: inherit;
+    font-size: 0.8rem;
+    color: var(--text-2);
+    cursor: pointer;
+}
+.view-btn svg { color: var(--muted); }
+.view-btn:hover { border-color: var(--faint); }
+.view-btn.active { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.view-btn.active svg { color: var(--on-accent); }
+.view-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.view-btn.save { margin-left: auto; color: var(--accent-ink); border-style: dashed; }
+.view-btn.save:hover { background: var(--accent-softer); border-color: var(--accent); }
+.answer-chart { background: var(--panel-bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; }
+.answer-chart .chart-note { margin-bottom: 0; }
+
+/* Marks that open their tickets */
+.drillable .chart-hit:not(.line-hit),
+.drillable .slice,
+.drillable .line-hit,
+.drillable .chart-stat { cursor: pointer; }
+.drillable .chart-stat:hover .chart-stat-value { color: var(--accent-ink); }
+.chart-stat:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+
+/* The tooltip of a chart with several series: one row per series */
+.tip-rows:empty, .tip-hint:empty { display: none; }
+.tip-rows { display: grid; gap: 2px; margin-top: 4px; }
+.tip-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 6px; align-items: center; color: var(--text-2); }
+.tip-row b { font-variant-numeric: tabular-nums; color: var(--text); }
+.tip-key { width: 10px; height: 3px; border-radius: 2px; }
+.tip-hint { margin-top: 4px; font-size: 0.75rem; color: var(--accent-ink); }
+
+/* The legend above a chart of several series */
+.chart-series-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0 0 8px; font-size: 0.82rem; color: var(--text-2); }
+.series-item { display: inline-flex; align-items: center; gap: 6px; }
+.series-key { width: 10px; height: 10px; border-radius: 3px; }
+.series-key.line { width: 14px; height: 3px; border-radius: 2px; }
+
+/* Pictures of charts are drawn here, off screen, always in the light colors */
+.picture-host {
+    position: fixed;
+    left: -20000px;
+    top: 0;
+    width: 912px;
+    visibility: hidden;
+    color-scheme: light;
+    --bg-primary: #f4f6f9;
+    --panel-bg: #ffffff;
+    --text: #2d3748;
+    --text-2: #4a5568;
+    --muted: #718096;
+    --faint: #a0aec0;
+    --border: #e2e8f0;
+    --chart-grid: #edf0f3;
+    --chart-axis: #cbd2d9;
+    --chart-other: #a0aec0;
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
+    --series-3: #1baf7a;
+    --series-4: #eda100;
+    --series-5: #e87ba4;
+    --series-6: #008300;
+    --series-7: #6250d6;
+    --series-8: #e34948;
+}
+
+/* ⤓ under a chart */
+.tile-download { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.tile-download .download-bar { margin-top: 0; }
+.download-note { color: var(--muted); font-size: 0.78rem; }
+.download-note:empty { display: none; }
+.download-bar option:disabled { color: var(--faint); }
+
+/* A dashboard's filter row */
+.board-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    margin: -4px 0 14px;
+    padding: 8px 12px;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.85rem;
+    color: var(--text-2);
+}
+.board-filters-label { font-weight: 700; color: var(--text); }
+.board-filter { display: inline-flex; align-items: center; gap: 6px; }
+.board-filters select,
+.board-filters input[type="date"],
+.team-pop input[type="search"] {
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel-bg);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.85rem;
+}
+.team-picker { position: relative; }
+#bf-team-btn.on,
+#board-share-btn.on { border-color: var(--accent); background: var(--accent-softer); color: var(--accent-ink); }
+.team-pop {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 5;
+    width: min(340px, calc(100vw - 48px));
+    padding: 10px;
+    box-sizing: border-box;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 12px 30px var(--shadow-strong);
+}
+.team-pop input[type="search"] { width: 100%; box-sizing: border-box; }
+.team-pop .filter-values { max-height: 240px; }
+.team-pop-note { margin: 6px 2px 0; font-size: 0.75rem; color: var(--muted); }
+.team-pop-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; }
+
+/* The builder: a note at the top, conditions with how they match, where to save */
+.builder-note { margin: 0 0 12px; padding: 8px 12px; background: var(--accent-softer); border-left: 3px solid var(--accent); border-radius: 4px; font-size: 0.85rem; color: var(--text-2); line-height: 1.45; }
+.filter-top .filter-op { flex: 0 0 auto; }
+.filter-text { width: 100%; box-sizing: border-box; margin-top: 4px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-bg); color: var(--text); font: inherit; font-size: 0.9rem; }
+.builder-dest { display: inline-flex; align-items: center; gap: 8px; margin-right: auto; font-size: 0.85rem; color: var(--text-2); }
+.builder-dest select { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-bg); color: var(--text); font: inherit; font-size: 0.85rem; max-width: 260px; }
+
+/* The tickets behind a chart, and a shared dashboard's preview */
+.drill-body, .shared-body { padding: 14px 20px 20px; overflow-y: auto; max-height: calc(100vh - 130px); box-sizing: border-box; }
+.drill-what { margin: 0 0 6px; font-size: 0.82rem; color: var(--muted); }
+.drill-body .table-wrap { max-height: 420px; }
+.shared-dialog .builder-foot { position: sticky; bottom: 0; background: var(--panel-bg); }
+
+/* Sharing: the link and its copy button */
+.share-text { margin: 0 0 12px; font-size: 0.88rem; color: var(--text-2); line-height: 1.5; }
+.share-link { display: flex; gap: 8px; }
+.share-link input { flex: 1; min-width: 0; }
+
+/* THE TOUR: everything else dimmed around a spotlight, and a card beside it */
+.tour { position: fixed; inset: 0; z-index: 80; }
+.tour-blocker { position: absolute; inset: 0; }
+.tour-spot {
+    position: fixed;
+    border-radius: 10px;
+    box-shadow: 0 0 0 9999px rgba(10, 12, 16, 0.6);
+    outline: 2px solid var(--accent);
+    pointer-events: none;
+    transition: left 0.2s, top 0.2s, width 0.2s, height 0.2s;
+}
+.tour-card {
+    position: fixed;
+    width: min(360px, calc(100vw - 16px));
+    box-sizing: border-box;
+    padding: 14px 16px;
+    background: var(--panel-bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+}
+.tour-step { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.tour-card h2 { margin: 4px 0 6px; font-size: 1.05rem; }
+.tour-card p { margin: 0 0 12px; font-size: 0.9rem; line-height: 1.5; color: var(--text-2); }
+.tour-actions { display: flex; align-items: center; gap: 8px; }
+.tour-spacer { flex: 1; }
+@media (prefers-reduced-motion: reduce) {
+    .tour-spot { transition: none; }
+}
+@media (max-width: 640px) {
+    .view-btn.save { margin-left: 0; }
+    .builder-dest { width: 100%; }
+}
+
+/* =====================================================================
    SIGN-IN PAGE (from styles2.css; every rule is scoped to .login-page
    so it cannot restyle the app behind it)
    ===================================================================== */
@@ -8977,7 +9472,9 @@ async function sendPrompt() {
 
         // Clarification or unsupported question: show the explanation only
         if (data.intent === 'clarify' || data.intent === 'unsupported') {
-            appendMessage('ai-msg', `🙋 ${escapeHtml(data.message || 'I need a little more detail to run that.')}` + answerTimingHtml(seconds, data.fromCache));
+            const message = data.message || 'I need a little more detail to run that.';
+            const download = downloadBarHtml(registerExport({ title: 'OneTouch answer', question: userPromptText, tables: buildExportTables(data, message) }));
+            appendMessage('ai-msg', `🙋 ${escapeHtml(message)}` + download + answerTimingHtml(seconds, data.fromCache));
             return;
         }
 
@@ -8987,20 +9484,24 @@ async function sendPrompt() {
         // Nothing found anywhere: the server's explanation replaces the empty tables
         const explanationHtml = data.explanation
             ? `<div class="result-explanation">${escapeHtml(data.explanation)}</div>` : '';
+        let tablesHtml = '';
         if (data.explanation && data.allEmpty) {
             html += explanationHtml;
         } else if (data.combined) {
             // Counts across several ticket types: one table, one column per type
-            html += renderCombined(data.combined);
+            tablesHtml = renderCombined(data.combined);
         } else if (data.sections && data.sections.length > 1) {
             // Lists across several ticket types: one titled table per type
-            html += data.sections.map(s =>
+            tablesHtml = data.sections.map(s =>
                 `<div class="section-title">${escapeHtml(capitalize(nounFor(s.entity, 2)))}</div>` +
                 renderResults(s.rows, s.entity)
             ).join('');
         } else {
-            html += renderResults(data.results || [], data.entity);
+            tablesHtml = renderResults(data.results || [], data.entity);
         }
+        // Counts by one thing can also be shown as a chart (and back)
+        const answer = { data, question: userPromptText, tablesHtml, view: 'table', model: tablesHtml ? answerChartModel(data, userPromptText) : null };
+        if (tablesHtml) html += (answer.model ? answerViewsHtml(answer.model, data.chartable) : '') + `<div class="answer-view">${tablesHtml}</div>`;
         // Some ticket types found nothing: explain those under the tables
         if (data.explanation && !data.allEmpty) html += explanationHtml;
 
@@ -9013,21 +9514,26 @@ async function sendPrompt() {
         // Star every ticket the answer lists, or all of one type
         html += starAllHtml(answerTicketNumbers(data));
 
-        // Offer the same tables as a download in any of the export formats
+        // Offer the same tables as a download in any of the export formats, and,
+        // while a chart is showing, a picture of it (also placed in PDF, Word and Excel)
         const tables = buildExportTables(data);
         if (tables.length) {
             html += downloadBarHtml(registerExport({
                 title: data.message || 'One Touch results',
                 question: userPromptText,
                 tables,
-            }));
+                picture: answer.model ? () => answerPicture(answer) : undefined,
+            }), 'Download as', { pictures: Boolean(answer.model) });
         }
 
         const answerId = appendMessage('ai-msg wide', html + answerTimingHtml(seconds, data.fromCache));
+        const answerEl = document.getElementById(answerId);
+        answerEl._answer = answer;
+        paintPictureOptions(answerEl);
 
         // Parent / child tickets and others linked to the ones in this answer, under it
         const primary = answerTicketNumbers(data);
-        if (primary.length) showRelated(document.getElementById(answerId), primary, true);
+        if (primary.length) showRelated(answerEl, primary, true);
 
         // The tickets in this answer pop up in Ticket results on Home
         if (data.shownTickets && data.shownTickets.length) ticketsShown(data.shownTickets);
@@ -9331,6 +9837,154 @@ function capitalize(s) {
     return s ? s[0].toUpperCase() + s.slice(1) : s;
 }
 
+// =====================================================================
+// AI ANSWERS AS CHARTS: an answer that counts one ticket type by one thing
+// (or compares ticket types) can be shown as columns, bars, a line, a donut
+// and back to the table. One that is exactly a chart (chartable from the
+// server) can be saved to Home or a dashboard, and a click on its chart
+// lists the tickets behind a bar or slice.
+// =====================================================================
+
+const ANSWER_VIEW_NAMES = { table: 'Table', bar: 'Columns', hbar: 'Sideways bars', line: 'Line', area: 'Area', donut: 'Donut', stacked: 'Stacked columns' };
+const STACKED_ICON = '<rect x="4" y="13" width="5" height="8" rx="1"/><rect x="4" y="6" width="5" height="6" rx="1" opacity="0.5"/><rect x="14" y="9" width="5" height="12" rx="1"/><rect x="14" y="3" width="5" height="5" rx="1" opacity="0.5"/>';
+// More than this many categories: the biggest are drawn, the rest add up in a note
+const MAX_ANSWER_BARS = 30;
+
+// -> { kind: 'single', chart, data, views, drill } | { kind: 'series', chart, series, views } | null
+function answerChartModel(data, question) {
+    const title = data.message || question;
+    const base = { id: 'answer', title, color: 'accent', size: 'large', status: 'all', filters: [], dates: { preset: 'all' } };
+    const rows = data.results || [];
+    // One ticket type counted by one field
+    if (!data.combined && data.entity !== 'multiple' && rows.length >= 2) {
+        const columns = Object.keys(rows[0]);
+        const counts = columns.filter(c => c.endsWith('.count'));
+        const fields = columns.filter(c => !c.endsWith('.count'));
+        if (counts.length === 1 && fields.length === 1) {
+            const field = splitMember(fields[0]).column;
+            const time = isTimeField(field);
+            const list = rows.map(r => ({ value: r[fields[0]] ?? null, count: Number(r[counts[0]]) || 0 }));
+            const total = list.reduce((t, r) => t + r.count, 0);
+            let other = null;
+            if (time) list.sort((a, b) => String(a.value).localeCompare(String(b.value)));
+            else if (list.length > MAX_ANSWER_BARS) {
+                list.sort((a, b) => b.count - a.count);
+                const rest = list.splice(MAX_ANSWER_BARS);
+                other = { count: rest.reduce((t, r) => t + r.count, 0), groups: rest.length };
+            }
+            return {
+                kind: 'single',
+                chart: { ...base, source: data.entity, groupBy: field, display: time ? 'line' : 'bar', limit: list.length },
+                data: { total, rows: list, other },
+                views: time ? ['table', 'line', 'area', 'bar'] : ['table', 'bar', 'hbar', 'donut', 'line'],
+                drill: data.chartable && !data.chartable.dropped.length ? data.chartable.chart : null,
+            };
+        }
+    }
+    const combined = data.combined;
+    if (combined && combined.rows.length) {
+        const { dimension, entities, totals } = combined;
+        const name = e => capitalize(nounFor(e, 2));
+        // A total per ticket type
+        if (!dimension && entities.length >= 2) {
+            return {
+                kind: 'single',
+                chart: { ...base, source: 'tickets', groupBy: 'ticket_type', display: 'bar', limit: entities.length },
+                data: { total: totals.total, rows: entities.map(e => ({ value: name(e), count: totals.counts[e] || 0, slot: ENTITY_SLOTS[e] || 1 })), other: null },
+                views: ['table', 'bar', 'hbar', 'donut'],
+                drill: null,
+            };
+        }
+        // Ticket types side by side, per week, team, ...
+        if (dimension && combined.rows.length >= 2) {
+            const time = isTimeField(splitMember(dimension).column);
+            const ordered = time ? [...combined.rows].sort((a, b) => String(a.key).localeCompare(String(b.key))) : combined.rows;
+            return {
+                kind: 'series',
+                chart: { ...base, groupLabel: columnLabel(dimension) },
+                series: {
+                    categories: ordered.map(r => ({ value: r.key, label: time ? periodLabel(dimension, r.key) : formatValue(dimension, r.key) })),
+                    series: entities.map(e => ({ name: name(e), slot: ENTITY_SLOTS[e] || 1, values: ordered.map(r => r.counts[e] || 0) })),
+                    total: totals.total,
+                },
+                views: time ? ['table', 'line', 'bar', 'stacked'] : ['table', 'bar', 'stacked', 'line'],
+            };
+        }
+    }
+    return null;
+}
+
+function answerViewsHtml(model, chartable) {
+    const icon = view => {
+        const svg = view === 'stacked' ? STACKED_ICON : (DISPLAY_CHOICES.find(([v]) => v === view) || [])[2] || '';
+        return `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">${svg}</svg>`;
+    };
+    const buttons = model.views.map(v => `<button type="button" class="view-btn${v === 'table' ? ' active' : ''}" data-answer-view="${v}" aria-pressed="${v === 'table'}">` +
+        `${icon(v)}<span>${ANSWER_VIEW_NAMES[v]}</span></button>`).join('');
+    const save = model.kind === 'single' && chartable
+        ? '<button type="button" class="view-btn save" data-answer-save title="Put this on Home or one of your dashboards, as a chart that stays">📌 Save as a chart</button>' : '';
+    return `<div class="answer-views" role="group" aria-label="Show this answer as"><span class="answer-views-label">Show as</span>${buttons}${save}</div>`;
+}
+
+function setAnswerView(el, view) {
+    const answer = el._answer;
+    if (!answer?.model || !answer.model.views.includes(view)) return;
+    answer.view = view;
+    el.querySelectorAll('[data-answer-view]').forEach(b => {
+        const on = b.dataset.answerView === view;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-pressed', String(on));
+    });
+    const box = el.querySelector('.answer-view');
+    resizeWatcher.unobserve(box);
+    box._drawn = null;
+    box._pick = null;
+    if (view === 'table') {
+        box.className = 'answer-view';
+        box.innerHTML = answer.tablesHtml;
+        refreshStarButtons();
+    } else {
+        box.className = 'answer-view tile-body answer-chart';
+        const model = answer.model;
+        if (model.kind === 'series') drawSeriesChart(box, model.chart, model.series, view);
+        else drawChart(box, { ...model.chart, display: view }, model.data, false);
+        // An answer that is exactly a chart: a click lists the tickets behind a mark
+        if (model.drill) box._pick = row => openDrill({ chart: model.drill, value: row ? row.value : null, label: row ? groupLabel(model.drill, row.value, true) : '' });
+        box.classList.toggle('drillable', Boolean(box._pick));
+        if (model.data?.other) {
+            box.insertAdjacentHTML('beforeend', `<p class="chart-note">${escapeHtml(`Showing the biggest ${model.data.rows.length}; the other ${model.data.other.groups.toLocaleString()} add up to ${model.data.other.count.toLocaleString()} (all of them are in the table).`)}</p>`);
+        }
+    }
+    paintPictureOptions(el);
+}
+
+// The picture of the answer's chart, while one is showing
+function answerPicture(answer) {
+    if (!answer.model || answer.view === 'table') return null;
+    const model = answer.model;
+    const subtitle = `Question: ${answer.question}`;
+    return model.kind === 'series'
+        ? { chart: model.chart, series: model.series, display: answer.view, title: model.chart.title, subtitle }
+        : { chart: { ...model.chart, display: answer.view }, data: model.data, title: model.chart.title, subtitle };
+}
+
+// "📌 Save as a chart": the chart builder, filled in from the answer, saving to Home or a dashboard
+function saveAnswerChart(el) {
+    const answer = el._answer;
+    const chartable = answer?.data.chartable;
+    if (!chartable) return;
+    const display = ['bar', 'hbar', 'line', 'area', 'donut'].includes(answer.view) ? answer.view : chartable.chart.display;
+    toggleAssistant(false);
+    openBuilder({
+        chart: { ...chartable.chart, id: newChartId(), title: '', display },
+        note: chartable.dropped.length
+            ? `From the answer. Not carried over, because a chart can't hold it: ${chartable.dropped.join('; ')}. The chart counts without it.`
+            : 'From the answer: the same numbers. Change anything you like, then choose where to save it.',
+        destination: true,
+        onSave: saveChartTo,
+    });
+}
+
 // Counts merged across ticket types (see combineResults in business_logic.mjs)
 function renderCombined(combined) {
     const { dimension, entities, rows, totals } = combined;
@@ -9440,16 +10094,33 @@ function exportTableFromCombined(combined) {
     };
 }
 
-function buildExportTables(data) {
+// Every kind of answer downloads: its tables, why something was empty, and how
+// the question was read (notes: kept out of CSV files that have data). A
+// text-only answer (a question back, or something the data can't answer)
+// downloads as its text.
+function buildExportTables(data, textAnswer = null) {
     let tables;
-    if (data.combined) {
+    if (textAnswer) {
+        tables = [noteTable('Answer', 'Answer', [textAnswer])];
+    } else if (data.combined) {
         tables = [exportTableFromCombined(data.combined)];
     } else if (data.sections && data.sections.length > 1) {
         tables = data.sections.map(s => exportTableFromRows(s.rows, capitalize(nounFor(s.entity, 2))));
     } else {
         tables = [exportTableFromRows(data.results || [], null)];
     }
-    return tables.filter(Boolean);
+    tables = tables.filter(Boolean);
+    if (data.explanation) {
+        tables.push(noteTable(data.allEmpty ? 'Why nothing was found' : 'Why some of it is empty', 'Explanation', [data.explanation]));
+    }
+    if (data.assumptions && data.assumptions.length) {
+        tables.push(noteTable('How I read your question', 'Assumption', data.assumptions));
+    }
+    return tables;
+}
+
+function noteTable(title, label, lines) {
+    return { title, note: true, columns: [{ label }], rows: lines.map(l => [String(l)]), footer: null };
 }
 
 const EXPORT_OPTIONS = [
@@ -9467,8 +10138,16 @@ const EXPORT_OPTIONS = [
     ]],
 ];
 
-function downloadBarHtml(exportId, label = 'Download as') {
-    const options = EXPORT_OPTIONS.map(([group, items]) =>
+// Pictures of the chart (drawn in the browser by charts.js)
+const PICTURE_FORMATS = ['png', 'svg'];
+const PICTURE_OPTIONS = ['Picture of the chart', [['png', 'Picture (.png)'], ['svg', 'Picture, any size (.svg)']]];
+// Formats that also carry the chart picture, when a chart is showing
+const FORMATS_WITH_PICTURE = ['pdf', 'docx', 'xlsx', 'rtf', 'zip', '7z'];
+
+// pictures: the result can be shown as a chart, so offer its picture too
+function downloadBarHtml(exportId, label = 'Download as', { pictures = false } = {}) {
+    const groups = pictures ? [EXPORT_OPTIONS[0], PICTURE_OPTIONS, ...EXPORT_OPTIONS.slice(1)] : EXPORT_OPTIONS;
+    const options = groups.map(([group, items]) =>
         `<optgroup label="${escapeHtml(group)}">` +
         items.map(([value, label]) => `<option value="${value}">${escapeHtml(label)}</option>`).join('') +
         `</optgroup>`
@@ -9478,7 +10157,35 @@ function downloadBarHtml(exportId, label = 'Download as') {
         `<select id="${exportId}-format">${options}</select>` +
         `<button type="button" onclick="downloadExport('${exportId}')">⬇ Download</button>` +
         `<span class="download-status" role="status"></span>` +
+        (pictures ? '<span class="download-note" data-picture-note></span>' : '') +
         `</div>`;
+}
+
+// The picture choices work while a chart is showing; with the table showing,
+// they say how to get one
+function paintPictureOptions(container) {
+    const bar = container.querySelector(':scope > .download-bar, .answer-download .download-bar, .tile-download .download-bar') || container.querySelector('.download-bar');
+    if (!bar) return;
+    const payload = exportPayloads.get(bar.id);
+    const on = Boolean(payload?.picture?.());
+    bar.querySelectorAll('option').forEach(o => {
+        if (!PICTURE_FORMATS.includes(o.value)) return;
+        o.disabled = !on;
+        o.textContent = (o.value === 'png' ? 'Picture (.png)' : 'Picture, any size (.svg)') + (on ? '' : ' — show a chart first');
+    });
+    const select = bar.querySelector('select');
+    if (!on && PICTURE_FORMATS.includes(select.value)) select.value = 'xlsx';
+    const note = bar.querySelector('[data-picture-note]');
+    if (note) note.textContent = on ? 'PDF, Word, Excel, RTF and archives include the chart.' : '';
+}
+
+// "one-touch-how-many-open-incidents-2026-10-22", like the server's file names
+function pictureFileName(payload) {
+    const slug = String(payload.question || payload.title || 'chart').toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'chart';
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    return `one-touch-${slug}-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 async function downloadExport(exportId) {
@@ -9494,11 +10201,19 @@ async function downloadExport(exportId) {
     status.textContent = `Preparing ${format.toUpperCase()} file…`;
 
     try {
+        // The chart on screen, if any: its picture is drawn here, in the browser
+        const picture = payload.picture ? payload.picture() : null;
+        if (PICTURE_FORMATS.includes(format)) {
+            if (!picture) throw new Error('Show the answer as a chart first, then download its picture.');
+            status.textContent = `Downloaded ${await downloadPicture(picture, format, pictureFileName(payload))}`;
+            return;
+        }
+        const chart = picture && FORMATS_WITH_PICTURE.includes(format) ? await picturePng(chartPicture(picture)) : null;
         const response = await fetch(`${API_BASE}/api/export`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...authHeaders() },
             // The browser's time zone: the file's "Generated" time and date use it
-            body: JSON.stringify({ ...payload, format, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
+            body: JSON.stringify({ ...payload, format, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, chart }),
         });
         if (handleUnauthorized(response)) {
             status.textContent = '';
@@ -10180,6 +10895,11 @@ document.addEventListener('click', e => {
     const ticket = e.target.closest('[data-ticket]');
     if (ticket) { openTicketRecord(ticket.dataset.ticket); return; }
 
+    const view = e.target.closest('[data-answer-view]');
+    if (view) { setAnswerView(view.closest('.msg'), view.dataset.answerView); return; }
+    const saveChart = e.target.closest('[data-answer-save]');
+    if (saveChart) { saveAnswerChart(saveChart.closest('.msg')); return; }
+
     // Home's example question is asked in the chat
     const example = e.target.closest('[data-example]');
     if (example) { askAssistant(example.dataset.example); return; }
@@ -10255,6 +10975,7 @@ async function loadTicketDetail(box, number) {
 document.getElementById('ticket-results').innerHTML = NO_TICKET_RESULTS_HTML;
 buildThemePanel();
 buildBuilder();
+buildBoardFilters();
 renderHomeLayout();
 renderMyDashboards();
 showApp(Boolean(sessionTokenValue));
@@ -12355,13 +13076,14 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 | `stars.mjs` | Each person's starred tickets, in `onetouch_auth` (`starred_tickets`, created on start); `addStars` stars many at once ("Star all", `PUT /api/stars`) up to `MAX_STARS` |
 | `seen.mjs` | Each person's "Ticket results": every ticket shown to them (`seen_tickets`, created on start). `/api/query` records the ticket numbers in each answer (`ticketNumbersIn`) before replying and returns them as `shownTickets`; `GET /api/seen-tickets` returns the list with summaries (`ticketSummaries`); `DELETE /api/seen-tickets` empties it ("Delete ticket results") |
 | `prefs.mjs` | Each person's preferences in `onetouch_auth` (`user_preferences`: one JSONB per user, saved in parts `theme` / `home` / `dashboards` via `PUT /api/preferences/:part`, reset with `DELETE`). `cleanPreference` drops unknown keys and caps sizes (20 dashboards x 30 charts, 30 Home sections); every chart goes through `sanitizeChart` |
-| `charts.mjs` | The charts people build: `CHART_SOURCES` (per ticket type, the fields to group / filter by and the time groupings), `sanitizeChart`, `chartData` (builds its own Cube query: count, one dimension, `equals` filters, open / closed states from `ENTITY_CATALOG`, a day range; top N plus an `other` total), `chartValues` (a filter's choices), `chartCatalog`. In-memory LRU cache, since the data is frozen. Routes: `/api/charts/catalog`, `/api/charts/data`, `/api/charts/values` |
+| `charts.mjs` | The charts people build: `CHART_SOURCES` (per ticket type, the fields to group / filter by and the time groupings), `sanitizeChart`, `chartData` (builds its own Cube query: count, one dimension, `equals` / `notEquals` / `contains` filters, open / closed states from `ENTITY_CATALOG`, a day range, plus a dashboard's `scope` (dates, teams via `TEAM_FIELDS`); top N plus an `other` total), `chartTickets` (the tickets behind one bar), `chartFromQuery` (an AI answer's validated query as a chart, returned on `/api/query` as `chartable`), `chartValues` / `teamValues`, `chartCatalog`. In-memory LRU cache, since the data is frozen. Routes: `/api/charts/catalog`, `/api/charts/data`, `/api/charts/values`, `/api/charts/teams`, `/api/charts/tickets` |
+| `shares.mjs` | Shared dashboards (`shared_dashboards` in `onetouch_auth`): one random token per (owner, dashboard), re-sharing updates it, anyone signed in can read it (`/api/shares`). The board goes through `prefs.cleanBoard` |
 | `business_logic.mjs` | Everything Claude knows about the data: `ENTITY_CATALOG`, `buildSystemPrompt()` (sections A-E), `OUTPUT_SCHEMA`, and `normalizeAndValidate()`, which every Claude-built query passes through before Cube |
 | `empty_results.mjs` | When a query returns nothing: re-runs it minus one filter at a time, then Claude explains why |
-| `export.mjs` | Tables -> pdf/docx/xlsx/csv/txt/rtf, and zip/7z bundles (7-Zip) |
+| `export.mjs` | Tables -> pdf/docx/xlsx/csv/txt/rtf, and zip/7z bundles (7-Zip). An optional `chart` (a PNG data URL the browser drew) goes above the tables in pdf/docx/xlsx/rtf and into archives; tables marked `note` stay out of CSV |
 | `auth.mjs` | Accounts and sessions in the `onetouch_auth` Postgres DB (its own role `onetouch_app`); scrypt hashes; `db/accounts.json` export/sync |
 | `remote.mjs` | "Remote mode" for clones: serves `public/` on localhost and forwards `/api`, `/public`, `/app` to a OneTouch server |
-| `public/` | The single-page UI (`index.html`, `app.js`, `style.css`); no build step. Home has the AI assistant's card (example question, Open chat, Delete chat; the chat opens as a panel over the page; ticket rows in its answers open in place into the record plus related tickets via `toggleTicketRow`), ticket results (a clicked ticket's record) and starred tickets; Dashboards is the other tab. Delete chat resets the server conversation and bumps `chatEpoch` so a late answer is dropped. `customize.js` (colors panel, Customize Home, My dashboards, hiding team dashboards, the chart builder, saving preferences) and `charts.js` (SVG charts, tooltips, table view) load before `app.js`; their start-up work (`buildThemePanel`, `buildBuilder`) is called from `app.js` because they use its helpers. Every color in `style.css` is a variable (`:root`, `[data-theme="dark"]`, `[data-header=...]`); never hard-code one |
+| `public/` | The single-page UI (`index.html`, `app.js`, `style.css`); no build step. Home has the AI assistant's card (example question, Open chat, Delete chat; the chat opens as a panel over the page; ticket rows in its answers open in place into the record plus related tickets via `toggleTicketRow`), ticket results (a clicked ticket's record) and starred tickets; Dashboards is the other tab. Delete chat resets the server conversation and bumps `chatEpoch` so a late answer is dropped. `customize.js` (colors panel, Customize Home, My dashboards and their filter row, hiding team dashboards, the chart builder, the drill-down list, sharing, the tour, saving preferences) and `charts.js` (SVG charts incl. several series, tooltips, table view, click-through via a box's `_pick`, pictures for downloads via `chartPicture` / `picturePng`) load before `app.js`; their start-up work (`buildThemePanel`, `buildBuilder`, `buildBoardFilters`) is called from `app.js` because they use its helpers. Every color in `style.css` is a variable (`:root`, `[data-theme="dark"]`, `[data-header=...]`); never hard-code one |
 | `db/` | `init-auth.sh`, `init-reporting.sh`, `reporting-views.sql` (typed `reporting.*` views for Metabase), `accounts.json` |
 | `scripts/users.mjs` | Account admin CLI (add, import CSV, export, sync, ...) |
 | `scripts/warmup.mjs` | `npm run warmup`: before a crowd, asks every question in `scripts/warmup-questions.txt` (so each is answered from the repeated-question cache) and opens every dashboard (filling Metabase's result cache); lists anything that failed |
@@ -12544,7 +13266,7 @@ const FILES = [
   // Added later; at the end so the guide's links to B.1-B.36 keep their numbers
   'tickets.mjs', 'stars.mjs', 'scripts/share.mjs', 'scripts/warmup.mjs', 'scripts/warmup-questions.txt',
   'seen.mjs', 'relations.mjs',
-  'prefs.mjs', 'charts.mjs', 'public/charts.js', 'public/customize.js',
+  'prefs.mjs', 'charts.mjs', 'public/charts.js', 'public/customize.js', 'shares.mjs',
 ];
 
 // Not copied in, and why (shown in the appendix)
@@ -13353,6 +14075,22 @@ What are the most common incident subcategories?
 Which servers or systems have the most incidents?
 How many incidents were reopened?
 Show me incident INC1814467
+How many incidents came in through each channel?
+Which locations have the most incidents?
+How many incidents are on hold, by on-hold reason?
+How many incidents breached SLA, and why?
+How many incidents were resolved each day in August 2026?
+What causes the most incidents?
+Which incidents were P1 at some point but are not P1 now?
+How many incidents were reassigned at least once, by team?
+List the P2 incidents for the ACN-INFRA-CLOUD-WINTEL team
+
+# Problems and related tickets
+Which problem records have the most incidents?
+Show me the incidents linked to problem PRB0051839
+Show me the child incidents of INC1813985
+What is the parent request of RITM0440458?
+Show me the catalog tasks for RITM0440498
 
 # Changes
 How many changes are there by type?
@@ -13360,22 +14098,47 @@ How many changes were created in August 2026 by risk?
 List the emergency changes
 Which changes caused incidents?
 Show me change CHG1101321
+Which changes were unsuccessful, and why?
+How many changes are waiting for approval?
+What changes are planned to start in September 2026?
+Which teams own the most changes?
+How many production changes had an outage?
+How many changes affect SAP?
+How many changes touch breweries?
+
+# Approvals
+Which groups approve the most changes?
+How many requests were rejected?
+How many requests are still waiting for approval?
 
 # Requests and catalog tasks
 What are the top 5 most requested catalog items?
 How many requests were opened each month?
 Show open catalog tasks that breached SLA
 Which teams have the most open catalog tasks?
+Which locations submit the most requests?
+How many open requests are there by stage?
+How many VDI - Pool Access requests were opened in August 2026?
+Show me request RITM0440498
+Show me catalog task SCTASK0595823
+How many catalog tasks were created each week in August 2026?
+Which catalog items create the most tasks?
 
 # Across ticket types
 How many incidents, changes and requests were opened in August 2026?
 How many requests and incidents were opened each week in August 2026?
+How many tickets of each type are open right now?
+Show open tickets for the ACN-INFRA-CLOUD-WINTEL team
+How many tickets were opened at Milwaukee Brewery in August 2026?
 
 # Nothing found: OneTouch works out why and says so
 Show me changes owned by the TCS-ServiceDesk-L1-NA-WE team
 
 # Outside the data's dates: Claude says what the export covers
 How many incidents were opened in January 2026?
+
+# Not in the data: Claude explains and offers the nearest question it can answer
+What is the average time to resolve a P3 incident?
 ```
 
 <a id="b42"></a>
@@ -13711,10 +14474,11 @@ export function describeFamilies(families) {
 // =====================================================================
 
 import { pool } from './auth.mjs';
-import { sanitizeChart, newId } from './charts.mjs';
+import { sanitizeChart, sanitizeScope, newId } from './charts.mjs';
 
-// Saved separately, so changing colors never overwrites a dashboard
-export const PARTS = ['theme', 'home', 'dashboards'];
+// Saved separately, so changing colors never overwrites a dashboard.
+// tour: whether the first-visit tour has been seen.
+export const PARTS = ['theme', 'home', 'dashboards', 'tour'];
 
 export const MAX_BOARDS = 20;
 export const MAX_BOARD_CHARTS = 30;
@@ -13798,23 +14562,31 @@ function cleanHome(h = {}) {
   return { blocks };
 }
 
+// One dashboard: its name, its charts, and its filter row (scope: dates, teams)
+export function cleanBoard(b, takenIds = []) {
+  return {
+    id: typeof b.id === 'string' && ID.test(b.id) && !takenIds.includes(b.id) ? b.id : newId(),
+    name: String(b.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 60) || 'My dashboard',
+    charts: cleanCharts(b.charts, MAX_BOARD_CHARTS),
+    scope: sanitizeScope(b.scope),
+  };
+}
+
 function cleanDashboards(d = {}) {
   const boards = [];
   for (const b of (Array.isArray(d.boards) ? d.boards : []).slice(0, MAX_BOARDS)) {
     if (!b || typeof b !== 'object') continue;
-    boards.push({
-      id: ID.test(b.id) && !boards.some(other => other.id === b.id) ? b.id : newId(),
-      name: String(b.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 60) || 'My dashboard',
-      charts: cleanCharts(b.charts, MAX_BOARD_CHARTS),
-    });
+    boards.push(cleanBoard(b, boards.map(other => other.id)));
   }
   // Team dashboards this person hid from their list, and the one they had open last
-  const hidden = [...new Set((Array.isArray(d.hidden) ? d.hidden : []).filter(k => DASHBOARD_KEY.test(k)))].slice(0, 200);
+  const hidden = [...new Set((Array.isArray(d.hidden) ? d.hidden : []).filter(k => typeof k === 'string' && DASHBOARD_KEY.test(k)))].slice(0, 200);
   const last = typeof d.last === 'string' && (DASHBOARD_KEY.test(d.last) || /^my:[A-Za-z0-9_-]{1,40}$/.test(d.last)) ? d.last : '';
   return { boards, hidden, last };
 }
 
-const CLEANERS = { theme: cleanTheme, home: cleanHome, dashboards: cleanDashboards };
+const cleanTour = (t = {}) => ({ done: t.done === true });
+
+const CLEANERS = { theme: cleanTheme, home: cleanHome, dashboards: cleanDashboards, tour: cleanTour };
 
 export function cleanPreference(part, value) {
   if (!PARTS.includes(part)) throw new PreferenceError('Unknown setting.');
@@ -13831,21 +14603,22 @@ export function cleanPreference(part, value) {
 ```js
 // =====================================================================
 // CHARTS: the data behind the charts people build themselves (on their
-// own dashboards and on Home). A chart is a set of choices from
-// CHART_SOURCES: which tickets to count, which ones to include, and what
-// to group them by. Every Cube query here is built by this file from
-// those choices (checked by sanitizeChart), never from text the browser
-// sends, so nothing unchecked reaches Cube.
+// own dashboards and on Home), and behind AI answers shown as charts.
+// A chart is a set of choices from CHART_SOURCES: which tickets to count,
+// which ones to include, and what to group them by. Every Cube query here
+// is built by this file from those choices (checked by sanitizeChart),
+// never from text the browser sends, so nothing unchecked reaches Cube.
 // =====================================================================
 
 import { ENTITY_CATALOG } from './business_logic.mjs';
+import { TICKET_KINDS, toTicket } from './tickets.mjs';
 
 // What can be counted, per ticket type: `fields` group into categories and
 // can also filter; `times` group by when (oldest first). `day` is the
-// opened date the date range filters on.
+// opened date the date range filters on; `opened` the full timestamp.
 export const CHART_SOURCES = {
   incident: {
-    label: 'Incidents', one: 'incident', many: 'incidents', day: 'created_day',
+    label: 'Incidents', one: 'incident', many: 'incidents', day: 'created_day', opened: 'created', prefix: 'INC',
     fields: {
       priority: 'Priority', state: 'State', category: 'Category', subcategory: 'Subcategory',
       assignment_group: 'Team', assigned_to: 'Assigned to', contact_type: 'How it was reported',
@@ -13858,7 +14631,7 @@ export const CHART_SOURCES = {
     },
   },
   change_request: {
-    label: 'Changes', one: 'change', many: 'changes', day: 'created_day',
+    label: 'Changes', one: 'change', many: 'changes', day: 'created_day', opened: 'created', prefix: 'CHG',
     fields: {
       risk: 'Risk', state: 'State', type: 'Type', sub_type: 'Sub-type', owner_group: 'Team',
       approval: 'Approval', environment: 'Environment', close_code: 'Outcome', failure_code: 'Failure reason',
@@ -13870,16 +14643,19 @@ export const CHART_SOURCES = {
     },
   },
   sc_req_item: {
-    label: 'Requests', one: 'request', many: 'requests', day: 'opened_day',
+    label: 'Requests', one: 'request', many: 'requests', day: 'opened_day', opened: 'opened', prefix: 'RITM',
     fields: { item: 'Catalog item', state: 'State', stage: 'Stage', approval: 'Approval', location: 'Location' },
     times: { opened_day: 'Day opened', opened_week: 'Week opened', opened_month: 'Month opened', closed_month: 'Month closed' },
   },
   sc_task: {
-    label: 'Catalog tasks', one: 'catalog task', many: 'catalog tasks', day: 'created_day',
+    label: 'Catalog tasks', one: 'catalog task', many: 'catalog tasks', day: 'created_day', opened: 'created', prefix: 'SCTASK',
     fields: { state: 'State', assignment_group: 'Team', assigned_to: 'Assigned to', item: 'Catalog item', sla_flag: 'SLA breached' },
     times: { created_day: 'Day opened', created_week: 'Week opened', created_month: 'Month opened' },
   },
 };
+
+// The team column, for a dashboard's "Team" filter (requests have no team)
+export const TEAM_FIELDS = { incident: 'assignment_group', change_request: 'owner_group', sc_task: 'assignment_group' };
 
 // The ways a chart can look and be cut; anything else falls back to the default
 export const DISPLAYS = ['bar', 'hbar', 'line', 'area', 'donut', 'table', 'number'];
@@ -13888,13 +14664,18 @@ const LIMITS = [5, 10, 15, 20, 30, 50];
 const COLORS = ['accent', '1', '2', '3', '4', '5', '6', '7', '8'];
 const STATUSES = ['all', 'open', 'closed'];
 const DATE_PRESETS = ['all', '7', '30', '90', 'custom'];
+// A condition: is one of the values, is none of them, or contains a word
+const FILTER_OPS = ['equals', 'notEquals', 'contains'];
 const MAX_FILTERS = 6;
 const MAX_FILTER_VALUES = 50;
+const MAX_SCOPE_TEAMS = 30;
 // Plenty for any field (the biggest, people, has a few thousand); the tail beyond
 // the chart's top N comes back as one "Other" count
 const MAX_GROUPS = 5000;
 // Day by day over the whole export is about 100 points
 const MAX_TIME_POINTS = 400;
+// The tickets behind one bar or slice: the newest this many are listed
+export const MAX_DRILL_TICKETS = 200;
 
 const ID = /^[A-Za-z0-9_-]{1,40}$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -13903,6 +14684,26 @@ export class ChartError extends Error {}
 
 export function newId() {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+}
+
+function sanitizeDates(input) {
+  const dates = input && typeof input === 'object' ? input : {};
+  const preset = DATE_PRESETS.includes(String(dates.preset)) ? String(dates.preset) : 'all';
+  if (preset !== 'custom') return { preset };
+  let from = DAY.test(dates.from) ? dates.from : '';
+  let to = DAY.test(dates.to) ? dates.to : '';
+  if (from && to && from > to) [from, to] = [to, from];
+  return { preset, from, to };
+}
+
+function sanitizeFilter(f, src) {
+  if (!f || !src.fields[f.field]) return null;
+  const op = FILTER_OPS.includes(f.op) ? f.op : 'equals';
+  const list = Array.isArray(f.values) ? f.values : [];
+  const values = op === 'contains'
+    ? [...new Set(list.map(v => String(v).trim().slice(0, 100)).filter(Boolean))].slice(0, 10)
+    : [...new Set(list.map(v => String(v).slice(0, 200)))].slice(0, MAX_FILTER_VALUES);
+  return values.length ? { field: f.field, op, values } : null;
 }
 
 // Browser input -> a chart with every setting checked and filled in.
@@ -13915,27 +14716,20 @@ export function sanitizeChart(input) {
 
   const filters = [];
   for (const f of (Array.isArray(c.filters) ? c.filters : []).slice(0, MAX_FILTERS)) {
-    if (!f || !src.fields[f.field] || filters.some(g => g.field === f.field)) continue;
-    const values = [...new Set((Array.isArray(f.values) ? f.values : []).map(v => String(v).slice(0, 200)))].slice(0, MAX_FILTER_VALUES);
-    if (values.length) filters.push({ field: f.field, values });
+    const clean = sanitizeFilter(f, src);
+    if (clean && !filters.some(g => g.field === clean.field)) filters.push(clean);
   }
-
-  const dates = c.dates && typeof c.dates === 'object' ? c.dates : {};
-  const preset = DATE_PRESETS.includes(String(dates.preset)) ? String(dates.preset) : 'all';
-  let from = DAY.test(dates.from) ? dates.from : '';
-  let to = DAY.test(dates.to) ? dates.to : '';
-  if (from && to && from > to) [from, to] = [to, from];
 
   // One number needs nothing to group by; everything else does
   let display = DISPLAYS.includes(c.display) ? c.display : (groupBy ? 'bar' : 'number');
   if (!groupBy) display = 'number';
 
   return {
-    id: ID.test(c.id) ? c.id : newId(),
+    id: typeof c.id === 'string' && ID.test(c.id) ? c.id : newId(),
     title: String(c.title ?? '').replace(/\s+/g, ' ').trim().slice(0, 80),
     source: c.source,
     status: STATUSES.includes(c.status) ? c.status : 'all',
-    dates: preset === 'custom' ? { preset, from, to } : { preset },
+    dates: sanitizeDates(c.dates),
     filters,
     groupBy,
     display,
@@ -13944,6 +14738,14 @@ export function sanitizeChart(input) {
     size: SIZES.includes(c.size) ? c.size : 'medium',
     color: COLORS.includes(String(c.color)) ? String(c.color) : 'accent',
   };
+}
+
+// A dashboard's filter row, applied to every chart on it: when the tickets
+// were opened, and which teams. -> { dates, teams }
+export function sanitizeScope(input) {
+  const s = input && typeof input === 'object' ? input : {};
+  const teams = [...new Set((Array.isArray(s.teams) ? s.teams : []).map(t => String(t).slice(0, 200)).filter(Boolean))].slice(0, MAX_SCOPE_TEAMS);
+  return { dates: sanitizeDates(s.dates), teams };
 }
 
 // ---------------------------------------------------------------------
@@ -13993,27 +14795,39 @@ function daysBefore(day, n) {
   return d.toISOString().slice(0, 10);
 }
 
-// The chart's "which ones" as Cube filters
-async function cubeFilters(chart, runQuery) {
+// A date range as Cube filters on the opened day
+async function dateFilters(cube, dates, runQuery) {
+  const day = `${cube}.${CHART_SOURCES[cube].day}`;
+  if (dates.preset === 'custom') {
+    return [
+      ...(dates.from ? [{ member: day, operator: 'gte', values: [dates.from] }] : []),
+      ...(dates.to ? [{ member: day, operator: 'lte', values: [dates.to] }] : []),
+    ];
+  }
+  if (dates.preset === 'all') return [];
+  // "Last 30 days" of the export, counting back from its newest day
+  const { last } = await dataDays(cube, runQuery);
+  return last ? [{ member: day, operator: 'gte', values: [daysBefore(last, Number(dates.preset) - 1)] }] : [];
+}
+
+// The chart's "which ones" (and its dashboard's filter row) as Cube filters.
+// -> { filters, skipped: ['team'] when the dashboard's team filter can't apply }
+async function cubeFilters(chart, runQuery, scope = sanitizeScope()) {
   const cube = chart.source;
   const filters = [];
   if (chart.status !== 'all') {
     const states = chart.status === 'open' ? ENTITY_CATALOG[cube].openStates : ENTITY_CATALOG[cube].closedStates;
     filters.push({ member: `${cube}.state`, operator: 'equals', values: states });
   }
-  for (const f of chart.filters) filters.push({ member: `${cube}.${f.field}`, operator: 'equals', values: f.values });
-
-  const day = `${cube}.${CHART_SOURCES[cube].day}`;
-  const { preset } = chart.dates;
-  if (preset === 'custom') {
-    if (chart.dates.from) filters.push({ member: day, operator: 'gte', values: [chart.dates.from] });
-    if (chart.dates.to) filters.push({ member: day, operator: 'lte', values: [chart.dates.to] });
-  } else if (preset !== 'all') {
-    // "Last 30 days" of the export, counting back from its newest day
-    const { last } = await dataDays(cube, runQuery);
-    if (last) filters.push({ member: day, operator: 'gte', values: [daysBefore(last, Number(preset) - 1)] });
+  for (const f of chart.filters) filters.push({ member: `${cube}.${f.field}`, operator: f.op, values: f.values });
+  filters.push(...await dateFilters(cube, chart.dates, runQuery));
+  filters.push(...await dateFilters(cube, scope.dates, runQuery));
+  const skipped = [];
+  if (scope.teams.length) {
+    if (TEAM_FIELDS[cube]) filters.push({ member: `${cube}.${TEAM_FIELDS[cube]}`, operator: 'equals', values: scope.teams });
+    else skipped.push('team');
   }
-  return filters;
+  return { filters, skipped };
 }
 
 // No value, or the export's placeholder for "no system": both show as "(Not set)"
@@ -14034,14 +14848,16 @@ function naturalOrder(cube, field) {
   };
 }
 
-// chart -> { chart, total, rows: [{ value, count }], other: { count, groups } | null, days }
-// rows: for a time grouping every period, oldest first; otherwise the chart's
-// top N by count, in the chart's order, with the rest as one "other" count.
-export async function chartData(input, runQuery) {
+// chart (+ its dashboard's filter row) -> { chart, total, rows: [{ value, count }],
+// other: { count, groups } | null, days, skipped }. rows: for a time grouping every
+// period, oldest first; otherwise the chart's top N by count, in the chart's order,
+// with the rest as one "other" count.
+export async function chartData(input, runQuery, scopeInput) {
   const chart = sanitizeChart(input);
+  const scope = sanitizeScope(scopeInput);
   const cube = chart.source;
   const count = `${cube}.count`;
-  const filters = await cubeFilters(chart, runQuery);
+  const { filters, skipped } = await cubeFilters(chart, runQuery, scope);
   const days = await dataDays(cube, runQuery);
 
   if (!chart.groupBy) {
@@ -14049,7 +14865,7 @@ export async function chartData(input, runQuery) {
       const rows = await runQuery({ measures: [count], filters });
       return Number(rows[0]?.[count]) || 0;
     });
-    return { chart, total, rows: [], other: null, days };
+    return { chart, total, rows: [], other: null, days, skipped };
   }
 
   const member = `${cube}.${chart.groupBy}`;
@@ -14074,13 +14890,41 @@ export async function chartData(input, runQuery) {
   });
 
   const total = groups.reduce((sum, g) => sum + g.count, 0);
-  if (isTime) return { chart, total, rows: groups, other: null, days };
+  if (isTime) return { chart, total, rows: groups, other: null, days, skipped };
 
   const top = groups.slice(0, chart.limit);
   const rest = groups.slice(chart.limit);
   if (chart.sort === 'label') top.sort(naturalOrder(cube, chart.groupBy));
   const other = rest.length ? { count: rest.reduce((sum, g) => sum + g.count, 0), groups: rest.length } : null;
-  return { chart, total, rows: top, other, days };
+  return { chart, total, rows: top, other, days, skipped };
+}
+
+// The tickets behind one bar, slice or point (value: that group's value; null
+// for "(Not set)"), or behind a one-number chart (no grouping): how many
+// there are, and the newest MAX_DRILL_TICKETS as ticket summaries
+export async function chartTickets(input, value, runQuery, scopeInput) {
+  const chart = sanitizeChart(input);
+  const scope = sanitizeScope(scopeInput);
+  const cube = chart.source;
+  const src = CHART_SOURCES[cube];
+  const { filters } = await cubeFilters(chart, runQuery, scope);
+  if (chart.groupBy) {
+    const member = `${cube}.${chart.groupBy}`;
+    if (value === null || value === undefined) {
+      filters.push(chart.groupBy === 'configuration_item'
+        ? { or: [{ member, operator: 'notSet' }, { member, operator: 'equals', values: ['zzz'] }] }
+        : { member, operator: 'notSet' });
+    } else {
+      filters.push({ member, operator: 'equals', values: [String(value).slice(0, 200)] });
+    }
+  }
+  const kind = TICKET_KINDS[src.prefix];
+  const dimensions = [...new Set(['number', ...Object.values(kind.fields)])].map(c => `${cube}.${c}`);
+  const [totalRows, rows] = await Promise.all([
+    runQuery({ measures: [`${cube}.count`], filters }),
+    runQuery({ dimensions, filters, order: { [`${cube}.${src.opened}`]: 'desc' }, limit: MAX_DRILL_TICKETS }),
+  ]);
+  return { chart, total: Number(totalRows[0]?.[`${cube}.count`]) || 0, tickets: rows.map(r => toTicket(src.prefix, r)) };
 }
 
 // The values a filter can pick from, most common first: [{ value, count }]
@@ -14097,6 +14941,16 @@ export async function chartValues(source, field, runQuery) {
   });
 }
 
+// Every team, across incidents, changes and catalog tasks, busiest first
+export async function teamValues(runQuery) {
+  return cached('teams', async () => {
+    const lists = await Promise.all(Object.entries(TEAM_FIELDS).map(([source, field]) => chartValues(source, field, runQuery)));
+    const merged = new Map();
+    for (const list of lists) for (const v of list) merged.set(v.value, (merged.get(v.value) || 0) + v.count);
+    return [...merged].map(([value, count]) => ({ value, count })).sort((a, b) => b.count - a.count);
+  });
+}
+
 // What the chart builder offers, with each ticket type's open / closed
 // states and the dates its data covers
 export async function chartCatalog(runQuery) {
@@ -14108,10 +14962,74 @@ export async function chartCatalog(runQuery) {
       times: Object.entries(src.times),
       openStates: ENTITY_CATALOG[key].openStates,
       closedStates: ENTITY_CATALOG[key].closedStates,
+      hasTeam: Boolean(TEAM_FIELDS[key]),
       days: await dataDays(key, runQuery),
     };
   }
   return { sources };
+}
+
+// ---------------------------------------------------------------------
+// AI answers as charts: a validated Cube query that counts one ticket type
+// by one field becomes a chart. Conditions a chart can't hold are listed
+// in plain English (`dropped`), so the page can say what didn't carry over.
+// ---------------------------------------------------------------------
+
+const OP_WORDS = {
+  equals: 'is', notEquals: 'is not', contains: 'contains', notContains: 'does not contain',
+  startsWith: 'starts with', endsWith: 'ends with', set: 'has a value', notSet: 'is empty',
+  gt: 'is after', gte: 'is on or after', lt: 'is before', lte: 'is on or before',
+};
+
+const sameSet = (a, b) => a.length === b.length && a.every(v => b.includes(v));
+
+function dayBefore(day) {
+  return daysBefore(day, 1);
+}
+
+// cube query -> { chart, dropped } or null when it isn't a count by one field
+export function chartFromQuery(entity, query) {
+  const src = CHART_SOURCES[entity];
+  if (!src || !query) return null;
+  const dimensions = query.dimensions || [];
+  const measures = query.measures || [];
+  if (dimensions.length !== 1 || measures.length !== 1 || measures[0] !== `${entity}.count`) return null;
+  const groupBy = dimensions[0].slice(entity.length + 1);
+  if (!src.fields[groupBy] && !src.times[groupBy]) return null;
+  const isTime = Boolean(src.times[groupBy]);
+
+  const label = field => src.fields[field] || src.times[field] || field.replace(/_/g, ' ');
+  const chart = { source: entity, groupBy, display: isTime ? 'line' : 'bar', status: 'all', filters: [], sort: isTime ? 'label' : 'count' };
+  const dropped = [];
+  let from = '', to = '';
+  for (const f of query.filters || []) {
+    if (!f.member) { dropped.push('a combined "or / and" condition'); continue; }
+    const field = f.member.slice(entity.length + 1);
+    const values = (f.values || []).map(String);
+    if (field === 'state' && f.operator === 'equals' && sameSet(values, ENTITY_CATALOG[entity].openStates)) { chart.status = 'open'; continue; }
+    if (field === 'state' && f.operator === 'equals' && sameSet(values, ENTITY_CATALOG[entity].closedStates)) { chart.status = 'closed'; continue; }
+    if (src.fields[field] && FILTER_OPS.includes(f.operator) && values.length && !chart.filters.some(g => g.field === field)) {
+      chart.filters.push({ field, op: f.operator, values });
+      continue;
+    }
+    // A range on the opened date (the timestamp or its day)
+    if ([src.opened, src.day].includes(field) && ['gte', 'gt', 'lt', 'lte'].includes(f.operator) && DAY.test(String(values[0]).slice(0, 10))) {
+      const day = values[0].slice(0, 10);
+      if (f.operator === 'gte' || f.operator === 'gt') from = day;
+      else to = f.operator === 'lt' ? dayBefore(day) : day;
+      continue;
+    }
+    const shown = values.length > 3 ? `${values.slice(0, 3).join(', ')} and ${values.length - 3} more` : values.join(', ');
+    dropped.push(`${label(field)} ${OP_WORDS[f.operator] || f.operator}${shown ? ` ${shown}` : ''}`);
+  }
+  if (from || to) chart.dates = { preset: 'custom', from, to };
+  // Sorted by the field itself (A to Z, P1 first) rather than by the count
+  const order = Array.isArray(query.order) ? query.order.map(o => o?.member ?? o?.[0]) : Object.keys(query.order || {});
+  if (!isTime && order[0] === dimensions[0]) chart.sort = 'label';
+  // The answer's "top N", as the nearest a chart offers
+  const limit = Number(query.limit) || 0;
+  if (!isTime && limit) chart.limit = LIMITS.find(n => n >= limit) || 50;
+  return { chart: sanitizeChart(chart), dropped };
 }
 ```
 
@@ -14121,10 +15039,12 @@ export async function chartCatalog(runQuery) {
 ```js
 // =====================================================================
 // CHARTS: the charts people build themselves (their own dashboards, and
-// Home), drawn as plain SVG in the page's colors, so they follow each
-// person's color scheme. Thin marks, a hairline grid, a tooltip on every
-// mark (hover or keyboard focus), and a table view for every chart.
-// The numbers come from /api/charts/data (charts.mjs on the server).
+// Home) and AI answers shown as charts, drawn as plain SVG in the page's
+// colors, so they follow each person's color scheme. Thin marks, a
+// hairline grid, a tooltip on every mark (hover or keyboard focus), a
+// table view for every chart, a click on a mark to list its tickets, and
+// pictures (PNG / SVG) for downloads. The numbers come from
+// /api/charts/data (charts.mjs on the server) or from the AI answer.
 // Loaded before app.js, whose helpers (escapeHtml, API_BASE, ...) these
 // functions use when they run.
 // =====================================================================
@@ -14132,6 +15052,8 @@ export async function chartCatalog(runQuery) {
 const DONUT_SLICES = 6; // part-to-whole reads at a glance only up to about six
 const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const CHART_FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+// Each ticket type keeps its color in every chart that compares types
+const ENTITY_SLOTS = { incident: 1, change_request: 2, sc_req_item: 3, sc_task: 4, change_approvals: 5, ritm_approvals: 7 };
 
 // What the builder offers and how each ticket type is named (from /api/charts/catalog)
 let chartCatalog = null;
@@ -14160,7 +15082,7 @@ const isTimeField = field => /_(day|week|month)$/.test(field || '');
 function fieldLabel(source, field) {
     const src = chartCatalog?.sources[source];
     const pair = src && [...src.fields, ...src.times].find(([key]) => key === field);
-    return pair ? pair[1] : field;
+    return pair ? pair[1] : String(field || '').replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
 }
 
 // "Team" -> "team", but "System (CI)" -> "system (CI)" and "SLA breached" stays
@@ -14214,6 +15136,18 @@ function chartTitle(chart) {
 
 const fmtDay = day => periodLabel('x_day', day, true);
 
+function datesText(dates) {
+    if (!dates || dates.preset === 'all') return '';
+    if (dates.preset === 'custom') {
+        if (dates.from && dates.to) return `Opened ${fmtDay(dates.from)} to ${fmtDay(dates.to)}`;
+        if (dates.from) return `Opened on or after ${fmtDay(dates.from)}`;
+        return dates.to ? `Opened on or before ${fmtDay(dates.to)}` : '';
+    }
+    return `Opened in the data's last ${dates.preset} days`;
+}
+
+const OP_TEXT = { equals: '', notEquals: ' is not', contains: ' contains' };
+
 // Which tickets a chart counts, in words: "Open only · Priority: P1 - Critical · Opened Aug 3 – Sep 1, 2026"
 function chartDescription(chart) {
     const src = chartCatalog?.sources[chart.source];
@@ -14221,17 +15155,22 @@ function chartDescription(chart) {
     if (chart.status === 'open') parts.push(`Open ${src ? src.many : ''} only (${src ? src.openStates.join(', ') : ''})`);
     if (chart.status === 'closed') parts.push(`Closed ${src ? src.many : ''} only`);
     for (const f of chart.filters || []) {
-        const shown = f.values.slice(0, 3).map(v => groupLabel({ groupBy: f.field }, v)).join(', ');
-        parts.push(`${fieldLabel(chart.source, f.field)}: ${shown}${f.values.length > 3 ? ` and ${f.values.length - 3} more` : ''}`);
+        const shown = f.values.slice(0, 3).map(v => f.op === 'contains' ? `"${v}"` : groupLabel({ groupBy: f.field }, v)).join(f.op === 'contains' ? ' or ' : ', ');
+        parts.push(`${fieldLabel(chart.source, f.field)}${OP_TEXT[f.op] || ''}: ${shown}${f.values.length > 3 ? ` and ${f.values.length - 3} more` : ''}`);
     }
-    const dates = chart.dates || { preset: 'all' };
-    if (dates.preset === 'custom' && (dates.from || dates.to)) {
-        parts.push(dates.from && dates.to ? `Opened ${fmtDay(dates.from)} to ${fmtDay(dates.to)}`
-            : dates.from ? `Opened on or after ${fmtDay(dates.from)}` : `Opened on or before ${fmtDay(dates.to)}`);
-    } else if (dates.preset !== 'all' && dates.preset !== 'custom') {
-        parts.push(`Opened in the data's last ${dates.preset} days`);
-    }
+    const dates = datesText(chart.dates);
+    if (dates) parts.push(dates);
     return parts.length ? parts.join(' · ') : `All ${src ? src.many : 'tickets'}`;
+}
+
+// A dashboard's filter row, in words: "Opened in the data's last 30 days · Team: ACN-SAP-BASIS"
+function scopeDescription(scope) {
+    if (!scope) return '';
+    const parts = [];
+    const dates = datesText(scope.dates);
+    if (dates) parts.push(dates);
+    if (scope.teams?.length) parts.push(`Team: ${scope.teams.slice(0, 3).join(', ')}${scope.teams.length > 3 ? ` and ${scope.teams.length - 3} more` : ''}`);
+    return parts.join(' · ');
 }
 
 // 0 / 950 / 1.2K / 12K / 1.5M
@@ -14241,6 +15180,8 @@ function compactNumber(n) {
     return String(n);
 }
 
+const share = (n, total) => `${((n / (total || 1)) * 100).toFixed(1)}%`;
+
 // ---------------------------------------------------------------------
 // Data: one request per distinct question, kept for the page's life
 // (the data is a frozen export, so an answer never changes)
@@ -14249,19 +15190,19 @@ function compactNumber(n) {
 const chartDataCache = new Map();
 
 // What changes the numbers; how it looks (display, color, size) doesn't
-function chartDataKey(chart) {
+function chartDataKey(chart, scope) {
     const { source, status, dates, filters, groupBy, limit, sort } = chart;
-    return JSON.stringify({ source, status, dates, filters, groupBy, limit, sort });
+    return JSON.stringify({ source, status, dates, filters, groupBy, limit, sort, scope: scope || null });
 }
 
-function fetchChartData(chart) {
-    const key = chartDataKey(chart);
+function fetchChartData(chart, scope = null) {
+    const key = chartDataKey(chart, scope);
     if (!chartDataCache.has(key)) {
         const pending = (async () => {
             const response = await fetch(`${API_BASE}/api/charts/data`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', ...authHeaders() },
-                body: JSON.stringify({ chart }),
+                body: JSON.stringify({ chart, scope }),
             });
             if (handleUnauthorized(response)) return null;
             const data = await response.json().catch(() => ({}));
@@ -14330,14 +15271,14 @@ function barPath(x, y, w, h, radius = 4) {
         `Q${r1(x + w)},${r1(y + h)} ${r1(x + w - r)},${r1(y + h)}H${r1(x)}Z`;
 }
 
-// A mark's tooltip, as attributes (shown on hover and keyboard focus)
-function tipAttrs(chart, row, total) {
-    const share = total ? ` (${((row.count / total) * 100).toFixed(1)}%)` : '';
-    return ` data-tip-value="${escapeHtml(row.count.toLocaleString() + share)}" data-tip-label="${escapeHtml(row.label || groupLabel(chart, row.value, true))}"`;
+// A mark's tooltip, and which row it is (for clicking through to its tickets)
+function tipAttrs(chart, row, total, index) {
+    return ` data-index="${index}" data-tip-value="${escapeHtml(`${row.count.toLocaleString()} (${share(row.count, total)})`)}"` +
+        ` data-tip-label="${escapeHtml(row.label || groupLabel(chart, row.value, true))}"`;
 }
 
-function svgOpen(width, height, label) {
-    return `<svg class="chart-svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(label)}">`;
+function svgOpen(width, height, label, cls = '') {
+    return `<svg class="chart-svg ${cls}" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(label)}">`;
 }
 
 // Hairline gridlines with their values at the left
@@ -14347,14 +15288,16 @@ function gridHtml(ticks, y, left, right) {
 }
 
 // Labels along the bottom: as many as fit, evenly spaced, each cut to its room
-function xLabelsHtml(chart, rows, xAt, room, baseY) {
-    const every = Math.max(1, Math.ceil(rows.length / Math.max(1, Math.floor(room.total / 72))));
-    return rows.map((row, i) => i % every ? '' :
-        `<text class="chart-tick" x="${r1(xAt(i))}" y="${baseY}" text-anchor="middle">${escapeHtml(fitText(groupLabel(chart, row.value), room.each * every - 6, 11))}</text>`).join('');
+function xLabelsHtml(labels, xAt, room, baseY) {
+    const every = Math.max(1, Math.ceil(labels.length / Math.max(1, Math.floor(room.total / 72))));
+    return labels.map((label, i) => i % every ? '' :
+        `<text class="chart-tick" x="${r1(xAt(i))}" y="${baseY}" text-anchor="middle">${escapeHtml(fitText(label, room.each * every - 6, 11))}</text>`).join('');
 }
 
+const tickWidth = ticks => Math.ceil(Math.max(...ticks.map(t => textWidth(compactNumber(t), 11)))) + 12;
+
 // ---------------------------------------------------------------------
-// The chart forms
+// One series (a count per category or per period)
 // ---------------------------------------------------------------------
 
 function chartHeight(chart) {
@@ -14364,9 +15307,10 @@ function chartHeight(chart) {
 // One number: the total
 function numberHtml(chart, data) {
     const src = chartCatalog?.sources[chart.source];
-    const noun = src ? (data.total === 1 ? src.one : src.many) : 'tickets';
+    const noun = src ? (data.total === 1 ? src.one : src.many) : (data.total === 1 ? 'ticket' : 'tickets');
     const state = chart.status === 'open' ? 'open ' : chart.status === 'closed' ? 'closed ' : '';
-    return `<div class="chart-stat"><span class="chart-stat-value">${data.total.toLocaleString()}</span>` +
+    return `<div class="chart-stat" data-index="all" tabindex="0" data-tip-value="${data.total.toLocaleString()}" data-tip-label="${escapeHtml(state + noun)}">` +
+        `<span class="chart-stat-value">${data.total.toLocaleString()}</span>` +
         `<span class="chart-stat-label">${escapeHtml(state + noun)}</span></div>`;
 }
 
@@ -14374,13 +15318,13 @@ function numberHtml(chart, data) {
 function columnsHtml(chart, data, width) {
     const rows = data.rows;
     const height = chartHeight(chart);
-    const { top, ticks } = niceScale(Math.max(...rows.map(r => r.count)));
-    const m = { top: 20, right: 8, bottom: 26, left: Math.ceil(Math.max(...ticks.map(t => textWidth(compactNumber(t), 11)))) + 12 };
+    const max = Math.max(...rows.map(r => r.count));
+    const { top, ticks } = niceScale(max);
+    const m = { top: 20, right: 8, bottom: 26, left: tickWidth(ticks) };
     const plotW = width - m.left - m.right, plotH = height - m.top - m.bottom;
     const band = plotW / rows.length;
     const barW = Math.max(2, Math.min(24, band * 0.7));
     const y = v => m.top + plotH - (v / top) * plotH;
-    const max = Math.max(...rows.map(r => r.count));
     // Values on the caps when they fit; otherwise only the biggest is labeled
     const labelAll = rows.length <= 12 && rows.every(r => textWidth(r.count.toLocaleString(), 11) <= band + 2);
     const focusable = rows.length <= 40 ? ' tabindex="0"' : '';
@@ -14392,10 +15336,10 @@ function columnsHtml(chart, data, width) {
         if (labelAll || (row.count === max && i === rows.findIndex(r => r.count === max))) {
             html += `<text class="chart-value" x="${r1(x + barW / 2)}" y="${r1(y(row.count) - 6)}" text-anchor="middle">${row.count.toLocaleString()}</text>`;
         }
-        html += `<rect class="chart-hit" x="${r1(m.left + i * band)}" y="${m.top}" width="${r1(band)}" height="${plotH}"${focusable}${tipAttrs(chart, row, data.total)}/>`;
+        html += `<rect class="chart-hit" x="${r1(m.left + i * band)}" y="${m.top}" width="${r1(band)}" height="${plotH}"${focusable}${tipAttrs(chart, row, data.total, i)}/>`;
     });
     html += `<line class="chart-axis" x1="${m.left}" x2="${width - m.right}" y1="${r1(y(0))}" y2="${r1(y(0))}"/>`;
-    html += xLabelsHtml(chart, rows, i => m.left + i * band + band / 2, { total: plotW, each: band }, height - 8);
+    html += xLabelsHtml(rows.map(r => groupLabel(chart, r.value)), i => m.left + i * band + band / 2, { total: plotW, each: band }, height - 8);
     return html + '</svg>';
 }
 
@@ -14417,19 +15361,26 @@ function barsHtml(chart, data, width) {
         html += `<text class="chart-label" x="${r1(labelW)}" y="${r1(y + barH / 2 + 4)}" text-anchor="end">${escapeHtml(fitText(labels[i], labelW, 12))}</text>`;
         if (w > 0) html += `<path class="chart-mark" d="${barPath(left, y, w, barH)}" style="fill:${seriesColor(chart)}"/>`;
         html += `<text class="chart-value" x="${r1(left + w + 6)}" y="${r1(y + barH / 2 + 4)}">${row.count.toLocaleString()}</text>`;
-        html += `<rect class="chart-hit" x="0" y="${i * rowH}" width="${width}" height="${rowH}" tabindex="0"${tipAttrs(chart, row, data.total)}/>`;
+        html += `<rect class="chart-hit" x="0" y="${i * rowH}" width="${width}" height="${rowH}" tabindex="0"${tipAttrs(chart, row, data.total, i)}/>`;
     });
     html += `<line class="chart-axis" x1="${left}" x2="${left}" y1="0" y2="${height}"/>`;
     return html + '</svg>';
 }
 
-// A line (or a line over a light wash, for "area"): best over time.
-// The pointer (or arrow keys) moves a crosshair from point to point.
+// The crosshair a line chart's pointer (or arrow keys) moves from point to point
+function crosshairHtml(m, plotW, plotH, y0, step, top, dots) {
+    return `<line class="chart-cross" x1="0" x2="0" y1="${m.top}" y2="${r1(y0)}" visibility="hidden"/>` +
+        dots.map(color => `<circle class="chart-dot chart-cross-dot" r="4" visibility="hidden" style="fill:${color}"/>`).join('') +
+        `<rect class="chart-hit line-hit" data-index="line" x="${m.left - 6}" y="${m.top}" width="${plotW + 12}" height="${plotH}" tabindex="0"` +
+        ` aria-label="Move along the line with the arrow keys" data-left="${m.left}" data-step="${r1(step)}" data-plot-h="${plotH}" data-top="${m.top}" data-max="${top}"/>`;
+}
+
+// A line (or a line over a light wash, for "area"): best over time
 function lineHtml(chart, data, width, area) {
     const rows = data.rows;
     const height = chartHeight(chart);
     const { top, ticks } = niceScale(Math.max(...rows.map(r => r.count)));
-    const m = { top: 22, right: 14, bottom: 26, left: Math.ceil(Math.max(...ticks.map(t => textWidth(compactNumber(t), 11)))) + 12 };
+    const m = { top: 22, right: 14, bottom: 26, left: tickWidth(ticks) };
     const plotW = width - m.left - m.right, plotH = height - m.top - m.bottom;
     const step = rows.length > 1 ? plotW / (rows.length - 1) : 0;
     const x = i => rows.length > 1 ? m.left + i * step : m.left + plotW / 2;
@@ -14450,18 +15401,14 @@ function lineHtml(chart, data, width, area) {
         html += `<text class="chart-value" x="${r1(i === last ? x(i) + 4 : x(i))}" y="${r1(y(rows[i].count) - 9)}" text-anchor="${anchor}">${rows[i].count.toLocaleString()}</text>`;
     }
     html += `<circle class="chart-dot" cx="${r1(x(last))}" cy="${r1(y(rows[last].count))}" r="4" style="fill:${color}"/>`;
-    html += xLabelsHtml(chart, rows, x, { total: plotW, each: Math.max(step, 1) }, height - 8);
-    // The crosshair, moved by the pointer or the arrow keys
-    html += `<line class="chart-cross" x1="0" x2="0" y1="${m.top}" y2="${r1(y(0))}" visibility="hidden"/>` +
-        `<circle class="chart-dot chart-cross-dot" r="4" visibility="hidden" style="fill:${color}"/>` +
-        `<rect class="chart-hit line-hit" x="${m.left - 6}" y="${m.top}" width="${plotW + 12}" height="${plotH}" tabindex="0"` +
-        ` aria-label="Move along the line with the arrow keys" data-left="${m.left}" data-step="${r1(step)}" data-plot-h="${plotH}" data-top="${m.top}" data-max="${top}"/>`;
+    html += xLabelsHtml(rows.map(r => groupLabel(chart, r.value)), x, { total: plotW, each: Math.max(step, 1) }, height - 8);
+    html += crosshairHtml(m, plotW, plotH, y(0), step, top, [color]);
     return html + '</svg>';
 }
 
-// Donut: share of the whole, at most six slices (the rest folds into "Other")
-function donutHtml(chart, data, width) {
-    let parts = data.rows.map((r, i) => ({ ...r, label: groupLabel(chart, r.value), slot: i + 1 }));
+// The donut's slices: at most six, the rest folded into "Other"
+function donutParts(chart, data) {
+    let parts = data.rows.map((r, i) => ({ ...r, label: groupLabel(chart, r.value), slot: r.slot || i + 1, index: i }));
     let otherCount = data.other?.count || 0;
     let otherGroups = data.other?.groups || 0;
     if (parts.length + (otherCount ? 1 : 0) > DONUT_SLICES) {
@@ -14470,27 +15417,34 @@ function donutHtml(chart, data, width) {
         otherCount += folded.reduce((s, r) => s + r.count, 0);
         otherGroups += folded.length;
     }
-    if (otherCount) parts.push({ value: '__other', label: `Other (${otherGroups.toLocaleString()})`, count: otherCount, other: true });
+    if (otherCount) parts.push({ value: '__other', label: `Other (${otherGroups.toLocaleString()})`, count: otherCount, other: true, index: 'other' });
+    return parts;
+}
+
+const donutFill = p => p.other ? 'var(--chart-other)' : `var(--series-${p.slot})`;
+
+// Donut: share of the whole, at most six slices (the rest folds into "Other")
+function donutHtml(chart, data, width) {
+    const parts = donutParts(chart, data);
     const total = data.total || 1;
     const side = width >= 440;
     const size = Math.min(side ? 190 : 170, side ? width * 0.42 : width - 20);
     const r = size / 2, inner = r * 0.62, cx = r + 2, cy = r + 2;
-    const fill = p => p.other ? 'var(--chart-other)' : `var(--series-${p.slot})`;
     let angle = -Math.PI / 2;
     let slices = '';
     for (const p of parts) {
         const sweep = (p.count / total) * Math.PI * 2;
         if (sweep <= 0) continue;
-        const tip = tipAttrs(chart, p, data.total);
+        const tip = tipAttrs(chart, p, data.total, p.index);
         if (sweep >= Math.PI * 2 - 1e-6) {
             // One slice is everything: a full ring
-            slices += `<path class="chart-mark slice" tabindex="0" d="M${cx},${cy - r}A${r},${r} 0 1 1 ${cx - 0.01},${cy - r}Z M${cx},${cy - inner}A${inner},${inner} 0 1 0 ${cx + 0.01},${cy - inner}Z" fill-rule="evenodd" style="fill:${fill(p)}"${tip}/>`;
+            slices += `<path class="chart-mark slice" tabindex="0" d="M${cx},${cy - r}A${r},${r} 0 1 1 ${cx - 0.01},${cy - r}Z M${cx},${cy - inner}A${inner},${inner} 0 1 0 ${cx + 0.01},${cy - inner}Z" fill-rule="evenodd" style="fill:${donutFill(p)}"${tip}/>`;
             break;
         }
         const a0 = angle, a1 = angle + sweep;
         const large = sweep > Math.PI ? 1 : 0;
         const pt = (rad, a) => `${r1(cx + rad * Math.cos(a))},${r1(cy + rad * Math.sin(a))}`;
-        slices += `<path class="chart-mark slice" tabindex="0" d="M${pt(r, a0)}A${r1(r)},${r1(r)} 0 ${large} 1 ${pt(r, a1)}L${pt(inner, a1)}A${r1(inner)},${r1(inner)} 0 ${large} 0 ${pt(inner, a0)}Z" style="fill:${fill(p)}"${tip}/>`;
+        slices += `<path class="chart-mark slice" tabindex="0" d="M${pt(r, a0)}A${r1(r)},${r1(r)} 0 ${large} 1 ${pt(r, a1)}L${pt(inner, a1)}A${r1(inner)},${r1(inner)} 0 ${large} 0 ${pt(inner, a0)}Z" style="fill:${donutFill(p)}"${tip}/>`;
         angle = a1;
     }
     const src = chartCatalog?.sources[chart.source];
@@ -14499,37 +15453,133 @@ function donutHtml(chart, data, width) {
         `<text class="chart-donut-total" x="${cx}" y="${cy + 2}" text-anchor="middle">${data.total < 100000 ? data.total.toLocaleString() : compactNumber(data.total)}</text>` +
         `<text class="chart-tick" x="${cx}" y="${cy + 18}" text-anchor="middle">${escapeHtml(src ? src.many : 'tickets')}</text></svg>`;
     // The legend names every slice, with its number and share
-    const legend = parts.map(p => `<li><span class="legend-key" style="background:${fill(p)}"></span>` +
+    const legend = parts.map(p => `<li><span class="legend-key" style="background:${donutFill(p)}"></span>` +
         `<span class="legend-name" title="${escapeHtml(p.label)}">${escapeHtml(p.label)}</span>` +
         `<span class="legend-value">${p.count.toLocaleString()}</span>` +
-        `<span class="legend-share">${((p.count / total) * 100).toFixed(1)}%</span></li>`).join('');
+        `<span class="legend-share">${share(p.count, total)}</span></li>`).join('');
     return `<div class="chart-donut${side ? ' side' : ''}">${svg}<ul class="chart-legend">${legend}</ul></div>`;
 }
 
 // The table view: every chart has one (and "Table" charts are only this)
 function chartTableHtml(chart, data) {
     const label = chart.groupBy ? fieldLabel(chart.source, chart.groupBy) : 'Tickets';
-    const total = data.total || 1;
     const rows = data.rows.map(r => `<tr><td>${escapeHtml(groupLabel(chart, r.value, true))}</td>` +
-        `<td class="num">${r.count.toLocaleString()}</td><td class="num">${((r.count / total) * 100).toFixed(1)}%</td></tr>`);
+        `<td class="num">${r.count.toLocaleString()}</td><td class="num">${share(r.count, data.total)}</td></tr>`);
     if (data.other) {
         rows.push(`<tr class="chart-other-row"><td>Other (${data.other.groups.toLocaleString()} more)</td>` +
-            `<td class="num">${data.other.count.toLocaleString()}</td><td class="num">${((data.other.count / total) * 100).toFixed(1)}%</td></tr>`);
+            `<td class="num">${data.other.count.toLocaleString()}</td><td class="num">${share(data.other.count, data.total)}</td></tr>`);
     }
-    const exportId = registerExport({
-        title: chartTitle(chart),
-        question: chartDescription(chart),
-        tables: [{
-            title: null,
-            columns: [{ label }, { label: 'Count' }, { label: 'Share' }],
-            rows: [...data.rows.map(r => [groupLabel(chart, r.value, true), String(r.count), `${((r.count / total) * 100).toFixed(1)}%`]),
-                ...(data.other ? [[`Other (${data.other.groups} more)`, String(data.other.count), `${((data.other.count / total) * 100).toFixed(1)}%`]] : [])],
-            footer: ['Total', String(data.total), '100%'],
-        }],
-    });
     return `<div class="table-wrap chart-table"><table class="result-table"><thead><tr><th>${escapeHtml(label)}</th><th class="num">Count</th><th class="num">Share</th></tr></thead>` +
-        `<tbody>${rows.join('')}</tbody><tfoot><tr><td>Total</td><td class="num">${data.total.toLocaleString()}</td><td class="num">100%</td></tr></tfoot></table></div>` +
-        downloadBarHtml(exportId);
+        `<tbody>${rows.join('')}</tbody><tfoot><tr><td>Total</td><td class="num">${data.total.toLocaleString()}</td><td class="num">100%</td></tr></tfoot></table></div>`;
+}
+
+// The same numbers as a download table
+function chartExportTable(chart, data) {
+    return {
+        title: null,
+        columns: [{ label: chart.groupBy ? fieldLabel(chart.source, chart.groupBy) : 'Tickets' }, { label: 'Count', num: true }, { label: 'Share' }],
+        rows: [...data.rows.map(r => [groupLabel(chart, r.value, true), r.count, share(r.count, data.total)]),
+            ...(data.other ? [[`Other (${data.other.groups} more)`, data.other.count, share(data.other.count, data.total)]] : [])],
+        footer: ['Total', data.total, '100%'],
+    };
+}
+
+// ---------------------------------------------------------------------
+// Several series: AI answers that compare ticket types (a count per type
+// for each week, team, ...). series: { categories: [{ value, label }],
+// series: [{ name, slot, values }], total }
+// ---------------------------------------------------------------------
+
+// The tooltip of one category: every series' value, then the total
+function seriesTip(s, i) {
+    const rows = s.series.map(x => [x.slot, x.name, x.values[i].toLocaleString()]);
+    const sum = s.series.reduce((t, x) => t + x.values[i], 0);
+    return ` data-index="${i}" data-tip-value="${escapeHtml(`${sum.toLocaleString()} in all`)}" data-tip-label="${escapeHtml(s.categories[i].label)}"` +
+        ` data-tip-rows="${escapeHtml(JSON.stringify(rows))}"`;
+}
+
+// The legend above a chart of several series: a swatch (bars) or a short line (lines) per series
+function seriesLegendHtml(s, lines) {
+    return `<div class="chart-series-legend">${s.series.map(x =>
+        `<span class="series-item"><span class="series-key${lines ? ' line' : ''}" style="background:var(--series-${x.slot})"></span>${escapeHtml(x.name)}</span>`).join('')}</div>`;
+}
+
+// Columns side by side (grouped) or on top of each other (stacked)
+function seriesColumnsHtml(chart, s, width, stacked) {
+    const n = s.series.length;
+    const cats = s.categories;
+    const height = 280;
+    const sums = cats.map((_, i) => s.series.reduce((t, x) => t + x.values[i], 0));
+    const max = stacked ? Math.max(...sums) : Math.max(...s.series.flatMap(x => x.values));
+    const { top, ticks } = niceScale(max);
+    const m = { top: 20, right: 8, bottom: 26, left: tickWidth(ticks) };
+    const plotW = width - m.left - m.right, plotH = height - m.top - m.bottom;
+    const band = plotW / cats.length;
+    const y = v => m.top + plotH - (v / top) * plotH;
+    let html = svgOpen(width, height, chartTitle(chart)) + gridHtml(ticks, y, m.left, width - m.right);
+    cats.forEach((cat, i) => {
+        if (stacked) {
+            const barW = Math.max(3, Math.min(28, band * 0.6));
+            const bx = m.left + i * band + (band - barW) / 2;
+            let base = 0;
+            const topIndex = s.series.map(one => one.values[i]).findLastIndex(v => v > 0);
+            s.series.forEach((one, k) => {
+                const v = one.values[i];
+                if (v <= 0) return;
+                // A 2px gap in the background color between stacked segments
+                const h = y(base) - y(base + v) - (k === topIndex ? 0 : 2);
+                if (h > 0) {
+                    html += k === topIndex
+                        ? `<path class="chart-mark" d="${columnPath(bx, y(base + v), barW, h)}" style="fill:var(--series-${one.slot})"/>`
+                        : `<rect class="chart-mark" x="${r1(bx)}" y="${r1(y(base + v) + 2)}" width="${r1(barW)}" height="${r1(h)}" style="fill:var(--series-${one.slot})"/>`;
+                }
+                base += v;
+            });
+            if (cats.length <= 12) html += `<text class="chart-value" x="${r1(bx + barW / 2)}" y="${r1(y(sums[i]) - 6)}" text-anchor="middle">${sums[i].toLocaleString()}</text>`;
+        } else {
+            const barW = Math.max(2, Math.min(24, (band * 0.8 - 2 * (n - 1)) / n));
+            const groupW = n * barW + 2 * (n - 1);
+            const start = m.left + i * band + (band - groupW) / 2;
+            s.series.forEach((x, k) => {
+                const h = y(0) - y(x.values[i]);
+                if (h > 0) html += `<path class="chart-mark" d="${columnPath(start + k * (barW + 2), y(x.values[i]), barW, h)}" style="fill:var(--series-${x.slot})"/>`;
+            });
+        }
+        html += `<rect class="chart-hit" x="${r1(m.left + i * band)}" y="${m.top}" width="${r1(band)}" height="${plotH}"${cats.length <= 40 ? ' tabindex="0"' : ''}${seriesTip(s, i)}/>`;
+    });
+    html += `<line class="chart-axis" x1="${m.left}" x2="${width - m.right}" y1="${r1(y(0))}" y2="${r1(y(0))}"/>`;
+    html += xLabelsHtml(cats.map(c => c.label), i => m.left + i * band + band / 2, { total: plotW, each: band }, height - 8);
+    return seriesLegendHtml(s, false) + html + '</svg>';
+}
+
+// One line per series, with one crosshair that reads every series at once
+function seriesLineHtml(chart, s, width) {
+    const cats = s.categories;
+    const height = 280;
+    const { top, ticks } = niceScale(Math.max(...s.series.flatMap(x => x.values)));
+    const m = { top: 22, right: 14, bottom: 26, left: tickWidth(ticks) };
+    const plotW = width - m.left - m.right, plotH = height - m.top - m.bottom;
+    const step = cats.length > 1 ? plotW / (cats.length - 1) : 0;
+    const x = i => cats.length > 1 ? m.left + i * step : m.left + plotW / 2;
+    const y = v => m.top + plotH - (v / top) * plotH;
+    let html = svgOpen(width, height, chartTitle(chart)) + gridHtml(ticks, y, m.left, width - m.right);
+    html += `<line class="chart-axis" x1="${m.left}" x2="${width - m.right}" y1="${r1(y(0))}" y2="${r1(y(0))}"/>`;
+    for (const series of s.series) {
+        const color = `var(--series-${series.slot})`;
+        if (cats.length > 1) html += `<path class="chart-line" d="M${series.values.map((v, i) => `${r1(x(i))},${r1(y(v))}`).join('L')}" style="stroke:${color}"/>`;
+        const last = cats.length - 1;
+        html += `<circle class="chart-dot" cx="${r1(x(last))}" cy="${r1(y(series.values[last]))}" r="4" style="fill:${color}"/>`;
+    }
+    html += xLabelsHtml(cats.map(c => c.label), x, { total: plotW, each: Math.max(step, 1) }, height - 8);
+    html += crosshairHtml(m, plotW, plotH, y(0), step, top, s.series.map(x => `var(--series-${x.slot})`));
+    return seriesLegendHtml(s, true) + html + '</svg>';
+}
+
+function seriesTableHtml(chart, s) {
+    const head = `<th>${escapeHtml(chart.groupLabel || '')}</th>${s.series.map(x => `<th class="num">${escapeHtml(x.name)}</th>`).join('')}<th class="num">Total</th>`;
+    const body = s.categories.map((c, i) => `<tr><td>${escapeHtml(c.label)}</td>${s.series.map(x => `<td class="num">${x.values[i].toLocaleString()}</td>`).join('')}` +
+        `<td class="num">${s.series.reduce((t, x) => t + x.values[i], 0).toLocaleString()}</td></tr>`).join('');
+    return `<div class="table-wrap chart-table"><table class="result-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 // ---------------------------------------------------------------------
@@ -14540,27 +15590,39 @@ const resizeWatcher = new ResizeObserver(entries => {
     for (const entry of entries) {
         const box = entry.target;
         const drawn = box._drawn;
-        if (!drawn || !box.clientWidth || drawn.asTable || !['bar', 'hbar', 'line', 'area', 'donut'].includes(drawn.chart.display)) continue;
-        if (Math.abs(box.clientWidth - drawn.width) > 4) drawChart(box, drawn.chart, drawn.data, false);
+        if (!drawn || !box.clientWidth || drawn.asTable || ['table', 'number'].includes(drawn.display)) continue;
+        if (Math.abs(box.clientWidth - drawn.width) <= 4) continue;
+        if (drawn.series) drawSeriesChart(box, drawn.chart, drawn.series, drawn.display);
+        else drawChart(box, drawn.chart, drawn.data, false);
     }
 });
 
 // asTable: the table view instead of the chart
 function drawChart(box, chart, data, asTable) {
     const width = Math.max(Math.floor(box.clientWidth) || 0, 220);
-    box._drawn = { chart, data, asTable, width };
+    const display = asTable ? 'table' : (chart.groupBy ? chart.display : 'number');
+    box._drawn = { chart, data, asTable, width, display };
     resizeWatcher.observe(box);
     if (!data.total) {
         box.innerHTML = '<p class="chart-empty">No tickets match these choices.</p>';
         return;
     }
-    const display = asTable ? 'table' : chart.display;
-    if (display === 'number' || !chart.groupBy) box.innerHTML = numberHtml(chart, data);
+    if (display === 'number') box.innerHTML = numberHtml(chart, data);
     else if (display === 'table') box.innerHTML = chartTableHtml(chart, data);
     else if (display === 'hbar') box.innerHTML = barsHtml(chart, data, width);
     else if (display === 'line' || display === 'area') box.innerHTML = lineHtml(chart, data, width, display === 'area');
     else if (display === 'donut') box.innerHTML = donutHtml(chart, data, width);
     else box.innerHTML = columnsHtml(chart, data, width);
+}
+
+// display: 'bar' (side by side), 'stacked', 'line' or 'table'
+function drawSeriesChart(box, chart, series, display) {
+    const width = Math.max(Math.floor(box.clientWidth) || 0, 220);
+    box._drawn = { chart, series, width, display };
+    resizeWatcher.observe(box);
+    if (display === 'table') box.innerHTML = seriesTableHtml(chart, series);
+    else if (display === 'line') box.innerHTML = seriesLineHtml(chart, series, width);
+    else box.innerHTML = seriesColumnsHtml(chart, series, width, display === 'stacked');
 }
 
 // What isn't drawn: "Showing the top 10 of 105; the other 95 add up to 9,860"
@@ -14572,6 +15634,39 @@ function chartNote(chart, data) {
 }
 
 // ---------------------------------------------------------------------
+// Clicking a mark: a box with a _pick function (a dashboard chart, or an AI
+// answer that is an exact chart) lists the tickets behind it
+// ---------------------------------------------------------------------
+
+function pickedRow(mark) {
+    const box = mark.closest('.tile-body');
+    const drawn = box?._drawn;
+    if (!drawn || !box._pick || drawn.series) return null;
+    const index = mark.dataset.index;
+    if (index === 'all') return { box, row: null };
+    if (index === 'other') return null;
+    const i = index === 'line' ? mark._index : Number(index);
+    const row = drawn.data.rows[i];
+    return row ? { box, row } : null;
+}
+
+document.addEventListener('click', e => {
+    const mark = e.target.closest?.('[data-index]');
+    if (!mark) return;
+    // A tap on a line (no pointer moved over it first): the point nearest the tap
+    if (mark.classList.contains('line-hit')) moveCrosshair(mark, lineIndexAt(mark, e.clientX));
+    const picked = pickedRow(mark);
+    if (picked) picked.box._pick(picked.row);
+});
+document.addEventListener('keydown', e => {
+    if ((e.key !== 'Enter' && e.key !== ' ') || !e.target.matches?.('[data-index]')) return;
+    const picked = pickedRow(e.target);
+    if (!picked) return;
+    e.preventDefault();
+    picked.box._pick(picked.row);
+});
+
+// ---------------------------------------------------------------------
 // The tooltip: one for the whole page, filled with textContent
 // ---------------------------------------------------------------------
 
@@ -14581,16 +15676,32 @@ function chartTip() {
         tip = document.createElement('div');
         tip.id = 'chart-tip';
         tip.className = 'chart-tip';
-        tip.innerHTML = '<strong></strong><span></span>';
+        tip.innerHTML = '<strong></strong><span class="tip-label"></span><div class="tip-rows"></div><span class="tip-hint"></span>';
         document.body.appendChild(tip);
     }
     return tip;
 }
 
-function showChartTip(value, label, x, y) {
+// rows: [[series slot, name, value]] for charts of several series
+function showChartTip(value, label, x, y, { rows = [], hint = '' } = {}) {
     const tip = chartTip();
     tip.querySelector('strong').textContent = value;
-    tip.querySelector('span').textContent = label;
+    tip.querySelector('.tip-label').textContent = label;
+    const list = tip.querySelector('.tip-rows');
+    list.replaceChildren(...rows.map(([slot, name, v]) => {
+        const row = document.createElement('div');
+        row.className = 'tip-row';
+        const key = document.createElement('span');
+        key.className = 'tip-key';
+        key.style.background = `var(--series-${Number(slot) || 1})`;
+        const nameEl = document.createElement('span');
+        nameEl.textContent = name;
+        const valueEl = document.createElement('b');
+        valueEl.textContent = v;
+        row.append(key, nameEl, valueEl);
+        return row;
+    }));
+    tip.querySelector('.tip-hint').textContent = hint;
     tip.classList.add('show');
     const w = tip.offsetWidth, h = tip.offsetHeight;
     tip.style.left = `${Math.max(8, Math.min(x + 14, innerWidth - w - 8))}px`;
@@ -14601,47 +15712,70 @@ function hideChartTip() {
     document.getElementById('chart-tip')?.classList.remove('show');
 }
 
+const DRILL_HINT = 'Click to see these tickets';
+
 function markTip(mark, x, y) {
     mark.classList.add('hover');
-    showChartTip(mark.dataset.tipValue, mark.dataset.tipLabel, x, y);
+    const drillable = mark.closest('.tile-body')?._pick && mark.dataset.index !== 'other' && !mark.dataset.tipRows;
+    showChartTip(mark.dataset.tipValue, mark.dataset.tipLabel, x, y, {
+        rows: mark.dataset.tipRows ? JSON.parse(mark.dataset.tipRows) : [],
+        hint: drillable ? DRILL_HINT : '',
+    });
 }
 
 // Where along a line chart the crosshair is: the pointer's nearest point, or a key press
 function moveCrosshair(hit, index) {
     const svg = hit.ownerSVGElement;
-    const box = svg.closest('.tile-body, .builder-preview-body');
+    const box = svg.closest('.tile-body');
     const drawn = box?._drawn;
     if (!drawn) return;
-    const rows = drawn.data.rows;
-    index = Math.max(0, Math.min(rows.length - 1, index));
+    const series = drawn.series ? drawn.series.series : [{ values: drawn.data.rows.map(r => r.count) }];
+    const count = series[0].values.length;
+    index = Math.max(0, Math.min(count - 1, index));
     hit._index = index;
     const left = Number(hit.dataset.left), step = Number(hit.dataset.step);
     const top = Number(hit.dataset.top), plotH = Number(hit.dataset.plotH), max = Number(hit.dataset.max);
-    const x = rows.length > 1 ? left + index * step : left + (Number(hit.getAttribute('width')) - 12) / 2;
-    const y = top + plotH - (rows[index].count / max) * plotH;
+    const x = count > 1 ? left + index * step : left + (Number(hit.getAttribute('width')) - 12) / 2;
     const cross = svg.querySelector('.chart-cross');
-    const dot = svg.querySelector('.chart-cross-dot');
     cross.setAttribute('x1', x); cross.setAttribute('x2', x); cross.setAttribute('visibility', 'visible');
-    dot.setAttribute('cx', x); dot.setAttribute('cy', y); dot.setAttribute('visibility', 'visible');
+    const dots = svg.querySelectorAll('.chart-cross-dot');
+    series.forEach((s, k) => {
+        dots[k]?.setAttribute('cx', x);
+        dots[k]?.setAttribute('cy', top + plotH - (s.values[index] / max) * plotH);
+        dots[k]?.setAttribute('visibility', 'visible');
+    });
     const rect = svg.getBoundingClientRect();
     const scale = rect.width / Number(svg.getAttribute('width'));
-    const row = rows[index];
-    showChartTip(row.count.toLocaleString() + ` (${((row.count / drawn.data.total) * 100).toFixed(1)}%)`,
-        groupLabel(drawn.chart, row.value, true), rect.left + x * scale, rect.top + y * scale);
+    const highest = Math.max(...series.map(s => s.values[index]));
+    const y = top + plotH - (highest / max) * plotH;
+    if (drawn.series) {
+        const s = drawn.series;
+        showChartTip(`${s.series.reduce((t, x) => t + x.values[index], 0).toLocaleString()} in all`, s.categories[index].label,
+            rect.left + x * scale, rect.top + y * scale, { rows: s.series.map(x => [x.slot, x.name, x.values[index].toLocaleString()]) });
+    } else {
+        const row = drawn.data.rows[index];
+        showChartTip(`${row.count.toLocaleString()} (${share(row.count, drawn.data.total)})`, groupLabel(drawn.chart, row.value, true),
+            rect.left + x * scale, rect.top + y * scale, { hint: box._pick ? DRILL_HINT : '' });
+    }
 }
 
 function hideCrosshair(svg) {
     svg?.querySelectorAll('.chart-cross, .chart-cross-dot').forEach(el => el.setAttribute('visibility', 'hidden'));
 }
 
+// The point of a line chart nearest to a pointer position
+function lineIndexAt(hit, clientX) {
+    const svg = hit.ownerSVGElement;
+    const rect = svg.getBoundingClientRect();
+    const scale = rect.width / Number(svg.getAttribute('width'));
+    const step = Number(hit.dataset.step) || 1;
+    return Math.round(((clientX - rect.left) / scale - Number(hit.dataset.left)) / step);
+}
+
 document.addEventListener('pointermove', e => {
     const hit = e.target.closest?.('.line-hit');
     if (hit) {
-        const svg = hit.ownerSVGElement;
-        const rect = svg.getBoundingClientRect();
-        const scale = rect.width / Number(svg.getAttribute('width'));
-        const step = Number(hit.dataset.step) || 1;
-        moveCrosshair(hit, Math.round(((e.clientX - rect.left) / scale - Number(hit.dataset.left)) / step));
+        moveCrosshair(hit, lineIndexAt(hit, e.clientX));
         return;
     }
     const mark = e.target.closest?.('[data-tip-value]');
@@ -14655,12 +15789,16 @@ document.addEventListener('pointerout', e => {
     hideChartTip();
 });
 document.addEventListener('focusin', e => {
+    if (e.target.classList?.contains('line-hit')) {
+        const drawn = e.target.ownerSVGElement.closest('.tile-body')?._drawn;
+        const count = drawn ? (drawn.series ? drawn.series.categories.length : drawn.data.rows.length) : 1;
+        moveCrosshair(e.target, e.target._index ?? count - 1);
+        return;
+    }
     const mark = e.target.closest?.('[data-tip-value]');
-    if (mark && !mark.classList.contains('line-hit')) {
+    if (mark) {
         const r = mark.getBoundingClientRect();
         markTip(mark, r.left + r.width / 2, r.top);
-    } else if (e.target.classList?.contains('line-hit')) {
-        moveCrosshair(e.target, e.target._index ?? e.target.ownerSVGElement.closest('.tile-body, .builder-preview-body')?._drawn?.data.rows.length - 1);
     }
 });
 document.addEventListener('focusout', e => {
@@ -14673,12 +15811,163 @@ document.addEventListener('focusout', e => {
 document.addEventListener('keydown', e => {
     if (!e.target.classList?.contains('line-hit') || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
     e.preventDefault();
-    const rows = e.target.ownerSVGElement.closest('.tile-body, .builder-preview-body')?._drawn?.data.rows || [];
-    const now = e.target._index ?? rows.length - 1;
-    moveCrosshair(e.target, e.key === 'Home' ? 0 : e.key === 'End' ? rows.length - 1 : now + (e.key === 'ArrowLeft' ? -1 : 1));
+    const drawn = e.target.ownerSVGElement.closest('.tile-body')?._drawn;
+    const count = drawn ? (drawn.series ? drawn.series.categories.length : drawn.data.rows.length) : 1;
+    const now = e.target._index ?? count - 1;
+    moveCrosshair(e.target, e.key === 'Home' ? 0 : e.key === 'End' ? count - 1 : now + (e.key === 'ArrowLeft' ? -1 : 1));
 });
 // A scrolled page leaves the tooltip behind, so it goes
 document.addEventListener('scroll', hideChartTip, true);
+
+// ---------------------------------------------------------------------
+// PICTURES: a chart as a standalone SVG or PNG, always on white (for
+// documents and slides), with its title, what it counts, and its legend.
+// The chart is drawn off screen at a fixed width, then every color and
+// font is written into the SVG, so the file needs no stylesheet.
+// spec: { chart, data } (one series) or { chart, series, display } (several);
+// title, subtitle
+// ---------------------------------------------------------------------
+
+const PICTURE_WIDTH = 960;
+const PICTURE_PAD = 24;
+const PICTURE_STYLES = ['fill', 'fill-opacity', 'stroke', 'stroke-width', 'stroke-opacity', 'stroke-linejoin',
+    'stroke-linecap', 'opacity', 'font-size', 'font-weight', 'font-family', 'font-variant-numeric'];
+
+// Copies the computed look of every element into the copy, then drops what only works on screen
+function standaloneSvg(svg) {
+    const copy = svg.cloneNode(true);
+    const from = [svg, ...svg.querySelectorAll('*')];
+    const to = [copy, ...copy.querySelectorAll('*')];
+    from.forEach((el, i) => {
+        const cs = getComputedStyle(el);
+        to[i].setAttribute('style', PICTURE_STYLES.map(p => `${p}:${cs.getPropertyValue(p)}`).join(';'));
+        for (const attr of ['class', 'tabindex', 'role', 'aria-label']) to[i].removeAttribute(attr);
+        for (const attr of [...to[i].attributes]) if (attr.name.startsWith('data-')) to[i].removeAttribute(attr.name);
+    });
+    copy.querySelectorAll('rect[style*="fill-opacity:0"], line[visibility="hidden"], circle[visibility="hidden"]').forEach(el => el.remove());
+    return copy;
+}
+
+const xmlText = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+// -> { svg: text, width, height }
+function chartPicture(spec) {
+    const host = document.createElement('div');
+    host.className = 'picture-host';
+    host.innerHTML = '<div class="tile-body"></div>';
+    document.body.appendChild(host);
+    const body = host.firstChild;
+    const W = PICTURE_WIDTH, inner = W - 2 * PICTURE_PAD;
+    const color = name => getComputedStyle(host).getPropertyValue(name).trim();
+    try {
+        const parts = [];
+        let y = PICTURE_PAD;
+        parts.push(`<text x="${PICTURE_PAD}" y="${y + 18}" style="font-size:18px;font-weight:700;fill:${color('--text')};font-family:${CHART_FONT.replace(/"/g, "'")}">${xmlText(fitText(spec.title || 'Chart', inner, 18))}</text>`);
+        y += 30;
+        if (spec.subtitle) {
+            parts.push(`<text x="${PICTURE_PAD}" y="${y + 12}" style="font-size:12px;fill:${color('--muted')};font-family:${CHART_FONT.replace(/"/g, "'")}">${xmlText(fitText(spec.subtitle, inner, 12))}</text>`);
+            y += 24;
+        }
+        y += 6;
+        const textStyle = (size, c, weight = 400) => `font-size:${size}px;font-weight:${weight};fill:${c};font-family:${CHART_FONT.replace(/"/g, "'")}`;
+
+        if (spec.series) {
+            // Legend row, then the chart
+            let x = PICTURE_PAD;
+            for (const s of spec.series.series) {
+                const key = spec.display === 'line'
+                    ? `<rect x="${x}" y="${y + 6}" width="14" height="3" rx="1.5" style="fill:${color(`--series-${s.slot}`)}"/>`
+                    : `<rect x="${x}" y="${y + 1}" width="12" height="12" rx="3" style="fill:${color(`--series-${s.slot}`)}"/>`;
+                parts.push(key + `<text x="${x + 18}" y="${y + 11}" style="${textStyle(12, color('--text-2'))}">${xmlText(s.name)}</text>`);
+                x += 18 + textWidth(s.name, 12) + 18;
+            }
+            y += 24;
+            drawSeriesChart(body, spec.chart, spec.series, spec.display);
+            const svg = body.querySelector('svg');
+            parts.push(`<g transform="translate(${PICTURE_PAD},${y})">${new XMLSerializer().serializeToString(standaloneSvg(svg))}</g>`);
+            y += Number(svg.getAttribute('height'));
+        } else if (spec.chart.display === 'number' || !spec.chart.groupBy) {
+            drawChart(body, spec.chart, spec.data, false);
+            const label = body.querySelector('.chart-stat-label')?.textContent || '';
+            parts.push(`<text x="${PICTURE_PAD}" y="${y + 52}" style="${textStyle(56, color('--text'), 700)}">${spec.data.total.toLocaleString()}</text>`);
+            parts.push(`<text x="${PICTURE_PAD}" y="${y + 80}" style="${textStyle(16, color('--muted'))}">${xmlText(label)}</text>`);
+            y += 92;
+        } else if (spec.chart.display === 'donut') {
+            drawChart(body, spec.chart, spec.data, false);
+            const svg = body.querySelector('svg');
+            const size = Number(svg.getAttribute('height'));
+            parts.push(`<g transform="translate(${PICTURE_PAD},${y})">${new XMLSerializer().serializeToString(standaloneSvg(svg))}</g>`);
+            // The legend beside it: swatch, name, number, share
+            const items = donutParts(spec.chart, spec.data);
+            const lx = PICTURE_PAD + size + 32;
+            const nameW = inner - size - 32 - 150;
+            items.forEach((p, i) => {
+                const ly = y + 14 + i * 24;
+                const fill = p.other ? color('--chart-other') : color(`--series-${p.slot}`);
+                parts.push(`<rect x="${lx}" y="${ly - 10}" width="12" height="12" rx="3" style="fill:${fill}"/>` +
+                    `<text x="${lx + 20}" y="${ly}" style="${textStyle(13, color('--text-2'))}">${xmlText(fitText(p.label, nameW, 13))}</text>` +
+                    `<text x="${lx + 20 + nameW + 80}" y="${ly}" text-anchor="end" style="${textStyle(13, color('--text'), 600)}">${p.count.toLocaleString()}</text>` +
+                    `<text x="${lx + 20 + nameW + 140}" y="${ly}" text-anchor="end" style="${textStyle(13, color('--muted'))}">${share(p.count, spec.data.total)}</text>`);
+            });
+            y += Math.max(size, items.length * 24 + 8);
+        } else {
+            drawChart(body, spec.chart, spec.data, false);
+            const svg = body.querySelector('svg');
+            parts.push(`<g transform="translate(${PICTURE_PAD},${y})">${new XMLSerializer().serializeToString(standaloneSvg(svg))}</g>`);
+            y += Number(svg.getAttribute('height'));
+            const note = spec.data && chartNote(spec.chart, spec.data);
+            if (note) {
+                parts.push(`<text x="${PICTURE_PAD}" y="${y + 20}" style="${textStyle(11, color('--muted'))}">${xmlText(note)}</text>`);
+                y += 24;
+            }
+        }
+        y += 14;
+        const stamp = `OneTouch · ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+        parts.push(`<text x="${W - PICTURE_PAD}" y="${y + 6}" text-anchor="end" style="${textStyle(10, color('--faint'))}">${xmlText(stamp)}</text>`);
+        const height = Math.ceil(y + PICTURE_PAD);
+        const svgText = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${height}" viewBox="0 0 ${W} ${height}">` +
+            `<rect width="${W}" height="${height}" style="fill:${color('--panel-bg')}"/>${parts.join('')}</svg>`;
+        return { svg: svgText, width: W, height };
+    } finally {
+        resizeWatcher.unobserve(body);
+        host.remove();
+    }
+}
+
+// -> { png: data URL, width, height } (drawn at twice the size, for sharp printing)
+async function picturePng(picture) {
+    const url = URL.createObjectURL(new Blob([picture.svg], { type: 'image/svg+xml;charset=utf-8' }));
+    try {
+        const img = new Image();
+        await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = () => reject(new Error('The chart could not be turned into a picture.')); img.src = url; });
+        const canvas = document.createElement('canvas');
+        canvas.width = picture.width * 2;
+        canvas.height = picture.height * 2;
+        const ctx = canvas.getContext('2d');
+        ctx.scale(2, 2);
+        ctx.drawImage(img, 0, 0, picture.width, picture.height);
+        return { png: canvas.toDataURL('image/png'), width: picture.width, height: picture.height };
+    } finally {
+        URL.revokeObjectURL(url);
+    }
+}
+
+// Saves the picture as name.png or name.svg
+async function downloadPicture(spec, format, name) {
+    const picture = chartPicture(spec);
+    const blob = format === 'svg'
+        ? new Blob([picture.svg], { type: 'image/svg+xml;charset=utf-8' })
+        : await (await fetch((await picturePng(picture)).png)).blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${name}.${format}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return `${name}.${format}`;
+}
 ```
 
 <a id="b47"></a>
@@ -14702,12 +15991,12 @@ const THEME_DEFAULTS = { mode: 'light', accent: '#10a37f', header: 'dark' };
 const defaultHome = () => ({ blocks: [{ type: 'assistant' }, { type: 'tickets' }] });
 const defaultDashboards = () => ({ boards: [], hidden: [], last: '' });
 
-const prefs = { theme: { ...THEME_DEFAULTS }, home: defaultHome(), dashboards: defaultDashboards() };
+const prefs = { theme: { ...THEME_DEFAULTS }, home: defaultHome(), dashboards: defaultDashboards(), tour: { done: false } };
 let prefsReady = Promise.resolve();
 // When loading failed, saving is off: it would replace what's saved with the defaults
 let prefsLoadFailed = false;
 
-const PART_NAMES = { theme: 'colors', home: 'Home page', dashboards: 'dashboards' };
+const PART_NAMES = { theme: 'colors', home: 'Home page', dashboards: 'dashboards', tour: 'tour' };
 
 function loadPreferences() {
     const token = sessionTokenValue;
@@ -14725,6 +16014,7 @@ function loadPreferences() {
             prefs.theme = { ...THEME_DEFAULTS, ...saved.theme };
             prefs.home = Array.isArray(saved.home?.blocks) ? saved.home : defaultHome();
             prefs.dashboards = { ...defaultDashboards(), ...saved.dashboards };
+            prefs.tour = { done: saved.tour?.done === true };
         } catch (err) {
             prefsLoadFailed = true;
             console.error('Could not load the saved layout and colors:', err);
@@ -14737,6 +16027,7 @@ function loadPreferences() {
         renderMyDashboards();
         clearTimeout(reveal);
         document.getElementById('home-blocks').classList.remove('waiting');
+        if (!prefsLoadFailed && token === sessionTokenValue) afterPreferences();
     })();
     return prefsReady;
 }
@@ -14801,8 +16092,12 @@ function resetCustomizing() {
     prefs.theme = { ...THEME_DEFAULTS };
     prefs.home = defaultHome();
     prefs.dashboards = defaultDashboards();
+    prefs.tour = { done: false };
     prefsReady = Promise.resolve();
     prefsLoadFailed = false;
+    sharedBoards.clear();
+    closeTour(false);
+    document.getElementById('bf-team-pop').hidden = true;
     for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close('cancel');
     applyTheme(prefs.theme);
     try { localStorage.removeItem(THEME_CACHE_KEY); } catch { /* nothing kept */ }
@@ -14948,14 +16243,17 @@ function askText({ title, label, value = '', action = 'Save' }) {
 
 const TILE_BUTTONS = {
     table: ['▦', 'Show as a table'],
+    download: ['⤓', 'Download this chart'],
     edit: ['✎', 'Edit this chart'],
     earlier: ['◀', 'Move earlier'],
     later: ['▶', 'Move later'],
     pin: ['📌', 'Add a copy to Home'],
     remove: ['🗑', 'Remove this chart'],
 };
-const HOME_TILE_BUTTONS = ['table', 'edit', 'earlier', 'later', 'remove'];
-const BOARD_TILE_BUTTONS = ['table', 'edit', 'earlier', 'later', 'pin', 'remove'];
+const HOME_TILE_BUTTONS = ['table', 'download', 'edit', 'earlier', 'later', 'remove'];
+const BOARD_TILE_BUTTONS = ['table', 'download', 'edit', 'earlier', 'later', 'pin', 'remove'];
+// Charts on someone else's shared dashboard: look, don't touch
+const SHARED_TILE_BUTTONS = ['table'];
 
 function tileHtml(chart, buttons, extraClass = '') {
     const actions = buttons.map(a => `<button type="button" class="tile-btn" data-tile-action="${a}" title="${TILE_BUTTONS[a][1]}" aria-label="${TILE_BUTTONS[a][1]}">${TILE_BUTTONS[a][0]}</button>`).join('');
@@ -14967,23 +16265,33 @@ function tileHtml(chart, buttons, extraClass = '') {
 
 // Fetches (or reuses) the chart's numbers and draws it. While new numbers
 // load, the old drawing stays, dimmed, instead of jumping to "Loading…".
-async function fillTile(tile, chart, asTable = tile._asTable || false) {
+// scope: the dashboard's filter row (dates, teams), applied on top of the chart's own.
+// A click on a bar, slice, point or the number lists the tickets behind it.
+async function fillTile(tile, chart, asTable = tile._asTable || false, scope = tile._scope || null) {
     const body = tile.querySelector('.tile-body');
     const run = (body._run || 0) + 1;
     body._run = run;
     tile._asTable = asTable;
+    tile._scope = scope;
+    tile._chart = chart;
     if (body._drawn) body.classList.add('refreshing');
     try {
         await loadChartCatalog();
         if (body._run !== run) return;
         tile.querySelector('.tile-title').textContent = chartTitle(chart);
         tile.querySelector('.tile-sub').textContent = chartDescription(chart);
-        const data = await fetchChartData(chart);
+        const data = await fetchChartData(chart, scope);
         if (!data || body._run !== run || !tile.isConnected) return;
+        tile._data = data;
         drawChart(body, chart, data, asTable);
+        body._pick = tile.classList.contains('preview') ? null
+            : row => openDrill({ chart, scope, value: row ? row.value : null, label: row ? groupLabel(chart, row.value, true) : '' });
+        body.classList.toggle('drillable', Boolean(body._pick) && !asTable);
         const note = tile.querySelector('.chart-note');
-        note.textContent = asTable ? '' : chartNote(chart, data);
+        note.textContent = [asTable ? '' : chartNote(chart, data),
+            data.skipped?.includes('team') ? "The dashboard's Team filter doesn't apply here: requests have no team." : ''].filter(Boolean).join(' ');
         note.hidden = !note.textContent;
+        if (tile.querySelector('.tile-download')) showTileDownload(tile, true);
         const tableButton = tile.querySelector('[data-tile-action="table"]');
         if (tableButton) {
             tableButton.hidden = chart.display === 'table' || chart.display === 'number' || !chart.groupBy;
@@ -15020,18 +16328,38 @@ function savePlace(where) {
         renderBoard();
         renderMyDashboards();
         savePreference('dashboards');
+        updateShareSoon(currentBoard());
     }
 }
 
+// ⤓ under a chart: its numbers in any download format, and (while the chart,
+// not its table, is showing) its picture, also placed in PDF, Word and Excel
+function showTileDownload(tile, show) {
+    tile.querySelector('.tile-download')?.remove();
+    tile.querySelector('[data-tile-action="download"]')?.setAttribute('aria-pressed', String(show));
+    if (!show || !tile._data) return;
+    const chart = tile._chart;
+    const subtitle = [chartDescription(chart), scopeDescription(tile._scope)].filter(Boolean).join(' · ');
+    const exportId = registerExport({
+        title: chartTitle(chart),
+        tables: [chartExportTable(chart, tile._data), noteTable('What this chart counts', 'Counts', [subtitle])],
+        picture: () => tile._asTable || chart.display === 'table' || !tile._data ? null : { chart, data: tile._data, title: chartTitle(chart), subtitle },
+    });
+    tile.insertAdjacentHTML('beforeend', `<div class="tile-download">${downloadBarHtml(exportId, 'Download as', { pictures: chart.display !== 'table' })}</div>`);
+    paintPictureOptions(tile.querySelector('.tile-download'));
+}
+
 function tileAction(tile, action) {
+    // These work on any chart, including a shared dashboard's preview
+    if (action === 'table') return tile._chart && fillTile(tile, tile._chart, !tile._asTable);
+    if (action === 'download') return showTileDownload(tile, !tile.querySelector('.tile-download'));
     const { where, list, index, chartOf } = tilePlace(tile);
     if (index < 0) return;
     const chart = chartOf(list[index]);
-    if (action === 'table') {
-        fillTile(tile, chart, !tile._asTable);
-    } else if (action === 'edit') {
+    if (action === 'edit') {
         openBuilder({
             chart,
+            scope: where === 'board' ? boardScope(currentBoard()) : null,
             onSave: updated => {
                 if (where === 'home') list[index] = { type: 'chart', chart: updated };
                 else list[index] = updated;
@@ -15246,6 +16574,8 @@ function renderBoard() {
     if (!board) return;
     setDashboardHeading('My dashboards', board.name, chartCount(board.charts.length), false);
     document.getElementById('dashboard-hint').hidden = true;
+    paintBoardFilters();
+    paintShareButton();
     const grid = document.getElementById('board-grid');
     if (!board.charts.length) {
         grid.innerHTML = '<div class="board-empty"><p class="board-empty-title">This dashboard has no charts yet.</p>' +
@@ -15255,7 +16585,16 @@ function renderBoard() {
         return;
     }
     grid.innerHTML = board.charts.map(c => tileHtml(c, BOARD_TILE_BUTTONS)).join('');
-    grid.querySelectorAll('.chart-tile').forEach((tile, i) => fillTile(tile, board.charts[i]));
+    grid.querySelectorAll('.chart-tile').forEach((tile, i) => fillTile(tile, board.charts[i], false, boardScope(board)));
+}
+
+const emptyScope = () => ({ dates: { preset: 'all' }, teams: [] });
+
+// The dashboard's filter row, or null when it filters nothing (so the charts
+// share their numbers with the same charts elsewhere)
+function boardScope(board) {
+    const scope = board?.scope;
+    return scope && (scope.dates?.preset !== 'all' || scope.teams?.length) ? scope : null;
 }
 
 const SUGGESTED_CHARTS = [
@@ -15283,7 +16622,7 @@ async function newBoard() {
     }
     const name = await askText({ title: 'New dashboard', label: 'Name', value: `My dashboard ${prefs.dashboards.boards.length + 1}`, action: 'Create' });
     if (!name) return;
-    const board = { id: newChartId(), name: name.slice(0, 60), charts: [] };
+    const board = { id: newChartId(), name: name.slice(0, 60), charts: [], scope: emptyScope() };
     prefs.dashboards.boards.push(board);
     savePreference('dashboards');
     renderMyDashboards();
@@ -15310,6 +16649,8 @@ function deleteBoard() {
     hideBoard();
     renderMyDashboards();
     savePreference('dashboards');
+    // Its link stops working too
+    if (sharedBoards.has(board.id)) stopSharing(board, true);
     showToast(`Deleted "${board.name}"`);
     showFirstDashboard();
 }
@@ -15322,6 +16663,7 @@ function addBoardChart() {
         return;
     }
     openBuilder({
+        scope: boardScope(board),
         onSave: chart => {
             board.charts.push(chart);
             savePlace('board');
@@ -15454,7 +16796,7 @@ function buildBuilder() {
         const used = new Set(builder.draft.filters.map(f => f.field));
         const field = src.fields.find(([key]) => !used.has(key));
         if (!field || builder.draft.filters.length >= MAX_CHART_FILTERS) return;
-        builder.draft.filters.push({ field: field[0], values: [] });
+        builder.draft.filters.push({ field: field[0], op: 'equals', values: [] });
         paintFilters();
         document.querySelector('#b-filters .filter-row:last-child select')?.focus();
     });
@@ -15467,20 +16809,41 @@ function buildBuilder() {
     });
 }
 
-async function openBuilder({ chart = null, onSave }) {
+// chart: the chart to edit (or to start from); scope: the dashboard's filter row,
+// shown in the preview; destination: ask where to save (Home, a dashboard, a new one);
+// note: a line at the top (e.g. what didn't carry over from an AI answer)
+let lastDestination = 'home';
+async function openBuilder({ chart = null, onSave, scope = null, destination = false, note = '' }) {
     try {
         if (!await loadChartCatalog()) return;
     } catch (err) {
         showToast(`❌ ${err.message}`);
         return;
     }
+    const editing = Boolean(chart) && !destination;
     builder = {
         draft: structuredClone(chart || chartWithDefaults({ source: 'incident', groupBy: 'priority', sort: 'label', display: 'bar' })),
         onSave,
+        scope,
+        destination,
     };
-    builder.draft.filters = builder.draft.filters.map(f => ({ ...f, values: [...f.values] }));
-    document.getElementById('builder-title').textContent = chart ? 'Edit chart' : 'Add a chart';
-    document.getElementById('b-save').textContent = chart ? 'Save changes' : 'Add chart';
+    builder.draft.filters = builder.draft.filters.map(f => ({ ...f, op: f.op || 'equals', values: [...f.values] }));
+    document.getElementById('builder-title').textContent = editing ? 'Edit chart' : destination ? 'Save as a chart' : 'Add a chart';
+    document.getElementById('b-save').textContent = editing ? 'Save changes' : destination ? 'Save chart' : 'Add chart';
+    const noteBox = document.getElementById('b-note');
+    noteBox.textContent = note;
+    noteBox.hidden = !note;
+    const scopeNote = document.getElementById('b-scope-note');
+    scopeNote.textContent = scope ? `The dashboard's filters apply too: ${scopeDescription(scope)}.` : '';
+    scopeNote.hidden = !scope;
+    const dest = document.getElementById('b-dest');
+    document.getElementById('b-dest-row').hidden = !destination;
+    if (destination) {
+        dest.innerHTML = '<option value="home">My Home page</option>' +
+            prefs.dashboards.boards.map(b => `<option value="${escapeHtml(b.id)}">Dashboard: ${escapeHtml(b.name)}</option>`).join('') +
+            '<option value="new">＋ A new dashboard…</option>';
+        dest.value = [...dest.options].some(o => o.value === lastDestination) ? lastDestination : 'home';
+    }
     document.getElementById('b-source').innerHTML = Object.entries(chartCatalog.sources)
         .map(([key, s]) => `<option value="${key}">${escapeHtml(s.label)}</option>`).join('');
     paintBuilder();
@@ -15546,16 +16909,24 @@ async function paintFilters() {
     box.innerHTML = d.filters.map((f, i) => {
         const others = new Set(d.filters.filter((_, j) => j !== i).map(g => g.field));
         const options = src.fields.filter(([k]) => !others.has(k)).map(([k, l]) => `<option value="${k}"${k === f.field ? ' selected' : ''}>${escapeHtml(l)}</option>`).join('');
+        const ops = FILTER_OP_CHOICES.map(([v, l]) => `<option value="${v}"${v === f.op ? ' selected' : ''}>${l}</option>`).join('');
+        // "contains": words to type; "is" / "is not": choices to tick
+        const values = f.op === 'contains'
+            ? `<input type="text" class="filter-text" data-filter-text="${i}" value="${escapeHtml(f.values.join(', '))}" placeholder="A word or two, e.g. WINTEL (commas for more than one)" aria-label="Words to look for">`
+            : `<input type="search" class="filter-search" data-filter-search="${i}" placeholder="Search the choices…" aria-label="Search the choices">` +
+              `<div class="filter-values" data-filter-values="${i}"><p class="chart-loading">Loading choices…</p></div>`;
         return `<div class="filter-row" data-filter="${i}"><div class="filter-top">` +
             `<label class="filter-field"><span>Only where</span><select data-filter-field="${i}">${options}</select></label>` +
+            `<label class="filter-field filter-op"><span>Match</span><select data-filter-op="${i}">${ops}</select></label>` +
             `<span class="filter-count" data-filter-count="${i}"></span>` +
             `<button type="button" class="tile-btn" data-remove-filter="${i}" title="Remove this condition" aria-label="Remove this condition">✕</button></div>` +
-            `<input type="search" class="filter-search" data-filter-search="${i}" placeholder="Search the choices…" aria-label="Search the choices">` +
-            `<div class="filter-values" data-filter-values="${i}"><p class="chart-loading">Loading choices…</p></div></div>`;
+            values + '</div>';
     }).join('');
     document.getElementById('b-add-filter').hidden = d.filters.length >= Math.min(MAX_CHART_FILTERS, src.fields.length);
-    d.filters.forEach((f, i) => paintFilterValues(i));
+    d.filters.forEach((f, i) => f.op === 'contains' ? paintFilterCount(i) : paintFilterValues(i));
 }
+
+const FILTER_OP_CHOICES = [['equals', 'is one of'], ['notEquals', 'is none of'], ['contains', 'contains']];
 
 async function paintFilterValues(i) {
     const d = builder.draft;
@@ -15584,7 +16955,9 @@ async function paintFilterValues(i) {
 function paintFilterCount(i) {
     const f = builder.draft.filters[i];
     const count = document.querySelector(`[data-filter-count="${i}"]`);
-    if (f && count) count.textContent = f.values.length ? `${f.values.length} chosen` : 'Pick one or more';
+    if (!f || !count) return;
+    if (f.op === 'contains') count.textContent = f.values.length ? '' : 'Type a word';
+    else count.textContent = f.values.length ? `${f.values.length} chosen` : 'Pick one or more';
 }
 
 // Every change in the form updates the draft, the dependent parts, and the preview
@@ -15594,6 +16967,14 @@ function builderInput(e) {
     if (!d) return;
     if (t.id === 'b-title') { d.title = t.value; previewSoon(); return; }
     if (t.matches('.filter-search')) { if (e.type === 'input') paintFilterValues(Number(t.dataset.filterSearch)); return; }
+    if (t.matches('[data-filter-text]')) {
+        const f = d.filters[Number(t.dataset.filterText)];
+        f.values = t.value.split(',').map(v => v.trim()).filter(Boolean).slice(0, 10);
+        paintFilterCount(Number(t.dataset.filterText));
+        previewSoon(500);
+        return;
+    }
+    if (t.id === 'b-dest') { lastDestination = t.value; return; }
     if (e.type === 'input' && t.type !== 'color' && t.type !== 'date') return; // selects and radios: on change
     if (t.id === 'b-source') {
         d.source = t.value;
@@ -15610,7 +16991,14 @@ function builderInput(e) {
     } else if (t.id === 'b-from' || t.id === 'b-to') {
         d.dates = { preset: 'custom', from: document.getElementById('b-from').value, to: document.getElementById('b-to').value };
     } else if (t.matches('[data-filter-field]')) {
-        d.filters[Number(t.dataset.filterField)] = { field: t.value, values: [] };
+        const f = d.filters[Number(t.dataset.filterField)];
+        d.filters[Number(t.dataset.filterField)] = { field: t.value, op: f.op === 'contains' ? 'contains' : f.op, values: [] };
+        paintFilters();
+    } else if (t.matches('[data-filter-op]')) {
+        const f = d.filters[Number(t.dataset.filterOp)];
+        // Ticked choices carry over between "is" and "is not"; typed words don't
+        if ((f.op === 'contains') !== (t.value === 'contains')) f.values = [];
+        f.op = t.value;
         paintFilters();
     } else if (t.matches('[data-filter-value]')) {
         const f = d.filters[Number(t.dataset.filterValue)];
@@ -15660,15 +17048,17 @@ function renderPreview() {
         box.innerHTML = tileHtml(chart, [], 'preview');
         tile = box.querySelector('.chart-tile');
     }
-    fillTile(tile, chart, false);
+    fillTile(tile, chart, false, builder.scope);
 }
 
 function saveBuilder() {
     if (!builder) return;
     const chart = builderChart();
-    const onSave = builder.onSave;
+    const { onSave, destination } = builder;
+    const dest = document.getElementById('b-dest').value;
+    if (destination) lastDestination = dest;
     closeBuilder();
-    onSave(chart);
+    onSave(chart, destination ? dest : undefined);
 }
 
 document.getElementById('chart-builder').addEventListener('close', () => {
@@ -15677,6 +17067,583 @@ document.getElementById('chart-builder').addEventListener('close', () => {
     document.getElementById('b-preview').innerHTML = '';
     hideChartTip();
 });
+
+// Once this person's preferences are in: which of their dashboards are
+// shared, then a shared link they opened, or else the first-visit tour
+async function afterPreferences() {
+    await loadShares();
+    if (!await openSharedLink()) maybeStartTour();
+}
+
+// ---------------------------------------------------------------------
+// A DASHBOARD'S FILTER ROW: when the tickets were opened, and which teams,
+// for every chart on it at once (on top of each chart's own choices).
+// Saved with the dashboard.
+// ---------------------------------------------------------------------
+
+let teamsLoading = null;
+function loadTeams() {
+    if (!teamsLoading) {
+        teamsLoading = (async () => {
+            const response = await fetch(`${API_BASE}/api/charts/teams`, { headers: authHeaders() });
+            if (handleUnauthorized(response)) return [];
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+            return data.values;
+        })();
+        teamsLoading.catch(() => { teamsLoading = null; });
+    }
+    return teamsLoading;
+}
+
+function buildBoardFilters() {
+    document.getElementById('bf-dates').innerHTML = DATE_CHOICES.map(([v, l]) => `<option value="${v}">${escapeHtml(l)}</option>`).join('');
+    const pop = document.getElementById('bf-team-pop');
+    const button = document.getElementById('bf-team-btn');
+    document.getElementById('bf-dates').addEventListener('change', e => {
+        const board = currentBoard();
+        setBoardScope({ dates: e.target.value === 'custom' ? { preset: 'custom', from: board?.scope?.dates?.from || '', to: board?.scope?.dates?.to || '' } : { preset: e.target.value } });
+    });
+    for (const id of ['bf-from', 'bf-to']) {
+        document.getElementById(id).addEventListener('change', () => setBoardScope({
+            dates: { preset: 'custom', from: document.getElementById('bf-from').value, to: document.getElementById('bf-to').value },
+        }));
+    }
+    button.addEventListener('click', () => {
+        pop.hidden = !pop.hidden;
+        button.setAttribute('aria-expanded', String(!pop.hidden));
+        if (!pop.hidden) {
+            paintTeamList();
+            document.getElementById('bf-team-search').focus();
+        }
+    });
+    document.getElementById('bf-team-search').addEventListener('input', paintTeamList);
+    document.getElementById('bf-team-list').addEventListener('change', e => {
+        const board = currentBoard();
+        if (!board || !e.target.matches('input[type="checkbox"]')) return;
+        const teams = board.scope?.teams || [];
+        if (teams.length >= 30 && e.target.checked) {
+            e.target.checked = false;
+            showToast('Up to 30 teams at once.');
+            return;
+        }
+        setBoardScope({ teams: e.target.checked ? [...teams, e.target.value] : teams.filter(t => t !== e.target.value) }, false);
+    });
+    document.getElementById('bf-team-clear').addEventListener('click', () => { setBoardScope({ teams: [] }); paintTeamList(); });
+    document.getElementById('bf-team-done').addEventListener('click', () => { pop.hidden = true; button.setAttribute('aria-expanded', 'false'); button.focus(); });
+    document.getElementById('bf-clear').addEventListener('click', () => setBoardScope(emptyScope()));
+    // A click elsewhere closes the team list
+    document.addEventListener('pointerdown', e => {
+        if (!pop.hidden && !pop.contains(e.target) && e.target !== button) {
+            pop.hidden = true;
+            button.setAttribute('aria-expanded', 'false');
+        }
+    });
+}
+
+function paintBoardFilters() {
+    const board = currentBoard();
+    if (!board) return;
+    const scope = { ...emptyScope(), ...board.scope };
+    document.getElementById('bf-dates').value = scope.dates.preset;
+    document.getElementById('bf-range').hidden = scope.dates.preset !== 'custom';
+    const from = document.getElementById('bf-from'), to = document.getElementById('bf-to');
+    from.value = scope.dates.from || '';
+    to.value = scope.dates.to || '';
+    if (chartCatalog) {
+        const days = Object.values(chartCatalog.sources).map(s => s.days);
+        for (const input of [from, to]) {
+            input.min = days.map(d => d.first).sort()[0];
+            input.max = days.map(d => d.last).sort().at(-1);
+        }
+    }
+    const teams = scope.teams;
+    document.getElementById('bf-team-btn').textContent = teams.length ? `Team: ${teams.length === 1 ? teams[0] : `${teams.length} teams`} ▾` : 'Team: any ▾';
+    document.getElementById('bf-team-btn').classList.toggle('on', teams.length > 0);
+    document.getElementById('bf-clear').hidden = !boardScope(board);
+}
+
+// repaint: also redraw the team list (not while someone is ticking boxes in it)
+function setBoardScope(change, repaint = true) {
+    const board = currentBoard();
+    if (!board) return;
+    board.scope = { ...emptyScope(), ...board.scope, ...change };
+    paintBoardFilters();
+    if (repaint && !document.getElementById('bf-team-pop').hidden) paintTeamList();
+    refreshBoardTilesSoon();
+    savePreference('dashboards');
+    updateShareSoon(board);
+}
+
+// Every chart on the dashboard, again with the new filters (keeping its drawing, dimmed, meanwhile)
+let boardRefreshTimer = null;
+function refreshBoardTilesSoon() {
+    clearTimeout(boardRefreshTimer);
+    boardRefreshTimer = setTimeout(() => {
+        const board = currentBoard();
+        if (!board) return;
+        document.querySelectorAll('#board-grid .chart-tile').forEach((tile, i) => {
+            if (board.charts[i]) fillTile(tile, board.charts[i], tile._asTable, boardScope(board));
+        });
+    }, 300);
+}
+
+async function paintTeamList() {
+    const list = document.getElementById('bf-team-list');
+    const board = currentBoard();
+    if (!board) return;
+    try {
+        if (!list.children.length) list.innerHTML = '<p class="chart-loading">Loading teams…</p>';
+        const values = await loadTeams();
+        const search = document.getElementById('bf-team-search').value.trim().toLowerCase();
+        const chosen = new Set(board.scope?.teams || []);
+        const all = [...values.filter(v => chosen.has(v.value)), ...values.filter(v => !chosen.has(v.value))]
+            .filter(v => !search || v.value.toLowerCase().includes(search));
+        const shown = all.slice(0, 100);
+        list.innerHTML = shown.map(v => `<label class="filter-value"><input type="checkbox" value="${escapeHtml(v.value)}"${chosen.has(v.value) ? ' checked' : ''}>` +
+            `<span class="filter-value-name">${escapeHtml(v.value)}</span><span class="filter-value-count">${v.count.toLocaleString()}</span></label>`).join('') +
+            (all.length > shown.length ? `<p class="filter-more">${(all.length - shown.length).toLocaleString()} more: search to find them</p>` : '') +
+            (!all.length ? '<p class="filter-more">No team matches that search.</p>' : '');
+    } catch (err) {
+        list.innerHTML = `<p class="chart-empty error">❌ ${escapeHtml(err.message)}</p>`;
+    }
+}
+
+// ---------------------------------------------------------------------
+// THE TICKETS BEHIND A CHART: a click on a bar, slice, point or number
+// lists them (the newest 200), with stars, records and a download
+// ---------------------------------------------------------------------
+
+let drillRun = 0;
+async function openDrill({ chart, scope = null, value = null, label = '' }) {
+    const dialog = document.getElementById('drill-dialog');
+    const body = document.getElementById('drill-body');
+    const run = ++drillRun;
+    // The chart's name and description need the builder's catalog (an AI answer may not have loaded it)
+    try { await loadChartCatalog(); } catch { /* the plain names below still work */ }
+    const title = label ? `${chartTitle(chart)}: ${label}` : chartTitle(chart);
+    document.getElementById('drill-title').textContent = title;
+    body.innerHTML = '<p class="home-status">Loading the tickets…</p>';
+    hideChartTip();
+    if (!dialog.open) dialog.showModal();
+    try {
+        const response = await fetch(`${API_BASE}/api/charts/tickets`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ chart, scope, value }),
+        });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        if (run !== drillRun || !dialog.open) return;
+        const what = [chartDescription(chart), scopeDescription(scope)].filter(Boolean).join(' · ');
+        const tickets = data.tickets;
+        const count = `${data.total.toLocaleString()} ${data.total === 1 ? 'ticket' : 'tickets'}`;
+        body.innerHTML = `<p class="drill-what">${escapeHtml(what)}</p>` +
+            `<p class="home-status">${count}${data.total > tickets.length ? `; the newest ${tickets.length.toLocaleString()} are listed (the download has them too)` : ''}. ` +
+            'Click a ticket number to see its full record.</p>' +
+            starAllHtml(tickets.map(t => t.number)) + ticketTableHtml(tickets) + ticketDownloadHtml(tickets, title);
+    } catch (err) {
+        if (run === drillRun) body.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+    }
+}
+
+// Opening a ticket's record (or its dashboard page) from the list closes the list first
+document.getElementById('drill-dialog').addEventListener('click', e => {
+    if (e.target.closest('[data-ticket], [data-open-dashboard]')) e.currentTarget.close();
+});
+
+// ---------------------------------------------------------------------
+// SAVING A CHART somewhere: from an AI answer ("Save as a chart")
+// ---------------------------------------------------------------------
+
+// dest: 'home', a dashboard's id, or 'new' (asks for a name)
+async function saveChartTo(chart, dest) {
+    if (dest === 'home') {
+        prefs.home.blocks.push({ type: 'chart', chart });
+        renderHomeLayout();
+        savePreference('home');
+        showToast(`📌 "${chartTitle(chart)}" is saved on your Home page`);
+        return;
+    }
+    let board = prefs.dashboards.boards.find(b => b.id === dest);
+    if (!board) {
+        if (prefs.dashboards.boards.length >= 20) {
+            showToast('You can have up to 20 dashboards of your own. Delete one first.');
+            return;
+        }
+        const name = await askText({ title: 'New dashboard', label: 'Name', value: `My dashboard ${prefs.dashboards.boards.length + 1}`, action: 'Create' });
+        if (!name) return;
+        board = { id: newChartId(), name: name.slice(0, 60), charts: [], scope: emptyScope() };
+        prefs.dashboards.boards.push(board);
+    }
+    if (board.charts.length >= 30) {
+        showToast(`"${board.name}" already has 30 charts. Remove one or choose another dashboard.`);
+        return;
+    }
+    board.charts.push(chart);
+    renderMyDashboards();
+    if (currentBoardId === board.id) renderBoard();
+    savePreference('dashboards');
+    updateShareSoon(board);
+    showToast(`📌 "${chartTitle(chart)}" is saved on your dashboard "${board.name}"`);
+}
+
+// ---------------------------------------------------------------------
+// SHARING A DASHBOARD: a link (shares.mjs) that shows a copy of it to
+// anyone signed in, who can add the copy to their own dashboards
+// ---------------------------------------------------------------------
+
+const sharedBoards = new Map(); // dashboard id -> its link's token
+
+async function loadShares() {
+    try {
+        const response = await fetch(`${API_BASE}/api/shares`, { headers: authHeaders() });
+        if (handleUnauthorized(response) || !response.ok) return;
+        const data = await response.json();
+        sharedBoards.clear();
+        for (const s of data.shares) sharedBoards.set(s.boardId, s.token);
+        paintShareButton();
+    } catch (err) {
+        console.error('Could not load shared dashboards:', err);
+    }
+}
+
+function shareLink(token) {
+    return `${location.origin}${location.pathname}#share=${token}`;
+}
+
+function paintShareButton() {
+    const board = currentBoard();
+    const button = document.getElementById('board-share-btn');
+    const shared = Boolean(board && sharedBoards.has(board.id));
+    button.textContent = shared ? '🔗 Shared' : '🔗 Share';
+    button.classList.toggle('on', shared);
+}
+
+// Shares the dashboard, or updates what its link shows -> the token
+async function putShare(board, quiet = false) {
+    try {
+        const response = await fetch(`${API_BASE}/api/shares`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ board }),
+        });
+        if (handleUnauthorized(response)) return null;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        sharedBoards.set(board.id, data.token);
+        paintShareButton();
+        return data.token;
+    } catch (err) {
+        if (!quiet) showToast(`❌ ${err.message}`);
+        return null;
+    }
+}
+
+// A shared dashboard that changes: its link shows the change (a moment later)
+let shareTimer = null;
+function updateShareSoon(board) {
+    if (!board || !sharedBoards.has(board.id)) return;
+    clearTimeout(shareTimer);
+    shareTimer = setTimeout(() => putShare(board, true), 800);
+}
+
+async function shareCurrentBoard() {
+    const board = currentBoard();
+    if (!board) return;
+    if (!board.charts.length) {
+        showToast('Add a chart to this dashboard before sharing it.');
+        return;
+    }
+    const token = await putShare(board);
+    if (!token) return;
+    const dialog = document.getElementById('share-dialog');
+    document.getElementById('share-title').textContent = `Share "${board.name}"`;
+    document.getElementById('share-link').value = shareLink(token);
+    document.getElementById('share-stop').onclick = () => stopSharing(board);
+    dialog.showModal();
+    document.getElementById('share-link').select();
+}
+
+async function copyShareLink() {
+    const input = document.getElementById('share-link');
+    input.select();
+    try {
+        await navigator.clipboard.writeText(input.value);
+    } catch {
+        document.execCommand('copy');
+    }
+    showToast('Link copied. Paste it into an email or chat.');
+}
+
+// quiet: the dashboard was deleted (its own toast says so)
+async function stopSharing(board, quiet = false) {
+    const token = sharedBoards.get(board.id);
+    if (!token) return;
+    if (!quiet && !confirm(`Stop sharing "${board.name}"? Its link stops working. Copies people already added stay theirs.`)) return;
+    try {
+        const response = await fetch(`${API_BASE}/api/shares/${encodeURIComponent(token)}`, { method: 'DELETE', headers: authHeaders() });
+        if (handleUnauthorized(response)) return;
+        if (!response.ok && response.status !== 404) {
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.error || `The server answered ${response.status}.`);
+        }
+        sharedBoards.delete(board.id);
+        paintShareButton();
+        document.getElementById('share-dialog').close();
+        if (!quiet) showToast(`"${board.name}" is no longer shared`);
+    } catch (err) {
+        showToast(`❌ ${err.message}`);
+    }
+}
+
+// A link like …/#share=<token>: show that dashboard, with "Add to my dashboards".
+// -> true if there was one to show
+async function openSharedLink() {
+    const match = location.hash.match(/^#share=([A-Za-z0-9_-]{22})$/);
+    if (!match || !sessionTokenValue) return false;
+    history.replaceState(null, '', location.pathname + location.search);
+    try {
+        const response = await fetch(`${API_BASE}/api/shares/${match[1]}`, { headers: authHeaders() });
+        if (handleUnauthorized(response)) return true;
+        const share = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(share.error || `The server answered ${response.status}.`);
+        await loadChartCatalog();
+        const dialog = document.getElementById('shared-dialog');
+        document.getElementById('shared-title').textContent = share.mine ? `Your shared dashboard "${share.name}"` : `${share.owner} shared "${share.name}" with you`;
+        const when = new Date(share.updatedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+        const filters = scopeDescription(share.scope);
+        document.getElementById('shared-about').textContent = `${chartCount(share.charts.length)}, last changed ${when}.` +
+            (filters ? ` Filters for every chart: ${filters}.` : '') +
+            (share.mine ? ' This is the link to one of your own dashboards; this is what others see.' : ' Click a bar or slice to see its tickets.');
+        const grid = document.getElementById('shared-grid');
+        grid.innerHTML = share.charts.map(c => tileHtml(c, SHARED_TILE_BUTTONS)).join('');
+        const add = document.getElementById('shared-add');
+        add.hidden = share.mine;
+        add.onclick = () => addSharedCopy(share);
+        dialog.showModal();
+        const scope = share.scope && (share.scope.dates?.preset !== 'all' || share.scope.teams?.length) ? share.scope : null;
+        grid.querySelectorAll('.chart-tile').forEach((tile, i) => fillTile(tile, share.charts[i], false, scope));
+    } catch (err) {
+        showToast(`❌ ${err.message}`);
+    }
+    return true;
+}
+
+async function addSharedCopy(share) {
+    if (prefs.dashboards.boards.length >= 20) {
+        showToast('You can have up to 20 dashboards of your own. Delete one first.');
+        return;
+    }
+    const taken = new Set(prefs.dashboards.boards.map(b => b.name));
+    let name = share.name;
+    for (let n = 2; taken.has(name); n++) name = `${share.name} (${n})`;
+    const board = {
+        id: newChartId(),
+        name: name.slice(0, 60),
+        charts: share.charts.map(c => ({ ...c, id: newChartId() })),
+        scope: { ...emptyScope(), ...share.scope },
+    };
+    prefs.dashboards.boards.push(board);
+    savePreference('dashboards');
+    renderMyDashboards();
+    document.getElementById('shared-dialog').close();
+    switchTab('dashboard');
+    await loadDashboards();
+    showBoard(board.id);
+    showToast(`Added "${board.name}" to your dashboards. It's your copy: change it however you like.`);
+}
+
+window.addEventListener('hashchange', () => {
+    if (sessionTokenValue && !document.body.classList.contains('signed-out')) openSharedLink();
+});
+
+// ---------------------------------------------------------------------
+// THE TOUR: a few steps pointing at the main parts, shown once to each
+// person (saved to their account) and again from "❔ Tour" on Home
+// ---------------------------------------------------------------------
+
+const TOUR_STEPS = [
+    { target: '.tab-navigation', title: 'Home and Dashboards',
+        text: 'OneTouch has two pages. The one you are on lights up. The OneTouch logo also brings you back Home from anywhere.' },
+    { target: '[data-block="assistant"] .guide-card', title: 'Ask anything about the data',
+        text: 'Type a question in plain English, like "How many open incidents are there by priority?". Answers come back as tables you can switch to a chart, download (also as a picture), or save to a dashboard.' },
+    { target: '[data-block="tickets"]', title: 'Your tickets',
+        text: 'Every ticket the AI assistant shows you lands in Ticket results. Click ☆ to star one. Both are saved to your account.' },
+    { target: '#customize-home-btn', title: 'Make Home yours',
+        text: 'Move or hide these sections, and add charts of your own.' },
+    { target: '.tab-btn[data-tab="dashboard"]', title: 'Dashboards: the team\'s and yours',
+        text: 'The team dashboards, plus ones you build: ☰ Dashboards, then ＋ New dashboard. Click any bar or slice to see its tickets, filter a whole dashboard by team or date, and share it with a link.' },
+    { target: '#theme-btn', title: 'Your colors',
+        text: 'Light or dark, your own accent color, and the header\'s color. "❔ Tour" on Home shows this tour again.' },
+];
+
+let tourState = null; // { steps, index, opener }
+
+function maybeStartTour() {
+    if (prefs.tour.done || prefsLoadFailed) return;
+    setTimeout(() => {
+        const ready = !prefs.tour.done && !document.body.classList.contains('signed-out') && !document.querySelector('dialog[open]') &&
+            document.getElementById('home-view').classList.contains('active') && !assistantOpen();
+        if (ready) startTour();
+    }, 600);
+}
+
+function startTour() {
+    toggleHomeEditing(false);
+    toggleThemePanel(false);
+    toggleAssistant(false);
+    if (!document.getElementById('home-view').classList.contains('active')) switchTab('home');
+    const steps = TOUR_STEPS.filter(s => {
+        const el = document.querySelector(s.target);
+        return el && el.getClientRects().length > 0;
+    });
+    if (!steps.length) return;
+    tourState = { steps, index: 0, opener: document.activeElement };
+    document.getElementById('tour').hidden = false;
+    showTourStep();
+}
+
+function showTourStep() {
+    if (!tourState) return;
+    const { steps, index } = tourState;
+    const step = steps[index];
+    const target = document.querySelector(step.target);
+    if (!target) return closeTour();
+    target.scrollIntoView({ block: 'nearest' });
+    const r = target.getBoundingClientRect();
+    const pad = 6;
+    const spot = document.getElementById('tour-spot');
+    Object.assign(spot.style, { left: `${r.left - pad}px`, top: `${r.top - pad}px`, width: `${r.width + 2 * pad}px`, height: `${r.height + 2 * pad}px` });
+    document.getElementById('tour-step').textContent = `${index + 1} of ${steps.length}`;
+    document.getElementById('tour-title').textContent = step.title;
+    document.getElementById('tour-text').textContent = step.text;
+    document.getElementById('tour-back').disabled = index === 0;
+    document.getElementById('tour-next').textContent = index === steps.length - 1 ? 'Done' : 'Next';
+    // The card goes under what it points at, or above when there's no room below
+    const card = document.getElementById('tour-card');
+    const h = card.offsetHeight, w = card.offsetWidth;
+    const below = r.bottom + pad + 12;
+    const top = below + h < innerHeight - 8 ? below : Math.max(8, r.top - pad - 12 - h);
+    card.style.top = `${top}px`;
+    card.style.left = `${Math.max(8, Math.min(r.left, innerWidth - w - 8))}px`;
+    document.getElementById('tour-next').focus();
+}
+
+function tourMove(delta) {
+    if (!tourState) return;
+    const next = tourState.index + delta;
+    if (next >= tourState.steps.length) return closeTour();
+    tourState.index = Math.max(0, next);
+    showTourStep();
+}
+
+// save: remember it was seen (Skip and Done both count)
+function closeTour(save = true) {
+    const opener = tourState?.opener;
+    const wasOpen = Boolean(tourState);
+    tourState = null;
+    document.getElementById('tour').hidden = true;
+    if (!wasOpen) return;
+    if (save && !prefs.tour.done) {
+        prefs.tour = { done: true };
+        savePreference('tour');
+    }
+    if (opener && opener.isConnected) opener.focus();
+}
+
+// Escape skips; Tab stays on the tour's buttons; the card follows a resized window
+document.addEventListener('keydown', e => {
+    if (!tourState) return;
+    if (e.key === 'Escape') {
+        e.stopImmediatePropagation();
+        closeTour();
+    } else if (e.key === 'Tab') {
+        const buttons = [...document.querySelectorAll('#tour-card button:not(:disabled)')];
+        const i = buttons.indexOf(document.activeElement);
+        e.preventDefault();
+        buttons[(i + (e.shiftKey ? -1 : 1) + buttons.length) % buttons.length].focus();
+    }
+});
+window.addEventListener('resize', () => { if (tourState) showTourStep(); });
+```
+
+<a id="b48"></a>
+### B.48 `shares.mjs`
+
+```js
+// =====================================================================
+// SHARED DASHBOARDS: a link to a copy of someone's own dashboard. Anyone
+// signed in to OneTouch who opens the link sees it and can add a copy to
+// their own dashboards. Each dashboard has one link, and the owner's later
+// changes to the dashboard update what the link shows; copies people
+// already added are theirs and don't change.
+// =====================================================================
+
+import { randomBytes } from 'node:crypto';
+import { pool } from './auth.mjs';
+import { cleanBoard } from './prefs.mjs';
+
+// A link per dashboard, and each person can have at most 20 of their own
+export const MAX_SHARES = 20;
+export const TOKEN = /^[A-Za-z0-9_-]{22}$/;
+
+export class ShareError extends Error {}
+
+// Safe to run every start (after auth.ensureSchema, which creates users)
+export async function ensureSharesSchema() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS shared_dashboards (
+      token       text PRIMARY KEY,
+      owner_id    integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      board_id    text NOT NULL,
+      board       jsonb NOT NULL,
+      created_at  timestamptz NOT NULL DEFAULT now(),
+      updated_at  timestamptz NOT NULL DEFAULT now(),
+      UNIQUE (owner_id, board_id)
+    );
+  `);
+}
+
+// Shares (or updates the shared copy of) one of this person's dashboards -> its token
+export async function shareBoard(userId, input) {
+  if (!input || typeof input !== 'object') throw new ShareError('Nothing to share.');
+  const board = cleanBoard(input);
+  if (!board.charts.length) throw new ShareError('Add a chart to this dashboard before sharing it.');
+  const { rows: [{ count }] } = await pool.query(
+    'SELECT count(*)::int AS count FROM shared_dashboards WHERE owner_id = $1 AND board_id <> $2', [userId, board.id]);
+  if (count >= MAX_SHARES) throw new ShareError(`You can share up to ${MAX_SHARES} dashboards. Stop sharing one first.`);
+  const { rows } = await pool.query(
+    `INSERT INTO shared_dashboards (token, owner_id, board_id, board) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (owner_id, board_id) DO UPDATE SET board = EXCLUDED.board, updated_at = now()
+     RETURNING token`,
+    [randomBytes(16).toString('base64url'), userId, board.id, JSON.stringify(board)]);
+  return rows[0].token;
+}
+
+// This person's shared dashboards: [{ boardId, token }]
+export async function listShares(userId) {
+  const { rows } = await pool.query('SELECT board_id, token FROM shared_dashboards WHERE owner_id = $1', [userId]);
+  return rows.map(r => ({ boardId: r.board_id, token: r.token }));
+}
+
+// What a link shows -> { name, charts, scope, owner, updatedAt, mine } or null
+export async function getShare(token, userId) {
+  if (!TOKEN.test(token)) return null;
+  const { rows } = await pool.query(
+    `SELECT s.board, s.updated_at, s.owner_id, coalesce(nullif(u.display_name, ''), u.username) AS owner
+       FROM shared_dashboards s JOIN users u ON u.id = s.owner_id WHERE s.token = $1`, [token]);
+  if (!rows.length) return null;
+  const { board, updated_at, owner_id, owner } = rows[0];
+  return { name: board.name, charts: board.charts, scope: board.scope, owner, updatedAt: updated_at.toISOString(), mine: owner_id === userId };
+}
+
+// Stops sharing: the link stops working (copies people added stay theirs)
+export async function unshare(userId, token) {
+  const { rowCount } = await pool.query('DELETE FROM shared_dashboards WHERE token = $1 AND owner_id = $2', [token, userId]);
+  return rowCount > 0;
+}
 ```
 
 ## Appendix C: images

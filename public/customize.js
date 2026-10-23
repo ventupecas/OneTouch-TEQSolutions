@@ -15,12 +15,12 @@ const THEME_DEFAULTS = { mode: 'light', accent: '#10a37f', header: 'dark' };
 const defaultHome = () => ({ blocks: [{ type: 'assistant' }, { type: 'tickets' }] });
 const defaultDashboards = () => ({ boards: [], hidden: [], last: '' });
 
-const prefs = { theme: { ...THEME_DEFAULTS }, home: defaultHome(), dashboards: defaultDashboards() };
+const prefs = { theme: { ...THEME_DEFAULTS }, home: defaultHome(), dashboards: defaultDashboards(), tour: { done: false } };
 let prefsReady = Promise.resolve();
 // When loading failed, saving is off: it would replace what's saved with the defaults
 let prefsLoadFailed = false;
 
-const PART_NAMES = { theme: 'colors', home: 'Home page', dashboards: 'dashboards' };
+const PART_NAMES = { theme: 'colors', home: 'Home page', dashboards: 'dashboards', tour: 'tour' };
 
 function loadPreferences() {
     const token = sessionTokenValue;
@@ -38,6 +38,7 @@ function loadPreferences() {
             prefs.theme = { ...THEME_DEFAULTS, ...saved.theme };
             prefs.home = Array.isArray(saved.home?.blocks) ? saved.home : defaultHome();
             prefs.dashboards = { ...defaultDashboards(), ...saved.dashboards };
+            prefs.tour = { done: saved.tour?.done === true };
         } catch (err) {
             prefsLoadFailed = true;
             console.error('Could not load the saved layout and colors:', err);
@@ -50,6 +51,7 @@ function loadPreferences() {
         renderMyDashboards();
         clearTimeout(reveal);
         document.getElementById('home-blocks').classList.remove('waiting');
+        if (!prefsLoadFailed && token === sessionTokenValue) afterPreferences();
     })();
     return prefsReady;
 }
@@ -114,8 +116,12 @@ function resetCustomizing() {
     prefs.theme = { ...THEME_DEFAULTS };
     prefs.home = defaultHome();
     prefs.dashboards = defaultDashboards();
+    prefs.tour = { done: false };
     prefsReady = Promise.resolve();
     prefsLoadFailed = false;
+    sharedBoards.clear();
+    closeTour(false);
+    document.getElementById('bf-team-pop').hidden = true;
     for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close('cancel');
     applyTheme(prefs.theme);
     try { localStorage.removeItem(THEME_CACHE_KEY); } catch { /* nothing kept */ }
@@ -261,14 +267,17 @@ function askText({ title, label, value = '', action = 'Save' }) {
 
 const TILE_BUTTONS = {
     table: ['▦', 'Show as a table'],
+    download: ['⤓', 'Download this chart'],
     edit: ['✎', 'Edit this chart'],
     earlier: ['◀', 'Move earlier'],
     later: ['▶', 'Move later'],
     pin: ['📌', 'Add a copy to Home'],
     remove: ['🗑', 'Remove this chart'],
 };
-const HOME_TILE_BUTTONS = ['table', 'edit', 'earlier', 'later', 'remove'];
-const BOARD_TILE_BUTTONS = ['table', 'edit', 'earlier', 'later', 'pin', 'remove'];
+const HOME_TILE_BUTTONS = ['table', 'download', 'edit', 'earlier', 'later', 'remove'];
+const BOARD_TILE_BUTTONS = ['table', 'download', 'edit', 'earlier', 'later', 'pin', 'remove'];
+// Charts on someone else's shared dashboard: look, don't touch
+const SHARED_TILE_BUTTONS = ['table'];
 
 function tileHtml(chart, buttons, extraClass = '') {
     const actions = buttons.map(a => `<button type="button" class="tile-btn" data-tile-action="${a}" title="${TILE_BUTTONS[a][1]}" aria-label="${TILE_BUTTONS[a][1]}">${TILE_BUTTONS[a][0]}</button>`).join('');
@@ -280,23 +289,33 @@ function tileHtml(chart, buttons, extraClass = '') {
 
 // Fetches (or reuses) the chart's numbers and draws it. While new numbers
 // load, the old drawing stays, dimmed, instead of jumping to "Loading…".
-async function fillTile(tile, chart, asTable = tile._asTable || false) {
+// scope: the dashboard's filter row (dates, teams), applied on top of the chart's own.
+// A click on a bar, slice, point or the number lists the tickets behind it.
+async function fillTile(tile, chart, asTable = tile._asTable || false, scope = tile._scope || null) {
     const body = tile.querySelector('.tile-body');
     const run = (body._run || 0) + 1;
     body._run = run;
     tile._asTable = asTable;
+    tile._scope = scope;
+    tile._chart = chart;
     if (body._drawn) body.classList.add('refreshing');
     try {
         await loadChartCatalog();
         if (body._run !== run) return;
         tile.querySelector('.tile-title').textContent = chartTitle(chart);
         tile.querySelector('.tile-sub').textContent = chartDescription(chart);
-        const data = await fetchChartData(chart);
+        const data = await fetchChartData(chart, scope);
         if (!data || body._run !== run || !tile.isConnected) return;
+        tile._data = data;
         drawChart(body, chart, data, asTable);
+        body._pick = tile.classList.contains('preview') ? null
+            : row => openDrill({ chart, scope, value: row ? row.value : null, label: row ? groupLabel(chart, row.value, true) : '' });
+        body.classList.toggle('drillable', Boolean(body._pick) && !asTable);
         const note = tile.querySelector('.chart-note');
-        note.textContent = asTable ? '' : chartNote(chart, data);
+        note.textContent = [asTable ? '' : chartNote(chart, data),
+            data.skipped?.includes('team') ? "The dashboard's Team filter doesn't apply here: requests have no team." : ''].filter(Boolean).join(' ');
         note.hidden = !note.textContent;
+        if (tile.querySelector('.tile-download')) showTileDownload(tile, true);
         const tableButton = tile.querySelector('[data-tile-action="table"]');
         if (tableButton) {
             tableButton.hidden = chart.display === 'table' || chart.display === 'number' || !chart.groupBy;
@@ -333,18 +352,38 @@ function savePlace(where) {
         renderBoard();
         renderMyDashboards();
         savePreference('dashboards');
+        updateShareSoon(currentBoard());
     }
 }
 
+// ⤓ under a chart: its numbers in any download format, and (while the chart,
+// not its table, is showing) its picture, also placed in PDF, Word and Excel
+function showTileDownload(tile, show) {
+    tile.querySelector('.tile-download')?.remove();
+    tile.querySelector('[data-tile-action="download"]')?.setAttribute('aria-pressed', String(show));
+    if (!show || !tile._data) return;
+    const chart = tile._chart;
+    const subtitle = [chartDescription(chart), scopeDescription(tile._scope)].filter(Boolean).join(' · ');
+    const exportId = registerExport({
+        title: chartTitle(chart),
+        tables: [chartExportTable(chart, tile._data), noteTable('What this chart counts', 'Counts', [subtitle])],
+        picture: () => tile._asTable || chart.display === 'table' || !tile._data ? null : { chart, data: tile._data, title: chartTitle(chart), subtitle },
+    });
+    tile.insertAdjacentHTML('beforeend', `<div class="tile-download">${downloadBarHtml(exportId, 'Download as', { pictures: chart.display !== 'table' })}</div>`);
+    paintPictureOptions(tile.querySelector('.tile-download'));
+}
+
 function tileAction(tile, action) {
+    // These work on any chart, including a shared dashboard's preview
+    if (action === 'table') return tile._chart && fillTile(tile, tile._chart, !tile._asTable);
+    if (action === 'download') return showTileDownload(tile, !tile.querySelector('.tile-download'));
     const { where, list, index, chartOf } = tilePlace(tile);
     if (index < 0) return;
     const chart = chartOf(list[index]);
-    if (action === 'table') {
-        fillTile(tile, chart, !tile._asTable);
-    } else if (action === 'edit') {
+    if (action === 'edit') {
         openBuilder({
             chart,
+            scope: where === 'board' ? boardScope(currentBoard()) : null,
             onSave: updated => {
                 if (where === 'home') list[index] = { type: 'chart', chart: updated };
                 else list[index] = updated;
@@ -559,6 +598,8 @@ function renderBoard() {
     if (!board) return;
     setDashboardHeading('My dashboards', board.name, chartCount(board.charts.length), false);
     document.getElementById('dashboard-hint').hidden = true;
+    paintBoardFilters();
+    paintShareButton();
     const grid = document.getElementById('board-grid');
     if (!board.charts.length) {
         grid.innerHTML = '<div class="board-empty"><p class="board-empty-title">This dashboard has no charts yet.</p>' +
@@ -568,7 +609,16 @@ function renderBoard() {
         return;
     }
     grid.innerHTML = board.charts.map(c => tileHtml(c, BOARD_TILE_BUTTONS)).join('');
-    grid.querySelectorAll('.chart-tile').forEach((tile, i) => fillTile(tile, board.charts[i]));
+    grid.querySelectorAll('.chart-tile').forEach((tile, i) => fillTile(tile, board.charts[i], false, boardScope(board)));
+}
+
+const emptyScope = () => ({ dates: { preset: 'all' }, teams: [] });
+
+// The dashboard's filter row, or null when it filters nothing (so the charts
+// share their numbers with the same charts elsewhere)
+function boardScope(board) {
+    const scope = board?.scope;
+    return scope && (scope.dates?.preset !== 'all' || scope.teams?.length) ? scope : null;
 }
 
 const SUGGESTED_CHARTS = [
@@ -596,7 +646,7 @@ async function newBoard() {
     }
     const name = await askText({ title: 'New dashboard', label: 'Name', value: `My dashboard ${prefs.dashboards.boards.length + 1}`, action: 'Create' });
     if (!name) return;
-    const board = { id: newChartId(), name: name.slice(0, 60), charts: [] };
+    const board = { id: newChartId(), name: name.slice(0, 60), charts: [], scope: emptyScope() };
     prefs.dashboards.boards.push(board);
     savePreference('dashboards');
     renderMyDashboards();
@@ -623,6 +673,8 @@ function deleteBoard() {
     hideBoard();
     renderMyDashboards();
     savePreference('dashboards');
+    // Its link stops working too
+    if (sharedBoards.has(board.id)) stopSharing(board, true);
     showToast(`Deleted "${board.name}"`);
     showFirstDashboard();
 }
@@ -635,6 +687,7 @@ function addBoardChart() {
         return;
     }
     openBuilder({
+        scope: boardScope(board),
         onSave: chart => {
             board.charts.push(chart);
             savePlace('board');
@@ -767,7 +820,7 @@ function buildBuilder() {
         const used = new Set(builder.draft.filters.map(f => f.field));
         const field = src.fields.find(([key]) => !used.has(key));
         if (!field || builder.draft.filters.length >= MAX_CHART_FILTERS) return;
-        builder.draft.filters.push({ field: field[0], values: [] });
+        builder.draft.filters.push({ field: field[0], op: 'equals', values: [] });
         paintFilters();
         document.querySelector('#b-filters .filter-row:last-child select')?.focus();
     });
@@ -780,20 +833,41 @@ function buildBuilder() {
     });
 }
 
-async function openBuilder({ chart = null, onSave }) {
+// chart: the chart to edit (or to start from); scope: the dashboard's filter row,
+// shown in the preview; destination: ask where to save (Home, a dashboard, a new one);
+// note: a line at the top (e.g. what didn't carry over from an AI answer)
+let lastDestination = 'home';
+async function openBuilder({ chart = null, onSave, scope = null, destination = false, note = '' }) {
     try {
         if (!await loadChartCatalog()) return;
     } catch (err) {
         showToast(`❌ ${err.message}`);
         return;
     }
+    const editing = Boolean(chart) && !destination;
     builder = {
         draft: structuredClone(chart || chartWithDefaults({ source: 'incident', groupBy: 'priority', sort: 'label', display: 'bar' })),
         onSave,
+        scope,
+        destination,
     };
-    builder.draft.filters = builder.draft.filters.map(f => ({ ...f, values: [...f.values] }));
-    document.getElementById('builder-title').textContent = chart ? 'Edit chart' : 'Add a chart';
-    document.getElementById('b-save').textContent = chart ? 'Save changes' : 'Add chart';
+    builder.draft.filters = builder.draft.filters.map(f => ({ ...f, op: f.op || 'equals', values: [...f.values] }));
+    document.getElementById('builder-title').textContent = editing ? 'Edit chart' : destination ? 'Save as a chart' : 'Add a chart';
+    document.getElementById('b-save').textContent = editing ? 'Save changes' : destination ? 'Save chart' : 'Add chart';
+    const noteBox = document.getElementById('b-note');
+    noteBox.textContent = note;
+    noteBox.hidden = !note;
+    const scopeNote = document.getElementById('b-scope-note');
+    scopeNote.textContent = scope ? `The dashboard's filters apply too: ${scopeDescription(scope)}.` : '';
+    scopeNote.hidden = !scope;
+    const dest = document.getElementById('b-dest');
+    document.getElementById('b-dest-row').hidden = !destination;
+    if (destination) {
+        dest.innerHTML = '<option value="home">My Home page</option>' +
+            prefs.dashboards.boards.map(b => `<option value="${escapeHtml(b.id)}">Dashboard: ${escapeHtml(b.name)}</option>`).join('') +
+            '<option value="new">＋ A new dashboard…</option>';
+        dest.value = [...dest.options].some(o => o.value === lastDestination) ? lastDestination : 'home';
+    }
     document.getElementById('b-source').innerHTML = Object.entries(chartCatalog.sources)
         .map(([key, s]) => `<option value="${key}">${escapeHtml(s.label)}</option>`).join('');
     paintBuilder();
@@ -859,16 +933,24 @@ async function paintFilters() {
     box.innerHTML = d.filters.map((f, i) => {
         const others = new Set(d.filters.filter((_, j) => j !== i).map(g => g.field));
         const options = src.fields.filter(([k]) => !others.has(k)).map(([k, l]) => `<option value="${k}"${k === f.field ? ' selected' : ''}>${escapeHtml(l)}</option>`).join('');
+        const ops = FILTER_OP_CHOICES.map(([v, l]) => `<option value="${v}"${v === f.op ? ' selected' : ''}>${l}</option>`).join('');
+        // "contains": words to type; "is" / "is not": choices to tick
+        const values = f.op === 'contains'
+            ? `<input type="text" class="filter-text" data-filter-text="${i}" value="${escapeHtml(f.values.join(', '))}" placeholder="A word or two, e.g. WINTEL (commas for more than one)" aria-label="Words to look for">`
+            : `<input type="search" class="filter-search" data-filter-search="${i}" placeholder="Search the choices…" aria-label="Search the choices">` +
+              `<div class="filter-values" data-filter-values="${i}"><p class="chart-loading">Loading choices…</p></div>`;
         return `<div class="filter-row" data-filter="${i}"><div class="filter-top">` +
             `<label class="filter-field"><span>Only where</span><select data-filter-field="${i}">${options}</select></label>` +
+            `<label class="filter-field filter-op"><span>Match</span><select data-filter-op="${i}">${ops}</select></label>` +
             `<span class="filter-count" data-filter-count="${i}"></span>` +
             `<button type="button" class="tile-btn" data-remove-filter="${i}" title="Remove this condition" aria-label="Remove this condition">✕</button></div>` +
-            `<input type="search" class="filter-search" data-filter-search="${i}" placeholder="Search the choices…" aria-label="Search the choices">` +
-            `<div class="filter-values" data-filter-values="${i}"><p class="chart-loading">Loading choices…</p></div></div>`;
+            values + '</div>';
     }).join('');
     document.getElementById('b-add-filter').hidden = d.filters.length >= Math.min(MAX_CHART_FILTERS, src.fields.length);
-    d.filters.forEach((f, i) => paintFilterValues(i));
+    d.filters.forEach((f, i) => f.op === 'contains' ? paintFilterCount(i) : paintFilterValues(i));
 }
+
+const FILTER_OP_CHOICES = [['equals', 'is one of'], ['notEquals', 'is none of'], ['contains', 'contains']];
 
 async function paintFilterValues(i) {
     const d = builder.draft;
@@ -897,7 +979,9 @@ async function paintFilterValues(i) {
 function paintFilterCount(i) {
     const f = builder.draft.filters[i];
     const count = document.querySelector(`[data-filter-count="${i}"]`);
-    if (f && count) count.textContent = f.values.length ? `${f.values.length} chosen` : 'Pick one or more';
+    if (!f || !count) return;
+    if (f.op === 'contains') count.textContent = f.values.length ? '' : 'Type a word';
+    else count.textContent = f.values.length ? `${f.values.length} chosen` : 'Pick one or more';
 }
 
 // Every change in the form updates the draft, the dependent parts, and the preview
@@ -907,6 +991,14 @@ function builderInput(e) {
     if (!d) return;
     if (t.id === 'b-title') { d.title = t.value; previewSoon(); return; }
     if (t.matches('.filter-search')) { if (e.type === 'input') paintFilterValues(Number(t.dataset.filterSearch)); return; }
+    if (t.matches('[data-filter-text]')) {
+        const f = d.filters[Number(t.dataset.filterText)];
+        f.values = t.value.split(',').map(v => v.trim()).filter(Boolean).slice(0, 10);
+        paintFilterCount(Number(t.dataset.filterText));
+        previewSoon(500);
+        return;
+    }
+    if (t.id === 'b-dest') { lastDestination = t.value; return; }
     if (e.type === 'input' && t.type !== 'color' && t.type !== 'date') return; // selects and radios: on change
     if (t.id === 'b-source') {
         d.source = t.value;
@@ -923,7 +1015,14 @@ function builderInput(e) {
     } else if (t.id === 'b-from' || t.id === 'b-to') {
         d.dates = { preset: 'custom', from: document.getElementById('b-from').value, to: document.getElementById('b-to').value };
     } else if (t.matches('[data-filter-field]')) {
-        d.filters[Number(t.dataset.filterField)] = { field: t.value, values: [] };
+        const f = d.filters[Number(t.dataset.filterField)];
+        d.filters[Number(t.dataset.filterField)] = { field: t.value, op: f.op === 'contains' ? 'contains' : f.op, values: [] };
+        paintFilters();
+    } else if (t.matches('[data-filter-op]')) {
+        const f = d.filters[Number(t.dataset.filterOp)];
+        // Ticked choices carry over between "is" and "is not"; typed words don't
+        if ((f.op === 'contains') !== (t.value === 'contains')) f.values = [];
+        f.op = t.value;
         paintFilters();
     } else if (t.matches('[data-filter-value]')) {
         const f = d.filters[Number(t.dataset.filterValue)];
@@ -973,15 +1072,17 @@ function renderPreview() {
         box.innerHTML = tileHtml(chart, [], 'preview');
         tile = box.querySelector('.chart-tile');
     }
-    fillTile(tile, chart, false);
+    fillTile(tile, chart, false, builder.scope);
 }
 
 function saveBuilder() {
     if (!builder) return;
     const chart = builderChart();
-    const onSave = builder.onSave;
+    const { onSave, destination } = builder;
+    const dest = document.getElementById('b-dest').value;
+    if (destination) lastDestination = dest;
     closeBuilder();
-    onSave(chart);
+    onSave(chart, destination ? dest : undefined);
 }
 
 document.getElementById('chart-builder').addEventListener('close', () => {
@@ -990,3 +1091,503 @@ document.getElementById('chart-builder').addEventListener('close', () => {
     document.getElementById('b-preview').innerHTML = '';
     hideChartTip();
 });
+
+// Once this person's preferences are in: which of their dashboards are
+// shared, then a shared link they opened, or else the first-visit tour
+async function afterPreferences() {
+    await loadShares();
+    if (!await openSharedLink()) maybeStartTour();
+}
+
+// ---------------------------------------------------------------------
+// A DASHBOARD'S FILTER ROW: when the tickets were opened, and which teams,
+// for every chart on it at once (on top of each chart's own choices).
+// Saved with the dashboard.
+// ---------------------------------------------------------------------
+
+let teamsLoading = null;
+function loadTeams() {
+    if (!teamsLoading) {
+        teamsLoading = (async () => {
+            const response = await fetch(`${API_BASE}/api/charts/teams`, { headers: authHeaders() });
+            if (handleUnauthorized(response)) return [];
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+            return data.values;
+        })();
+        teamsLoading.catch(() => { teamsLoading = null; });
+    }
+    return teamsLoading;
+}
+
+function buildBoardFilters() {
+    document.getElementById('bf-dates').innerHTML = DATE_CHOICES.map(([v, l]) => `<option value="${v}">${escapeHtml(l)}</option>`).join('');
+    const pop = document.getElementById('bf-team-pop');
+    const button = document.getElementById('bf-team-btn');
+    document.getElementById('bf-dates').addEventListener('change', e => {
+        const board = currentBoard();
+        setBoardScope({ dates: e.target.value === 'custom' ? { preset: 'custom', from: board?.scope?.dates?.from || '', to: board?.scope?.dates?.to || '' } : { preset: e.target.value } });
+    });
+    for (const id of ['bf-from', 'bf-to']) {
+        document.getElementById(id).addEventListener('change', () => setBoardScope({
+            dates: { preset: 'custom', from: document.getElementById('bf-from').value, to: document.getElementById('bf-to').value },
+        }));
+    }
+    button.addEventListener('click', () => {
+        pop.hidden = !pop.hidden;
+        button.setAttribute('aria-expanded', String(!pop.hidden));
+        if (!pop.hidden) {
+            paintTeamList();
+            document.getElementById('bf-team-search').focus();
+        }
+    });
+    document.getElementById('bf-team-search').addEventListener('input', paintTeamList);
+    document.getElementById('bf-team-list').addEventListener('change', e => {
+        const board = currentBoard();
+        if (!board || !e.target.matches('input[type="checkbox"]')) return;
+        const teams = board.scope?.teams || [];
+        if (teams.length >= 30 && e.target.checked) {
+            e.target.checked = false;
+            showToast('Up to 30 teams at once.');
+            return;
+        }
+        setBoardScope({ teams: e.target.checked ? [...teams, e.target.value] : teams.filter(t => t !== e.target.value) }, false);
+    });
+    document.getElementById('bf-team-clear').addEventListener('click', () => { setBoardScope({ teams: [] }); paintTeamList(); });
+    document.getElementById('bf-team-done').addEventListener('click', () => { pop.hidden = true; button.setAttribute('aria-expanded', 'false'); button.focus(); });
+    document.getElementById('bf-clear').addEventListener('click', () => setBoardScope(emptyScope()));
+    // A click elsewhere closes the team list
+    document.addEventListener('pointerdown', e => {
+        if (!pop.hidden && !pop.contains(e.target) && e.target !== button) {
+            pop.hidden = true;
+            button.setAttribute('aria-expanded', 'false');
+        }
+    });
+}
+
+function paintBoardFilters() {
+    const board = currentBoard();
+    if (!board) return;
+    const scope = { ...emptyScope(), ...board.scope };
+    document.getElementById('bf-dates').value = scope.dates.preset;
+    document.getElementById('bf-range').hidden = scope.dates.preset !== 'custom';
+    const from = document.getElementById('bf-from'), to = document.getElementById('bf-to');
+    from.value = scope.dates.from || '';
+    to.value = scope.dates.to || '';
+    if (chartCatalog) {
+        const days = Object.values(chartCatalog.sources).map(s => s.days);
+        for (const input of [from, to]) {
+            input.min = days.map(d => d.first).sort()[0];
+            input.max = days.map(d => d.last).sort().at(-1);
+        }
+    }
+    const teams = scope.teams;
+    document.getElementById('bf-team-btn').textContent = teams.length ? `Team: ${teams.length === 1 ? teams[0] : `${teams.length} teams`} ▾` : 'Team: any ▾';
+    document.getElementById('bf-team-btn').classList.toggle('on', teams.length > 0);
+    document.getElementById('bf-clear').hidden = !boardScope(board);
+}
+
+// repaint: also redraw the team list (not while someone is ticking boxes in it)
+function setBoardScope(change, repaint = true) {
+    const board = currentBoard();
+    if (!board) return;
+    board.scope = { ...emptyScope(), ...board.scope, ...change };
+    paintBoardFilters();
+    if (repaint && !document.getElementById('bf-team-pop').hidden) paintTeamList();
+    refreshBoardTilesSoon();
+    savePreference('dashboards');
+    updateShareSoon(board);
+}
+
+// Every chart on the dashboard, again with the new filters (keeping its drawing, dimmed, meanwhile)
+let boardRefreshTimer = null;
+function refreshBoardTilesSoon() {
+    clearTimeout(boardRefreshTimer);
+    boardRefreshTimer = setTimeout(() => {
+        const board = currentBoard();
+        if (!board) return;
+        document.querySelectorAll('#board-grid .chart-tile').forEach((tile, i) => {
+            if (board.charts[i]) fillTile(tile, board.charts[i], tile._asTable, boardScope(board));
+        });
+    }, 300);
+}
+
+async function paintTeamList() {
+    const list = document.getElementById('bf-team-list');
+    const board = currentBoard();
+    if (!board) return;
+    try {
+        if (!list.children.length) list.innerHTML = '<p class="chart-loading">Loading teams…</p>';
+        const values = await loadTeams();
+        const search = document.getElementById('bf-team-search').value.trim().toLowerCase();
+        const chosen = new Set(board.scope?.teams || []);
+        const all = [...values.filter(v => chosen.has(v.value)), ...values.filter(v => !chosen.has(v.value))]
+            .filter(v => !search || v.value.toLowerCase().includes(search));
+        const shown = all.slice(0, 100);
+        list.innerHTML = shown.map(v => `<label class="filter-value"><input type="checkbox" value="${escapeHtml(v.value)}"${chosen.has(v.value) ? ' checked' : ''}>` +
+            `<span class="filter-value-name">${escapeHtml(v.value)}</span><span class="filter-value-count">${v.count.toLocaleString()}</span></label>`).join('') +
+            (all.length > shown.length ? `<p class="filter-more">${(all.length - shown.length).toLocaleString()} more: search to find them</p>` : '') +
+            (!all.length ? '<p class="filter-more">No team matches that search.</p>' : '');
+    } catch (err) {
+        list.innerHTML = `<p class="chart-empty error">❌ ${escapeHtml(err.message)}</p>`;
+    }
+}
+
+// ---------------------------------------------------------------------
+// THE TICKETS BEHIND A CHART: a click on a bar, slice, point or number
+// lists them (the newest 200), with stars, records and a download
+// ---------------------------------------------------------------------
+
+let drillRun = 0;
+async function openDrill({ chart, scope = null, value = null, label = '' }) {
+    const dialog = document.getElementById('drill-dialog');
+    const body = document.getElementById('drill-body');
+    const run = ++drillRun;
+    // The chart's name and description need the builder's catalog (an AI answer may not have loaded it)
+    try { await loadChartCatalog(); } catch { /* the plain names below still work */ }
+    const title = label ? `${chartTitle(chart)}: ${label}` : chartTitle(chart);
+    document.getElementById('drill-title').textContent = title;
+    body.innerHTML = '<p class="home-status">Loading the tickets…</p>';
+    hideChartTip();
+    if (!dialog.open) dialog.showModal();
+    try {
+        const response = await fetch(`${API_BASE}/api/charts/tickets`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ chart, scope, value }),
+        });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        if (run !== drillRun || !dialog.open) return;
+        const what = [chartDescription(chart), scopeDescription(scope)].filter(Boolean).join(' · ');
+        const tickets = data.tickets;
+        const count = `${data.total.toLocaleString()} ${data.total === 1 ? 'ticket' : 'tickets'}`;
+        body.innerHTML = `<p class="drill-what">${escapeHtml(what)}</p>` +
+            `<p class="home-status">${count}${data.total > tickets.length ? `; the newest ${tickets.length.toLocaleString()} are listed (the download has them too)` : ''}. ` +
+            'Click a ticket number to see its full record.</p>' +
+            starAllHtml(tickets.map(t => t.number)) + ticketTableHtml(tickets) + ticketDownloadHtml(tickets, title);
+    } catch (err) {
+        if (run === drillRun) body.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+    }
+}
+
+// Opening a ticket's record (or its dashboard page) from the list closes the list first
+document.getElementById('drill-dialog').addEventListener('click', e => {
+    if (e.target.closest('[data-ticket], [data-open-dashboard]')) e.currentTarget.close();
+});
+
+// ---------------------------------------------------------------------
+// SAVING A CHART somewhere: from an AI answer ("Save as a chart")
+// ---------------------------------------------------------------------
+
+// dest: 'home', a dashboard's id, or 'new' (asks for a name)
+async function saveChartTo(chart, dest) {
+    if (dest === 'home') {
+        prefs.home.blocks.push({ type: 'chart', chart });
+        renderHomeLayout();
+        savePreference('home');
+        showToast(`📌 "${chartTitle(chart)}" is saved on your Home page`);
+        return;
+    }
+    let board = prefs.dashboards.boards.find(b => b.id === dest);
+    if (!board) {
+        if (prefs.dashboards.boards.length >= 20) {
+            showToast('You can have up to 20 dashboards of your own. Delete one first.');
+            return;
+        }
+        const name = await askText({ title: 'New dashboard', label: 'Name', value: `My dashboard ${prefs.dashboards.boards.length + 1}`, action: 'Create' });
+        if (!name) return;
+        board = { id: newChartId(), name: name.slice(0, 60), charts: [], scope: emptyScope() };
+        prefs.dashboards.boards.push(board);
+    }
+    if (board.charts.length >= 30) {
+        showToast(`"${board.name}" already has 30 charts. Remove one or choose another dashboard.`);
+        return;
+    }
+    board.charts.push(chart);
+    renderMyDashboards();
+    if (currentBoardId === board.id) renderBoard();
+    savePreference('dashboards');
+    updateShareSoon(board);
+    showToast(`📌 "${chartTitle(chart)}" is saved on your dashboard "${board.name}"`);
+}
+
+// ---------------------------------------------------------------------
+// SHARING A DASHBOARD: a link (shares.mjs) that shows a copy of it to
+// anyone signed in, who can add the copy to their own dashboards
+// ---------------------------------------------------------------------
+
+const sharedBoards = new Map(); // dashboard id -> its link's token
+
+async function loadShares() {
+    try {
+        const response = await fetch(`${API_BASE}/api/shares`, { headers: authHeaders() });
+        if (handleUnauthorized(response) || !response.ok) return;
+        const data = await response.json();
+        sharedBoards.clear();
+        for (const s of data.shares) sharedBoards.set(s.boardId, s.token);
+        paintShareButton();
+    } catch (err) {
+        console.error('Could not load shared dashboards:', err);
+    }
+}
+
+function shareLink(token) {
+    return `${location.origin}${location.pathname}#share=${token}`;
+}
+
+function paintShareButton() {
+    const board = currentBoard();
+    const button = document.getElementById('board-share-btn');
+    const shared = Boolean(board && sharedBoards.has(board.id));
+    button.textContent = shared ? '🔗 Shared' : '🔗 Share';
+    button.classList.toggle('on', shared);
+}
+
+// Shares the dashboard, or updates what its link shows -> the token
+async function putShare(board, quiet = false) {
+    try {
+        const response = await fetch(`${API_BASE}/api/shares`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ board }),
+        });
+        if (handleUnauthorized(response)) return null;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        sharedBoards.set(board.id, data.token);
+        paintShareButton();
+        return data.token;
+    } catch (err) {
+        if (!quiet) showToast(`❌ ${err.message}`);
+        return null;
+    }
+}
+
+// A shared dashboard that changes: its link shows the change (a moment later)
+let shareTimer = null;
+function updateShareSoon(board) {
+    if (!board || !sharedBoards.has(board.id)) return;
+    clearTimeout(shareTimer);
+    shareTimer = setTimeout(() => putShare(board, true), 800);
+}
+
+async function shareCurrentBoard() {
+    const board = currentBoard();
+    if (!board) return;
+    if (!board.charts.length) {
+        showToast('Add a chart to this dashboard before sharing it.');
+        return;
+    }
+    const token = await putShare(board);
+    if (!token) return;
+    const dialog = document.getElementById('share-dialog');
+    document.getElementById('share-title').textContent = `Share "${board.name}"`;
+    document.getElementById('share-link').value = shareLink(token);
+    document.getElementById('share-stop').onclick = () => stopSharing(board);
+    dialog.showModal();
+    document.getElementById('share-link').select();
+}
+
+async function copyShareLink() {
+    const input = document.getElementById('share-link');
+    input.select();
+    try {
+        await navigator.clipboard.writeText(input.value);
+    } catch {
+        document.execCommand('copy');
+    }
+    showToast('Link copied. Paste it into an email or chat.');
+}
+
+// quiet: the dashboard was deleted (its own toast says so)
+async function stopSharing(board, quiet = false) {
+    const token = sharedBoards.get(board.id);
+    if (!token) return;
+    if (!quiet && !confirm(`Stop sharing "${board.name}"? Its link stops working. Copies people already added stay theirs.`)) return;
+    try {
+        const response = await fetch(`${API_BASE}/api/shares/${encodeURIComponent(token)}`, { method: 'DELETE', headers: authHeaders() });
+        if (handleUnauthorized(response)) return;
+        if (!response.ok && response.status !== 404) {
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.error || `The server answered ${response.status}.`);
+        }
+        sharedBoards.delete(board.id);
+        paintShareButton();
+        document.getElementById('share-dialog').close();
+        if (!quiet) showToast(`"${board.name}" is no longer shared`);
+    } catch (err) {
+        showToast(`❌ ${err.message}`);
+    }
+}
+
+// A link like …/#share=<token>: show that dashboard, with "Add to my dashboards".
+// -> true if there was one to show
+async function openSharedLink() {
+    const match = location.hash.match(/^#share=([A-Za-z0-9_-]{22})$/);
+    if (!match || !sessionTokenValue) return false;
+    history.replaceState(null, '', location.pathname + location.search);
+    try {
+        const response = await fetch(`${API_BASE}/api/shares/${match[1]}`, { headers: authHeaders() });
+        if (handleUnauthorized(response)) return true;
+        const share = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(share.error || `The server answered ${response.status}.`);
+        await loadChartCatalog();
+        const dialog = document.getElementById('shared-dialog');
+        document.getElementById('shared-title').textContent = share.mine ? `Your shared dashboard "${share.name}"` : `${share.owner} shared "${share.name}" with you`;
+        const when = new Date(share.updatedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+        const filters = scopeDescription(share.scope);
+        document.getElementById('shared-about').textContent = `${chartCount(share.charts.length)}, last changed ${when}.` +
+            (filters ? ` Filters for every chart: ${filters}.` : '') +
+            (share.mine ? ' This is the link to one of your own dashboards; this is what others see.' : ' Click a bar or slice to see its tickets.');
+        const grid = document.getElementById('shared-grid');
+        grid.innerHTML = share.charts.map(c => tileHtml(c, SHARED_TILE_BUTTONS)).join('');
+        const add = document.getElementById('shared-add');
+        add.hidden = share.mine;
+        add.onclick = () => addSharedCopy(share);
+        dialog.showModal();
+        const scope = share.scope && (share.scope.dates?.preset !== 'all' || share.scope.teams?.length) ? share.scope : null;
+        grid.querySelectorAll('.chart-tile').forEach((tile, i) => fillTile(tile, share.charts[i], false, scope));
+    } catch (err) {
+        showToast(`❌ ${err.message}`);
+    }
+    return true;
+}
+
+async function addSharedCopy(share) {
+    if (prefs.dashboards.boards.length >= 20) {
+        showToast('You can have up to 20 dashboards of your own. Delete one first.');
+        return;
+    }
+    const taken = new Set(prefs.dashboards.boards.map(b => b.name));
+    let name = share.name;
+    for (let n = 2; taken.has(name); n++) name = `${share.name} (${n})`;
+    const board = {
+        id: newChartId(),
+        name: name.slice(0, 60),
+        charts: share.charts.map(c => ({ ...c, id: newChartId() })),
+        scope: { ...emptyScope(), ...share.scope },
+    };
+    prefs.dashboards.boards.push(board);
+    savePreference('dashboards');
+    renderMyDashboards();
+    document.getElementById('shared-dialog').close();
+    switchTab('dashboard');
+    await loadDashboards();
+    showBoard(board.id);
+    showToast(`Added "${board.name}" to your dashboards. It's your copy: change it however you like.`);
+}
+
+window.addEventListener('hashchange', () => {
+    if (sessionTokenValue && !document.body.classList.contains('signed-out')) openSharedLink();
+});
+
+// ---------------------------------------------------------------------
+// THE TOUR: a few steps pointing at the main parts, shown once to each
+// person (saved to their account) and again from "❔ Tour" on Home
+// ---------------------------------------------------------------------
+
+const TOUR_STEPS = [
+    { target: '.tab-navigation', title: 'Home and Dashboards',
+        text: 'OneTouch has two pages. The one you are on lights up. The OneTouch logo also brings you back Home from anywhere.' },
+    { target: '[data-block="assistant"] .guide-card', title: 'Ask anything about the data',
+        text: 'Type a question in plain English, like "How many open incidents are there by priority?". Answers come back as tables you can switch to a chart, download (also as a picture), or save to a dashboard.' },
+    { target: '[data-block="tickets"]', title: 'Your tickets',
+        text: 'Every ticket the AI assistant shows you lands in Ticket results. Click ☆ to star one. Both are saved to your account.' },
+    { target: '#customize-home-btn', title: 'Make Home yours',
+        text: 'Move or hide these sections, and add charts of your own.' },
+    { target: '.tab-btn[data-tab="dashboard"]', title: 'Dashboards: the team\'s and yours',
+        text: 'The team dashboards, plus ones you build: ☰ Dashboards, then ＋ New dashboard. Click any bar or slice to see its tickets, filter a whole dashboard by team or date, and share it with a link.' },
+    { target: '#theme-btn', title: 'Your colors',
+        text: 'Light or dark, your own accent color, and the header\'s color. "❔ Tour" on Home shows this tour again.' },
+];
+
+let tourState = null; // { steps, index, opener }
+
+function maybeStartTour() {
+    if (prefs.tour.done || prefsLoadFailed) return;
+    setTimeout(() => {
+        const ready = !prefs.tour.done && !document.body.classList.contains('signed-out') && !document.querySelector('dialog[open]') &&
+            document.getElementById('home-view').classList.contains('active') && !assistantOpen();
+        if (ready) startTour();
+    }, 600);
+}
+
+function startTour() {
+    toggleHomeEditing(false);
+    toggleThemePanel(false);
+    toggleAssistant(false);
+    if (!document.getElementById('home-view').classList.contains('active')) switchTab('home');
+    const steps = TOUR_STEPS.filter(s => {
+        const el = document.querySelector(s.target);
+        return el && el.getClientRects().length > 0;
+    });
+    if (!steps.length) return;
+    tourState = { steps, index: 0, opener: document.activeElement };
+    document.getElementById('tour').hidden = false;
+    showTourStep();
+}
+
+function showTourStep() {
+    if (!tourState) return;
+    const { steps, index } = tourState;
+    const step = steps[index];
+    const target = document.querySelector(step.target);
+    if (!target) return closeTour();
+    target.scrollIntoView({ block: 'nearest' });
+    const r = target.getBoundingClientRect();
+    const pad = 6;
+    const spot = document.getElementById('tour-spot');
+    Object.assign(spot.style, { left: `${r.left - pad}px`, top: `${r.top - pad}px`, width: `${r.width + 2 * pad}px`, height: `${r.height + 2 * pad}px` });
+    document.getElementById('tour-step').textContent = `${index + 1} of ${steps.length}`;
+    document.getElementById('tour-title').textContent = step.title;
+    document.getElementById('tour-text').textContent = step.text;
+    document.getElementById('tour-back').disabled = index === 0;
+    document.getElementById('tour-next').textContent = index === steps.length - 1 ? 'Done' : 'Next';
+    // The card goes under what it points at, or above when there's no room below
+    const card = document.getElementById('tour-card');
+    const h = card.offsetHeight, w = card.offsetWidth;
+    const below = r.bottom + pad + 12;
+    const top = below + h < innerHeight - 8 ? below : Math.max(8, r.top - pad - 12 - h);
+    card.style.top = `${top}px`;
+    card.style.left = `${Math.max(8, Math.min(r.left, innerWidth - w - 8))}px`;
+    document.getElementById('tour-next').focus();
+}
+
+function tourMove(delta) {
+    if (!tourState) return;
+    const next = tourState.index + delta;
+    if (next >= tourState.steps.length) return closeTour();
+    tourState.index = Math.max(0, next);
+    showTourStep();
+}
+
+// save: remember it was seen (Skip and Done both count)
+function closeTour(save = true) {
+    const opener = tourState?.opener;
+    const wasOpen = Boolean(tourState);
+    tourState = null;
+    document.getElementById('tour').hidden = true;
+    if (!wasOpen) return;
+    if (save && !prefs.tour.done) {
+        prefs.tour = { done: true };
+        savePreference('tour');
+    }
+    if (opener && opener.isConnected) opener.focus();
+}
+
+// Escape skips; Tab stays on the tour's buttons; the card follows a resized window
+document.addEventListener('keydown', e => {
+    if (!tourState) return;
+    if (e.key === 'Escape') {
+        e.stopImmediatePropagation();
+        closeTour();
+    } else if (e.key === 'Tab') {
+        const buttons = [...document.querySelectorAll('#tour-card button:not(:disabled)')];
+        const i = buttons.indexOf(document.activeElement);
+        e.preventDefault();
+        buttons[(i + (e.shiftKey ? -1 : 1) + buttons.length) % buttons.length].focus();
+    }
+});
+window.addEventListener('resize', () => { if (tourState) showTourStep(); });

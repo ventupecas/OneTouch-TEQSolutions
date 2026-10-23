@@ -6,10 +6,14 @@
 // column labels, formatted values). Every format is built from that one
 // shape:
 //
-//   { title, question, tables: [{ title, columns: [{ label, num }], rows: [[cell]], footer }] }
+//   { title, question, tables: [{ title, columns: [{ label, num }], rows: [[cell]], footer }],
+//     chart: { png: 'data:image/png;base64,...', width, height } }
 //
 // Document formats (pdf, docx, xlsx, csv, txt, rtf) are built in memory.
 // Archive formats (zip, 7z) bundle all six document formats together.
+// `chart` is optional: a picture of the chart on screen (drawn by the
+// browser), placed above the tables in PDF, Word, Excel and RTF, and added
+// to archives as its own .png file.
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -20,7 +24,7 @@ import ExcelJS from 'exceljs';
 import PdfPrinter from 'pdfmake';
 import sevenZipBin from '7zip-bin';
 import {
-  AlignmentType, Document, HeadingLevel, Packer, PageOrientation,
+  AlignmentType, Document, HeadingLevel, ImageRun, Packer, PageOrientation,
   Paragraph, ShadingType, Table, TableCell, TableRow, TextRun, WidthType,
 } from 'docx';
 
@@ -54,6 +58,9 @@ if (process.platform !== 'win32' && !process.env.SEVEN_ZIP_PATH) {
 // ---------------------------------------------------------------------
 
 const MAX_CELLS = 2_000_000;
+// A chart picture: a PNG of at most this many characters of base64 (about 7.5 MB)
+const MAX_CHART_CHARS = 10_000_000;
+const PNG_DATA_URL = /^data:image\/png;base64,[A-Za-z0-9+/]+=*$/;
 
 // Returns an error message, or null when the payload is usable
 export function validateExport(body) {
@@ -68,7 +75,27 @@ export function validateExport(body) {
     cells += t.rows.length * t.columns.length;
   }
   if (cells > MAX_CELLS) return 'That result is too large to export.';
+  if (body.chart !== undefined && body.chart !== null) {
+    const c = body.chart;
+    if (typeof c !== 'object' || typeof c.png !== 'string' || c.png.length > MAX_CHART_CHARS || !PNG_DATA_URL.test(c.png)) {
+      return 'The chart picture is not a usable PNG.';
+    }
+    if (!(c.width > 0 && c.width <= 10000 && c.height > 0 && c.height <= 10000)) return 'The chart picture has no usable size.';
+  }
   return null;
+}
+
+// The chart picture's bytes, and its size scaled to fit a width (in pixels)
+function chartImage(payload, maxWidth) {
+  const c = payload.chart;
+  if (!c) return null;
+  const scale = Math.min(1, maxWidth / c.width);
+  return {
+    dataUrl: c.png,
+    buffer: Buffer.from(c.png.slice(c.png.indexOf(',') + 1), 'base64'),
+    width: Math.round(c.width * scale),
+    height: Math.round(c.height * scale),
+  };
 }
 
 // ---------------------------------------------------------------------
@@ -138,8 +165,10 @@ function csvField(value) {
 }
 
 function buildCsv(payload) {
-  const multi = payload.tables.length > 1;
-  const blocks = payload.tables.map(t => {
+  // Notes (the AI's reading of the question, explanations) stay out of a CSV that has data
+  const tables = payload.tables.some(t => !t.note) ? payload.tables.filter(t => !t.note) : payload.tables;
+  const multi = tables.length > 1;
+  const blocks = tables.map(t => {
     const lines = [];
     if (multi && t.title) lines.push(csvField(t.title));
     lines.push(t.columns.map(c => csvField(c.label)).join(','));
@@ -276,6 +305,12 @@ function buildRtf(payload) {
     `\\pard{\\b\\fs32\\cf1 ${rtfEscape(title)}}\\par\n`;
   for (const line of rest) s += `\\pard{\\fs18\\cf3 ${rtfEscape(line)}}\\par\n`;
   s += '\\pard\\par\n';
+  // 1 pixel = 15 twips
+  const image = chartImage(payload, 900);
+  if (image) {
+    s += `\\pard{\\pict\\pngblip\\picw${payload.chart.width}\\pich${payload.chart.height}` +
+      `\\picwgoal${image.width * 15}\\pichgoal${image.height * 15}\n${image.buffer.toString('hex')}}\\par\\pard\\par\n`;
+  }
 
   for (const t of payload.tables) {
     if (t.title) s += `\\pard{\\b\\fs24 ${rtfEscape(t.title)}}\\par\n`;
@@ -302,6 +337,14 @@ async function buildXlsx(payload) {
   wb.creator = 'One Touch';
   wb.created = new Date();
   const used = new Set();
+
+  const image = chartImage(payload, 1000);
+  if (image) {
+    const ws = wb.addWorksheet(sheetName('Chart', 0, used));
+    ws.getCell('A1').value = payload.title || 'Chart';
+    ws.getCell('A1').font = { bold: true, size: 14 };
+    ws.addImage(wb.addImage({ base64: image.dataUrl, extension: 'png' }), { tl: { col: 0, row: 2 }, ext: { width: image.width, height: image.height } });
+  }
 
   payload.tables.forEach((t, idx) => {
     const ws = wb.addWorksheet(sheetName(t.title, idx, used), { views: [{ state: 'frozen', ySplit: 1 }] });
@@ -370,6 +413,13 @@ async function buildDocx(payload) {
     ...rest.map(l => docxParagraph(l, { size: 18 })),
     new Paragraph(''),
   ];
+  // Landscape letter with 0.5" margins: 10" across, 960 pixels
+  const image = chartImage(payload, 900);
+  if (image) {
+    children.push(new Paragraph({
+      children: [new ImageRun({ type: 'png', data: image.buffer, transformation: { width: image.width, height: image.height } })],
+    }), new Paragraph(''));
+  }
   for (const t of payload.tables) {
     if (t.title) children.push(new Paragraph({ text: t.title, heading: HeadingLevel.HEADING_2 }));
     children.push(docxParagraph(rowCountText(t), { size: 16 }), docxTable(t), new Paragraph(''));
@@ -450,6 +500,8 @@ function buildPdf(payload) {
     ...rest.map(l => ({ text: pdfSafe(l), fontSize: 9, color: '#718096' })),
     { text: ' ', margin: [0, 0, 0, 6] },
   ];
+  // Landscape letter less margins: 720 x 536 points
+  if (payload.chart) content.push({ image: payload.chart.png, fit: [720, 400], margin: [0, 0, 0, 12] });
   for (const t of payload.tables) {
     if (t.title) content.push({ text: pdfSafe(t.title), fontSize: 12, bold: true, margin: [0, 6, 0, 2] });
     content.push({ text: rowCountText(t), fontSize: 8, color: '#718096', margin: [0, 0, 0, 4] }, pdfTable(t));
@@ -491,6 +543,11 @@ async function buildArchive(payload, format, baseName) {
       const name = `${baseName}.${fmt}`;
       await writeFile(path.join(filesDir, name), await BUILDERS[fmt](payload));
       names.push(name);
+    }
+    const image = chartImage(payload, Infinity);
+    if (image) {
+      await writeFile(path.join(filesDir, `${baseName}.png`), image.buffer);
+      names.push(`${baseName}.png`);
     }
 
     const out = path.join(dir, `archive.${format}`);
