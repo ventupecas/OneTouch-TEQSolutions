@@ -404,7 +404,7 @@ body {
 .home-status:last-child { margin-bottom: 0; }
 .home-status.error { color: var(--danger); }
 .home-actions { margin: 0 0 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
-/* Ticket results: the summary line, with Delete ticket results at its right */
+/* Ticket results: the summary line, with Clear ticket results at its right */
 .results-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; }
 .results-head .home-status { flex: 1 1 320px; margin-bottom: 0; }
 .results-head .home-action { flex-shrink: 0; }

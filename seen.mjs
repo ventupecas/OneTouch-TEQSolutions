@@ -39,7 +39,7 @@ export async function recordSeen(userId, numbers, question = null) {
     [userId, MAX_SEEN]);
 }
 
-// "Delete ticket results": the person's whole list (their stars are separate). -> how many
+// "Clear ticket results": the person's whole list (their stars are separate). -> how many
 export async function clearSeen(userId) {
   const { rowCount } = await pool.query('DELETE FROM seen_tickets WHERE user_id = $1', [userId]);
   return rowCount;

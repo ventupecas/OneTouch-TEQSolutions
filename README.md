@@ -294,8 +294,8 @@ record: every field, with **Open in Dashboards** for incidents, changes and requ
 **← All ticket results** to go back. A ticket opened this way also joins the list ("Opened
 from a ticket number"). The list downloads like any other table.
 
-**🗑 Delete ticket results** (at the right of the list's summary line) empties the list. It
-asks first, and the list is then gone on every computer. Starred tickets stay starred, and
+**🧹 Clear ticket results** (at the right of the list's summary line) empties the list. It
+asks first, and the list is then empty on every computer. Starred tickets stay starred, and
 new answers start filling the list again.
 
 A ☆ appears next to every ticket number in OneTouch: in ticket results, in the AI assistant's
@@ -6338,15 +6338,15 @@ app.get('/api/seen-tickets', async (req, res) => {
   }
 });
 
-// "Delete ticket results": empties this person's list (their stars stay)
+// "Clear ticket results": empties this person's list (their stars stay)
 app.delete('/api/seen-tickets', async (req, res) => {
   try {
     const deleted = await seen.clearSeen(req.user.id);
-    console.log(`🎫 ${req.user.username} deleted their ticket results (${deleted})`);
+    console.log(`🎫 ${req.user.username} cleared their ticket results (${deleted})`);
     res.json({ ok: true, deleted });
   } catch (error) {
-    console.error('🎫 Could not delete the ticket results:', error.message);
-    res.status(503).json({ error: 'Your ticket results could not be deleted right now.' });
+    console.error('🎫 Could not clear the ticket results:', error.message);
+    res.status(503).json({ error: 'Your ticket results could not be cleared right now.' });
   }
 });
 
@@ -7467,7 +7467,7 @@ body {
 .home-status:last-child { margin-bottom: 0; }
 .home-status.error { color: var(--danger); }
 .home-actions { margin: 0 0 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
-/* Ticket results: the summary line, with Delete ticket results at its right */
+/* Ticket results: the summary line, with Clear ticket results at its right */
 .results-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; }
 .results-head .home-status { flex: 1 1 320px; margin-bottom: 0; }
 .results-head .home-action { flex-shrink: 0; }
@@ -10676,7 +10676,7 @@ function showTicketResults(quiet = false) {
             `<p class="home-status">${tickets.length.toLocaleString()} ${tickets.length === 1 ? 'ticket' : 'tickets'} shown to you, newest first. ` +
             (fresh ? `<span class="fresh-key">Highlighted: the ${fresh.toLocaleString()} from your latest question.</span> ` : '') +
             'Click a ticket number to see its full record.</p>' +
-            `<button type="button" class="home-action danger" onclick="deleteTicketResults(${tickets.length})">🗑 Delete ticket results</button></div>` +
+            `<button type="button" class="home-action danger" onclick="clearTicketResults(${tickets.length})">🧹 Clear ticket results</button></div>` +
             starAllHtml(tickets.map(t => t.number)) +
             ticketTableHtml(tickets, columns, latestShown) + ticketDownloadHtml(tickets, 'Ticket results', columns);
     }, quiet);
@@ -10831,11 +10831,11 @@ function closeTicketRecord() {
     showTicketResults();
 }
 
-// "Delete ticket results": after a confirmation, the whole list goes, on every
+// "Clear ticket results": after a confirmation, the whole list goes, on every
 // computer. Stars are separate and stay; new answers fill the list again.
-async function deleteTicketResults(count) {
+async function clearTicketResults(count) {
     const what = `${count.toLocaleString()} ${count === 1 ? 'ticket' : 'tickets'}`;
-    if (!confirm(`Delete your ticket results? The list of ${what} is cleared on every computer you use. Your starred tickets stay starred.`)) return;
+    if (!confirm(`Clear your ticket results? The list of ${what} is emptied on every computer you use. Your starred tickets stay starred.`)) return;
     try {
         const response = await fetch(`${API_BASE}/api/seen-tickets`, { method: 'DELETE', headers: authHeaders() });
         if (handleUnauthorized(response)) return;
@@ -10844,7 +10844,7 @@ async function deleteTicketResults(count) {
         latestShown = new Set();
         openedRecord = null;
         await showTicketResults();
-        showToast('Ticket results deleted');
+        showToast('Ticket results cleared');
     } catch (err) {
         showToast(`❌ ${err.message}`);
     }
@@ -13074,7 +13074,7 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 | `tickets.mjs` | Home page ticket search: parses INC/CHG/RITM/SCTASK/REQ numbers and builds its own Cube queries from them (never from model output); full records use Cube's `/meta` column list |
 | `relations.mjs` | Related tickets: from the link columns only (incident.parent_incident, sc_req_item.parent / request, sc_task.request_item, change_request.incident, incident.caused_by_change, *.problem), the families a ticket is in, with `same` / `differ` comparisons and every member (the page lists 25 but downloads all, via `familyExportTables` in app.js); one ticket gets all its families, a list only families 2+ of its tickets share. `POST /api/tickets/related` (conversation: true adds `describeFamilies` to Claude's pendingNote) |
 | `stars.mjs` | Each person's starred tickets, in `onetouch_auth` (`starred_tickets`, created on start); `addStars` stars many at once ("Star all", `PUT /api/stars`) up to `MAX_STARS` |
-| `seen.mjs` | Each person's "Ticket results": every ticket shown to them (`seen_tickets`, created on start). `/api/query` records the ticket numbers in each answer (`ticketNumbersIn`) before replying and returns them as `shownTickets`; `GET /api/seen-tickets` returns the list with summaries (`ticketSummaries`); `DELETE /api/seen-tickets` empties it ("Delete ticket results") |
+| `seen.mjs` | Each person's "Ticket results": every ticket shown to them (`seen_tickets`, created on start). `/api/query` records the ticket numbers in each answer (`ticketNumbersIn`) before replying and returns them as `shownTickets`; `GET /api/seen-tickets` returns the list with summaries (`ticketSummaries`); `DELETE /api/seen-tickets` empties it ("Clear ticket results") |
 | `prefs.mjs` | Each person's preferences in `onetouch_auth` (`user_preferences`: one JSONB per user, saved in parts `theme` / `home` / `dashboards` via `PUT /api/preferences/:part`, reset with `DELETE`). `cleanPreference` drops unknown keys and caps sizes (20 dashboards x 30 charts, 30 Home sections); every chart goes through `sanitizeChart` |
 | `charts.mjs` | The charts people build: `CHART_SOURCES` (per ticket type, the fields to group / filter by and the time groupings), `sanitizeChart`, `chartData` (builds its own Cube query: count, one dimension, `equals` / `notEquals` / `contains` filters, open / closed states from `ENTITY_CATALOG`, a day range, plus a dashboard's `scope` (dates, teams via `TEAM_FIELDS`); top N plus an `other` total), `chartTickets` (the tickets behind one bar), `chartFromQuery` (an AI answer's validated query as a chart, returned on `/api/query` as `chartable`), `chartValues` / `teamValues`, `chartCatalog`. In-memory LRU cache, since the data is frozen. Routes: `/api/charts/catalog`, `/api/charts/data`, `/api/charts/values`, `/api/charts/teams`, `/api/charts/tickets` |
 | `shares.mjs` | Shared dashboards (`shared_dashboards` in `onetouch_auth`): one random token per (owner, dashboard), re-sharing updates it, anyone signed in can read it (`/api/shares`). The board goes through `prefs.cleanBoard` |
@@ -14186,7 +14186,7 @@ export async function recordSeen(userId, numbers, question = null) {
     [userId, MAX_SEEN]);
 }
 
-// "Delete ticket results": the person's whole list (their stars are separate). -> how many
+// "Clear ticket results": the person's whole list (their stars are separate). -> how many
 export async function clearSeen(userId) {
   const { rowCount } = await pool.query('DELETE FROM seen_tickets WHERE user_id = $1', [userId]);
   return rowCount;

@@ -653,15 +653,15 @@ app.get('/api/seen-tickets', async (req, res) => {
   }
 });
 
-// "Delete ticket results": empties this person's list (their stars stay)
+// "Clear ticket results": empties this person's list (their stars stay)
 app.delete('/api/seen-tickets', async (req, res) => {
   try {
     const deleted = await seen.clearSeen(req.user.id);
-    console.log(`🎫 ${req.user.username} deleted their ticket results (${deleted})`);
+    console.log(`🎫 ${req.user.username} cleared their ticket results (${deleted})`);
     res.json({ ok: true, deleted });
   } catch (error) {
-    console.error('🎫 Could not delete the ticket results:', error.message);
-    res.status(503).json({ error: 'Your ticket results could not be deleted right now.' });
+    console.error('🎫 Could not clear the ticket results:', error.message);
+    res.status(503).json({ error: 'Your ticket results could not be cleared right now.' });
   }
 });
 

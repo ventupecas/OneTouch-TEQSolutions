@@ -1795,7 +1795,7 @@ function showTicketResults(quiet = false) {
             `<p class="home-status">${tickets.length.toLocaleString()} ${tickets.length === 1 ? 'ticket' : 'tickets'} shown to you, newest first. ` +
             (fresh ? `<span class="fresh-key">Highlighted: the ${fresh.toLocaleString()} from your latest question.</span> ` : '') +
             'Click a ticket number to see its full record.</p>' +
-            `<button type="button" class="home-action danger" onclick="deleteTicketResults(${tickets.length})">🗑 Delete ticket results</button></div>` +
+            `<button type="button" class="home-action danger" onclick="clearTicketResults(${tickets.length})">🧹 Clear ticket results</button></div>` +
             starAllHtml(tickets.map(t => t.number)) +
             ticketTableHtml(tickets, columns, latestShown) + ticketDownloadHtml(tickets, 'Ticket results', columns);
     }, quiet);
@@ -1950,11 +1950,11 @@ function closeTicketRecord() {
     showTicketResults();
 }
 
-// "Delete ticket results": after a confirmation, the whole list goes, on every
+// "Clear ticket results": after a confirmation, the whole list goes, on every
 // computer. Stars are separate and stay; new answers fill the list again.
-async function deleteTicketResults(count) {
+async function clearTicketResults(count) {
     const what = `${count.toLocaleString()} ${count === 1 ? 'ticket' : 'tickets'}`;
-    if (!confirm(`Delete your ticket results? The list of ${what} is cleared on every computer you use. Your starred tickets stay starred.`)) return;
+    if (!confirm(`Clear your ticket results? The list of ${what} is emptied on every computer you use. Your starred tickets stay starred.`)) return;
     try {
         const response = await fetch(`${API_BASE}/api/seen-tickets`, { method: 'DELETE', headers: authHeaders() });
         if (handleUnauthorized(response)) return;
@@ -1963,7 +1963,7 @@ async function deleteTicketResults(count) {
         latestShown = new Set();
         openedRecord = null;
         await showTicketResults();
-        showToast('Ticket results deleted');
+        showToast('Ticket results cleared');
     } catch (err) {
         showToast(`❌ ${err.message}`);
     }
