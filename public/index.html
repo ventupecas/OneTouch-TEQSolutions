@@ -10,6 +10,21 @@
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
     <link rel="manifest" href="site.webmanifest">
     <link rel="stylesheet" href="style.css">
+    <script>
+        // A signed-in reload starts in the colors this browser last used, so the
+        // default ones don't flash first (customize.js keeps the copy current)
+        try {
+            var saved = sessionStorage.getItem('onetouch-session') && JSON.parse(localStorage.getItem('onetouch-theme') || 'null');
+            if (saved) {
+                var root = document.documentElement;
+                var dark = saved.mode === 'dark' || (saved.mode === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+                root.dataset.theme = dark ? 'dark' : 'light';
+                root.dataset.header = saved.header || 'dark';
+                if (/^#[0-9a-f]{6}$/i.test(saved.accent)) root.style.setProperty('--accent', saved.accent);
+                if (/^#[0-9a-f]{6}$/i.test(saved.onAccent)) root.style.setProperty('--on-accent', saved.onAccent);
+            }
+        } catch (e) { /* the default colors, until the account's arrive */ }
+    </script>
 </head>
 <body class="signed-out">
     <!-- SIGN-IN PAGE: shown until the user signs in -->
@@ -42,7 +57,7 @@
     </div>
 
     <header class="app-header">
-        <!-- Top left: the logo and name (back to Home), who's signed in, and Dashboards -->
+        <!-- Top left: the logo and name (back to Home), who's signed in, then Home and Dashboards -->
         <div class="header-left">
             <h1 class="app-title">
                 <button type="button" class="home-link" onclick="goHome()" title="Back to Home">
@@ -51,53 +66,119 @@
             </h1>
             <span id="user-name" class="user-name"></span>
             <nav class="tab-navigation">
+                <button class="tab-btn" data-tab="home" onclick="goHome()">🏠 Home</button>
                 <button class="tab-btn" data-tab="dashboard" onclick="switchTab('dashboard')">📈 Dashboards</button>
             </nav>
         </div>
-        <button class="sign-out-btn" type="button" onclick="signOut()">Sign out</button>
+        <div class="header-right">
+            <button type="button" class="header-btn" id="theme-btn" onclick="toggleThemePanel()"
+                    aria-controls="theme-panel" aria-expanded="false">🎨 Colors</button>
+            <button class="sign-out-btn" type="button" onclick="signOut()">Sign out</button>
+        </div>
     </header>
 
+    <!-- 🎨 Colors: each person's color scheme, saved to their account (customize.js) -->
+    <section class="theme-panel" id="theme-panel" role="dialog" aria-label="Your colors" hidden>
+        <div class="theme-panel-head">
+            <span>🎨 Your colors</span>
+            <button type="button" class="drawer-close" onclick="toggleThemePanel(false)" aria-label="Close">✕</button>
+        </div>
+        <fieldset>
+            <legend>Light or dark</legend>
+            <div class="choice-row" id="theme-modes"></div>
+        </fieldset>
+        <fieldset>
+            <legend>Accent color <span class="legend-note">buttons, the page you're on, and charts</span></legend>
+            <div class="swatch-row">
+                <span id="theme-accents" class="swatch-row"></span>
+                <label class="swatch swatch-custom" title="Any color you like">
+                    <input type="color" id="theme-custom" value="#10a37f" aria-label="Pick any color">
+                    <span class="swatch-custom-face">＋</span>
+                </label>
+            </div>
+        </fieldset>
+        <fieldset>
+            <legend>Header</legend>
+            <div class="choice-row" id="theme-headers"></div>
+        </fieldset>
+        <div class="theme-panel-foot">
+            <span class="theme-note">Saved to your account, so your colors follow you to any computer.</span>
+            <button type="button" class="home-action" onclick="resetTheme()">↺ Default colors</button>
+        </div>
+    </section>
+
     <main class="app-content">
-        <!-- HOME: welcome, ticket search and starred tickets -->
+        <!-- HOME: welcome, then each person's sections and charts in their order (customize.js) -->
         <section id="home-view" class="view-panel active">
-            <div class="home">
-                <h2 class="home-welcome" id="home-welcome">Welcome!</h2>
-                <!-- The AI assistant: an example question, and the open / delete chat buttons -->
-                <div class="search-guide">
-                    <div class="guide-card">
-                        <span class="guide-title">💬 Any question about the data</span>
-                        <span class="guide-text">In plain English. The AI assistant answers with a table you can download, and remembers the conversation for follow-ups.</span>
-                        <button type="button" class="guide-example" data-example="How many open incidents are there by priority?">How many open incidents are there by priority?</button>
-                        <div class="chat-controls">
-                            <button type="button" class="home-action" id="open-chat-btn" onclick="toggleAssistant(true)"
-                                    aria-controls="assistant-panel" aria-expanded="false">💬 Open chat</button>
-                            <button type="button" class="home-action danger" id="delete-chat-btn" hidden onclick="deleteChat()">🗑 Delete chat</button>
-                        </div>
+            <div class="home" id="home">
+                <div class="home-head">
+                    <h2 class="home-welcome" id="home-welcome">Welcome!</h2>
+                    <button type="button" class="home-action" id="customize-home-btn" onclick="toggleHomeEditing()" aria-pressed="false">✏️ Customize Home</button>
+                </div>
+                <!-- While customizing: add charts, bring back hidden sections, reset -->
+                <div class="home-edit-bar" id="home-edit-bar" hidden>
+                    <p class="home-edit-text"><b>Customizing Home.</b> Move or hide sections with their buttons, add charts of your own,
+                        and edit or move a chart with the buttons on it. Changes are saved to your account as you go.</p>
+                    <div class="home-edit-actions">
+                        <button type="button" class="primary-btn" onclick="addHomeChart()">＋ Add a chart</button>
+                        <span class="home-add-back" id="home-add-back"></span>
+                        <button type="button" class="home-action" onclick="resetHomeLayout()">↺ Reset Home</button>
+                        <button type="button" class="home-action" onclick="toggleHomeEditing(false)">✓ Done</button>
                     </div>
                 </div>
+                <p class="home-status home-empty" id="home-empty" hidden>Your Home page is empty. Click <b>Customize Home</b> to add sections or charts.</p>
 
-                <div class="home-modes" role="tablist" aria-label="Your tickets">
-                    <button type="button" role="tab" class="home-mode active" data-mode="results" aria-selected="true" aria-controls="home-results" onclick="setHomeMode('results')">
-                        <span class="home-mode-name">🎫 Ticket results</span>
-                        <span class="home-mode-desc">Every ticket the AI assistant has shown you</span>
-                    </button>
-                    <button type="button" role="tab" class="home-mode" data-mode="starred" aria-selected="false" aria-controls="home-starred" onclick="setHomeMode('starred')">
-                        <span class="home-mode-name">★ Starred tickets <span class="star-count" id="star-count">0</span></span>
-                        <span class="home-mode-desc">Saved to your account</span>
-                    </button>
-                </div>
+                <div class="home-blocks waiting" id="home-blocks">
+                    <!-- The AI assistant: an example question, and the open / delete chat buttons -->
+                    <section class="home-block" data-block="assistant">
+                        <div class="search-guide">
+                            <div class="guide-card">
+                                <span class="guide-title">💬 Any question about the data</span>
+                                <span class="guide-text">In plain English. The AI assistant answers with a table you can download, and remembers the conversation for follow-ups.</span>
+                                <button type="button" class="guide-example" data-example="How many open incidents are there by priority?">How many open incidents are there by priority?</button>
+                                <div class="chat-controls">
+                                    <button type="button" class="home-action" id="open-chat-btn" onclick="toggleAssistant(true)"
+                                            aria-controls="assistant-panel" aria-expanded="false">💬 Open chat</button>
+                                    <button type="button" class="home-action danger" id="delete-chat-btn" hidden onclick="deleteChat()">🗑 Delete chat</button>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
 
-                <div class="home-panel" id="home-results" role="tabpanel">
-                    <div class="home-result" id="ticket-results" aria-live="polite"></div>
-                </div>
+                    <!-- Your tickets: Ticket results and starred tickets -->
+                    <section class="home-block" data-block="tickets">
+                        <div class="home-modes" role="tablist" aria-label="Your tickets">
+                            <button type="button" role="tab" class="home-mode active" data-mode="results" aria-selected="true" aria-controls="home-results" onclick="setHomeMode('results')">
+                                <span class="home-mode-name">🎫 Ticket results</span>
+                                <span class="home-mode-desc">Every ticket the AI assistant has shown you</span>
+                            </button>
+                            <button type="button" role="tab" class="home-mode" data-mode="starred" aria-selected="false" aria-controls="home-starred" onclick="setHomeMode('starred')">
+                                <span class="home-mode-name">★ Starred tickets <span class="star-count" id="star-count">0</span></span>
+                                <span class="home-mode-desc">Saved to your account</span>
+                            </button>
+                        </div>
 
-                <div class="home-panel" id="home-starred" role="tabpanel" hidden>
-                    <div class="home-result" id="starred-result" aria-live="polite"></div>
+                        <div class="home-panel" id="home-results" role="tabpanel">
+                            <div class="home-result" id="ticket-results" aria-live="polite"></div>
+                        </div>
+
+                        <div class="home-panel" id="home-starred" role="tabpanel" hidden>
+                            <div class="home-result" id="starred-result" aria-live="polite"></div>
+                        </div>
+                    </section>
+
+                    <!-- Your dashboards: shortcuts to the dashboards you built (hidden until added) -->
+                    <section class="home-block" data-block="shortcuts" hidden>
+                        <div class="guide-card shortcuts-card">
+                            <span class="guide-title">📊 Your dashboards</span>
+                            <div class="shortcut-list" id="home-shortcuts"></div>
+                        </div>
+                    </section>
                 </div>
             </div>
         </section>
 
-        <!-- DASHBOARD VIEW CONTAINER (METABASE) -->
+        <!-- DASHBOARD VIEW CONTAINER (METABASE, and each person's own dashboards) -->
         <section id="dashboard-view" class="view-panel">
             <div class="dashboard-container">
                 <!-- Top-left: the drawer button and which dashboard is showing -->
@@ -119,16 +200,35 @@
                 </div>
                 <div class="dashboard-body">
                     <div class="dashboard-backdrop" id="dashboard-backdrop" onclick="toggleDashboardDrawer(false)"></div>
-                    <!-- Filled in by app.js from /api/dashboards (built by scripts/metabase-setup.mjs) -->
                     <aside class="dashboard-drawer" id="dashboard-drawer" aria-label="Dashboards">
                         <div class="drawer-header">
                             <span>Dashboards</span>
                             <button type="button" class="drawer-close" onclick="toggleDashboardDrawer(false)" aria-label="Close">✕</button>
                         </div>
+                        <!-- The dashboards this person built (customize.js) -->
+                        <section class="drawer-group my-dashboards">
+                            <h3>My dashboards</h3>
+                            <div id="my-dashboards-list"></div>
+                            <button type="button" class="drawer-new" onclick="newBoard()">＋ New dashboard</button>
+                        </section>
+                        <!-- The team dashboards: filled in by app.js from /api/dashboards (built by scripts/metabase-setup.mjs) -->
                         <nav id="dashboard-picker"></nav>
+                        <div class="drawer-foot">
+                            <p class="drawer-note" id="drawer-hidden-note"></p>
+                            <button type="button" class="drawer-customize" id="drawer-customize" onclick="toggleDrawerEditing()" aria-pressed="false">👁 Show or hide team dashboards</button>
+                        </div>
                     </aside>
                     <p class="dashboard-message" id="dashboard-message">Loading dashboards…</p>
                     <iframe id="dashboard-frame" title="Dashboard" hidden></iframe>
+                    <!-- One of this person's own dashboards -->
+                    <div class="board-view" id="board-view" hidden>
+                        <div class="board-bar">
+                            <button type="button" class="primary-btn" onclick="addBoardChart()">＋ Add a chart</button>
+                            <button type="button" class="home-action" onclick="renameBoard()">✎ Rename</button>
+                            <button type="button" class="home-action danger" onclick="deleteBoard()">🗑 Delete dashboard</button>
+                        </div>
+                        <div class="tile-grid" id="board-grid"></div>
+                    </div>
                 </div>
             </div>
         </section>
@@ -156,6 +256,95 @@
         </section>
     </main>
 
+    <!-- THE CHART BUILDER: what a chart counts, which ones, grouped by what, and how it's drawn -->
+    <dialog class="builder" id="chart-builder" aria-labelledby="builder-title">
+        <form id="builder-form" class="builder-form">
+            <div class="builder-head">
+                <h2 id="builder-title">Add a chart</h2>
+                <button type="button" class="drawer-close" onclick="closeBuilder()" aria-label="Close">✕</button>
+            </div>
+            <div class="builder-body">
+                <div class="builder-fields">
+                    <fieldset>
+                        <legend>1. What to count</legend>
+                        <select id="b-source" aria-label="What to count"></select>
+                    </fieldset>
+                    <fieldset>
+                        <legend>2. Which ones</legend>
+                        <div class="choice-row" id="b-status" role="radiogroup" aria-label="Open or closed"></div>
+                        <p class="field-note" id="b-status-note"></p>
+                        <label class="field-label">Opened
+                            <select id="b-dates"></select>
+                        </label>
+                        <div class="date-range" id="b-range" hidden>
+                            <label>From <input type="date" id="b-from"></label>
+                            <label>To <input type="date" id="b-to"></label>
+                        </div>
+                        <p class="field-note" id="b-dates-note"></p>
+                        <div id="b-filters"></div>
+                        <button type="button" class="home-action" id="b-add-filter">＋ Only include some… (team, priority, state, …)</button>
+                    </fieldset>
+                    <fieldset>
+                        <legend>3. Group by</legend>
+                        <select id="b-group" aria-label="Group by"></select>
+                    </fieldset>
+                    <fieldset>
+                        <legend>4. Show it as</legend>
+                        <div class="display-picker" id="b-display" role="radiogroup" aria-label="Chart type"></div>
+                        <p class="field-note" id="b-display-note"></p>
+                        <div class="builder-row" id="b-cut">
+                            <label class="field-label">Show
+                                <select id="b-limit"></select>
+                            </label>
+                            <label class="field-label">Order
+                                <select id="b-sort">
+                                    <option value="count">Biggest first</option>
+                                    <option value="label">In order (A to Z, P1 first)</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div class="builder-row" id="b-color-row">
+                            <span class="field-label-text">Color</span>
+                            <div class="swatch-row" id="b-colors" role="radiogroup" aria-label="Color"></div>
+                        </div>
+                        <div class="builder-row">
+                            <span class="field-label-text">Size</span>
+                            <div class="choice-row" id="b-sizes" role="radiogroup" aria-label="Size"></div>
+                        </div>
+                    </fieldset>
+                    <fieldset>
+                        <legend>5. Title</legend>
+                        <input type="text" id="b-title" maxlength="80" aria-label="Title">
+                    </fieldset>
+                </div>
+                <div class="builder-preview">
+                    <div class="builder-preview-label">Preview</div>
+                    <div id="b-preview"></div>
+                </div>
+            </div>
+            <div class="builder-foot">
+                <button type="button" class="home-action" onclick="closeBuilder()">Cancel</button>
+                <button type="submit" class="primary-btn" id="b-save">Add chart</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- A small "name it" box (new dashboard, rename) -->
+    <dialog class="ask-dialog" id="ask-dialog">
+        <form method="dialog">
+            <h2 class="ask-title"></h2>
+            <label class="field-label"><span class="ask-label"></span>
+                <input type="text" id="ask-input" maxlength="60" required>
+            </label>
+            <div class="builder-foot">
+                <button type="button" class="home-action" onclick="this.closest('dialog').close('cancel')">Cancel</button>
+                <button type="submit" class="primary-btn" id="ask-ok" value="ok">Save</button>
+            </div>
+        </form>
+    </dialog>
+
+    <script src="charts.js"></script>
+    <script src="customize.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

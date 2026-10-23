@@ -30,12 +30,13 @@ function showLoginError(message) {
     document.getElementById('login-error').textContent = message || '';
 }
 
-// Signed in: the home page, with this person's starred tickets
+// Signed in: the home page, with this person's starred tickets, layout and colors
 function showApp(signedIn) {
     document.body.classList.toggle('signed-out', !signedIn);
     if (signedIn) {
         switchTab('home');
         loadStars();
+        loadPreferences();
     } else {
         document.getElementById('login-email').focus();
     }
@@ -124,6 +125,7 @@ function signOut(message) {
     clearChat();
     setCurrentUser(null);
     resetHome();
+    resetCustomizing();
     showLoginError(typeof message === 'string' ? message : '');
     showApp(false);
 }
@@ -191,11 +193,13 @@ async function deleteChat() {
 function goHome() {
     toggleAssistant(false);
     toggleDashboardDrawer(false);
+    toggleThemePanel(false);
     switchTab('home');
     document.getElementById('home-view').scrollTop = 0;
 }
 
-// Pages: Home (the logo) and Dashboards (its button); the AI assistant opens over either
+// Pages: Home (the logo, or its button) and Dashboards; the page showing lights up.
+// The AI assistant opens over either.
 function switchTab(viewName) {
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === viewName));
     document.querySelectorAll('.view-panel').forEach(panel => panel.classList.toggle('active', panel.id === `${viewName}-view`));
@@ -254,20 +258,37 @@ function updateChatControls() {
 // shown through the OneTouch server (so they work from any address)
 // =====================================================================
 
-const LAST_DASHBOARD_KEY = 'onetouch-dashboard';
-
 // Every page the frame can show, by its public id: the drawer's dashboards,
 // and the detail pages a click on a chart opens
 const dashboardPages = { main: new Map(), details: new Map() };
 let currentMainDashboard = null;
 const pageId = path => (String(path).match(/\/public\/dashboard\/([0-9a-f-]{36})/) || [])[1];
 
-// The last dashboard this browser showed (storage can be blocked: then none)
+// The dashboard each person had open last ("my:<id>" for one of their own),
+// saved to their account so it opens there next time, on any computer
 function rememberedDashboard() {
-    try { return localStorage.getItem(LAST_DASHBOARD_KEY); } catch { return null; }
+    return prefs.dashboards.last || '';
 }
 function rememberDashboard(key) {
-    try { localStorage.setItem(LAST_DASHBOARD_KEY, key); } catch { /* not remembered; that's fine */ }
+    if (prefs.dashboards.last === key || !sessionTokenValue || prefsLoadFailed) return;
+    prefs.dashboards.last = key;
+    savePreference('dashboards');
+}
+
+// How the frame shows a dashboard: no extra border or title (the toolbar
+// above names it), and Metabase's dark look when OneTouch is dark
+function frameHash() {
+    return `#bordered=false&titled=false${document.documentElement.dataset.theme === 'dark' ? '&theme=night' : ''}`;
+}
+
+// Light <-> dark: the dashboard in the frame reloads in the matching look
+function refreshDashboardTheme() {
+    if (!frameHasPage()) return;
+    try {
+        const where = document.getElementById('dashboard-frame').contentWindow.location;
+        where.replace(`${where.pathname}${where.search}${frameHash()}`);
+        where.reload();
+    } catch { /* not ours */ }
 }
 
 // Loads the drawer once; resolves true when the dashboards are there.
@@ -292,10 +313,11 @@ async function buildDashboards() {
         const { dashboards, details = [] } = await response.json();
         for (const d of dashboards) dashboardPages.main.set(pageId(d.path), d);
         for (const d of details) dashboardPages.details.set(pageId(d.path), d);
+        // Which team dashboards this person hid, and which one they had open
+        await prefsReady;
         if (!dashboards.length) {
-            message.textContent = 'No dashboards yet. Whoever runs this OneTouch server can create them with: ' +
-                'docker exec analytics_node_app node scripts/metabase-setup.mjs';
-            document.getElementById('dashboard-drawer-toggle').hidden = true;
+            message.textContent = 'No team dashboards yet. Whoever runs this OneTouch server can create them with: ' +
+                'docker exec analytics_node_app node scripts/metabase-setup.mjs. You can still build your own under ☰ Dashboards.';
             return false;
         }
 
@@ -317,10 +339,12 @@ async function buildDashboards() {
                 button.type = 'button';
                 button.className = 'dashboard-choice';
                 button.dataset.key = d.key;
-                button.innerHTML = '<span class="dashboard-choice-name"></span><span class="dashboard-choice-desc"></span>';
+                button.innerHTML = '<span class="choice-check" aria-hidden="true"></span><span class="dashboard-choice-name"></span><span class="dashboard-choice-desc"></span>';
                 button.querySelector('.dashboard-choice-name').textContent = d.name;
                 button.querySelector('.dashboard-choice-desc').textContent = d.description || '';
                 button.onclick = () => {
+                    // "Show or hide team dashboards": a click shows or hides it in the list
+                    if (drawerEditing) return toggleDashboardHidden(d.key);
                     showDashboard(d);
                     toggleDashboardDrawer(false);
                 };
@@ -329,16 +353,37 @@ async function buildDashboards() {
             picker.appendChild(section);
         }
 
-        const remembered = dashboards.find(d => d.key === rememberedDashboard());
-        showDashboard(remembered || dashboards[0]);
+        applyHiddenDashboards();
+
+        const last = rememberedDashboard();
+        if (last.startsWith('my:') && showBoard(last.slice(3))) return true;
+        const remembered = dashboards.find(d => d.key === last && !isDashboardHidden(d.key));
+        if (remembered) showDashboard(remembered);
+        else showFirstDashboard();
         // First visit: open the drawer so people see everything that's there
-        if (!remembered) toggleDashboardDrawer(true);
+        if (!last) toggleDashboardDrawer(true);
         return true;
     } catch (err) {
         message.textContent = 'Could not load the dashboards. Please try again.';
         console.error(err);
         return false;
     }
+}
+
+// The first team dashboard in this person's list; with every one hidden, a
+// dashboard of their own, or a note saying how to bring the team ones back
+function showFirstDashboard() {
+    const visible = [...dashboardPages.main.values()].filter(d => !isDashboardHidden(d.key));
+    if (visible.length) return showDashboard(visible[0]);
+    if (prefs.dashboards.boards.length) return showBoard(prefs.dashboards.boards[0].id);
+    hideBoard();
+    document.getElementById('dashboard-frame').hidden = true;
+    const message = document.getElementById('dashboard-message');
+    message.textContent = 'Every team dashboard is hidden from your list. Open ☰ Dashboards and click "Show or hide team dashboards" ' +
+        'to bring some back, or create a dashboard of your own.';
+    message.hidden = false;
+    setDashboardHeading('', '', '', false);
+    document.getElementById('dashboard-hint').hidden = true;
 }
 
 // The record pages a ticket number can open (built by scripts/metabase-setup.mjs)
@@ -353,7 +398,16 @@ async function openInDashboards(number) {
     const page = [...dashboardPages.details.values()].find(d => d.key === key);
     if (!page) return;
     toggleDashboardDrawer(false);
-    openDashboardPath(`${page.path}?number=${encodeURIComponent(number)}#titled=false&bordered=false`);
+    const path = `${page.path}?number=${encodeURIComponent(number)}${frameHash()}`;
+    if (currentBoardId || document.getElementById('dashboard-frame').hidden) {
+        // One of their own dashboards is showing: back to the team dashboards, and
+        // the record opens on top of one once it has loaded (so ← Back works)
+        const visible = [...dashboardPages.main.values()].filter(d => !isDashboardHidden(d.key));
+        showDashboard(visible.includes(currentMainDashboard) ? currentMainDashboard : visible[0] || [...dashboardPages.main.values()][0]);
+        pendingFramePath = path;
+    } else {
+        openDashboardPath(path);
+    }
 }
 
 // Moves the frame to a page the way a click inside it would, so ← Back
@@ -379,11 +433,10 @@ document.getElementById('dashboard-frame').addEventListener('load', () => {
 });
 
 function showDashboard(dashboard) {
+    hideBoard();
     markCurrentDashboard(dashboard);
     const frame = document.getElementById('dashboard-frame');
-    // #bordered=false: no extra frame around the dashboard inside ours;
-    // titled=false: the toolbar above already names it
-    frame.src = `${API_BASE}${dashboard.path}#bordered=false&titled=false`;
+    frame.src = `${API_BASE}${dashboard.path}${frameHash()}`;
     frame.hidden = false;
     document.getElementById('dashboard-message').hidden = true;
 }
@@ -421,6 +474,7 @@ function detailPageLabel(detail, search) {
 let lastFrameAddress = '';
 function followDashboardFrame() {
     const frame = document.getElementById('dashboard-frame');
+    if (frame.hidden) return; // one of their own dashboards is showing
     let where;
     try { where = frame.contentWindow.location; } catch { return; } // not ours (yet)
     if (!where || where.href === lastFrameAddress) return;
@@ -440,7 +494,7 @@ function followDashboardFrame() {
         if (!detail.params.some(p => values.get(p.slug))) {
             const home = currentMainDashboard || [...dashboardPages.main.values()][0];
             if (home) {
-                frame.contentWindow.location.replace(`${API_BASE}${home.path}#bordered=false&titled=false`);
+                frame.contentWindow.location.replace(`${API_BASE}${home.path}${frameHash()}`);
                 showToast(`No filters left, so you're back on ${home.name}`);
                 return;
             }
@@ -483,10 +537,12 @@ function toggleDashboardDrawer(open) {
     }
 }
 
-// Escape closes whatever is open on top: the conversation, then the drawer
+// Escape closes whatever is open on top: the colors panel, the conversation,
+// then the drawer (a dialog such as the chart builder closes itself)
 document.addEventListener('keydown', e => {
-    if (e.key !== 'Escape') return;
-    if (assistantOpen()) toggleAssistant(false);
+    if (e.key !== 'Escape' || document.querySelector('dialog[open]')) return;
+    if (!document.getElementById('theme-panel').hidden) toggleThemePanel(false);
+    else if (assistantOpen()) toggleAssistant(false);
     else if (document.getElementById('dashboard-drawer').classList.contains('open')) toggleDashboardDrawer(false);
 });
 
@@ -1811,6 +1867,10 @@ async function loadTicketDetail(box, number) {
 // =====================================================================
 
 document.getElementById('ticket-results').innerHTML = NO_TICKET_RESULTS_HTML;
+buildThemePanel();
+buildBuilder();
+renderHomeLayout();
+renderMyDashboards();
 showApp(Boolean(sessionTokenValue));
 loadCurrentUser();
 
