@@ -22,6 +22,7 @@ import * as prefs from './prefs.mjs';
 import { chartData, chartValues, chartCatalog, chartTickets, chartFromQuery, teamValues, ChartError } from './charts.mjs';
 import * as shares from './shares.mjs';
 import * as chats from './chats.mjs';
+import * as teams from './teams.mjs';
 import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
 
 dotenv.config();
@@ -252,20 +253,43 @@ async function requireLogin(req, res, next) {
     if (token) conversations.delete(token);
     return res.status(401).json({ error: 'Please sign in again.' });
   }
+  // Which tickets this person may see (teams.mjs): every Cube query their
+  // request makes goes through req.runQuery, which only ever sees those
+  try {
+    req.scope = await teams.scopeFor(user);
+  } catch (error) {
+    console.error('👥 Access check failed:', error.message);
+    return res.status(503).json({ error: 'The account database could not be reached. Please try again shortly.' });
+  }
   req.user = user;
   req.session = conversationState(token);
+  req.runQuery = scopedRunner(req.scope);
   next();
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats'], requireLogin);
+// runCubeQuery limited to one person's tickets. scopeKey names that set of
+// tickets in the caches of charts.mjs and relations.mjs.
+function scopedRunner(scope) {
+  const run = query => runCubeQuery(teams.restrictQuery(query, scope));
+  run.scopeKey = scope.key;
+  return run;
+}
 
-// Who is signed in (the page shows their display name)
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families'], requireLogin);
+
+// Who is signed in (the page shows their display name), and what they may do
 app.get('/api/me', (req, res) => {
-  res.json({ username: req.user.username, displayName: req.user.displayName });
+  const { admin, role, team } = req.scope.access;
+  res.json({
+    username: req.user.username, displayName: req.user.displayName,
+    access: { admin, role, roleName: teams.ROLES[role] || null, team, tickets: req.scope.count, note: teams.scopeNote(req.scope) },
+  });
 });
 
-// The dashboards built by scripts/metabase-setup.mjs, for the Dashboards tab
-app.get('/api/dashboards', (_req, res) => {
+// The dashboards built by scripts/metabase-setup.mjs, for the Dashboards tab.
+// Metabase shows every ticket and can't be limited per person, so only admins get them.
+app.get('/api/dashboards', (req, res) => {
+  if (!req.scope.all) return res.json({ dashboards: [], details: [], restricted: true });
   try {
     const { dashboards, details = [] } = JSON.parse(readFileSync(METABASE_DASHBOARDS_FILE, 'utf8'));
     res.json({
@@ -570,14 +594,16 @@ app.post('/api/query', async (req, res) => {
   let sent = null;
   const recorded = { progress: reply.progress, send: (status, body) => { sent = body; return reply.send(status, body); } };
   await queued(session, async () => {
-    await answerQuestion(session.conversation, userPrompt, recorded, req.user);
+    await answerQuestion(session.conversation, userPrompt, recorded, req.user, req.scope, req.runQuery);
     if (!sent) return;
     session.transcript.push({ question: userPrompt, reply: sent, askedAt: new Date().toISOString() });
     await saveSessionChat(session, req.user);
   });
 });
 
-async function answerQuestion(conversation, userPrompt, reply, user) {
+// scope / runQuery: the tickets this person may see, and Cube limited to them
+// (teams.mjs). The translation is the same for everyone; what it finds isn't.
+async function answerQuestion(conversation, userPrompt, reply, user, scope, runQuery) {
   const started = Date.now();
   // Set once Claude's answer is in the conversation; from then on, whatever
   // happens to the query is reported to Claude with the next question
@@ -638,21 +664,26 @@ async function answerQuestion(conversation, userPrompt, reply, user) {
     for (const q of verdict.queries) console.log(`🤖 Cube query [${q.entity}]:`, JSON.stringify(q.cubeQuery));
     const sections = await Promise.all(verdict.queries.map(async q => ({
       entity: q.entity,
-      rows: await runCubeQuery(q.cubeQuery),
+      rows: await runQuery(q.cubeQuery),
     })));
     // Nothing found: work out why (which filter emptied it, what dates the data
     // covers) and have Claude say so plainly, instead of a bare "no records".
-    // A repeated question reuses the explanation it got the first time.
+    // A repeated question reuses the explanation it got the first time, for
+    // the same set of visible tickets only (the reasons differ between people).
     const emptyQueries = verdict.queries.filter((_, i) => isEmptyResult(sections[i].rows));
-    let explanation = cached?.explanation ?? null;
-    if (emptyQueries.length && !explanation) {
+    let explanation = cached?.explanations?.[scope.key] ?? null;
+    if (emptyQueries.length && !explanation && !scope.all && !scope.count) {
+      // No tickets at all: nothing to diagnose, and no reason to ask Claude
+      explanation = teams.scopeNote(scope);
+    } else if (emptyQueries.length && !explanation) {
       reply.progress('explaining');
       try {
-        const facts = (await Promise.all(emptyQueries.map(q => diagnoseEmpty(q.entity, q.cubeQuery, runCubeQuery)))).flat();
+        const facts = (await Promise.all(emptyQueries.map(q => diagnoseEmpty(q.entity, q.cubeQuery, runQuery)))).flat();
+        if (!scope.all) facts.push(`This person only sees some tickets: ${teams.scopeNote(scope)}`);
         console.log('🔎 Empty result facts:\n   ' + facts.join('\n   '));
         explanation = await explainEmpty({ anthropic, model: CLAUDE_MODEL, question: userPrompt, searchedFor: verdict.message, facts });
         console.log(`🔎 Explained: ${explanation}`);
-        if (cached) cached.explanation = explanation;
+        if (cached) cached.explanations = { ...cached.explanations, [scope.key]: explanation };
       } catch (error) {
         console.error('🔎 Could not diagnose the empty result:', error.message);
       }
@@ -664,7 +695,7 @@ async function answerQuestion(conversation, userPrompt, reply, user) {
     const combined = verdict.merge ? combineResults(verdict.merge, verdict.queries, sections) : null;
 
     // Only an answer that ran all the way through is worth reusing
-    if (fresh && cacheKey) rememberAnswer(cacheKey, { ...fresh, explanation });
+    if (fresh && cacheKey) rememberAnswer(cacheKey, { ...fresh, explanations: explanation ? { [scope.key]: explanation } : {} });
 
     // The tickets in this answer join the person's "Ticket results" on Home.
     // Saved before the answer goes out, so the page can show the list at once;
@@ -697,6 +728,8 @@ async function answerQuestion(conversation, userPrompt, reply, user) {
       shownTickets,
       // { chart, dropped }: the answer as a saveable chart (charts.mjs), or null
       chartable,
+      // Which tickets it covered, for anyone who isn't an admin (teams.mjs)
+      visibility: teams.scopeNote(scope),
       ...timing(),
     });
 
@@ -724,10 +757,10 @@ app.post('/api/tickets/search', async (req, res) => {
   if (text.length > 20000) return res.status(400).json({ error: 'That is too much text to search; paste at most a few hundred ticket numbers.' });
 
   try {
-    const result = await findTickets(text, runCubeQuery);
+    const result = await findTickets(text, req.runQuery);
     if (record && result.found.length === 1) {
       // Without the full record the page still shows the ticket's summary row
-      result.record = await ticketRecord(result.found[0].number, runCubeQuery, {
+      result.record = await ticketRecord(result.found[0].number, req.runQuery, {
         cubeUrl: process.env.CUBE_API_URL || 'http://localhost:4000/cubejs-api/v1/load',
         token: process.env.CUBE_API_TOKEN || 'super_secret_key_change_me_later',
       }).catch(error => {
@@ -751,7 +784,7 @@ app.post('/api/tickets/related', async (req, res) => {
   const numbers = Array.isArray(req.body?.numbers) ? req.body.numbers.slice(0, 500).map(String) : [];
   if (!numbers.length) return res.status(400).json({ error: 'No ticket numbers to look at.' });
   try {
-    const families = await relatedFamilies(numbers, runCubeQuery);
+    const families = await relatedFamilies(numbers, req.runQuery);
     if (req.body.conversation && families.length) {
       // Queued behind the answer that showed these tickets, and only for that
       // same conversation (not one started by "New chat" in the meantime)
@@ -777,8 +810,8 @@ app.post('/api/tickets/related', async (req, res) => {
 // =====================================================================
 
 // Each family row with its anchor's summary (null for an order or a problem record)
-async function withAnchors(rows) {
-  const summaries = await ticketSummaries(rows.map(r => r.anchor), runCubeQuery);
+async function withAnchors(rows, runQuery) {
+  const summaries = await ticketSummaries(rows.map(r => r.anchor), runQuery);
   return rows.map(r => ({ ...r, ticket: summaries.get(r.anchor) || null }));
 }
 
@@ -788,9 +821,9 @@ function familiesFailed(res, error) {
 }
 
 // -> { kinds: { kind: { families, tickets } } }
-app.get('/api/families', async (_req, res) => {
+app.get('/api/families', async (req, res) => {
   try {
-    res.json({ kinds: await familySummary(runCubeQuery) });
+    res.json({ kinds: await familySummary(req.runQuery) });
   } catch (error) {
     familiesFailed(res, error);
   }
@@ -801,14 +834,14 @@ app.get('/api/families/find', async (req, res) => {
   const number = String(req.query.number || '').trim().toUpperCase();
   if (!STARRABLE.test(number)) return res.status(400).json({ error: 'Type a ticket number, like INC1813970, CHG1100098, RITM0440458 or SCTASK0595823.' });
   try {
-    const [links, found] = await Promise.all([ticketLinks([number], runCubeQuery), ticketSummaries([number], runCubeQuery)]);
+    const [links, found] = await Promise.all([ticketLinks([number], req.runQuery), ticketSummaries([number], req.runQuery)]);
     const rows = [];
     for (const f of links.get(number)?.families || []) {
       const kind = LINK_KIND[f.kind];
-      const entry = (await familyList(kind, runCubeQuery)).find(e => e.anchor === f.anchor);
+      const entry = (await familyList(kind, req.runQuery)).find(e => e.anchor === f.anchor);
       if (entry) rows.push({ kind, ...entry });
     }
-    res.json({ number, known: found.has(number), families: await withAnchors(rows) });
+    res.json({ number, known: found.has(number), families: await withAnchors(rows, req.runQuery) });
   } catch (error) {
     familiesFailed(res, error);
   }
@@ -821,11 +854,11 @@ app.get('/api/families/:kind', async (req, res) => {
   const offset = Math.max(0, Number.parseInt(req.query.offset, 10) || 0);
   const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 50));
   try {
-    let list = await familyList(kind, runCubeQuery);
+    let list = await familyList(kind, req.runQuery);
     // Ticket numbers go up over time, so the newest parent has the highest number
     if (req.query.sort === 'newest') list = [...list].sort((a, b) => b.anchor.localeCompare(a.anchor));
     if (req.query.sort === 'oldest') list = [...list].sort((a, b) => a.anchor.localeCompare(b.anchor));
-    res.json({ kind, total: list.length, families: await withAnchors(list.slice(offset, offset + limit)) });
+    res.json({ kind, total: list.length, families: await withAnchors(list.slice(offset, offset + limit), req.runQuery) });
   } catch (error) {
     familiesFailed(res, error);
   }
@@ -834,7 +867,7 @@ app.get('/api/families/:kind', async (req, res) => {
 // -> { family }: every member, with what they share and where they differ
 app.get('/api/families/:kind/:anchor', async (req, res) => {
   try {
-    const family = await familyOf(req.params.kind, String(req.params.anchor).toUpperCase(), runCubeQuery);
+    const family = await familyOf(req.params.kind, String(req.params.anchor).toUpperCase(), req.runQuery);
     if (!family) return res.status(404).json({ error: 'That family is not in the data.' });
     res.json({ family });
   } catch (error) {
@@ -848,7 +881,7 @@ app.get('/api/seen-tickets', async (req, res) => {
   try {
     const list = await seen.listSeen(req.user.id);
     const numbers = list.map(s => s.number);
-    const [summaries, links] = await Promise.all([ticketSummaries(numbers, runCubeQuery), linksOrNone(numbers)]);
+    const [summaries, links] = await Promise.all([ticketSummaries(numbers, req.runQuery), linksOrNone(numbers, req.runQuery)]);
     res.json({ tickets: list.filter(s => summaries.has(s.number)).map(s => ({ ...summaries.get(s.number), ...links.get(s.number), shownAt: s.shownAt, question: s.question })) });
   } catch (error) {
     console.error('🎫 Could not list the shown tickets:', error.message);
@@ -870,9 +903,9 @@ app.delete('/api/seen-tickets', async (req, res) => {
 
 // Each ticket's parent and families (relations.mjs) for a list; if that fails, the
 // list still shows, just without them
-async function linksOrNone(numbers) {
+async function linksOrNone(numbers, runQuery) {
   try {
-    return await ticketLinks(numbers, runCubeQuery);
+    return await ticketLinks(numbers, runQuery);
   } catch (error) {
     console.error('🔗 Could not look up parents and families:', error.message);
     return new Map();
@@ -913,7 +946,7 @@ app.get('/api/stars', async (req, res) => {
     const list = await stars.listStars(req.user.id);
     if (!req.query.details) return res.json({ stars: list });
     const numbers = list.map(s => s.number);
-    const [summaries, links] = await Promise.all([ticketSummaries(numbers, runCubeQuery), linksOrNone(numbers)]);
+    const [summaries, links] = await Promise.all([ticketSummaries(numbers, req.runQuery), linksOrNone(numbers, req.runQuery)]);
     res.json({
       stars: list,
       tickets: list.filter(s => summaries.has(s.number)).map(s => ({ ...summaries.get(s.number), ...links.get(s.number), starredAt: s.starredAt })),
@@ -1020,9 +1053,9 @@ app.delete('/api/preferences/:part', async (req, res) => {
 });
 
 // What the chart builder can offer (ticket types, fields, the dates the data covers)
-app.get('/api/charts/catalog', async (_req, res) => {
+app.get('/api/charts/catalog', async (req, res) => {
   try {
-    res.json(await chartCatalog(runCubeQuery));
+    res.json(await chartCatalog(req.runQuery));
   } catch (error) {
     console.error('📊 Chart catalog failed:', error.message);
     res.status(502).json({ error: `The chart options could not be loaded right now: ${error.message}` });
@@ -1032,7 +1065,7 @@ app.get('/api/charts/catalog', async (_req, res) => {
 // { chart } -> its numbers
 app.post('/api/charts/data', async (req, res) => {
   try {
-    res.json(await chartData(req.body?.chart, runCubeQuery, req.body?.scope));
+    res.json(await chartData(req.body?.chart, req.runQuery, req.body?.scope));
   } catch (error) {
     if (error instanceof ChartError) return res.status(400).json({ error: error.message });
     console.error('📊 Chart data failed:', error.message);
@@ -1044,7 +1077,7 @@ app.post('/api/charts/data', async (req, res) => {
 // (value null: "(Not set)"; a chart with no grouping: all of its tickets)
 app.post('/api/charts/tickets', async (req, res) => {
   try {
-    res.json(await chartTickets(req.body?.chart, req.body?.value ?? null, runCubeQuery, req.body?.scope));
+    res.json(await chartTickets(req.body?.chart, req.body?.value ?? null, req.runQuery, req.body?.scope));
   } catch (error) {
     if (error instanceof ChartError) return res.status(400).json({ error: error.message });
     console.error('📊 Chart tickets failed:', error.message);
@@ -1053,9 +1086,9 @@ app.post('/api/charts/tickets', async (req, res) => {
 });
 
 // Every team (for a dashboard's Team filter)
-app.get('/api/charts/teams', async (_req, res) => {
+app.get('/api/charts/teams', async (req, res) => {
   try {
-    res.json({ values: await teamValues(runCubeQuery) });
+    res.json({ values: await teamValues(req.runQuery) });
   } catch (error) {
     console.error('📊 Team list failed:', error.message);
     res.status(502).json({ error: `The teams could not be loaded right now: ${error.message}` });
@@ -1111,11 +1144,93 @@ app.delete('/api/shares/:token', async (req, res) => {
 // { source, field } -> the values a filter can choose from
 app.post('/api/charts/values', async (req, res) => {
   try {
-    res.json({ values: await chartValues(String(req.body?.source), String(req.body?.field), runCubeQuery) });
+    res.json({ values: await chartValues(String(req.body?.source), String(req.body?.field), req.runQuery) });
   } catch (error) {
     if (error instanceof ChartError) return res.status(400).json({ error: error.message });
     console.error('📊 Filter values failed:', error.message);
     res.status(502).json({ error: `The choices could not be loaded right now: ${error.message}` });
+  }
+});
+
+// =====================================================================
+// TEAMS (teams.mjs): the teams and their people, each team's tickets and
+// who has them, and the changes admins and project managers make
+// =====================================================================
+
+function teamsFailed(res, error, what) {
+  if (error instanceof teams.AccessError) return res.status(403).json({ error: error.message });
+  console.error(`👥 ${what} failed:`, error.message);
+  res.status(503).json({ error: `${what} could not be done right now.` });
+}
+
+app.get('/api/teams', async (req, res) => {
+  try {
+    res.json(await teams.listTeams(req.scope));
+  } catch (error) {
+    teamsFailed(res, error, 'Loading the teams');
+  }
+});
+
+// ?assignee=<user id>|none&kind=INC&search=&offset&limit -> { total, tickets }:
+// one page of a team's tickets with who has each one, and each one's summary
+app.get('/api/teams/:id/tickets', async (req, res) => {
+  try {
+    const page = await teams.teamTickets(req.scope, Number(req.params.id), {
+      assignee: req.query.assignee || null, kind: req.query.kind || null, search: req.query.search || '',
+      offset: req.query.offset, limit: req.query.limit,
+    });
+    // The numbers are already this person's to see, so their summaries come straight from Cube
+    const summaries = await ticketSummaries(page.tickets.map(t => t.number), runCubeQuery)
+      .catch(error => { console.error('👥 Could not load ticket summaries:', error.message); return new Map(); });
+    res.json({ total: page.total, tickets: page.tickets.map(t => ({ ...summaries.get(t.number), ...t })) });
+  } catch (error) {
+    teamsFailed(res, error, 'Loading the team\'s tickets');
+  }
+});
+
+// { numbers, assigneeId } (null: nobody) -> { changed }
+app.put('/api/assignments', async (req, res) => {
+  try {
+    const assigneeId = req.body?.assigneeId ?? null;
+    const changed = await teams.assignTickets(req.scope, req.body?.numbers, assigneeId);
+    console.log(`👥 ${req.user.username} assigned ${changed} tickets to user ${assigneeId ?? '(nobody)'}`);
+    res.json({ changed });
+  } catch (error) {
+    teamsFailed(res, error, 'Assigning those tickets');
+  }
+});
+
+// Admins: { teamId (null: no team), role } for one person
+app.put('/api/teams/members/:userId', async (req, res) => {
+  try {
+    const teamId = req.body?.teamId == null ? null : Number(req.body.teamId);
+    await teams.setMembership(req.scope, Number(req.params.userId), teamId, req.body?.role);
+    console.log(`👥 ${req.user.username} put user ${req.params.userId} on team ${teamId ?? '(none)'} as ${req.body?.role ?? '-'}`);
+    res.json({ ok: true });
+  } catch (error) {
+    teamsFailed(res, error, 'Changing that person\'s team');
+  }
+});
+
+// Admins: ?number=INC1813970 -> { family }: the linked group that ticket is in, and its team
+app.get('/api/ticket-families', async (req, res) => {
+  try {
+    const family = await teams.familyOfTicket(req.scope, req.query.number);
+    if (!family) return res.status(404).json({ error: 'That ticket isn\'t in the data.' });
+    res.json({ family });
+  } catch (error) {
+    teamsFailed(res, error, 'Finding that family');
+  }
+});
+
+// Admins: { teamId } -> the whole family moves to that team -> { moved }
+app.put('/api/ticket-families/:id/team', async (req, res) => {
+  try {
+    const moved = await teams.moveFamily(req.scope, String(req.params.id).toUpperCase(), Number(req.body?.teamId));
+    console.log(`👥 ${req.user.username} moved family ${req.params.id} (${moved} tickets) to team ${req.body?.teamId}`);
+    res.json({ moved });
+  } catch (error) {
+    teamsFailed(res, error, 'Moving that family');
   }
 });
 
@@ -1154,6 +1269,7 @@ async function prepareAccounts(attempt = 1) {
     await prefs.ensurePrefsSchema();
     await shares.ensureSharesSchema();
     await chats.ensureChatsSchema();
+    await teams.ensureTeamsSchema();
   } catch (error) {
     const wait = Math.min(attempt * 2, 15);
     console.error(`🔐 Account database not reachable yet (${error.message}); retrying in ${wait}s`);
@@ -1178,5 +1294,19 @@ async function prepareAccounts(attempt = 1) {
   console.log(users.length
     ? `🔐 Account database ready (${users.length} ${users.length === 1 ? 'account' : 'accounts'})`
     : '🔐 Account database ready, but it has no accounts yet. Add one with: docker exec -it analytics_node_app node scripts/users.mjs add <username>');
+  seedTeamsWhenReady();
 }
 prepareAccounts();
+
+// First start with teams: sets them up from every ticket in Cube (teams.mjs).
+// Retries, because Cube may still be starting.
+async function seedTeamsWhenReady(attempt = 1) {
+  try {
+    const seeded = await teams.seedTeams(runCubeQuery);
+    if (seeded) console.log(`👥 Set up ${seeded.teams} teams: ${seeded.people} people, ${seeded.families.toLocaleString()} families, ${seeded.tickets.toLocaleString()} tickets`);
+  } catch (error) {
+    const wait = Math.min(attempt * 5, 60);
+    console.error(`👥 Could not set up the teams yet (${error.message}); retrying in ${wait}s`);
+    setTimeout(() => seedTeamsWhenReady(attempt + 1), wait * 1000).unref();
+  }
+}

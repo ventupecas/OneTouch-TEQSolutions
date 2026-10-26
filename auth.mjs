@@ -20,6 +20,8 @@ const scrypt = promisify(scryptCb);
 let poolInstance = null;
 export const pool = {
   query: (...args) => getPool().query(...args),
+  // One connection, for a transaction (release it when done)
+  connect: () => getPool().connect(),
   end: () => (poolInstance ? poolInstance.end() : Promise.resolve()),
 };
 

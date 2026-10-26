@@ -635,6 +635,43 @@ What each click opens is set by `click` / `links` on the charts in
 
 Metabase itself is at http://localhost:3000 on the server only. The dashboards are
 public links that OneTouch passes through, so anyone with the link can view them.
+Inside OneTouch, only admins get the Metabase dashboards (see [Teams](#teams-and-who-sees-which-tickets)),
+because they show every ticket and can't be limited per person.
+
+### Teams and who sees which tickets
+
+Every ticket belongs to one of six teams, named after Molson Coors beers: Coors Light,
+Miller Lite, Coors Banquet, Blue Moon, Molson Canadian and Miller High Life. Within its
+team, each ticket is assigned to one person. What you see depends on your role:
+
+| Role | Sees | Can |
+|---|---|---|
+| Admin (vperez, lvang, lbell) | Every ticket, and the Metabase dashboards | Put people on teams, set roles, move tickets between teams, assign any ticket |
+| Project manager | Every ticket of their team | Assign the team's tickets to its members, and see who's working on what |
+| Process excellence | The tickets assigned to them | |
+| Project team member | The tickets assigned to them | |
+
+This applies everywhere: the AI assistant (its counts are of the tickets you can see, and
+a 👥 line under each answer says so), ticket search, records, Ticket families, and your
+own dashboards. People on no team see no tickets.
+
+**The 👥 Team tab** shows who's on your team and in what role. A project manager also sees
+how many incidents, changes, requests and catalog tasks each person has, and every ticket of
+the team with an **Assigned to** box on each. Tick tickets and use **Give the ticked tickets
+to** to hand out many at once. An admin picks any team at the top, changes anyone's role or
+team in the people table, adds people who are on no team, and can **Move tickets to another
+team**.
+
+**Families stay together.** Tickets linked to each other (a parent incident and its
+children, a request and its tasks, an order, everything on one problem, a change and its
+incidents) form one family, and a family always belongs to one team. So moving a ticket to
+another team moves its whole family. Those tickets become unassigned, for the new team's
+project manager to hand out. Someone taken off a team leaves their tickets behind,
+unassigned.
+
+On the first start the server sets the teams up by itself (`teams.mjs`): families go to
+whichever team has the fewest tickets so far, and each ticket goes to a random member of its
+team. Which role should work which kinds of tickets is being worked out in `CLAUDE.md`.
 
 ### Accounts
 
@@ -951,7 +988,8 @@ Claude keeps the earlier filters unless you change them, and the assumptions say
 was carried over.
 
 - **New chat** clears the screen and starts a fresh conversation.
-- **Reloading the page** does the same.
+- **Reloading the page** or **signing in again** brings back the chat you had last, with
+  Claude's memory of it.
 - After **40 questions**, Claude starts fresh automatically, and a note says "This
   conversation got long, so Claude started fresh."
 - **Every chat is saved** to your account after each answer (`chats.mjs`, the
@@ -1980,6 +2018,9 @@ Create each file at the path shown, with exactly this content. Files are in the 
 - [B.49 `public/families.js`](#b49)
 - [B.50 `scripts/signin-links.mjs`](#b50)
 - [B.51 `chats.mjs`](#b51)
+- [B.52 `teams.mjs`](#b52)
+- [B.53 `public/teams.js`](#b53)
+- [B.54 `CLAUDE.md`](#b54)
 
 <a id="b1"></a>
 ### B.1 `.gitignore`
@@ -5358,6 +5399,8 @@ const scrypt = promisify(scryptCb);
 let poolInstance = null;
 export const pool = {
   query: (...args) => getPool().query(...args),
+  // One connection, for a transaction (release it when done)
+  connect: () => getPool().connect(),
   end: () => (poolInstance ? poolInstance.end() : Promise.resolve()),
 };
 
@@ -5892,6 +5935,7 @@ import * as prefs from './prefs.mjs';
 import { chartData, chartValues, chartCatalog, chartTickets, chartFromQuery, teamValues, ChartError } from './charts.mjs';
 import * as shares from './shares.mjs';
 import * as chats from './chats.mjs';
+import * as teams from './teams.mjs';
 import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
 
 dotenv.config();
@@ -6122,20 +6166,43 @@ async function requireLogin(req, res, next) {
     if (token) conversations.delete(token);
     return res.status(401).json({ error: 'Please sign in again.' });
   }
+  // Which tickets this person may see (teams.mjs): every Cube query their
+  // request makes goes through req.runQuery, which only ever sees those
+  try {
+    req.scope = await teams.scopeFor(user);
+  } catch (error) {
+    console.error('👥 Access check failed:', error.message);
+    return res.status(503).json({ error: 'The account database could not be reached. Please try again shortly.' });
+  }
   req.user = user;
   req.session = conversationState(token);
+  req.runQuery = scopedRunner(req.scope);
   next();
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats'], requireLogin);
+// runCubeQuery limited to one person's tickets. scopeKey names that set of
+// tickets in the caches of charts.mjs and relations.mjs.
+function scopedRunner(scope) {
+  const run = query => runCubeQuery(teams.restrictQuery(query, scope));
+  run.scopeKey = scope.key;
+  return run;
+}
 
-// Who is signed in (the page shows their display name)
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families'], requireLogin);
+
+// Who is signed in (the page shows their display name), and what they may do
 app.get('/api/me', (req, res) => {
-  res.json({ username: req.user.username, displayName: req.user.displayName });
+  const { admin, role, team } = req.scope.access;
+  res.json({
+    username: req.user.username, displayName: req.user.displayName,
+    access: { admin, role, roleName: teams.ROLES[role] || null, team, tickets: req.scope.count, note: teams.scopeNote(req.scope) },
+  });
 });
 
-// The dashboards built by scripts/metabase-setup.mjs, for the Dashboards tab
-app.get('/api/dashboards', (_req, res) => {
+// The dashboards built by scripts/metabase-setup.mjs, for the Dashboards tab.
+// Metabase shows every ticket and can't be limited per person, so only admins get them.
+app.get('/api/dashboards', (req, res) => {
+  if (!req.scope.all) return res.json({ dashboards: [], details: [], restricted: true });
   try {
     const { dashboards, details = [] } = JSON.parse(readFileSync(METABASE_DASHBOARDS_FILE, 'utf8'));
     res.json({
@@ -6440,14 +6507,16 @@ app.post('/api/query', async (req, res) => {
   let sent = null;
   const recorded = { progress: reply.progress, send: (status, body) => { sent = body; return reply.send(status, body); } };
   await queued(session, async () => {
-    await answerQuestion(session.conversation, userPrompt, recorded, req.user);
+    await answerQuestion(session.conversation, userPrompt, recorded, req.user, req.scope, req.runQuery);
     if (!sent) return;
     session.transcript.push({ question: userPrompt, reply: sent, askedAt: new Date().toISOString() });
     await saveSessionChat(session, req.user);
   });
 });
 
-async function answerQuestion(conversation, userPrompt, reply, user) {
+// scope / runQuery: the tickets this person may see, and Cube limited to them
+// (teams.mjs). The translation is the same for everyone; what it finds isn't.
+async function answerQuestion(conversation, userPrompt, reply, user, scope, runQuery) {
   const started = Date.now();
   // Set once Claude's answer is in the conversation; from then on, whatever
   // happens to the query is reported to Claude with the next question
@@ -6508,21 +6577,26 @@ async function answerQuestion(conversation, userPrompt, reply, user) {
     for (const q of verdict.queries) console.log(`🤖 Cube query [${q.entity}]:`, JSON.stringify(q.cubeQuery));
     const sections = await Promise.all(verdict.queries.map(async q => ({
       entity: q.entity,
-      rows: await runCubeQuery(q.cubeQuery),
+      rows: await runQuery(q.cubeQuery),
     })));
     // Nothing found: work out why (which filter emptied it, what dates the data
     // covers) and have Claude say so plainly, instead of a bare "no records".
-    // A repeated question reuses the explanation it got the first time.
+    // A repeated question reuses the explanation it got the first time, for
+    // the same set of visible tickets only (the reasons differ between people).
     const emptyQueries = verdict.queries.filter((_, i) => isEmptyResult(sections[i].rows));
-    let explanation = cached?.explanation ?? null;
-    if (emptyQueries.length && !explanation) {
+    let explanation = cached?.explanations?.[scope.key] ?? null;
+    if (emptyQueries.length && !explanation && !scope.all && !scope.count) {
+      // No tickets at all: nothing to diagnose, and no reason to ask Claude
+      explanation = teams.scopeNote(scope);
+    } else if (emptyQueries.length && !explanation) {
       reply.progress('explaining');
       try {
-        const facts = (await Promise.all(emptyQueries.map(q => diagnoseEmpty(q.entity, q.cubeQuery, runCubeQuery)))).flat();
+        const facts = (await Promise.all(emptyQueries.map(q => diagnoseEmpty(q.entity, q.cubeQuery, runQuery)))).flat();
+        if (!scope.all) facts.push(`This person only sees some tickets: ${teams.scopeNote(scope)}`);
         console.log('🔎 Empty result facts:\n   ' + facts.join('\n   '));
         explanation = await explainEmpty({ anthropic, model: CLAUDE_MODEL, question: userPrompt, searchedFor: verdict.message, facts });
         console.log(`🔎 Explained: ${explanation}`);
-        if (cached) cached.explanation = explanation;
+        if (cached) cached.explanations = { ...cached.explanations, [scope.key]: explanation };
       } catch (error) {
         console.error('🔎 Could not diagnose the empty result:', error.message);
       }
@@ -6534,7 +6608,7 @@ async function answerQuestion(conversation, userPrompt, reply, user) {
     const combined = verdict.merge ? combineResults(verdict.merge, verdict.queries, sections) : null;
 
     // Only an answer that ran all the way through is worth reusing
-    if (fresh && cacheKey) rememberAnswer(cacheKey, { ...fresh, explanation });
+    if (fresh && cacheKey) rememberAnswer(cacheKey, { ...fresh, explanations: explanation ? { [scope.key]: explanation } : {} });
 
     // The tickets in this answer join the person's "Ticket results" on Home.
     // Saved before the answer goes out, so the page can show the list at once;
@@ -6567,6 +6641,8 @@ async function answerQuestion(conversation, userPrompt, reply, user) {
       shownTickets,
       // { chart, dropped }: the answer as a saveable chart (charts.mjs), or null
       chartable,
+      // Which tickets it covered, for anyone who isn't an admin (teams.mjs)
+      visibility: teams.scopeNote(scope),
       ...timing(),
     });
 
@@ -6594,10 +6670,10 @@ app.post('/api/tickets/search', async (req, res) => {
   if (text.length > 20000) return res.status(400).json({ error: 'That is too much text to search; paste at most a few hundred ticket numbers.' });
 
   try {
-    const result = await findTickets(text, runCubeQuery);
+    const result = await findTickets(text, req.runQuery);
     if (record && result.found.length === 1) {
       // Without the full record the page still shows the ticket's summary row
-      result.record = await ticketRecord(result.found[0].number, runCubeQuery, {
+      result.record = await ticketRecord(result.found[0].number, req.runQuery, {
         cubeUrl: process.env.CUBE_API_URL || 'http://localhost:4000/cubejs-api/v1/load',
         token: process.env.CUBE_API_TOKEN || 'super_secret_key_change_me_later',
       }).catch(error => {
@@ -6621,7 +6697,7 @@ app.post('/api/tickets/related', async (req, res) => {
   const numbers = Array.isArray(req.body?.numbers) ? req.body.numbers.slice(0, 500).map(String) : [];
   if (!numbers.length) return res.status(400).json({ error: 'No ticket numbers to look at.' });
   try {
-    const families = await relatedFamilies(numbers, runCubeQuery);
+    const families = await relatedFamilies(numbers, req.runQuery);
     if (req.body.conversation && families.length) {
       // Queued behind the answer that showed these tickets, and only for that
       // same conversation (not one started by "New chat" in the meantime)
@@ -6647,8 +6723,8 @@ app.post('/api/tickets/related', async (req, res) => {
 // =====================================================================
 
 // Each family row with its anchor's summary (null for an order or a problem record)
-async function withAnchors(rows) {
-  const summaries = await ticketSummaries(rows.map(r => r.anchor), runCubeQuery);
+async function withAnchors(rows, runQuery) {
+  const summaries = await ticketSummaries(rows.map(r => r.anchor), runQuery);
   return rows.map(r => ({ ...r, ticket: summaries.get(r.anchor) || null }));
 }
 
@@ -6658,9 +6734,9 @@ function familiesFailed(res, error) {
 }
 
 // -> { kinds: { kind: { families, tickets } } }
-app.get('/api/families', async (_req, res) => {
+app.get('/api/families', async (req, res) => {
   try {
-    res.json({ kinds: await familySummary(runCubeQuery) });
+    res.json({ kinds: await familySummary(req.runQuery) });
   } catch (error) {
     familiesFailed(res, error);
   }
@@ -6671,14 +6747,14 @@ app.get('/api/families/find', async (req, res) => {
   const number = String(req.query.number || '').trim().toUpperCase();
   if (!STARRABLE.test(number)) return res.status(400).json({ error: 'Type a ticket number, like INC1813970, CHG1100098, RITM0440458 or SCTASK0595823.' });
   try {
-    const [links, found] = await Promise.all([ticketLinks([number], runCubeQuery), ticketSummaries([number], runCubeQuery)]);
+    const [links, found] = await Promise.all([ticketLinks([number], req.runQuery), ticketSummaries([number], req.runQuery)]);
     const rows = [];
     for (const f of links.get(number)?.families || []) {
       const kind = LINK_KIND[f.kind];
-      const entry = (await familyList(kind, runCubeQuery)).find(e => e.anchor === f.anchor);
+      const entry = (await familyList(kind, req.runQuery)).find(e => e.anchor === f.anchor);
       if (entry) rows.push({ kind, ...entry });
     }
-    res.json({ number, known: found.has(number), families: await withAnchors(rows) });
+    res.json({ number, known: found.has(number), families: await withAnchors(rows, req.runQuery) });
   } catch (error) {
     familiesFailed(res, error);
   }
@@ -6691,11 +6767,11 @@ app.get('/api/families/:kind', async (req, res) => {
   const offset = Math.max(0, Number.parseInt(req.query.offset, 10) || 0);
   const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 50));
   try {
-    let list = await familyList(kind, runCubeQuery);
+    let list = await familyList(kind, req.runQuery);
     // Ticket numbers go up over time, so the newest parent has the highest number
     if (req.query.sort === 'newest') list = [...list].sort((a, b) => b.anchor.localeCompare(a.anchor));
     if (req.query.sort === 'oldest') list = [...list].sort((a, b) => a.anchor.localeCompare(b.anchor));
-    res.json({ kind, total: list.length, families: await withAnchors(list.slice(offset, offset + limit)) });
+    res.json({ kind, total: list.length, families: await withAnchors(list.slice(offset, offset + limit), req.runQuery) });
   } catch (error) {
     familiesFailed(res, error);
   }
@@ -6704,7 +6780,7 @@ app.get('/api/families/:kind', async (req, res) => {
 // -> { family }: every member, with what they share and where they differ
 app.get('/api/families/:kind/:anchor', async (req, res) => {
   try {
-    const family = await familyOf(req.params.kind, String(req.params.anchor).toUpperCase(), runCubeQuery);
+    const family = await familyOf(req.params.kind, String(req.params.anchor).toUpperCase(), req.runQuery);
     if (!family) return res.status(404).json({ error: 'That family is not in the data.' });
     res.json({ family });
   } catch (error) {
@@ -6718,7 +6794,7 @@ app.get('/api/seen-tickets', async (req, res) => {
   try {
     const list = await seen.listSeen(req.user.id);
     const numbers = list.map(s => s.number);
-    const [summaries, links] = await Promise.all([ticketSummaries(numbers, runCubeQuery), linksOrNone(numbers)]);
+    const [summaries, links] = await Promise.all([ticketSummaries(numbers, req.runQuery), linksOrNone(numbers, req.runQuery)]);
     res.json({ tickets: list.filter(s => summaries.has(s.number)).map(s => ({ ...summaries.get(s.number), ...links.get(s.number), shownAt: s.shownAt, question: s.question })) });
   } catch (error) {
     console.error('🎫 Could not list the shown tickets:', error.message);
@@ -6740,9 +6816,9 @@ app.delete('/api/seen-tickets', async (req, res) => {
 
 // Each ticket's parent and families (relations.mjs) for a list; if that fails, the
 // list still shows, just without them
-async function linksOrNone(numbers) {
+async function linksOrNone(numbers, runQuery) {
   try {
-    return await ticketLinks(numbers, runCubeQuery);
+    return await ticketLinks(numbers, runQuery);
   } catch (error) {
     console.error('🔗 Could not look up parents and families:', error.message);
     return new Map();
@@ -6783,7 +6859,7 @@ app.get('/api/stars', async (req, res) => {
     const list = await stars.listStars(req.user.id);
     if (!req.query.details) return res.json({ stars: list });
     const numbers = list.map(s => s.number);
-    const [summaries, links] = await Promise.all([ticketSummaries(numbers, runCubeQuery), linksOrNone(numbers)]);
+    const [summaries, links] = await Promise.all([ticketSummaries(numbers, req.runQuery), linksOrNone(numbers, req.runQuery)]);
     res.json({
       stars: list,
       tickets: list.filter(s => summaries.has(s.number)).map(s => ({ ...summaries.get(s.number), ...links.get(s.number), starredAt: s.starredAt })),
@@ -6890,9 +6966,9 @@ app.delete('/api/preferences/:part', async (req, res) => {
 });
 
 // What the chart builder can offer (ticket types, fields, the dates the data covers)
-app.get('/api/charts/catalog', async (_req, res) => {
+app.get('/api/charts/catalog', async (req, res) => {
   try {
-    res.json(await chartCatalog(runCubeQuery));
+    res.json(await chartCatalog(req.runQuery));
   } catch (error) {
     console.error('📊 Chart catalog failed:', error.message);
     res.status(502).json({ error: `The chart options could not be loaded right now: ${error.message}` });
@@ -6902,7 +6978,7 @@ app.get('/api/charts/catalog', async (_req, res) => {
 // { chart } -> its numbers
 app.post('/api/charts/data', async (req, res) => {
   try {
-    res.json(await chartData(req.body?.chart, runCubeQuery, req.body?.scope));
+    res.json(await chartData(req.body?.chart, req.runQuery, req.body?.scope));
   } catch (error) {
     if (error instanceof ChartError) return res.status(400).json({ error: error.message });
     console.error('📊 Chart data failed:', error.message);
@@ -6914,7 +6990,7 @@ app.post('/api/charts/data', async (req, res) => {
 // (value null: "(Not set)"; a chart with no grouping: all of its tickets)
 app.post('/api/charts/tickets', async (req, res) => {
   try {
-    res.json(await chartTickets(req.body?.chart, req.body?.value ?? null, runCubeQuery, req.body?.scope));
+    res.json(await chartTickets(req.body?.chart, req.body?.value ?? null, req.runQuery, req.body?.scope));
   } catch (error) {
     if (error instanceof ChartError) return res.status(400).json({ error: error.message });
     console.error('📊 Chart tickets failed:', error.message);
@@ -6923,9 +6999,9 @@ app.post('/api/charts/tickets', async (req, res) => {
 });
 
 // Every team (for a dashboard's Team filter)
-app.get('/api/charts/teams', async (_req, res) => {
+app.get('/api/charts/teams', async (req, res) => {
   try {
-    res.json({ values: await teamValues(runCubeQuery) });
+    res.json({ values: await teamValues(req.runQuery) });
   } catch (error) {
     console.error('📊 Team list failed:', error.message);
     res.status(502).json({ error: `The teams could not be loaded right now: ${error.message}` });
@@ -6981,11 +7057,93 @@ app.delete('/api/shares/:token', async (req, res) => {
 // { source, field } -> the values a filter can choose from
 app.post('/api/charts/values', async (req, res) => {
   try {
-    res.json({ values: await chartValues(String(req.body?.source), String(req.body?.field), runCubeQuery) });
+    res.json({ values: await chartValues(String(req.body?.source), String(req.body?.field), req.runQuery) });
   } catch (error) {
     if (error instanceof ChartError) return res.status(400).json({ error: error.message });
     console.error('📊 Filter values failed:', error.message);
     res.status(502).json({ error: `The choices could not be loaded right now: ${error.message}` });
+  }
+});
+
+// =====================================================================
+// TEAMS (teams.mjs): the teams and their people, each team's tickets and
+// who has them, and the changes admins and project managers make
+// =====================================================================
+
+function teamsFailed(res, error, what) {
+  if (error instanceof teams.AccessError) return res.status(403).json({ error: error.message });
+  console.error(`👥 ${what} failed:`, error.message);
+  res.status(503).json({ error: `${what} could not be done right now.` });
+}
+
+app.get('/api/teams', async (req, res) => {
+  try {
+    res.json(await teams.listTeams(req.scope));
+  } catch (error) {
+    teamsFailed(res, error, 'Loading the teams');
+  }
+});
+
+// ?assignee=<user id>|none&kind=INC&search=&offset&limit -> { total, tickets }:
+// one page of a team's tickets with who has each one, and each one's summary
+app.get('/api/teams/:id/tickets', async (req, res) => {
+  try {
+    const page = await teams.teamTickets(req.scope, Number(req.params.id), {
+      assignee: req.query.assignee || null, kind: req.query.kind || null, search: req.query.search || '',
+      offset: req.query.offset, limit: req.query.limit,
+    });
+    // The numbers are already this person's to see, so their summaries come straight from Cube
+    const summaries = await ticketSummaries(page.tickets.map(t => t.number), runCubeQuery)
+      .catch(error => { console.error('👥 Could not load ticket summaries:', error.message); return new Map(); });
+    res.json({ total: page.total, tickets: page.tickets.map(t => ({ ...summaries.get(t.number), ...t })) });
+  } catch (error) {
+    teamsFailed(res, error, 'Loading the team\'s tickets');
+  }
+});
+
+// { numbers, assigneeId } (null: nobody) -> { changed }
+app.put('/api/assignments', async (req, res) => {
+  try {
+    const assigneeId = req.body?.assigneeId ?? null;
+    const changed = await teams.assignTickets(req.scope, req.body?.numbers, assigneeId);
+    console.log(`👥 ${req.user.username} assigned ${changed} tickets to user ${assigneeId ?? '(nobody)'}`);
+    res.json({ changed });
+  } catch (error) {
+    teamsFailed(res, error, 'Assigning those tickets');
+  }
+});
+
+// Admins: { teamId (null: no team), role } for one person
+app.put('/api/teams/members/:userId', async (req, res) => {
+  try {
+    const teamId = req.body?.teamId == null ? null : Number(req.body.teamId);
+    await teams.setMembership(req.scope, Number(req.params.userId), teamId, req.body?.role);
+    console.log(`👥 ${req.user.username} put user ${req.params.userId} on team ${teamId ?? '(none)'} as ${req.body?.role ?? '-'}`);
+    res.json({ ok: true });
+  } catch (error) {
+    teamsFailed(res, error, 'Changing that person\'s team');
+  }
+});
+
+// Admins: ?number=INC1813970 -> { family }: the linked group that ticket is in, and its team
+app.get('/api/ticket-families', async (req, res) => {
+  try {
+    const family = await teams.familyOfTicket(req.scope, req.query.number);
+    if (!family) return res.status(404).json({ error: 'That ticket isn\'t in the data.' });
+    res.json({ family });
+  } catch (error) {
+    teamsFailed(res, error, 'Finding that family');
+  }
+});
+
+// Admins: { teamId } -> the whole family moves to that team -> { moved }
+app.put('/api/ticket-families/:id/team', async (req, res) => {
+  try {
+    const moved = await teams.moveFamily(req.scope, String(req.params.id).toUpperCase(), Number(req.body?.teamId));
+    console.log(`👥 ${req.user.username} moved family ${req.params.id} (${moved} tickets) to team ${req.body?.teamId}`);
+    res.json({ moved });
+  } catch (error) {
+    teamsFailed(res, error, 'Moving that family');
   }
 });
 
@@ -7024,6 +7182,7 @@ async function prepareAccounts(attempt = 1) {
     await prefs.ensurePrefsSchema();
     await shares.ensureSharesSchema();
     await chats.ensureChatsSchema();
+    await teams.ensureTeamsSchema();
   } catch (error) {
     const wait = Math.min(attempt * 2, 15);
     console.error(`🔐 Account database not reachable yet (${error.message}); retrying in ${wait}s`);
@@ -7048,8 +7207,22 @@ async function prepareAccounts(attempt = 1) {
   console.log(users.length
     ? `🔐 Account database ready (${users.length} ${users.length === 1 ? 'account' : 'accounts'})`
     : '🔐 Account database ready, but it has no accounts yet. Add one with: docker exec -it analytics_node_app node scripts/users.mjs add <username>');
+  seedTeamsWhenReady();
 }
 prepareAccounts();
+
+// First start with teams: sets them up from every ticket in Cube (teams.mjs).
+// Retries, because Cube may still be starting.
+async function seedTeamsWhenReady(attempt = 1) {
+  try {
+    const seeded = await teams.seedTeams(runCubeQuery);
+    if (seeded) console.log(`👥 Set up ${seeded.teams} teams: ${seeded.people} people, ${seeded.families.toLocaleString()} families, ${seeded.tickets.toLocaleString()} tickets`);
+  } catch (error) {
+    const wait = Math.min(attempt * 5, 60);
+    console.error(`👥 Could not set up the teams yet (${error.message}); retrying in ${wait}s`);
+    setTimeout(() => seedTeamsWhenReady(attempt + 1), wait * 1000).unref();
+  }
+}
 ```
 
 <a id="b25"></a>
@@ -7126,6 +7299,8 @@ prepareAccounts();
             <nav class="tab-navigation">
                 <button class="tab-btn" data-tab="home" onclick="goHome()">🏠 Home</button>
                 <button class="tab-btn" data-tab="dashboard" onclick="switchTab('dashboard')">📈 Dashboards</button>
+                <!-- Admins and anyone on a team (teams.js) -->
+                <button class="tab-btn" data-tab="teams" id="teams-tab" onclick="switchTab('teams')" hidden>👥 Team</button>
             </nav>
         </div>
         <div class="header-right">
@@ -7237,6 +7412,11 @@ prepareAccounts();
                     </section>
                 </div>
             </div>
+        </section>
+
+        <!-- TEAM: teams, their people and roles, and who has which ticket (teams.js) -->
+        <section id="teams-view" class="view-panel">
+            <div class="home teams" id="teams"></div>
         </section>
 
         <!-- DASHBOARD VIEW CONTAINER (METABASE, and each person's own dashboards) -->
@@ -7546,6 +7726,7 @@ prepareAccounts();
     <script src="charts.js"></script>
     <script src="customize.js"></script>
     <script src="families.js"></script>
+    <script src="teams.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
@@ -7925,6 +8106,58 @@ body {
 
 /* HOME PAGE: the welcome sits in the page's top-left corner */
 #home-view { overflow-y: auto; }
+
+/* TEAM TAB (teams.js): teams, their people, and who has which ticket */
+#teams-view { overflow-y: auto; }
+.tab-btn[hidden] { display: none; }
+.teams > .home-status { max-width: 820px; }
+.team-picker { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 16px; }
+.team-pick {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding: 8px 14px;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    cursor: pointer;
+    font: inherit;
+}
+.team-pick:hover { background: var(--bg-primary); }
+.team-pick.active { border-color: var(--accent); background: var(--accent-softer); }
+.team-pick-name { font-weight: 700; }
+.team-pick-meta { font-size: 0.8rem; color: var(--text-2); }
+.team-card {
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+}
+.team-card h3 { margin: 0 0 6px; }
+.team-table td.num, .team-table th.num { text-align: right; }
+.team-table select, .team-filters select, .team-bulk select { max-width: 100%; }
+.team-you td { font-weight: 600; }
+.team-you-tag { font-size: 0.72rem; font-weight: 600; color: var(--accent-ink); background: var(--accent-soft); border-radius: 4px; padding: 1px 6px; }
+.team-unassigned td { color: var(--text-2); font-style: italic; }
+.team-filters, .team-bulk, .team-pager { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 8px 0; }
+.team-filters label { display: flex; align-items: center; gap: 6px; font-size: 0.87rem; }
+.team-filters input, .team-filters select, .team-bulk select, .team-table select, .result-table select.team-assign {
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel-bg);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.87rem;
+}
+.team-bulk { font-size: 0.87rem; }
+.team-pager { justify-content: flex-end; font-size: 0.87rem; color: var(--text-2); }
+.home-action:disabled { opacity: 0.5; cursor: default; }
+.link-btn { background: none; border: none; padding: 0; color: var(--link); cursor: pointer; font: inherit; text-decoration: underline; }
+.result-visibility { margin-top: 8px; font-size: 0.82rem; color: var(--text-2); }
 .home {
     width: 100%;
     max-width: 1400px;
@@ -9695,11 +9928,19 @@ window.addEventListener('hashchange', () => {
 // (their display name, or their username if they don't have one)
 let currentUserName = '';
 let currentUsername = '';
+// What this person may see and do (teams.mjs on the server):
+// { admin, role, roleName, team: { id, name }, tickets, note }
+const NO_ACCESS = { admin: false, role: null, roleName: null, team: null, tickets: 0, note: null };
+let currentAccess = NO_ACCESS;
 
 function setCurrentUser(user) {
     currentUserName = user ? (user.displayName || user.username || '') : '';
     currentUsername = user ? (user.username || '') : '';
     document.getElementById('user-name').textContent = currentUserName;
+    if (!user) currentAccess = NO_ACCESS;
+    else if (user.access) currentAccess = user.access;
+    // The Team tab: admins, and anyone on a team
+    document.getElementById('teams-tab').hidden = !(currentAccess.admin || currentAccess.team);
     renderGreetings();
     // Each person's home page opens on the search they used last
     if (currentUsername) setHomeMode(rememberedHomeMode());
@@ -9757,6 +9998,8 @@ async function signIn() {
         clearChat();
         setCurrentUser(data);
         showApp(true);
+        // What they may see, then their last chat (saved to their account)
+        loadCurrentUser().then(resumeLatestChat);
     } catch (err) {
         showLoginError('Could not reach the OneTouch server. Please try again.');
         console.error(err);
@@ -9777,6 +10020,7 @@ function signOut(message) {
     clearChat();
     setCurrentUser(null);
     resetHome();
+    resetTeams();
     resetCustomizing();
     showLoginError(typeof message === 'string' ? message : '');
     showApp(false);
@@ -9899,8 +10143,23 @@ async function loadChatHistory() {
     }
 }
 
-// Shows a saved chat's questions and answers, and Claude remembers it again
-async function openSavedChat(id) {
+// After a refresh or signing in: the chat they had last comes back, so
+// nothing is lost (New chat starts a fresh one; this one stays in the history)
+async function resumeLatestChat() {
+    if (!sessionTokenValue || document.querySelector('#chat-log .user-msg')) return;
+    try {
+        const response = await fetch(`${API_BASE}/api/chats`, { headers: authHeaders() });
+        if (!response.ok) return;
+        const { chats } = await response.json();
+        if (chats.length && !document.querySelector('#chat-log .user-msg')) await openSavedChat(chats[0].id, { quiet: true });
+    } catch (err) {
+        console.error('Could not reopen the last chat:', err);
+    }
+}
+
+// Shows a saved chat's questions and answers, and Claude remembers it again.
+// quiet: reopened by itself (after a refresh), so the cursor stays where it is.
+async function openSavedChat(id, { quiet = false } = {}) {
     try {
         const response = await fetch(`${API_BASE}/api/chats/${id}/open`, { method: 'POST', headers: authHeaders() });
         if (handleUnauthorized(response)) return;
@@ -9912,8 +10171,9 @@ async function openSavedChat(id) {
             const reply = entry.reply || {};
             showAnswer(entry.question, reply, reply.elapsedMs ? reply.elapsedMs / 1000 : null, { replay: true });
         }
-        document.getElementById('user-prompt').focus();
+        if (!quiet) document.getElementById('user-prompt').focus();
     } catch (err) {
+        if (quiet) return console.error(err);
         showToast(err.message);
         loadChatHistory();
         console.error(err);
@@ -9958,6 +10218,8 @@ function switchTab(viewName) {
     document.querySelectorAll('.view-panel').forEach(panel => panel.classList.toggle('active', panel.id === `${viewName}-view`));
     // The first time someone sees Dashboards: its tour (customize.js)
     if (viewName === 'dashboard') loadDashboards().then(() => maybeStartTour('dashboards'));
+    // The Team tab, fresh each time (assignments change)
+    if (viewName === 'teams') loadTeams();
     // Stars may have changed elsewhere (the chat, a dashboard, another computer)
     if (viewName === 'home') {
         if (homeMode === 'starred') showStarred();
@@ -10074,11 +10336,22 @@ async function buildDashboards() {
     try {
         const response = await fetch(`${API_BASE}/api/dashboards`, { headers: authHeaders() });
         if (handleUnauthorized(response)) return false;
-        const { dashboards, details = [] } = await response.json();
+        const { dashboards, details = [], restricted = false } = await response.json();
         for (const d of dashboards) dashboardPages.main.set(pageId(d.path), d);
         for (const d of details) dashboardPages.details.set(pageId(d.path), d);
         // Which team dashboards this person hid, and which one they had open
         await prefsReady;
+        if (restricted) {
+            // Metabase shows every ticket, so only admins get those dashboards;
+            // Ticket families and their own dashboards show only their tickets
+            document.getElementById('drawer-customize').hidden = true;
+            const last = rememberedDashboard();
+            if (last === 'families') { showFamilies(); return true; }
+            if (last.startsWith('my:') && showBoard(last.slice(3))) return true;
+            message.textContent = 'The Metabase team dashboards show every ticket, so only admins can open them. ' +
+                'Under ☰ Dashboards, Ticket families and your own dashboards show the tickets you can see.';
+            return true;
+        }
         if (!dashboards.length) {
             message.textContent = 'No team dashboards yet. Whoever runs this OneTouch server can create them with: ' +
                 'docker exec analytics_node_app node scripts/metabase-setup.mjs. You can still build your own under ☰ Dashboards.';
@@ -10439,6 +10712,9 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
             data.assumptions.map(a => `<li>${escapeHtml(a)}</li>`).join('') +
             `</ul></details>`;
     }
+
+    // Not an admin: which tickets the answer could see (teams.mjs)
+    if (data.visibility && !(data.explanation && data.allEmpty)) html += `<div class="result-visibility">👥 ${escapeHtml(data.visibility)}</div>`;
 
     // Star every ticket the answer lists, or all of one type
     html += starAllHtml(answerTicketNumbers(data));
@@ -11553,7 +11829,8 @@ function ticketDownloadHtml(tickets, title, columns = TICKET_COLUMNS) {
 
 // One ticket: its heading, a star, a link to its dashboard record, and every field it has
 function ticketCardHtml(t, record) {
-    const dashboardButton = RECORD_PAGES[t.kind]
+    // The Metabase record pages are for admins only (they show every ticket)
+    const dashboardButton = RECORD_PAGES[t.kind] && currentAccess.admin
         ? `<button type="button" class="home-action" data-open-dashboard="${escapeHtml(t.number)}">Open in Dashboards ↗</button>` : '';
     let html = `<div class="ticket-head">` +
         `<span class="ticket-type">${escapeHtml(t.type)}</span>` +
@@ -12270,11 +12547,9 @@ renderHomeLayout();
 renderMyDashboards();
 readSignInLink();
 showApp(Boolean(sessionTokenValue));
-loadCurrentUser();
 
-// A reload empties the chat on screen and starts a fresh one; the one
-// before it is under "Chat History"
-resetConversation();
+// A reload brings back the chat this person had last (it's saved to their account)
+if (sessionTokenValue) loadCurrentUser().then(resumeLatestChat);
 ```
 
 <a id="b28"></a>
@@ -14564,7 +14839,7 @@ const FILES = [
   'tickets.mjs', 'stars.mjs', 'scripts/share.mjs', 'scripts/warmup.mjs', 'scripts/warmup-questions.txt',
   'seen.mjs', 'relations.mjs',
   'prefs.mjs', 'charts.mjs', 'public/charts.js', 'public/customize.js', 'shares.mjs', 'public/families.js',
-  'scripts/signin-links.mjs', 'chats.mjs',
+  'scripts/signin-links.mjs', 'chats.mjs', 'teams.mjs', 'public/teams.js', 'CLAUDE.md',
 ];
 
 // Not copied in, and why (shown in the appendix)
@@ -15855,7 +16130,9 @@ async function countBy(cube, column, values, runQuery) {
 // can be grouped by issue.
 export async function ticketLinks(numbers, runQuery) {
   const wanted = [...new Set(numbers.map(n => String(n).toUpperCase()))].filter(n => TICKET_NUMBER.test(n)).slice(0, MAX_LINK_TICKETS);
-  const todo = wanted.filter(n => !linkCache.has(n));
+  // Family sizes count only the tickets this person may see (teams.mjs), so each set has its own entries
+  const cacheKey = n => `${runQuery.scopeKey ?? ''}|${n}`;
+  const todo = wanted.filter(n => !linkCache.has(cacheKey(n)));
   if (todo.length) {
     const of = prefix => todo.filter(n => prefixOf(n) === prefix);
     const uniq = list => [...new Set(list.filter(Boolean))];
@@ -15920,11 +16197,11 @@ export async function ticketLinks(numbers, runQuery) {
       found.set(t.number, { parent: t.request_item, families });
     }
     for (const n of todo) {
-      linkCache.set(n, found.get(n) || { parent: '', families: [] });
+      linkCache.set(cacheKey(n), found.get(n) || { parent: '', families: [] });
       if (linkCache.size > LINK_CACHE_SIZE) linkCache.delete(linkCache.keys().next().value);
     }
   }
-  return new Map(wanted.map(n => [n, linkCache.get(n)]));
+  return new Map(wanted.map(n => [n, linkCache.get(cacheKey(n))]));
 }
 
 // =====================================================================
@@ -15983,14 +16260,18 @@ async function buildFamilyList(kind, runQuery) {
   return list.filter(f => FAMILY_ANCHOR[kind].test(f.anchor)).sort((a, b) => (b.size - a.size) || b.anchor.localeCompare(a.anchor));
 }
 
+// One set of lists per set of tickets someone may see (runQuery.scopeKey, teams.mjs)
 const familyLists = new Map();
+const FAMILY_LISTS_KEPT = 600;
 export function familyList(kind, runQuery) {
-  if (!familyLists.has(kind)) {
+  const key = `${runQuery.scopeKey ?? ''}|${kind}`;
+  if (!familyLists.has(key)) {
     const pending = buildFamilyList(kind, runQuery);
-    familyLists.set(kind, pending);
-    pending.catch(() => familyLists.delete(kind));
+    familyLists.set(key, pending);
+    if (familyLists.size > FAMILY_LISTS_KEPT) familyLists.delete(familyLists.keys().next().value);
+    pending.catch(() => familyLists.delete(key));
   }
-  return familyLists.get(kind);
+  return familyLists.get(key);
 }
 
 // For the page's tabs: per kind, how many families and how many tickets they hold
@@ -16324,13 +16605,15 @@ export function sanitizeScope(input) {
 
 // ---------------------------------------------------------------------
 // Results are cached: the data is a frozen export, so the same question
-// always has the same answer (a server restart empties the cache)
+// always has the same answer (a server restart empties the cache). Each
+// set of tickets someone may see (runQuery.scopeKey, teams.mjs) has its own.
 // ---------------------------------------------------------------------
 
 const CACHE_SIZE = 400;
 const cache = new Map();
 
-async function cached(key, work) {
+async function cached(runQuery, name, work) {
+  const key = `${runQuery.scopeKey ?? ''}|${name}`;
   if (cache.has(key)) {
     const hit = cache.get(key);
     cache.delete(key);
@@ -16350,7 +16633,7 @@ async function cached(key, work) {
 
 // The first and last day each ticket type has (for "last 30 days" and the date pickers)
 async function dataDays(cube, runQuery) {
-  return cached(`days:${cube}`, async () => {
+  return cached(runQuery, `days:${cube}`, async () => {
     const member = `${cube}.${CHART_SOURCES[cube].day}`;
     const ends = await Promise.all(['asc', 'desc'].map(direction => runQuery({
       dimensions: [member],
@@ -16435,7 +16718,7 @@ export async function chartData(input, runQuery, scopeInput) {
   const days = await dataDays(cube, runQuery);
 
   if (!chart.groupBy) {
-    const total = await cached(JSON.stringify(['total', cube, filters]), async () => {
+    const total = await cached(runQuery, JSON.stringify(['total', cube, filters]), async () => {
       const rows = await runQuery({ measures: [count], filters });
       return Number(rows[0]?.[count]) || 0;
     });
@@ -16444,7 +16727,7 @@ export async function chartData(input, runQuery, scopeInput) {
 
   const member = `${cube}.${chart.groupBy}`;
   const isTime = Boolean(CHART_SOURCES[cube].times[chart.groupBy]);
-  const groups = await cached(JSON.stringify(['groups', cube, chart.groupBy, filters]), async () => {
+  const groups = await cached(runQuery, JSON.stringify(['groups', cube, chart.groupBy, filters]), async () => {
     const rows = await runQuery({
       measures: [count],
       dimensions: [member],
@@ -16507,7 +16790,7 @@ export async function chartValues(source, field, runQuery) {
   if (!src || !src.fields[field]) throw new ChartError('That field cannot be used as a filter.');
   const member = `${source}.${field}`;
   const count = `${source}.count`;
-  return cached(JSON.stringify(['values', source, field]), async () => {
+  return cached(runQuery, JSON.stringify(['values', source, field]), async () => {
     const rows = await runQuery({ measures: [count], dimensions: [member], order: { [count]: 'desc' }, limit: 500 });
     return rows
       .map(r => ({ value: cleanValue(field, r[member]), count: Number(r[count]) || 0 }))
@@ -16517,7 +16800,7 @@ export async function chartValues(source, field, runQuery) {
 
 // Every team, across incidents, changes and catalog tasks, busiest first
 export async function teamValues(runQuery) {
-  return cached('teams', async () => {
+  return cached(runQuery, 'teams', async () => {
     const lists = await Promise.all(Object.entries(TEAM_FIELDS).map(([source, field]) => chartValues(source, field, runQuery)));
     const merged = new Map();
     for (const list of lists) for (const v of list) merged.set(v.value, (merged.get(v.value) || 0) + v.count);
@@ -17687,6 +17970,16 @@ function resetCustomizing() {
     renderMyDashboards();
     document.getElementById('home-blocks').classList.add('waiting');
     dashboardsLoading = null; // the next person's dashboards open where they left them
+    // The team dashboards are admins only: none stay behind for whoever signs in next
+    dashboardPages.main.clear();
+    dashboardPages.details.clear();
+    currentMainDashboard = null;
+    document.getElementById('dashboard-picker').innerHTML = '';
+    document.getElementById('drawer-customize').hidden = false;
+    const frame = document.getElementById('dashboard-frame');
+    frame.hidden = true;
+    frame.src = 'about:blank';
+    document.getElementById('dashboard-message').textContent = 'Loading dashboards…';
 }
 
 // ---------------------------------------------------------------------
@@ -19850,6 +20143,1089 @@ function fitTranscript(transcript) {
   }
   return fitted;
 }
+```
+
+<a id="b52"></a>
+### B.52 `teams.mjs`
+
+```js
+// =====================================================================
+// TEAMS, ROLES, AND WHO SEES WHICH TICKETS, kept with the accounts in the
+// onetouch_auth database
+//
+//   admin               sees every ticket; moves families between teams,
+//                       puts people on teams, and assigns any ticket
+//   project manager     sees every ticket of their team, assigns them to
+//                       the team's members, and sees who has what
+//   process excellence  sees the tickets assigned to them
+//   project team member sees the tickets assigned to them
+//
+// Tickets go to teams by family. A ticket can be in several families (a
+// parent incident, a problem, a change it caused...), so everything linked
+// together forms one group, a row in ticket_families, and the whole group
+// belongs to one team. That way no family is ever split between two teams:
+// moving one ticket to another team moves its whole group.
+//
+// Every Cube query made for someone who isn't an admin goes through
+// restrictQuery, which adds "the ticket is one of theirs". So the AI
+// assistant, search, records, charts and families only ever see those.
+// =====================================================================
+
+import { createHash } from 'node:crypto';
+import { pool } from './auth.mjs';
+
+// They see absolutely everything
+export const ADMIN_USERNAMES = ['vperez', 'lvang', 'lbell'];
+// Named after Molson Coors' best-known beers
+export const TEAM_NAMES = ['Coors Light', 'Miller Lite', 'Coors Banquet', 'Blue Moon', 'Molson Canadian', 'Miller High Life'];
+export const ROLES = {
+  project_manager: 'Project manager',
+  process_excellence: 'Process excellence',
+  project_team: 'Project team member',
+};
+// Accounts that aren't people (scripts/warmup.mjs) never join a team
+const SERVICE_ACCOUNTS = ['warmup'];
+// Test accounts join teams but never lead one
+const TEST_ACCOUNT = /^tester\d*$/;
+
+const PREFIXES = ['INC', 'CHG', 'RITM', 'SCTASK'];
+const TICKET = /^(INC|CHG|RITM|SCTASK)\d{7}$/;
+// The column that holds each cube's ticket number (an approval: the ticket it approves)
+const SCOPED_CUBES = {
+  incident: ['INC', 'number'],
+  change_request: ['CHG', 'number'],
+  sc_req_item: ['RITM', 'number'],
+  sc_task: ['SCTASK', 'number'],
+  change_approvals: ['CHG', 'parent'],
+  ritm_approvals: ['RITM', 'parent'],
+};
+// The link columns that join tickets into families (the same ones as
+// relations.mjs). A problem record isn't a ticket, so it's marked PRB:.
+const LINKS = {
+  incident: ['parent_incident', 'problem', 'caused_by_change'],
+  change_request: ['incident', 'problem'],
+  sc_req_item: ['request', 'parent'],
+  sc_task: ['request_item'],
+};
+// Matches no ticket: someone with no tickets of a type still gets a count of 0
+const NO_TICKET = 'NONE';
+const MAX_ASSIGN = 500;
+
+export class AccessError extends Error {}
+
+const kindOf = number => number.match(/^[A-Z]+/)[0];
+// The same "random" everywhere: every OneTouch server seeds identical teams
+const hash = (salt, text) => createHash('sha256').update(`${salt}:${text}`).digest().readUInt32BE(0);
+
+// Safe to run every start (after auth.ensureSchema, which creates users)
+export async function ensureTeamsSchema() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS teams (
+      id          serial PRIMARY KEY,
+      name        text UNIQUE NOT NULL,
+      created_at  timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS team_members (
+      user_id    integer PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      team_id    integer NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      role       text NOT NULL CHECK (role IN ('project_manager', 'process_excellence', 'project_team')),
+      joined_at  timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS ticket_families (
+      id       text PRIMARY KEY,
+      team_id  integer REFERENCES teams(id) ON DELETE SET NULL,
+      size     integer NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS ticket_families_team_idx ON ticket_families (team_id);
+    CREATE TABLE IF NOT EXISTS ticket_assignments (
+      number       text PRIMARY KEY,
+      family_id    text NOT NULL REFERENCES ticket_families(id) ON DELETE CASCADE,
+      assignee_id  integer REFERENCES users(id) ON DELETE SET NULL,
+      assigned_at  timestamptz,
+      assigned_by  integer REFERENCES users(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS ticket_assignments_family_idx ON ticket_assignments (family_id);
+    CREATE INDEX IF NOT EXISTS ticket_assignments_assignee_idx ON ticket_assignments (assignee_id);
+  `);
+}
+
+// ---------------------------------------------------------------------
+// FIRST START: the teams, who's on them, and every ticket's family, team
+// and person. Families are dealt out biggest first, each to the team with
+// the fewest tickets so far, so the teams come out about even; each ticket
+// then goes to one of its team's members at random.
+// ---------------------------------------------------------------------
+
+// Every ticket, grouped with everything it's linked to -> [{ id, numbers }],
+// biggest first; a group is named after its lowest ticket number
+async function linkedGroups(runQuery) {
+  const parent = new Map();
+  const find = x => {
+    let root = x;
+    while (parent.get(root) !== root) root = parent.get(root);
+    while (parent.get(x) !== root) { const next = parent.get(x); parent.set(x, root); x = next; }
+    return root;
+  };
+  const add = x => { if (!parent.has(x)) parent.set(x, x); };
+  const join = (a, b) => { add(a); add(b); const ra = find(a), rb = find(b); if (ra !== rb) parent.set(ra, rb); };
+
+  const tickets = new Set();
+  for (const [cube, links] of Object.entries(LINKS)) {
+    const rows = await runQuery({ dimensions: [`${cube}.number`, ...links.map(l => `${cube}.${l}`)], limit: 50000 });
+    if (rows.length >= 50000) throw new Error(`${cube} has 50,000 tickets or more; teams.mjs reads at most that many`);
+    for (const row of rows) {
+      const number = String(row[`${cube}.number`] ?? '').trim();
+      if (!TICKET.test(number)) continue;
+      tickets.add(number);
+      add(number);
+      for (const link of links) {
+        // "zzz" is the export's placeholder for "none"
+        const value = String(row[`${cube}.${link}`] ?? '').trim();
+        if (value && value !== 'zzz') join(number, link === 'problem' ? `PRB:${value}` : value);
+      }
+    }
+  }
+  const groups = new Map();
+  for (const number of tickets) {
+    const root = find(number);
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root).push(number);
+  }
+  return [...groups.values()]
+    .map(numbers => { numbers.sort(); return { id: numbers[0], numbers }; })
+    .sort((a, b) => (b.numbers.length - a.numbers.length) || a.id.localeCompare(b.id));
+}
+
+// Many rows in one statement per 5,000
+async function insertRows(client, table, columns, types, rows) {
+  for (let i = 0; i < rows.length; i += 5000) {
+    const batch = rows.slice(i, i + 5000);
+    await client.query(
+      `INSERT INTO ${table} (${columns.join(', ')}) SELECT * FROM unnest(${types.map((t, c) => `$${c + 1}::${t}[]`).join(', ')})`,
+      types.map((_, c) => batch.map(r => r[c])));
+  }
+}
+
+// Does nothing once any team exists. -> null, or what was set up
+export async function seedTeams(runQuery) {
+  const { rows: [{ n }] } = await pool.query('SELECT count(*)::int AS n FROM teams');
+  if (n) return null;
+  const groups = await linkedGroups(runQuery);
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('LOCK TABLE teams IN EXCLUSIVE MODE');
+    if ((await client.query('SELECT 1 FROM teams LIMIT 1')).rows.length) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    const teamIds = [];
+    for (const name of TEAM_NAMES) {
+      teamIds.push((await client.query('INSERT INTO teams (name) VALUES ($1) RETURNING id', [name])).rows[0].id);
+    }
+
+    // One project manager and one process excellence member per team, then
+    // everyone else to whichever team is smallest
+    const { rows: people } = await client.query(
+      'SELECT id, username FROM users WHERE is_active AND username <> ALL($1::text[])',
+      [[...ADMIN_USERNAMES, ...SERVICE_ACCOUNTS]]);
+    people.sort((a, b) => (hash('person', a.username) - hash('person', b.username)) || a.username.localeCompare(b.username));
+    const leaders = people.filter(p => !TEST_ACCOUNT.test(p.username));
+    const members = teamIds.map(() => []);
+    const placed = new Set();
+    const place = (person, team, role) => { members[team].push({ id: person.id, role }); placed.add(person.id); };
+    leaders.slice(0, teamIds.length).forEach((p, t) => place(p, t, 'project_manager'));
+    leaders.slice(teamIds.length, teamIds.length * 2).forEach((p, t) => place(p, t, 'process_excellence'));
+    for (const p of people.filter(p => !placed.has(p.id))) {
+      const smallest = members.reduce((best, list, t) => (list.length < members[best].length ? t : best), 0);
+      place(p, smallest, 'project_team');
+    }
+    await insertRows(client, 'team_members', ['user_id', 'team_id', 'role'], ['int', 'int', 'text'],
+      members.flatMap((list, t) => list.map(m => [m.id, teamIds[t], m.role])));
+
+    const load = teamIds.map(() => 0);
+    const families = [];
+    const tickets = [];
+    for (const group of groups) {
+      const t = load.indexOf(Math.min(...load));
+      load[t] += group.numbers.length;
+      const ids = members[t].map(m => m.id).sort((a, b) => a - b);
+      families.push([group.id, teamIds[t], group.numbers.length]);
+      for (const number of group.numbers) tickets.push([number, group.id, ids.length ? ids[hash('ticket', number) % ids.length] : null]);
+    }
+    await insertRows(client, 'ticket_families', ['id', 'team_id', 'size'], ['text', 'int', 'int'], families);
+    await insertRows(client, 'ticket_assignments', ['number', 'family_id', 'assignee_id'], ['text', 'text', 'int'], tickets);
+    await client.query('UPDATE ticket_assignments SET assigned_at = now() WHERE assignee_id IS NOT NULL');
+    await client.query('COMMIT');
+    changed();
+    return { teams: teamIds.length, people: placed.size, families: families.length, tickets: tickets.length };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// ---------------------------------------------------------------------
+// WHAT SOMEONE MAY SEE. A scope is { all: true } for an admin, otherwise
+// their ticket numbers by type. Kept for a minute, and dropped as soon as
+// anything here changes. key names the scope in the caches of charts.mjs
+// and relations.mjs, so two people never share a cached answer they
+// shouldn't; it's made from the tickets themselves, so the same tickets
+// keep the same key.
+// ---------------------------------------------------------------------
+
+let version = 0;
+const changed = () => { version += 1; };
+const SCOPE_TTL_MS = 60 * 1000;
+const scopes = new Map(); // user id -> scope
+
+export async function scopeFor(user) {
+  const hit = scopes.get(user.id);
+  if (hit && hit.version === version && hit.at > Date.now() - SCOPE_TTL_MS) return hit;
+
+  const { rows: [m] } = await pool.query(
+    'SELECT m.role, t.id, t.name FROM team_members m JOIN teams t ON t.id = m.team_id WHERE m.user_id = $1', [user.id]);
+  const access = {
+    userId: user.id,
+    admin: ADMIN_USERNAMES.includes(user.username),
+    role: m?.role || null,
+    team: m ? { id: m.id, name: m.name } : null,
+  };
+  let scope;
+  if (access.admin) {
+    scope = { all: true, key: 'all', count: null };
+  } else {
+    const { rows } = access.role === 'project_manager'
+      ? await pool.query(
+        'SELECT a.number FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id WHERE f.team_id = $1 ORDER BY a.number', [access.team.id])
+      : await pool.query('SELECT number FROM ticket_assignments WHERE assignee_id = $1 ORDER BY number', [user.id]);
+    const byKind = Object.fromEntries(PREFIXES.map(p => [p, []]));
+    for (const { number } of rows) byKind[kindOf(number)]?.push(number);
+    const key = createHash('sha256').update(rows.map(r => r.number).join(',')).digest('hex').slice(0, 16);
+    scope = { all: false, key, byKind, count: rows.length };
+  }
+  Object.assign(scope, { access, version, at: Date.now() });
+  scopes.set(user.id, scope);
+  return scope;
+}
+
+// One line under an answer saying what it covered (null for an admin)
+export function scopeNote(scope) {
+  if (scope.all) return null;
+  const n = scope.count.toLocaleString('en-US');
+  if (scope.access.role === 'project_manager') return `Only ${scope.access.team.name}'s ${n} tickets are included.`;
+  return scope.count
+    ? `Only the ${n} tickets assigned to you are included.`
+    : 'No tickets are assigned to you yet, so there is nothing to show. Your project manager or an admin can assign you some.';
+}
+
+// A Cube query -> the same query limited to the scope's tickets. A cube with
+// no rule here is refused rather than run unfiltered.
+export function restrictQuery(query, scope) {
+  if (scope.all) return query;
+  const cubes = new Set();
+  const note = member => { if (typeof member === 'string' && member.includes('.')) cubes.add(member.split('.')[0]); };
+  const walk = f => {
+    if (!f || typeof f !== 'object') return;
+    if (Array.isArray(f.and)) f.and.forEach(walk);
+    else if (Array.isArray(f.or)) f.or.forEach(walk);
+    else note(f.member ?? f.dimension);
+  };
+  (query.measures || []).forEach(note);
+  (query.dimensions || []).forEach(note);
+  (query.segments || []).forEach(note);
+  (query.timeDimensions || []).forEach(t => note(t?.dimension));
+  (query.filters || []).forEach(walk);
+  if (Array.isArray(query.order)) query.order.forEach(o => note(Array.isArray(o) ? o[0] : o?.id));
+  else if (query.order && typeof query.order === 'object') Object.keys(query.order).forEach(note);
+  if (!cubes.size) throw new AccessError('That query names no ticket type.');
+
+  const filters = [...(query.filters || [])];
+  for (const cube of cubes) {
+    const rule = SCOPED_CUBES[cube];
+    if (!rule) throw new AccessError(`${cube} has no access rule, so it can't be shown.`);
+    const values = scope.byKind[rule[0]];
+    filters.push({ member: `${cube}.${rule[1]}`, operator: 'equals', values: values.length ? values : [NO_TICKET] });
+  }
+  return { ...query, filters };
+}
+
+// ---------------------------------------------------------------------
+// THE TEAMS PAGE: teams and their people, a team's tickets, and the
+// changes admins and project managers make
+// ---------------------------------------------------------------------
+
+// An admin, or the project manager of this team
+export const canManage = (scope, teamId) =>
+  scope.access.admin || (scope.access.role === 'project_manager' && scope.access.team?.id === teamId);
+
+function requireAdmin(scope) {
+  if (!scope.access.admin) throw new AccessError('Only an admin can do that.');
+}
+
+const emptyLoad = () => ({ INC: 0, CHG: 0, RITM: 0, SCTASK: 0, total: 0 });
+const personName = r => r.display_name || r.username;
+
+// Admins get every team and the people on none; anyone else, their own team.
+// Workloads (who has how many of what) are there for the teams someone
+// manages, and everyone sees their own.
+export async function listTeams(scope) {
+  const { access } = scope;
+  const { rows: teams } = await pool.query(
+    `SELECT t.id, t.name, count(f.id)::int AS families, coalesce(sum(f.size), 0)::int AS tickets
+       FROM teams t LEFT JOIN ticket_families f ON f.team_id = t.id
+      ${access.admin ? '' : 'WHERE t.id = $1'}
+      GROUP BY t.id ORDER BY t.id`,
+    access.admin ? [] : [access.team?.id ?? -1]);
+  const ids = teams.map(t => t.id);
+  const { rows: members } = await pool.query(
+    `SELECT m.team_id, m.role, u.id, u.username, u.display_name
+       FROM team_members m JOIN users u ON u.id = m.user_id
+      WHERE m.team_id = ANY($1::int[])
+      ORDER BY array_position(ARRAY['project_manager', 'process_excellence', 'project_team'], m.role), lower(coalesce(u.display_name, u.username))`,
+    [ids]);
+  const { rows: loads } = await pool.query(
+    `SELECT f.team_id, a.assignee_id, substring(a.number from '^[A-Z]+') AS kind, count(*)::int AS n
+       FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id
+      WHERE f.team_id = ANY($1::int[])
+      GROUP BY 1, 2, 3`,
+    [ids]);
+
+  const loadOf = (teamId, userId) => {
+    const load = emptyLoad();
+    for (const r of loads) {
+      if (r.team_id !== teamId || r.assignee_id !== userId) continue;
+      load[r.kind] = r.n;
+      load.total += r.n;
+    }
+    return load;
+  };
+  const result = {
+    roles: ROLES,
+    teams: teams.map(t => {
+      const manages = canManage(scope, t.id);
+      return {
+        ...t,
+        canManage: manages,
+        unassigned: manages ? loadOf(t.id, null) : null,
+        members: members.filter(m => m.team_id === t.id).map(m => ({
+          id: m.id, username: m.username, name: personName(m), role: m.role,
+          load: manages || m.id === access.userId ? loadOf(t.id, m.id) : null,
+        })),
+      };
+    }),
+  };
+  if (access.admin) {
+    const { rows } = await pool.query(
+      `SELECT id, username, display_name FROM users
+        WHERE is_active AND id NOT IN (SELECT user_id FROM team_members) AND username <> ALL($1::text[])
+        ORDER BY lower(coalesce(display_name, username))`,
+      [[...ADMIN_USERNAMES, ...SERVICE_ACCOUNTS]]);
+    result.people = rows.map(r => ({ id: r.id, username: r.username, name: personName(r) }));
+  }
+  return result;
+}
+
+// One page of a team's tickets, grouped by family (biggest first).
+// assignee: a user id, 'none' (unassigned) or null (everyone). Someone who
+// doesn't manage the team only ever gets their own.
+export async function teamTickets(scope, teamId, { assignee = null, kind = null, search = '', offset = 0, limit = 50 } = {}) {
+  if (!canManage(scope, teamId)) {
+    if (scope.access.team?.id !== teamId) throw new AccessError('That is not your team.');
+    assignee = scope.access.userId;
+  }
+  const params = [teamId];
+  const where = ['f.team_id = $1'];
+  if (assignee === 'none') where.push('a.assignee_id IS NULL');
+  else if (assignee) { params.push(Number(assignee)); where.push(`a.assignee_id = $${params.length}`); }
+  if (PREFIXES.includes(kind)) { params.push(`${kind}%`); where.push(`a.number LIKE $${params.length}`); }
+  const text = String(search || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20);
+  if (text) { params.push(`%${text}%`); where.push(`a.number LIKE $${params.length}`); }
+
+  const from = `FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id
+                LEFT JOIN users u ON u.id = a.assignee_id WHERE ${where.join(' AND ')}`;
+  const { rows: [{ total }] } = await pool.query(`SELECT count(*)::int AS total ${from}`, params);
+  const { rows } = await pool.query(
+    `SELECT a.number, a.family_id, f.size, a.assignee_id, u.username, u.display_name ${from}
+      ORDER BY f.size DESC, a.family_id, a.number
+      LIMIT ${Math.min(Math.max(Number(limit) || 50, 1), 200)} OFFSET ${Math.max(Number(offset) || 0, 0)}`,
+    params);
+  return {
+    total,
+    tickets: rows.map(r => ({
+      number: r.number, family: { id: r.family_id, size: r.size },
+      assignee: r.assignee_id ? { id: r.assignee_id, name: personName(r) } : null,
+    })),
+  };
+}
+
+// Gives tickets of one team to one of its members (null: nobody). Admins can
+// for any team, a project manager for their own. -> how many changed
+export async function assignTickets(scope, numbers, assigneeId) {
+  const wanted = [...new Set((Array.isArray(numbers) ? numbers : []).map(n => String(n).toUpperCase()))].filter(n => TICKET.test(n));
+  if (!wanted.length) throw new AccessError('No tickets to assign.');
+  if (wanted.length > MAX_ASSIGN) throw new AccessError(`Assign at most ${MAX_ASSIGN} tickets at a time.`);
+  const { rows } = await pool.query(
+    'SELECT a.number, f.team_id FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id WHERE a.number = ANY($1::text[])', [wanted]);
+  if (rows.length !== wanted.length) throw new AccessError('Some of those tickets aren\'t on any team.');
+  const teamIds = new Set(rows.map(r => r.team_id));
+  if (teamIds.size !== 1 || rows[0].team_id === null) throw new AccessError('Assign one team\'s tickets at a time.');
+  const teamId = rows[0].team_id;
+  if (!canManage(scope, teamId)) throw new AccessError('Only an admin or this team\'s project manager can assign its tickets.');
+  const person = assigneeId === null ? null : Number(assigneeId);
+  if (person !== null) {
+    const { rows: on } = await pool.query('SELECT 1 FROM team_members WHERE user_id = $1 AND team_id = $2', [person, teamId]);
+    if (!on.length) throw new AccessError('That person isn\'t on this team.');
+  }
+  const { rowCount } = await pool.query(
+    `UPDATE ticket_assignments
+        SET assignee_id = $2, assigned_at = CASE WHEN $2::int IS NULL THEN NULL ELSE now() END, assigned_by = $3
+      WHERE number = ANY($1::text[]) AND assignee_id IS DISTINCT FROM $2::int`,
+    [wanted, person, scope.access.userId]);
+  if (rowCount) changed();
+  return rowCount;
+}
+
+// A ticket's family: its size, how many of each type, and its team (admins only)
+export async function familyOfTicket(scope, number) {
+  requireAdmin(scope);
+  const n = String(number || '').toUpperCase().trim();
+  if (!TICKET.test(n)) throw new AccessError('Type a ticket number, like INC1813970 or RITM0440458.');
+  const { rows: [f] } = await pool.query(
+    `SELECT f.id, f.size, f.team_id, t.name AS team
+       FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id LEFT JOIN teams t ON t.id = f.team_id
+      WHERE a.number = $1`, [n]);
+  if (!f) return null;
+  const { rows: kinds } = await pool.query(
+    `SELECT substring(number from '^[A-Z]+') AS kind, count(*)::int AS n FROM ticket_assignments WHERE family_id = $1 GROUP BY 1`, [f.id]);
+  const { rows: sample } = await pool.query(
+    'SELECT number FROM ticket_assignments WHERE family_id = $1 ORDER BY number LIMIT 12', [f.id]);
+  return {
+    id: f.id, size: f.size, number: n,
+    team: f.team_id ? { id: f.team_id, name: f.team } : null,
+    kinds: Object.fromEntries(kinds.map(k => [k.kind, k.n])),
+    sample: sample.map(s => s.number),
+  };
+}
+
+// Moves a whole family to another team (admins only). Its tickets were the
+// old team's people's, so they become unassigned for the new team's project
+// manager to hand out. -> how many tickets moved
+export async function moveFamily(scope, familyId, teamId) {
+  requireAdmin(scope);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [team] } = await client.query('SELECT id FROM teams WHERE id = $1', [teamId]);
+    if (!team) throw new AccessError('There is no such team.');
+    const { rows: [family] } = await client.query('SELECT size, team_id FROM ticket_families WHERE id = $1 FOR UPDATE', [familyId]);
+    if (!family) throw new AccessError('There is no such family.');
+    if (family.team_id === team.id) {
+      await client.query('ROLLBACK');
+      return 0;
+    }
+    await client.query('UPDATE ticket_families SET team_id = $2 WHERE id = $1', [familyId, team.id]);
+    await client.query(
+      `UPDATE ticket_assignments SET assignee_id = NULL, assigned_at = NULL, assigned_by = $2
+        WHERE family_id = $1 AND assignee_id IS NOT NULL`, [familyId, scope.access.userId]);
+    await client.query('COMMIT');
+    changed();
+    return family.size;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// Puts someone on a team with a role, changes their role, or (teamId null)
+// takes them off their team (admins only). Leaving a team hands their
+// tickets back to it, unassigned.
+export async function setMembership(scope, userId, teamId, role) {
+  requireAdmin(scope);
+  if (teamId !== null && !ROLES[role]) throw new AccessError('Choose a role.');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [user] } = await client.query('SELECT id, username FROM users WHERE id = $1 AND is_active', [userId]);
+    if (!user) throw new AccessError('There is no such account.');
+    if (SERVICE_ACCOUNTS.includes(user.username)) throw new AccessError(`${user.username} is a service account and can't join a team.`);
+    if (teamId !== null && !(await client.query('SELECT 1 FROM teams WHERE id = $1', [teamId])).rows.length) {
+      throw new AccessError('There is no such team.');
+    }
+    const { rows: [now] } = await client.query('SELECT team_id FROM team_members WHERE user_id = $1 FOR UPDATE', [userId]);
+    if (now && now.team_id !== teamId) {
+      await client.query(
+        'UPDATE ticket_assignments SET assignee_id = NULL, assigned_at = NULL, assigned_by = $2 WHERE assignee_id = $1',
+        [userId, scope.access.userId]);
+    }
+    if (teamId === null) {
+      await client.query('DELETE FROM team_members WHERE user_id = $1', [userId]);
+    } else {
+      await client.query(
+        `INSERT INTO team_members (user_id, team_id, role) VALUES ($1, $2, $3)
+         ON CONFLICT (user_id) DO UPDATE SET team_id = EXCLUDED.team_id, role = EXCLUDED.role,
+           joined_at = CASE WHEN team_members.team_id = EXCLUDED.team_id THEN team_members.joined_at ELSE now() END`,
+        [userId, teamId, role]);
+    }
+    await client.query('COMMIT');
+    changed();
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+```
+
+<a id="b53"></a>
+### B.53 `public/teams.js`
+
+```js
+// =====================================================================
+// TEAMS: the Team tab (teams.mjs on the server). Admins see every team -
+// who's on it and in what role, its tickets and who has each one - and can
+// put people on teams and move families between teams. A project manager
+// sees their own team the same way and hands out its tickets. Everyone
+// else sees who's on their team and the tickets assigned to them.
+// Loaded before app.js, whose helpers these functions use when they run.
+// =====================================================================
+
+const TEAM_PAGE_SIZE = 50;
+const TEAM_KINDS = [['INC', 'Incidents'], ['CHG', 'Changes'], ['RITM', 'Requests'], ['SCTASK', 'Catalog tasks']];
+
+const teamsView = {
+    data: null,     // GET /api/teams: { teams, roles, people? }
+    teamId: null,   // the team showing
+    filter: { assignee: '', kind: '', search: '' },
+    offset: 0,
+    run: 0,         // bumped on every load, so an answer for an older view is dropped
+};
+
+// Signing out: nothing of this person's team stays on the page
+function resetTeams() {
+    teamsView.data = null;
+    teamsView.teamId = null;
+    teamsView.filter = { assignee: '', kind: '', search: '' };
+    teamsView.offset = 0;
+    teamsView.run += 1;
+    document.getElementById('teams').innerHTML = '';
+}
+
+// -> the JSON answer, or null if the session ended; a refusal throws its message
+async function teamsFetch(path, options = {}) {
+    const response = await fetch(`${API_BASE}${path}`, {
+        ...options,
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    });
+    if (handleUnauthorized(response)) return null;
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'That didn\'t work. Please try again.');
+    return data;
+}
+
+const currentTeam = () => teamsView.data?.teams.find(t => t.id === teamsView.teamId) || null;
+const roleName = role => teamsView.data?.roles[role] || '';
+
+async function loadTeams() {
+    const box = document.getElementById('teams');
+    if (!teamsView.data) box.innerHTML = '<p class="home-status">Loading your team…</p>';
+    try {
+        const data = await teamsFetch('/api/teams');
+        if (!data) return;
+        teamsView.data = data;
+        if (!currentTeam()) {
+            const mine = data.teams.find(t => t.id === currentAccess.team?.id) || data.teams[0];
+            teamsView.teamId = mine ? mine.id : null;
+        }
+        renderTeams();
+    } catch (err) {
+        box.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        console.error(err);
+    }
+}
+
+// After an assignment or a move: the counts again, keeping the ticket list as it is
+async function refreshTeamCounts() {
+    try {
+        const data = await teamsFetch('/api/teams');
+        if (!data) return;
+        teamsView.data = data;
+        const summary = document.getElementById('team-summary');
+        if (summary && currentTeam()) summary.innerHTML = teamSummaryHtml(currentTeam());
+        const picker = document.getElementById('team-picker');
+        if (picker) picker.innerHTML = teamPickerHtml();
+    } catch (err) {
+        console.error('Could not refresh the team counts:', err);
+    }
+}
+
+function youLine(team) {
+    if (currentAccess.admin) return 'You\'re an admin: you see every team and every ticket, put people on teams, and move families between them.';
+    if (!team) return 'You\'re not on a team yet, so no tickets are assigned to you. An admin can add you to one.';
+    if (currentAccess.role === 'project_manager') return `You're the project manager of ${team.name}: you see all of its tickets, hand them out, and see who's working on what.`;
+    return `You're on ${team.name} as ${roleName(currentAccess.role).toLowerCase()}. You see the tickets assigned to you.`;
+}
+
+function renderTeams() {
+    const { data } = teamsView;
+    const team = currentTeam();
+    const box = document.getElementById('teams');
+    let html = `<div class="home-head"><h2 class="home-welcome">👥 ${currentAccess.admin ? 'Teams' : escapeHtml(team?.name || 'Your team')}</h2></div>` +
+        `<p class="home-status">${escapeHtml(youLine(team))}</p>`;
+    if (currentAccess.admin) html += `<div class="team-picker" id="team-picker">${teamPickerHtml()}</div>`;
+    if (team) {
+        const manage = team.canManage;
+        html += `<section class="team-card" id="team-summary">${teamSummaryHtml(team)}</section>` +
+            `<section class="team-card">` +
+            `<h3>${manage ? `${escapeHtml(team.name)}'s tickets` : 'My tickets'}</h3>` +
+            `<div class="team-filters">` +
+            (manage ? `<label>Who has it <select id="team-filter-assignee">${assigneeFilterOptions(team)}</select></label>` : '') +
+            `<label>Type <select id="team-filter-kind"><option value="">All types</option>` +
+            TEAM_KINDS.map(([k, label]) => `<option value="${k}"${teamsView.filter.kind === k ? ' selected' : ''}>${label}</option>`).join('') +
+            `</select></label>` +
+            `<label>Ticket number <input type="search" id="team-filter-search" value="${escapeHtml(teamsView.filter.search)}" placeholder="e.g. 1813970"></label>` +
+            `<button type="button" class="home-action" data-team-search>Search</button>` +
+            `</div>` +
+            (manage ? `<div class="team-bulk"><label><input type="checkbox" class="team-select-all"> Tick all on this page</label>` +
+                `<span>Give the ticked tickets to</span> <select id="team-bulk-to" aria-label="Give the ticked tickets to">${assigneeOptions(team, null)}</select>` +
+                `<button type="button" class="home-action" data-team-bulk>Assign</button></div>` : '') +
+            `<div id="team-tickets"></div></section>`;
+    }
+    if (currentAccess.admin) html += familyCardHtml() + peopleCardHtml(data.people || []);
+    box.innerHTML = html;
+    if (team) loadTeamTickets();
+}
+
+function teamPickerHtml() {
+    return teamsView.data.teams.map(t =>
+        `<button type="button" class="team-pick${t.id === teamsView.teamId ? ' active' : ''}" data-team-pick="${t.id}">` +
+        `<span class="team-pick-name">${escapeHtml(t.name)}</span>` +
+        `<span class="team-pick-meta">${t.tickets.toLocaleString()} tickets · ${t.members.length} people</span></button>`).join('');
+}
+
+function loadCells(load) {
+    if (!load) return TEAM_KINDS.map(() => '<td class="num">—</td>').join('') + '<td class="num">—</td>';
+    return TEAM_KINDS.map(([k]) => `<td class="num">${load[k].toLocaleString()}</td>`).join('') +
+        `<td class="num"><strong>${load.total.toLocaleString()}</strong></td>`;
+}
+
+// Who's on the team, in what role, and (for whoever manages it) how many of each type they have
+function teamSummaryHtml(team) {
+    const manage = team.canManage;
+    const admin = currentAccess.admin;
+    const unassigned = team.unassigned?.total || 0;
+    const head = '<th>Name</th><th>Role</th>' + TEAM_KINDS.map(([, label]) => `<th class="num">${label}</th>`).join('') + '<th class="num">Total</th>' +
+        (manage ? '<th></th>' : '') + (admin ? '<th>Team</th>' : '');
+    const rows = team.members.map(m =>
+        `<tr${m.username === currentUsername ? ' class="team-you"' : ''}>` +
+        `<td>${escapeHtml(m.name)}${m.username === currentUsername ? ' <span class="team-you-tag">you</span>' : ''}</td>` +
+        `<td>${admin ? roleSelectHtml(`data-member-role="${m.id}"`, m.role) : escapeHtml(roleName(m.role))}</td>` +
+        loadCells(m.load) +
+        (manage ? `<td><button type="button" class="home-action" data-team-show="${m.id}">Their tickets</button></td>` : '') +
+        (admin ? `<td>${teamSelectHtml(`data-member-team="${m.id}"`, team.id, true)}</td>` : '') +
+        '</tr>').join('');
+    const unassignedRow = manage
+        ? `<tr class="team-unassigned"><td>Not assigned yet</td><td>—</td>${loadCells(team.unassigned)}` +
+          `<td><button type="button" class="home-action" data-team-show="none"${unassigned ? '' : ' disabled'}>Show them</button></td>${admin ? '<td></td>' : ''}</tr>`
+        : '';
+    return `<h3>${escapeHtml(team.name)}</h3>` +
+        `<p class="home-status">${team.tickets.toLocaleString()} tickets in ${team.families.toLocaleString()} families · ${team.members.length} people` +
+        (manage && unassigned ? ` · <strong>${unassigned.toLocaleString()} not assigned yet</strong>` : '') + '</p>' +
+        (team.members.length
+            ? `<div class="table-wrap"><table class="result-table team-table"><thead><tr>${head}</tr></thead><tbody>${rows}${unassignedRow}</tbody></table></div>`
+            : '<p class="home-status">Nobody is on this team yet.</p>');
+}
+
+function roleSelectHtml(attr, selected) {
+    return `<select ${attr} aria-label="Role">` + Object.entries(teamsView.data.roles)
+        .map(([value, label]) => `<option value="${value}"${value === selected ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('') + '</select>';
+}
+
+function teamSelectHtml(attr, selected, withNone) {
+    return `<select ${attr} aria-label="Team">` + (withNone ? `<option value="">No team</option>` : '') + teamsView.data.teams
+        .map(t => `<option value="${t.id}"${t.id === selected ? ' selected' : ''}>${escapeHtml(t.name)}</option>`).join('') + '</select>';
+}
+
+// The team's people to give a ticket to (or nobody)
+function assigneeOptions(team, selected) {
+    return `<option value=""${selected ? '' : ' selected'}>Not assigned</option>` + team.members
+        .map(m => `<option value="${m.id}"${m.id === selected ? ' selected' : ''}>${escapeHtml(m.name)} (${escapeHtml(roleName(m.role))})</option>`).join('');
+}
+
+function assigneeFilterOptions(team) {
+    const f = teamsView.filter.assignee;
+    return `<option value=""${f ? '' : ' selected'}>Everyone</option><option value="none"${f === 'none' ? ' selected' : ''}>Not assigned yet</option>` +
+        team.members.map(m => `<option value="${m.id}"${String(m.id) === f ? ' selected' : ''}>${escapeHtml(m.name)}</option>`).join('');
+}
+
+async function loadTeamTickets() {
+    const team = currentTeam();
+    const out = document.getElementById('team-tickets');
+    if (!team || !out) return;
+    const run = ++teamsView.run;
+    out.innerHTML = '<p class="home-status">Loading tickets…</p>';
+    const q = new URLSearchParams({ offset: teamsView.offset, limit: TEAM_PAGE_SIZE });
+    for (const [key, value] of Object.entries(teamsView.filter)) if (value) q.set(key, value);
+    try {
+        const data = await teamsFetch(`/api/teams/${team.id}/tickets?${q}`);
+        if (!data || run !== teamsView.run) return;
+        out.innerHTML = teamTicketsHtml(team, data);
+        const all = document.querySelector('#teams .team-select-all');
+        if (all) all.checked = false;
+    } catch (err) {
+        if (run === teamsView.run) out.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        console.error(err);
+    }
+}
+
+function teamTicketsHtml(team, data) {
+    if (!data.total) {
+        return `<p class="home-status">${teamsView.filter.assignee || teamsView.filter.kind || teamsView.filter.search
+            ? 'No tickets match.' : team.canManage ? 'This team has no tickets.' : 'No tickets are assigned to you yet.'}</p>`;
+    }
+    const manage = team.canManage;
+    const admin = currentAccess.admin;
+    const rows = data.tickets.map(t => {
+        const n = escapeHtml(t.number);
+        const summary = String(t.summary || '');
+        const family = t.family.size > 1
+            ? `${t.family.size.toLocaleString()} linked tickets` + (admin ? ` <button type="button" class="link-btn" data-family-find="${n}" title="Move this family to another team">Move…</button>` : '')
+            : 'On its own' + (admin ? ` <button type="button" class="link-btn" data-family-find="${n}" title="Move this ticket to another team">Move…</button>` : '');
+        return '<tr>' +
+            (manage ? `<td class="select-cell"><input type="checkbox" class="team-select" value="${n}" aria-label="Tick ${n}"></td>` : '') +
+            `<td class="ticket-cell"><button type="button" class="ticket-link" data-ticket="${n}" title="Open ${n}">${n}</button>${starButtonHtml(t.number)}</td>` +
+            `<td>${escapeHtml(t.type || '—')}</td>` +
+            `<td${summary.length > 100 ? ` title="${escapeHtml(summary)}"` : ''}>${escapeHtml(summary.length > 100 ? `${summary.slice(0, 97)}…` : summary || '—')}</td>` +
+            `<td>${escapeHtml(t.state || '—')}</td>` +
+            `<td>${family}</td>` +
+            `<td>${manage
+                ? `<select class="team-assign" data-number="${n}" aria-label="Who has ${n}">${assigneeOptions(team, t.assignee?.id ?? null)}</select>`
+                : escapeHtml(t.assignee?.name || 'Not assigned')}</td>` +
+            '</tr>';
+    }).join('');
+    const first = teamsView.offset + 1;
+    const last = teamsView.offset + data.tickets.length;
+    return `<div class="table-wrap"><table class="result-table"><thead><tr>` +
+        (manage ? '<th class="select-cell"></th>' : '') +
+        '<th>Ticket</th><th>Type</th><th>Summary</th><th>State</th><th>Family</th><th>Assigned to</th>' +
+        `</tr></thead><tbody>${rows}</tbody></table></div>` +
+        `<div class="team-pager"><span>${first.toLocaleString()}–${last.toLocaleString()} of ${data.total.toLocaleString()}</span>` +
+        `<button type="button" class="home-action" data-team-page="-1"${teamsView.offset ? '' : ' disabled'}>← Previous</button>` +
+        `<button type="button" class="home-action" data-team-page="1"${last < data.total ? '' : ' disabled'}>Next →</button></div>`;
+}
+
+async function assign(numbers, assigneeId) {
+    const data = await teamsFetch('/api/assignments', { method: 'PUT', body: JSON.stringify({ numbers, assigneeId }) });
+    if (!data) return false;
+    const team = currentTeam();
+    const who = assigneeId ? team?.members.find(m => m.id === assigneeId)?.name : null;
+    showToast(numbers.length === 1
+        ? `${numbers[0]} ${who ? `is now ${who}'s` : 'is not assigned now'}`
+        : `${data.changed.toLocaleString()} tickets ${who ? `given to ${who}` : 'unassigned'}`);
+    refreshTeamCounts();
+    return true;
+}
+
+// ---------------------------------------------------------------------
+// Admins: moving a family (all the tickets linked to each other) to another team
+// ---------------------------------------------------------------------
+
+function familyCardHtml() {
+    return `<section class="team-card"><h3>Move tickets to another team</h3>` +
+        `<p class="home-status">Tickets linked to each other (a parent incident and its children, a request and its tasks, an order, ` +
+        `a problem, a change and its incidents) are one family, and a family always belongs to one team. So moving a ticket moves its whole family.</p>` +
+        `<div class="team-filters"><label>Any ticket in the family <input type="search" id="family-find" placeholder="e.g. INC1813970"></label>` +
+        `<button type="button" class="home-action" data-family-lookup>Find its family</button></div>` +
+        `<div id="family-found"></div></section>`;
+}
+
+async function findFamily(number) {
+    const out = document.getElementById('family-found');
+    const input = document.getElementById('family-find');
+    if (number) input.value = number;
+    const wanted = input.value.trim();
+    if (!wanted) return;
+    out.innerHTML = '<p class="home-status">Looking…</p>';
+    input.closest('.team-card').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    try {
+        const data = await teamsFetch(`/api/ticket-families?number=${encodeURIComponent(wanted)}`);
+        if (!data) return;
+        const f = data.family;
+        const kinds = TEAM_KINDS.filter(([k]) => f.kinds[k]).map(([k, label]) => `${f.kinds[k].toLocaleString()} ${label.toLowerCase()}`).join(', ');
+        out.innerHTML = `<p>${f.size === 1 ? `<strong>${escapeHtml(f.number)}</strong> isn't linked to any other ticket` : `<strong>${f.size.toLocaleString()} linked tickets</strong> (${kinds})`}, ` +
+            `now with <strong>${escapeHtml(f.team?.name || 'no team')}</strong>.` +
+            (f.size > 1 ? ` Includes ${f.sample.map(escapeHtml).join(', ')}${f.size > f.sample.length ? ', …' : ''}.` : '') + '</p>' +
+            `<div class="team-filters"><label>Move to ${teamSelectHtml('id="family-move-to"', f.team?.id ?? null, false)}</label>` +
+            `<button type="button" class="home-action" data-family-move="${escapeHtml(f.id)}">Move ${f.size === 1 ? 'it' : `all ${f.size.toLocaleString()}`}</button></div>` +
+            `<p class="home-status">They become unassigned, for the new team's project manager to hand out.</p>`;
+    } catch (err) {
+        out.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+    }
+}
+
+async function moveFamily(familyId) {
+    const teamId = Number(document.getElementById('family-move-to').value);
+    const team = teamsView.data.teams.find(t => t.id === teamId);
+    try {
+        const data = await teamsFetch(`/api/ticket-families/${encodeURIComponent(familyId)}/team`, { method: 'PUT', body: JSON.stringify({ teamId }) });
+        if (!data) return;
+        document.getElementById('family-found').innerHTML = data.moved
+            ? `<p class="home-status">✓ Moved ${data.moved.toLocaleString()} ${data.moved === 1 ? 'ticket' : 'tickets'} to ${escapeHtml(team.name)}. ${escapeHtml(team.name)}'s project manager can now hand them out.</p>`
+            : `<p class="home-status">That family is already ${escapeHtml(team.name)}'s.</p>`;
+        await refreshTeamCounts();
+        loadTeamTickets();
+    } catch (err) {
+        showToast(err.message);
+    }
+}
+
+// ---------------------------------------------------------------------
+// Admins: people on no team, and changing anyone's team or role
+// ---------------------------------------------------------------------
+
+function peopleCardHtml(people) {
+    const rows = people.map(p => `<tr><td>${escapeHtml(p.name)}</td>` +
+        `<td>${teamSelectHtml(`data-person-team="${p.id}"`, teamsView.teamId, false)}</td>` +
+        `<td>${roleSelectHtml(`data-person-role="${p.id}"`, 'project_team')}</td>` +
+        `<td><button type="button" class="home-action" data-person-add="${p.id}">Add</button></td></tr>`).join('');
+    return `<section class="team-card"><h3>People on no team</h3>` +
+        (people.length
+            ? `<p class="home-status">They see no tickets until they're on a team and have tickets assigned.</p>` +
+              `<div class="table-wrap"><table class="result-table team-table"><thead><tr><th>Name</th><th>Team</th><th>Role</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
+            : '<p class="home-status">Everyone is on a team. (Admins and the warm-up account don\'t need one.)</p>') +
+        '</section>';
+}
+
+async function setMembership(userId, teamId, role) {
+    try {
+        const data = await teamsFetch(`/api/teams/members/${userId}`, { method: 'PUT', body: JSON.stringify({ teamId, role }) });
+        if (!data) return;
+        showToast('Saved');
+        await loadTeams();
+    } catch (err) {
+        showToast(err.message);
+        loadTeams();
+    }
+}
+
+// ---------------------------------------------------------------------
+// Clicks and changes anywhere in the Team tab
+// ---------------------------------------------------------------------
+
+document.getElementById('teams-view').addEventListener('click', e => {
+    const pick = e.target.closest('[data-team-pick]');
+    if (pick) {
+        teamsView.teamId = Number(pick.dataset.teamPick);
+        teamsView.filter = { assignee: '', kind: '', search: '' };
+        teamsView.offset = 0;
+        renderTeams();
+        return;
+    }
+    const show = e.target.closest('[data-team-show]');
+    if (show) {
+        teamsView.filter.assignee = show.dataset.teamShow;
+        teamsView.offset = 0;
+        const select = document.getElementById('team-filter-assignee');
+        if (select) select.value = teamsView.filter.assignee;
+        loadTeamTickets();
+        document.getElementById('team-tickets').closest('.team-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+    }
+    const page = e.target.closest('[data-team-page]');
+    if (page) {
+        teamsView.offset = Math.max(0, teamsView.offset + Number(page.dataset.teamPage) * TEAM_PAGE_SIZE);
+        loadTeamTickets();
+        return;
+    }
+    if (e.target.closest('[data-team-search]')) {
+        teamsView.filter.search = document.getElementById('team-filter-search').value.trim();
+        teamsView.offset = 0;
+        loadTeamTickets();
+        return;
+    }
+    if (e.target.closest('[data-team-bulk]')) {
+        const numbers = [...document.querySelectorAll('#team-tickets .team-select:checked')].map(b => b.value);
+        if (!numbers.length) { showToast('Tick some tickets first'); return; }
+        const to = document.getElementById('team-bulk-to').value;
+        assign(numbers, to ? Number(to) : null).then(ok => { if (ok) loadTeamTickets(); }).catch(err => showToast(err.message));
+        return;
+    }
+    const find = e.target.closest('[data-family-find]');
+    if (find) { findFamily(find.dataset.familyFind); return; }
+    if (e.target.closest('[data-family-lookup]')) { findFamily(); return; }
+    const move = e.target.closest('[data-family-move]');
+    if (move) { moveFamily(move.dataset.familyMove); return; }
+    const add = e.target.closest('[data-person-add]');
+    if (add) {
+        const id = add.dataset.personAdd;
+        const row = add.closest('tr');
+        setMembership(Number(id), Number(row.querySelector('[data-person-team]').value), row.querySelector('[data-person-role]').value);
+    }
+});
+
+document.getElementById('teams-view').addEventListener('change', e => {
+    const t = e.target;
+    if (t.classList.contains('team-assign')) {
+        const previous = [...t.options].find(o => o.defaultSelected)?.value ?? '';
+        assign([t.dataset.number], t.value ? Number(t.value) : null)
+            .then(() => { for (const o of t.options) o.defaultSelected = o.selected; })
+            .catch(err => { t.value = previous; showToast(err.message); });
+    } else if (t.id === 'team-filter-assignee' || t.id === 'team-filter-kind') {
+        teamsView.filter[t.id === 'team-filter-kind' ? 'kind' : 'assignee'] = t.value;
+        teamsView.offset = 0;
+        loadTeamTickets();
+    } else if (t.classList.contains('team-select-all')) {
+        for (const box of document.querySelectorAll('#team-tickets .team-select')) box.checked = t.checked;
+    } else if (t.dataset.memberRole) {
+        const row = t.closest('tr');
+        setMembership(Number(t.dataset.memberRole), Number(row.querySelector('[data-member-team]').value) || null, t.value);
+    } else if (t.dataset.memberTeam !== undefined) {
+        const row = t.closest('tr');
+        const name = row.cells[0].textContent.replace(/\s*you$/, '');
+        const leaving = t.value ? `move ${name} to ${t.options[t.selectedIndex].text}` : `take ${name} off the team`;
+        if (!confirm(`Do you want to ${leaving}? Their tickets stay with this team, unassigned, for its project manager to hand out.`)) {
+            t.value = String(teamsView.teamId);
+            return;
+        }
+        setMembership(Number(t.dataset.memberTeam), t.value ? Number(t.value) : null, row.querySelector('[data-member-role]').value);
+    }
+});
+
+document.getElementById('teams-view').addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    if (e.target.id === 'team-filter-search') document.querySelector('#teams [data-team-search]').click();
+    if (e.target.id === 'family-find') findFamily();
+});
+```
+
+<a id="b54"></a>
+### B.54 `CLAUDE.md`
+
+```markdown
+# OneTouch: teams, roles, and who works which tickets
+
+This file records how OneTouch's teams work today and which role **should**
+work which kinds of tickets. It's a working draft: today every ticket is
+assigned at random within its team, and the routing below is the proposal for
+replacing that.
+
+## How it works today (teams.mjs)
+
+- **Admins** (`ADMIN_USERNAMES` in `teams.mjs`: vperez, lvang, lbell) see every
+  ticket. They put people on teams, set roles, move families between teams,
+  and assign any ticket. They're the only ones who see the Metabase
+  dashboards, because those show every ticket and can't be filtered per person.
+- **Project manager**: sees every ticket of their team, assigns them to the
+  team's members, and sees each member's workload (Team tab).
+- **Process excellence** and **project team member**: see only the tickets
+  assigned to them.
+- People on no team, and the `warmup` service account, see no tickets.
+- There are six teams, named after Molson Coors beers: Coors Light, Miller Lite,
+  Coors Banquet, Blue Moon, Molson Canadian and Miller High Life. Each has one
+  project manager, one process excellence member, and 3–4 project team members
+  (the first members were placed at random).
+
+**Families decide teams.** Tickets linked to each other form one family: a
+parent incident and its children, a bundle request and its child requests, a
+request and its catalog tasks, an order (REQ), everything linked to one
+problem, and a change with the incident it fixes and the incidents it caused.
+A ticket can be in several of these, so everything linked together is one
+group (`ticket_families`), and the whole group belongs to one team. No family
+is ever split between two teams. Moving a ticket to another team moves its
+whole group, and those tickets become unassigned until the new team's project
+manager hands them out.
+
+**What people see is enforced on the server.** `restrictQuery` adds "ticket
+number is one of theirs" to every Cube query made for anyone who isn't an
+admin. That covers the AI assistant, ticket search, records, families, charts
+and their own dashboards. Approval records follow the ticket they approve.
+Never add a route that calls `runCubeQuery` directly with input from a person:
+use `req.runQuery`. The only direct calls are the first-start seeding and
+summaries for numbers that were already checked.
+
+**Two kinds of "assigned".** `assigned_to` and `assignment_group` in the
+ServiceNow export are who worked a ticket in ServiceNow. They have nothing to
+do with OneTouch's assignments (`ticket_assignments.assignee_id`), which decide
+who sees a ticket here.
+
+**First start.** When the `teams` table is empty, the server builds the teams
+from Cube. Families are dealt out biggest first to whichever team has the fewest
+tickets, so each team gets about 9,850 of the 59,125. Each ticket then goes to
+a random member of its team. "Random" is a hash of the ticket number, so every
+OneTouch server seeds identically. To seed again from scratch, run
+`TRUNCATE teams, team_members, ticket_families, ticket_assignments` in
+`onetouch_auth` and restart the app. **This throws away every assignment and
+membership change people made.**
+
+## Which role should work which tickets (proposal)
+
+The goal: project team members do the hands-on work, the project manager
+coordinates the tickets that are urgent, risky or blocked, and process
+excellence works on why tickets keep coming back, not on fixing each one.
+
+### Incidents (INC)
+
+| Kind of incident | Role | Why |
+| --- | --- | --- |
+| P3 / P4, no parent, no problem | Project team member | Routine restore-service work |
+| Child incidents of a parent | Whoever has the parent | One person works the whole fault; the children close with it |
+| Parent (master) incidents | Project team member, watched by the PM | Many users are affected; the PM keeps an eye on progress and updates |
+| P1 / P2, or `was_p1` | Project manager (coordinates), with a project team member doing the fix | Major incidents need one person running communications and escalation |
+| Linked to a problem (`problem` set) | Process excellence | Part of a root-cause investigation |
+| Reopened (`reopen_count` > 0) or passed around (`reassignment_count` ≥ 3) | Process excellence reviews; a project team member fixes | These are signs the process failed, not just the fix |
+| Caused by a change (`caused_by_change` set) | Process excellence, with whoever has the change | Feeds the review of that change |
+
+### Changes (CHG)
+
+| Kind of change | Role | Why |
+| --- | --- | --- |
+| Standard or low-risk normal changes | Project team member | They build and carry out the work |
+| High risk, production, or with a planned outage | Project manager owns scheduling and approval; a project team member does the work | Needs CAB, communications and a back-out plan |
+| Emergency changes | Project manager | Approved and run under time pressure |
+| Unsuccessful (`close_code` Unsuccessful) or failure code "Caused Incident" | Process excellence | Post-implementation review: why it failed and how to prevent it |
+| Raised to fix an incident (`incident` set) | Whoever has that incident | Keeps the fix with the person who knows the fault |
+
+### Requests (RITM), orders (REQ) and catalog tasks (SCTASK)
+
+| Kind of ticket | Role | Why |
+| --- | --- | --- |
+| Single catalog requests and their tasks | One project team member for the request and all its tasks | One owner from order to fulfilment |
+| Bundle requests and orders with many items | Project manager splits the work, project team members fulfil it | Many people may be involved |
+| Waiting on approval (`ritm_approvals` / `change_approvals` still open) | Project manager | Chasing approvers is coordination work |
+| Tasks breaching SLA (`sla_flag`) | Project manager re-prioritises; the assignee keeps it | Visible to the PM before it's late |
+| High-volume catalog items | Process excellence | Candidates for automation or a simpler form |
+
+### Problems (the problem families)
+
+Process excellence leads the root-cause work. The project team members who had
+the linked incidents and changes help as subject experts. The project manager
+makes sure the fix is scheduled (usually as a change).
+
+## Suggested next steps
+
+1. **Assign by family, not by ticket.** Replace the per-ticket random pick in
+   `seedTeams` so a family goes to one person (the parent's or request's
+   owner). Today a parent incident and its children can belong to different
+   people on the same team.
+2. **Route by the tables above.** Pick the role from fields already in the
+   export (priority, `was_p1`, `problem`, `reopen_count`, change `risk` /
+   `outage` / `close_code`, `sla_flag`). Within that role, give the ticket to
+   whoever has the fewest open tickets.
+3. **Let process excellence see the whole team (read-only).** Their work is
+   spotting patterns, which is hard when they only see their own tickets.
+4. **Decide what admins and project managers want to approve.** For example,
+   whether a project manager may take tickets from another team's family, or
+   only an admin.
+5. **New tickets.** The export is a frozen snapshot, so seeding once is enough.
+   If live data ever arrives, new tickets need adding to an existing family
+   (and so a team) when they're linked, or to the smallest team when they
+   aren't.
 ```
 
 ## Appendix C: images

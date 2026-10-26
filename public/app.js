@@ -85,11 +85,19 @@ window.addEventListener('hashchange', () => {
 // (their display name, or their username if they don't have one)
 let currentUserName = '';
 let currentUsername = '';
+// What this person may see and do (teams.mjs on the server):
+// { admin, role, roleName, team: { id, name }, tickets, note }
+const NO_ACCESS = { admin: false, role: null, roleName: null, team: null, tickets: 0, note: null };
+let currentAccess = NO_ACCESS;
 
 function setCurrentUser(user) {
     currentUserName = user ? (user.displayName || user.username || '') : '';
     currentUsername = user ? (user.username || '') : '';
     document.getElementById('user-name').textContent = currentUserName;
+    if (!user) currentAccess = NO_ACCESS;
+    else if (user.access) currentAccess = user.access;
+    // The Team tab: admins, and anyone on a team
+    document.getElementById('teams-tab').hidden = !(currentAccess.admin || currentAccess.team);
     renderGreetings();
     // Each person's home page opens on the search they used last
     if (currentUsername) setHomeMode(rememberedHomeMode());
@@ -147,6 +155,8 @@ async function signIn() {
         clearChat();
         setCurrentUser(data);
         showApp(true);
+        // What they may see, then their last chat (saved to their account)
+        loadCurrentUser().then(resumeLatestChat);
     } catch (err) {
         showLoginError('Could not reach the OneTouch server. Please try again.');
         console.error(err);
@@ -167,6 +177,7 @@ function signOut(message) {
     clearChat();
     setCurrentUser(null);
     resetHome();
+    resetTeams();
     resetCustomizing();
     showLoginError(typeof message === 'string' ? message : '');
     showApp(false);
@@ -289,8 +300,23 @@ async function loadChatHistory() {
     }
 }
 
-// Shows a saved chat's questions and answers, and Claude remembers it again
-async function openSavedChat(id) {
+// After a refresh or signing in: the chat they had last comes back, so
+// nothing is lost (New chat starts a fresh one; this one stays in the history)
+async function resumeLatestChat() {
+    if (!sessionTokenValue || document.querySelector('#chat-log .user-msg')) return;
+    try {
+        const response = await fetch(`${API_BASE}/api/chats`, { headers: authHeaders() });
+        if (!response.ok) return;
+        const { chats } = await response.json();
+        if (chats.length && !document.querySelector('#chat-log .user-msg')) await openSavedChat(chats[0].id, { quiet: true });
+    } catch (err) {
+        console.error('Could not reopen the last chat:', err);
+    }
+}
+
+// Shows a saved chat's questions and answers, and Claude remembers it again.
+// quiet: reopened by itself (after a refresh), so the cursor stays where it is.
+async function openSavedChat(id, { quiet = false } = {}) {
     try {
         const response = await fetch(`${API_BASE}/api/chats/${id}/open`, { method: 'POST', headers: authHeaders() });
         if (handleUnauthorized(response)) return;
@@ -302,8 +328,9 @@ async function openSavedChat(id) {
             const reply = entry.reply || {};
             showAnswer(entry.question, reply, reply.elapsedMs ? reply.elapsedMs / 1000 : null, { replay: true });
         }
-        document.getElementById('user-prompt').focus();
+        if (!quiet) document.getElementById('user-prompt').focus();
     } catch (err) {
+        if (quiet) return console.error(err);
         showToast(err.message);
         loadChatHistory();
         console.error(err);
@@ -348,6 +375,8 @@ function switchTab(viewName) {
     document.querySelectorAll('.view-panel').forEach(panel => panel.classList.toggle('active', panel.id === `${viewName}-view`));
     // The first time someone sees Dashboards: its tour (customize.js)
     if (viewName === 'dashboard') loadDashboards().then(() => maybeStartTour('dashboards'));
+    // The Team tab, fresh each time (assignments change)
+    if (viewName === 'teams') loadTeams();
     // Stars may have changed elsewhere (the chat, a dashboard, another computer)
     if (viewName === 'home') {
         if (homeMode === 'starred') showStarred();
@@ -464,11 +493,22 @@ async function buildDashboards() {
     try {
         const response = await fetch(`${API_BASE}/api/dashboards`, { headers: authHeaders() });
         if (handleUnauthorized(response)) return false;
-        const { dashboards, details = [] } = await response.json();
+        const { dashboards, details = [], restricted = false } = await response.json();
         for (const d of dashboards) dashboardPages.main.set(pageId(d.path), d);
         for (const d of details) dashboardPages.details.set(pageId(d.path), d);
         // Which team dashboards this person hid, and which one they had open
         await prefsReady;
+        if (restricted) {
+            // Metabase shows every ticket, so only admins get those dashboards;
+            // Ticket families and their own dashboards show only their tickets
+            document.getElementById('drawer-customize').hidden = true;
+            const last = rememberedDashboard();
+            if (last === 'families') { showFamilies(); return true; }
+            if (last.startsWith('my:') && showBoard(last.slice(3))) return true;
+            message.textContent = 'The Metabase team dashboards show every ticket, so only admins can open them. ' +
+                'Under ☰ Dashboards, Ticket families and your own dashboards show the tickets you can see.';
+            return true;
+        }
         if (!dashboards.length) {
             message.textContent = 'No team dashboards yet. Whoever runs this OneTouch server can create them with: ' +
                 'docker exec analytics_node_app node scripts/metabase-setup.mjs. You can still build your own under ☰ Dashboards.';
@@ -829,6 +869,9 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
             data.assumptions.map(a => `<li>${escapeHtml(a)}</li>`).join('') +
             `</ul></details>`;
     }
+
+    // Not an admin: which tickets the answer could see (teams.mjs)
+    if (data.visibility && !(data.explanation && data.allEmpty)) html += `<div class="result-visibility">👥 ${escapeHtml(data.visibility)}</div>`;
 
     // Star every ticket the answer lists, or all of one type
     html += starAllHtml(answerTicketNumbers(data));
@@ -1943,7 +1986,8 @@ function ticketDownloadHtml(tickets, title, columns = TICKET_COLUMNS) {
 
 // One ticket: its heading, a star, a link to its dashboard record, and every field it has
 function ticketCardHtml(t, record) {
-    const dashboardButton = RECORD_PAGES[t.kind]
+    // The Metabase record pages are for admins only (they show every ticket)
+    const dashboardButton = RECORD_PAGES[t.kind] && currentAccess.admin
         ? `<button type="button" class="home-action" data-open-dashboard="${escapeHtml(t.number)}">Open in Dashboards ↗</button>` : '';
     let html = `<div class="ticket-head">` +
         `<span class="ticket-type">${escapeHtml(t.type)}</span>` +
@@ -2660,8 +2704,6 @@ renderHomeLayout();
 renderMyDashboards();
 readSignInLink();
 showApp(Boolean(sessionTokenValue));
-loadCurrentUser();
 
-// A reload empties the chat on screen and starts a fresh one; the one
-// before it is under "Chat History"
-resetConversation();
+// A reload brings back the chat this person had last (it's saved to their account)
+if (sessionTokenValue) loadCurrentUser().then(resumeLatestChat);

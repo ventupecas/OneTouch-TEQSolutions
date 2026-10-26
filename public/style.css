@@ -368,6 +368,58 @@ body {
 
 /* HOME PAGE: the welcome sits in the page's top-left corner */
 #home-view { overflow-y: auto; }
+
+/* TEAM TAB (teams.js): teams, their people, and who has which ticket */
+#teams-view { overflow-y: auto; }
+.tab-btn[hidden] { display: none; }
+.teams > .home-status { max-width: 820px; }
+.team-picker { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 16px; }
+.team-pick {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding: 8px 14px;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    cursor: pointer;
+    font: inherit;
+}
+.team-pick:hover { background: var(--bg-primary); }
+.team-pick.active { border-color: var(--accent); background: var(--accent-softer); }
+.team-pick-name { font-weight: 700; }
+.team-pick-meta { font-size: 0.8rem; color: var(--text-2); }
+.team-card {
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+}
+.team-card h3 { margin: 0 0 6px; }
+.team-table td.num, .team-table th.num { text-align: right; }
+.team-table select, .team-filters select, .team-bulk select { max-width: 100%; }
+.team-you td { font-weight: 600; }
+.team-you-tag { font-size: 0.72rem; font-weight: 600; color: var(--accent-ink); background: var(--accent-soft); border-radius: 4px; padding: 1px 6px; }
+.team-unassigned td { color: var(--text-2); font-style: italic; }
+.team-filters, .team-bulk, .team-pager { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 8px 0; }
+.team-filters label { display: flex; align-items: center; gap: 6px; font-size: 0.87rem; }
+.team-filters input, .team-filters select, .team-bulk select, .team-table select, .result-table select.team-assign {
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel-bg);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.87rem;
+}
+.team-bulk { font-size: 0.87rem; }
+.team-pager { justify-content: flex-end; font-size: 0.87rem; color: var(--text-2); }
+.home-action:disabled { opacity: 0.5; cursor: default; }
+.link-btn { background: none; border: none; padding: 0; color: var(--link); cursor: pointer; font: inherit; text-decoration: underline; }
+.result-visibility { margin-top: 8px; font-size: 0.82rem; color: var(--text-2); }
 .home {
     width: 100%;
     max-width: 1400px;

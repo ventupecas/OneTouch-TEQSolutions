@@ -147,13 +147,15 @@ export function sanitizeScope(input) {
 
 // ---------------------------------------------------------------------
 // Results are cached: the data is a frozen export, so the same question
-// always has the same answer (a server restart empties the cache)
+// always has the same answer (a server restart empties the cache). Each
+// set of tickets someone may see (runQuery.scopeKey, teams.mjs) has its own.
 // ---------------------------------------------------------------------
 
 const CACHE_SIZE = 400;
 const cache = new Map();
 
-async function cached(key, work) {
+async function cached(runQuery, name, work) {
+  const key = `${runQuery.scopeKey ?? ''}|${name}`;
   if (cache.has(key)) {
     const hit = cache.get(key);
     cache.delete(key);
@@ -173,7 +175,7 @@ async function cached(key, work) {
 
 // The first and last day each ticket type has (for "last 30 days" and the date pickers)
 async function dataDays(cube, runQuery) {
-  return cached(`days:${cube}`, async () => {
+  return cached(runQuery, `days:${cube}`, async () => {
     const member = `${cube}.${CHART_SOURCES[cube].day}`;
     const ends = await Promise.all(['asc', 'desc'].map(direction => runQuery({
       dimensions: [member],
@@ -258,7 +260,7 @@ export async function chartData(input, runQuery, scopeInput) {
   const days = await dataDays(cube, runQuery);
 
   if (!chart.groupBy) {
-    const total = await cached(JSON.stringify(['total', cube, filters]), async () => {
+    const total = await cached(runQuery, JSON.stringify(['total', cube, filters]), async () => {
       const rows = await runQuery({ measures: [count], filters });
       return Number(rows[0]?.[count]) || 0;
     });
@@ -267,7 +269,7 @@ export async function chartData(input, runQuery, scopeInput) {
 
   const member = `${cube}.${chart.groupBy}`;
   const isTime = Boolean(CHART_SOURCES[cube].times[chart.groupBy]);
-  const groups = await cached(JSON.stringify(['groups', cube, chart.groupBy, filters]), async () => {
+  const groups = await cached(runQuery, JSON.stringify(['groups', cube, chart.groupBy, filters]), async () => {
     const rows = await runQuery({
       measures: [count],
       dimensions: [member],
@@ -330,7 +332,7 @@ export async function chartValues(source, field, runQuery) {
   if (!src || !src.fields[field]) throw new ChartError('That field cannot be used as a filter.');
   const member = `${source}.${field}`;
   const count = `${source}.count`;
-  return cached(JSON.stringify(['values', source, field]), async () => {
+  return cached(runQuery, JSON.stringify(['values', source, field]), async () => {
     const rows = await runQuery({ measures: [count], dimensions: [member], order: { [count]: 'desc' }, limit: 500 });
     return rows
       .map(r => ({ value: cleanValue(field, r[member]), count: Number(r[count]) || 0 }))
@@ -340,7 +342,7 @@ export async function chartValues(source, field, runQuery) {
 
 // Every team, across incidents, changes and catalog tasks, busiest first
 export async function teamValues(runQuery) {
-  return cached('teams', async () => {
+  return cached(runQuery, 'teams', async () => {
     const lists = await Promise.all(Object.entries(TEAM_FIELDS).map(([source, field]) => chartValues(source, field, runQuery)));
     const merged = new Map();
     for (const list of lists) for (const v of list) merged.set(v.value, (merged.get(v.value) || 0) + v.count);

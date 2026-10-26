@@ -68,6 +68,8 @@
             <nav class="tab-navigation">
                 <button class="tab-btn" data-tab="home" onclick="goHome()">🏠 Home</button>
                 <button class="tab-btn" data-tab="dashboard" onclick="switchTab('dashboard')">📈 Dashboards</button>
+                <!-- Admins and anyone on a team (teams.js) -->
+                <button class="tab-btn" data-tab="teams" id="teams-tab" onclick="switchTab('teams')" hidden>👥 Team</button>
             </nav>
         </div>
         <div class="header-right">
@@ -179,6 +181,11 @@
                     </section>
                 </div>
             </div>
+        </section>
+
+        <!-- TEAM: teams, their people and roles, and who has which ticket (teams.js) -->
+        <section id="teams-view" class="view-panel">
+            <div class="home teams" id="teams"></div>
         </section>
 
         <!-- DASHBOARD VIEW CONTAINER (METABASE, and each person's own dashboards) -->
@@ -488,6 +495,7 @@
     <script src="charts.js"></script>
     <script src="customize.js"></script>
     <script src="families.js"></script>
+    <script src="teams.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

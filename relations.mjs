@@ -322,7 +322,9 @@ async function countBy(cube, column, values, runQuery) {
 // can be grouped by issue.
 export async function ticketLinks(numbers, runQuery) {
   const wanted = [...new Set(numbers.map(n => String(n).toUpperCase()))].filter(n => TICKET_NUMBER.test(n)).slice(0, MAX_LINK_TICKETS);
-  const todo = wanted.filter(n => !linkCache.has(n));
+  // Family sizes count only the tickets this person may see (teams.mjs), so each set has its own entries
+  const cacheKey = n => `${runQuery.scopeKey ?? ''}|${n}`;
+  const todo = wanted.filter(n => !linkCache.has(cacheKey(n)));
   if (todo.length) {
     const of = prefix => todo.filter(n => prefixOf(n) === prefix);
     const uniq = list => [...new Set(list.filter(Boolean))];
@@ -387,11 +389,11 @@ export async function ticketLinks(numbers, runQuery) {
       found.set(t.number, { parent: t.request_item, families });
     }
     for (const n of todo) {
-      linkCache.set(n, found.get(n) || { parent: '', families: [] });
+      linkCache.set(cacheKey(n), found.get(n) || { parent: '', families: [] });
       if (linkCache.size > LINK_CACHE_SIZE) linkCache.delete(linkCache.keys().next().value);
     }
   }
-  return new Map(wanted.map(n => [n, linkCache.get(n)]));
+  return new Map(wanted.map(n => [n, linkCache.get(cacheKey(n))]));
 }
 
 // =====================================================================
@@ -450,14 +452,18 @@ async function buildFamilyList(kind, runQuery) {
   return list.filter(f => FAMILY_ANCHOR[kind].test(f.anchor)).sort((a, b) => (b.size - a.size) || b.anchor.localeCompare(a.anchor));
 }
 
+// One set of lists per set of tickets someone may see (runQuery.scopeKey, teams.mjs)
 const familyLists = new Map();
+const FAMILY_LISTS_KEPT = 600;
 export function familyList(kind, runQuery) {
-  if (!familyLists.has(kind)) {
+  const key = `${runQuery.scopeKey ?? ''}|${kind}`;
+  if (!familyLists.has(key)) {
     const pending = buildFamilyList(kind, runQuery);
-    familyLists.set(kind, pending);
-    pending.catch(() => familyLists.delete(kind));
+    familyLists.set(key, pending);
+    if (familyLists.size > FAMILY_LISTS_KEPT) familyLists.delete(familyLists.keys().next().value);
+    pending.catch(() => familyLists.delete(key));
   }
-  return familyLists.get(kind);
+  return familyLists.get(key);
 }
 
 // For the page's tabs: per kind, how many families and how many tickets they hold
