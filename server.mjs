@@ -21,6 +21,7 @@ import { relatedFamilies, describeFamilies, ticketLinks, FAMILY_KINDS, LINK_KIND
 import * as prefs from './prefs.mjs';
 import { chartData, chartValues, chartCatalog, chartTickets, chartFromQuery, teamValues, ChartError } from './charts.mjs';
 import * as shares from './shares.mjs';
+import * as chats from './chats.mjs';
 import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
 
 dotenv.config();
@@ -105,8 +106,9 @@ app.use(express.static('public'));
 // /api/query, /api/export and /api/conversation need a session
 // =====================================================================
 
-// Conversation memory per session token: { conversation, queue }. Kept in
-// RAM, so a server restart keeps people signed in but Claude forgets.
+// Conversation memory per session token: { conversation, queue, chatId,
+// transcript }. Kept in RAM while in use; each chat is also saved to the
+// person's account after every answer (chats.mjs), so it can be reopened.
 const conversations = new Map();
 
 // What Claude remembers for one signed-in session (see translateToQuery)
@@ -122,11 +124,38 @@ function conversationState(token) {
   let state = conversations.get(token);
   if (!state) {
     // queue: questions in one session run one at a time
-    state = { conversation: newConversation(), queue: Promise.resolve(), lastUsed: Date.now() };
+    // chatId: this chat's saved row (null until its first answer is saved);
+    // transcript: what the page showed for each question, to draw it again
+    state = { conversation: newConversation(), queue: Promise.resolve(), lastUsed: Date.now(), chatId: null, transcript: [] };
     conversations.set(token, state);
   }
   state.lastUsed = Date.now();
   return state;
+}
+
+// Runs after everything already queued for this session (questions run one
+// at a time), so a chat can't change under an answer that's still coming
+function queued(session, work) {
+  const run = session.queue.then(work);
+  session.queue = run.catch(() => {});
+  return run;
+}
+
+// Saves the session's chat as it is now; a failure only costs the history
+async function saveSessionChat(session, user) {
+  if (!session.transcript.length) return;
+  try {
+    session.chatId = await chats.saveChat(user.id, session.chatId, { conversation: session.conversation, transcript: session.transcript });
+  } catch (error) {
+    console.error('💬 Could not save the chat:', error.message);
+  }
+}
+
+// A fresh, unsaved chat (the one before it stays in the history)
+function startNewChat(session) {
+  session.conversation = newConversation();
+  session.chatId = null;
+  session.transcript = [];
 }
 
 // Per-address brake on wrong passwords, on top of the per-account lockout in
@@ -228,7 +257,7 @@ async function requireLogin(req, res, next) {
   next();
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats'], requireLogin);
 
 // Who is signed in (the page shows their display name)
 app.get('/api/me', (req, res) => {
@@ -252,13 +281,81 @@ app.get('/api/dashboards', (_req, res) => {
   }
 });
 
-// "New chat": Claude forgets this session's conversation
-app.post('/api/conversation/reset', (req, res) => {
+// "New chat": a fresh conversation; the old one stays in the history.
+// { delete: true } ("Delete chat") also removes the old one from the history.
+app.post('/api/conversation/reset', async (req, res) => {
+  const session = req.session;
   // Queued behind any question still running, so its answer can't land in the new conversation
-  req.session.queue = req.session.queue.then(() => {
-    req.session.conversation = newConversation();
+  await queued(session, async () => {
+    if (req.body?.delete && session.chatId) {
+      await chats.deleteChat(req.user.id, session.chatId)
+        .catch(error => console.error('💬 Could not delete the chat:', error.message));
+    }
+    startNewChat(session);
   });
-  req.session.queue.then(() => res.json({ ok: true }));
+  res.json({ ok: true });
+});
+
+// =====================================================================
+// CHAT HISTORY: each person's saved chats (see chats.mjs)
+// =====================================================================
+
+const chatId = value => (/^\d{1,9}$/.test(String(value)) ? Number(value) : null);
+
+// Newest first; `current` marks the one this session is on
+app.get('/api/chats', async (req, res) => {
+  const session = req.session;
+  try {
+    const list = await queued(session, () => chats.listChats(req.user.id));
+    res.json({ chats: list.map(c => ({ ...c, current: c.id === session.chatId })) });
+  } catch (error) {
+    console.error('💬 Could not list the chats:', error.message);
+    res.status(503).json({ error: 'Could not load your chat history right now.' });
+  }
+});
+
+// Carries on a saved chat: Claude gets its memory back, and the page gets
+// each question with the answer it showed, to draw them again
+app.post('/api/chats/:id/open', async (req, res) => {
+  const id = chatId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'No such chat.' });
+  const session = req.session;
+  try {
+    const chat = await queued(session, async () => {
+      const found = await chats.getChat(req.user.id, id);
+      if (found) {
+        session.conversation = { ...newConversation(), ...found.conversation };
+        session.chatId = found.id;
+        session.transcript = found.transcript;
+      }
+      return found;
+    });
+    if (!chat) return res.status(404).json({ error: 'That chat was deleted.' });
+    console.log(`💬 ${req.user.username} reopened chat ${id} (${chat.transcript.length} questions)`);
+    res.json({ id: chat.id, title: chat.title, transcript: chat.transcript });
+  } catch (error) {
+    console.error('💬 Could not open the chat:', error.message);
+    res.status(503).json({ error: 'Could not open that chat right now.' });
+  }
+});
+
+// Removes a saved chat; if it's the one open, the session starts a fresh one
+app.delete('/api/chats/:id', async (req, res) => {
+  const id = chatId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'No such chat.' });
+  const session = req.session;
+  try {
+    const current = await queued(session, async () => {
+      await chats.deleteChat(req.user.id, id);
+      if (session.chatId !== id) return false;
+      startNewChat(session);
+      return true;
+    });
+    res.json({ ok: true, current });
+  } catch (error) {
+    console.error('💬 Could not delete the chat:', error.message);
+    res.status(503).json({ error: 'Could not delete that chat right now.' });
+  }
 });
 
 // Hourly housekeeping: expired sessions, idle conversations, old failure counts
@@ -469,9 +566,15 @@ app.post('/api/query', async (req, res) => {
   // can't interleave if the user sends a second one before the first returns
   const session = req.session;
   const reply = queryReply(req, res);
-  const run = session.queue.then(() => answerQuestion(session.conversation, userPrompt, reply, req.user));
-  session.queue = run.catch(() => {});
-  await run;
+  // What the page was sent, kept so the saved chat can show it again
+  let sent = null;
+  const recorded = { progress: reply.progress, send: (status, body) => { sent = body; return reply.send(status, body); } };
+  await queued(session, async () => {
+    await answerQuestion(session.conversation, userPrompt, recorded, req.user);
+    if (!sent) return;
+    session.transcript.push({ question: userPrompt, reply: sent, askedAt: new Date().toISOString() });
+    await saveSessionChat(session, req.user);
+  });
 });
 
 async function answerQuestion(conversation, userPrompt, reply, user) {
@@ -654,10 +757,11 @@ app.post('/api/tickets/related', async (req, res) => {
       // same conversation (not one started by "New chat" in the meantime)
       const session = req.session;
       const conversation = session.conversation;
-      session.queue = session.queue.then(() => {
+      queued(session, async () => {
         if (session.conversation !== conversation) return;
         const note = `Related tickets OneTouch showed the user under that answer: ${describeFamilies(families)}`;
         conversation.pendingNote = conversation.pendingNote ? `${conversation.pendingNote} ${note}` : note;
+        await saveSessionChat(session, req.user);
       });
     }
     res.json({ families });
@@ -1049,6 +1153,7 @@ async function prepareAccounts(attempt = 1) {
     await seen.ensureSeenSchema();
     await prefs.ensurePrefsSchema();
     await shares.ensureSharesSchema();
+    await chats.ensureChatsSchema();
   } catch (error) {
     const wait = Math.min(attempt * 2, 15);
     console.error(`🔐 Account database not reachable yet (${error.message}); retrying in ${wait}s`);
