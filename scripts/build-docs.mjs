@@ -36,7 +36,7 @@ const FILES = [
   'tickets.mjs', 'stars.mjs', 'scripts/share.mjs', 'scripts/warmup.mjs', 'scripts/warmup-questions.txt',
   'seen.mjs', 'relations.mjs',
   'prefs.mjs', 'charts.mjs', 'public/charts.js', 'public/customize.js', 'shares.mjs', 'public/families.js',
-  'scripts/signin-links.mjs', 'chats.mjs',
+  'scripts/signin-links.mjs', 'chats.mjs', 'teams.mjs', 'public/teams.js', 'CLAUDE.md',
 ];
 
 // Not copied in, and why (shown in the appendix)

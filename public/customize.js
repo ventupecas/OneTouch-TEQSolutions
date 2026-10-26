@@ -137,6 +137,16 @@ function resetCustomizing() {
     renderMyDashboards();
     document.getElementById('home-blocks').classList.add('waiting');
     dashboardsLoading = null; // the next person's dashboards open where they left them
+    // The team dashboards are admins only: none stay behind for whoever signs in next
+    dashboardPages.main.clear();
+    dashboardPages.details.clear();
+    currentMainDashboard = null;
+    document.getElementById('dashboard-picker').innerHTML = '';
+    document.getElementById('drawer-customize').hidden = false;
+    const frame = document.getElementById('dashboard-frame');
+    frame.hidden = true;
+    frame.src = 'about:blank';
+    document.getElementById('dashboard-message').textContent = 'Loading dashboards…';
 }
 
 // ---------------------------------------------------------------------
