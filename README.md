@@ -283,8 +283,11 @@ person can change it with **✏️ Customize Home**.
   the questions asked, e.g. **Open chat (3)**.
 - **🗑 Delete chat**, in the card and at the top of the chat, deletes the conversation. It
   asks first, then the questions and answers disappear, the assistant forgets the
-  conversation, and the chat closes ("Chat deleted"). An answer still on its way is
-  dropped. **New chat**, next to **Ask Claude**, does the same but keeps the chat open.
+  conversation, it leaves **Earlier chats**, and the chat closes ("Chat deleted"). An
+  answer still on its way is dropped. **New chat**, next to **Ask Claude**, starts a fresh
+  chat and keeps the old one under **Earlier chats**.
+- **🕘 Earlier chats**, at the top of the chat, lists your saved chats, newest first. Click
+  one to see its questions and answers again and carry on asking follow-ups; 🗑 deletes it.
 - **Minimize** (or Escape) closes the chat and keeps the conversation.
 
 **Ticket results** is every ticket the AI assistant has shown you, newest first. When an
@@ -947,12 +950,16 @@ month", "only the P1s", "what about last week", "show me the details of the firs
 Claude keeps the earlier filters unless you change them, and the assumptions say what
 was carried over.
 
-- **New chat** clears the screen and makes Claude forget the conversation.
+- **New chat** clears the screen and starts a fresh conversation.
 - **Reloading the page** does the same.
 - After **40 questions**, Claude starts fresh automatically, and a note says "This
   conversation got long, so Claude started fresh."
-- Memory lives in the server's RAM: a server restart keeps you signed in but Claude
-  forgets. Idle conversations are dropped after 12 hours.
+- **Every chat is saved** to your account after each answer (`chats.mjs`, the
+  `saved_chats` table in `onetouch_auth`): its questions, the answers as the page showed
+  them, and Claude's memory of it. So New chat, a reload, signing out or a server restart
+  never loses it: open it again from **🕘 Earlier chats** and Claude remembers it. Each
+  person keeps their 50 most recent chats; in a chat over 4 MB, the oldest answers' tables
+  are dropped (their text stays, and a note says to ask again).
 
 ### Errors you might see
 
@@ -1972,6 +1979,7 @@ Create each file at the path shown, with exactly this content. Files are in the 
 - [B.48 `shares.mjs`](#b48)
 - [B.49 `public/families.js`](#b49)
 - [B.50 `scripts/signin-links.mjs`](#b50)
+- [B.51 `chats.mjs`](#b51)
 
 <a id="b1"></a>
 ### B.1 `.gitignore`
@@ -5883,6 +5891,7 @@ import { relatedFamilies, describeFamilies, ticketLinks, FAMILY_KINDS, LINK_KIND
 import * as prefs from './prefs.mjs';
 import { chartData, chartValues, chartCatalog, chartTickets, chartFromQuery, teamValues, ChartError } from './charts.mjs';
 import * as shares from './shares.mjs';
+import * as chats from './chats.mjs';
 import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
 
 dotenv.config();
@@ -5967,8 +5976,9 @@ app.use(express.static('public'));
 // /api/query, /api/export and /api/conversation need a session
 // =====================================================================
 
-// Conversation memory per session token: { conversation, queue }. Kept in
-// RAM, so a server restart keeps people signed in but Claude forgets.
+// Conversation memory per session token: { conversation, queue, chatId,
+// transcript }. Kept in RAM while in use; each chat is also saved to the
+// person's account after every answer (chats.mjs), so it can be reopened.
 const conversations = new Map();
 
 // What Claude remembers for one signed-in session (see translateToQuery)
@@ -5984,11 +5994,38 @@ function conversationState(token) {
   let state = conversations.get(token);
   if (!state) {
     // queue: questions in one session run one at a time
-    state = { conversation: newConversation(), queue: Promise.resolve(), lastUsed: Date.now() };
+    // chatId: this chat's saved row (null until its first answer is saved);
+    // transcript: what the page showed for each question, to draw it again
+    state = { conversation: newConversation(), queue: Promise.resolve(), lastUsed: Date.now(), chatId: null, transcript: [] };
     conversations.set(token, state);
   }
   state.lastUsed = Date.now();
   return state;
+}
+
+// Runs after everything already queued for this session (questions run one
+// at a time), so a chat can't change under an answer that's still coming
+function queued(session, work) {
+  const run = session.queue.then(work);
+  session.queue = run.catch(() => {});
+  return run;
+}
+
+// Saves the session's chat as it is now; a failure only costs the history
+async function saveSessionChat(session, user) {
+  if (!session.transcript.length) return;
+  try {
+    session.chatId = await chats.saveChat(user.id, session.chatId, { conversation: session.conversation, transcript: session.transcript });
+  } catch (error) {
+    console.error('💬 Could not save the chat:', error.message);
+  }
+}
+
+// A fresh, unsaved chat (the one before it stays in the history)
+function startNewChat(session) {
+  session.conversation = newConversation();
+  session.chatId = null;
+  session.transcript = [];
 }
 
 // Per-address brake on wrong passwords, on top of the per-account lockout in
@@ -6090,7 +6127,7 @@ async function requireLogin(req, res, next) {
   next();
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats'], requireLogin);
 
 // Who is signed in (the page shows their display name)
 app.get('/api/me', (req, res) => {
@@ -6114,13 +6151,81 @@ app.get('/api/dashboards', (_req, res) => {
   }
 });
 
-// "New chat": Claude forgets this session's conversation
-app.post('/api/conversation/reset', (req, res) => {
+// "New chat": a fresh conversation; the old one stays in the history.
+// { delete: true } ("Delete chat") also removes the old one from the history.
+app.post('/api/conversation/reset', async (req, res) => {
+  const session = req.session;
   // Queued behind any question still running, so its answer can't land in the new conversation
-  req.session.queue = req.session.queue.then(() => {
-    req.session.conversation = newConversation();
+  await queued(session, async () => {
+    if (req.body?.delete && session.chatId) {
+      await chats.deleteChat(req.user.id, session.chatId)
+        .catch(error => console.error('💬 Could not delete the chat:', error.message));
+    }
+    startNewChat(session);
   });
-  req.session.queue.then(() => res.json({ ok: true }));
+  res.json({ ok: true });
+});
+
+// =====================================================================
+// CHAT HISTORY: each person's saved chats (see chats.mjs)
+// =====================================================================
+
+const chatId = value => (/^\d{1,9}$/.test(String(value)) ? Number(value) : null);
+
+// Newest first; `current` marks the one this session is on
+app.get('/api/chats', async (req, res) => {
+  const session = req.session;
+  try {
+    const list = await queued(session, () => chats.listChats(req.user.id));
+    res.json({ chats: list.map(c => ({ ...c, current: c.id === session.chatId })) });
+  } catch (error) {
+    console.error('💬 Could not list the chats:', error.message);
+    res.status(503).json({ error: 'Could not load your earlier chats right now.' });
+  }
+});
+
+// Carries on a saved chat: Claude gets its memory back, and the page gets
+// each question with the answer it showed, to draw them again
+app.post('/api/chats/:id/open', async (req, res) => {
+  const id = chatId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'No such chat.' });
+  const session = req.session;
+  try {
+    const chat = await queued(session, async () => {
+      const found = await chats.getChat(req.user.id, id);
+      if (found) {
+        session.conversation = { ...newConversation(), ...found.conversation };
+        session.chatId = found.id;
+        session.transcript = found.transcript;
+      }
+      return found;
+    });
+    if (!chat) return res.status(404).json({ error: 'That chat was deleted.' });
+    console.log(`💬 ${req.user.username} reopened chat ${id} (${chat.transcript.length} questions)`);
+    res.json({ id: chat.id, title: chat.title, transcript: chat.transcript });
+  } catch (error) {
+    console.error('💬 Could not open the chat:', error.message);
+    res.status(503).json({ error: 'Could not open that chat right now.' });
+  }
+});
+
+// Removes a saved chat; if it's the one open, the session starts a fresh one
+app.delete('/api/chats/:id', async (req, res) => {
+  const id = chatId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'No such chat.' });
+  const session = req.session;
+  try {
+    const current = await queued(session, async () => {
+      await chats.deleteChat(req.user.id, id);
+      if (session.chatId !== id) return false;
+      startNewChat(session);
+      return true;
+    });
+    res.json({ ok: true, current });
+  } catch (error) {
+    console.error('💬 Could not delete the chat:', error.message);
+    res.status(503).json({ error: 'Could not delete that chat right now.' });
+  }
 });
 
 // Hourly housekeeping: expired sessions, idle conversations, old failure counts
@@ -6331,9 +6436,15 @@ app.post('/api/query', async (req, res) => {
   // can't interleave if the user sends a second one before the first returns
   const session = req.session;
   const reply = queryReply(req, res);
-  const run = session.queue.then(() => answerQuestion(session.conversation, userPrompt, reply, req.user));
-  session.queue = run.catch(() => {});
-  await run;
+  // What the page was sent, kept so the saved chat can show it again
+  let sent = null;
+  const recorded = { progress: reply.progress, send: (status, body) => { sent = body; return reply.send(status, body); } };
+  await queued(session, async () => {
+    await answerQuestion(session.conversation, userPrompt, recorded, req.user);
+    if (!sent) return;
+    session.transcript.push({ question: userPrompt, reply: sent, askedAt: new Date().toISOString() });
+    await saveSessionChat(session, req.user);
+  });
 });
 
 async function answerQuestion(conversation, userPrompt, reply, user) {
@@ -6516,10 +6627,11 @@ app.post('/api/tickets/related', async (req, res) => {
       // same conversation (not one started by "New chat" in the meantime)
       const session = req.session;
       const conversation = session.conversation;
-      session.queue = session.queue.then(() => {
+      queued(session, async () => {
         if (session.conversation !== conversation) return;
         const note = `Related tickets OneTouch showed the user under that answer: ${describeFamilies(families)}`;
         conversation.pendingNote = conversation.pendingNote ? `${conversation.pendingNote} ${note}` : note;
+        await saveSessionChat(session, req.user);
       });
     }
     res.json({ families });
@@ -6911,6 +7023,7 @@ async function prepareAccounts(attempt = 1) {
     await seen.ensureSeenSchema();
     await prefs.ensurePrefsSchema();
     await shares.ensureSharesSchema();
+    await chats.ensureChatsSchema();
   } catch (error) {
     const wait = Math.min(attempt * 2, 15);
     console.error(`🔐 Account database not reachable yet (${error.message}); retrying in ${wait}s`);
@@ -7245,18 +7358,27 @@ prepareAccounts();
             <div class="assistant-head">
                 <span class="assistant-title">💬 AI Assistant</span>
                 <div class="assistant-head-actions">
-                    <button type="button" class="assistant-delete" onclick="deleteChat()" title="Delete this conversation: its questions and answers disappear and the assistant forgets it">🗑 Delete chat</button>
+                    <button type="button" class="assistant-minimize" id="chat-history-btn" onclick="toggleChatHistory()" aria-expanded="false" aria-controls="chat-history" title="Your saved chats: open one to see it again and carry on where you left off">🕘 Earlier chats</button>
+                    <button type="button" class="assistant-delete" onclick="deleteChat()" title="Delete this conversation: its questions and answers disappear, it leaves Earlier chats, and the assistant forgets it">🗑 Delete chat</button>
                     <button type="button" class="assistant-minimize" onclick="toggleAssistant(false)" title="Close the chat (the conversation is kept; Open chat on Home brings it back)">Minimize ▴</button>
                 </div>
             </div>
             <div class="chat-container">
+                <!-- Earlier chats, over the conversation until one is opened -->
+                <div class="chat-history" id="chat-history" hidden>
+                    <div class="chat-history-head">
+                        <span>Earlier chats</span>
+                        <button type="button" class="drawer-close" onclick="toggleChatHistory(false)" aria-label="Close earlier chats">✕</button>
+                    </div>
+                    <div class="chat-history-list" id="chat-history-list"></div>
+                </div>
                 <div class="chat-messages" id="chat-log">
                     <div class="msg system-msg" id="welcome-msg">Hello!</div>
                 </div>
                 <div class="chat-input-area">
                     <input type="text" id="user-prompt" placeholder="Ask a data question..." onkeydown="if(event.key === 'Enter') sendPrompt()">
                     <button id="send-btn" onclick="sendPrompt()">Ask Claude</button>
-                    <button id="new-chat-btn" type="button" onclick="newChat()" title="Start over: Claude forgets this conversation">New chat</button>
+                    <button id="new-chat-btn" type="button" onclick="newChat()" title="Start a fresh chat (this one is kept under Earlier chats)">New chat</button>
                 </div>
             </div>
         </section>
@@ -7732,6 +7854,7 @@ body {
 .assistant-delete { color: var(--danger); }
 .assistant-delete:hover { background: var(--danger-soft); border-color: var(--danger-line); }
 .assistant-panel .chat-container {
+    position: relative;
     flex: 1;
     min-height: 0;
     max-width: none;
@@ -7740,6 +7863,61 @@ body {
     border: none;
     border-radius: 0;
 }
+.assistant-minimize[aria-expanded="true"] { background: var(--accent-soft); border-color: var(--accent); }
+
+/* Earlier chats: a list over the conversation */
+.chat-history {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    background: var(--panel-bg);
+}
+.chat-history[hidden] { display: none; }
+.chat-history-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    font-weight: 700;
+}
+.chat-history-list { flex: 1; overflow-y: auto; padding: 12px 20px; }
+.chat-history-item {
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 8px;
+}
+.chat-history-item.current { border-color: var(--accent); background: var(--accent-softer); }
+.chat-history-open {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 10px 12px;
+    background: transparent;
+    border: none;
+    text-align: left;
+    color: var(--text);
+    cursor: pointer;
+    font: inherit;
+}
+.chat-history-open:hover { background: var(--bg-primary); }
+.chat-history-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-history-meta { font-size: 0.82rem; color: var(--text-2); }
+.chat-history-delete {
+    background: transparent;
+    border: none;
+    padding: 0 12px;
+    color: var(--danger);
+    cursor: pointer;
+}
+.chat-history-delete:hover { background: var(--danger-soft); }
 
 @media (max-width: 900px) {
     .app-header { padding: 10px 16px; }
@@ -9613,8 +9791,10 @@ function handleUnauthorized(response) {
 
 // =====================================================================
 // CONVERSATION MEMORY: the server keeps this session's questions and
-// Claude's answers, so follow-ups ("same but for changes") work.
-// "New chat" clears both the screen and Claude's memory.
+// Claude's answers, so follow-ups ("same but for changes") work, and saves
+// each chat to the person's account after every answer. "New chat" starts
+// a fresh one; the old one stays under "Earlier chats", where reopening it
+// shows its answers again and Claude remembers it.
 // =====================================================================
 
 const WELCOME_HTML = document.getElementById('chat-log').innerHTML;
@@ -9628,14 +9808,20 @@ function clearChat() {
     chatEpoch += 1;
     document.getElementById('chat-log').innerHTML = WELCOME_HTML;
     forgetRemovedExports();
+    toggleChatHistory(false);
     renderGreetings();
     updateChatControls();
 }
 
-async function resetConversation() {
+// remove: also delete the chat from the history ("Delete chat")
+async function resetConversation(remove = false) {
     if (!sessionTokenValue) return;
     try {
-        const response = await fetch(`${API_BASE}/api/conversation/reset`, { method: 'POST', headers: authHeaders() });
+        const response = await fetch(`${API_BASE}/api/conversation/reset`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ delete: remove }),
+        });
         handleUnauthorized(response);
     } catch (err) {
         console.error('Could not reset the conversation:', err);
@@ -9649,17 +9835,110 @@ async function newChat() {
 }
 
 // "Delete chat": after a confirmation, the questions and answers disappear,
-// Claude forgets the conversation, and the chat closes
+// Claude forgets the conversation, it leaves the history, and the chat closes
 async function deleteChat() {
     if (!document.querySelector('#chat-log .user-msg')) {
         toggleAssistant(false);
         return;
     }
-    if (!confirm('Delete this chat? Its questions and answers disappear, and the AI assistant forgets the conversation.')) return;
+    if (!confirm('Delete this chat? Its questions and answers disappear, it leaves your earlier chats, and the AI assistant forgets the conversation.')) return;
     clearChat();
     toggleAssistant(false);
-    await resetConversation();
+    await resetConversation(true);
     showToast('Chat deleted');
+}
+
+// ---------------------------------------------------------------------
+// EARLIER CHATS: the list over the chat, newest first. Opening one draws
+// its answers again and Claude carries on with it.
+// ---------------------------------------------------------------------
+
+function chatHistoryOpen() {
+    return !document.getElementById('chat-history').hidden;
+}
+
+function toggleChatHistory(open) {
+    const box = document.getElementById('chat-history');
+    const willOpen = typeof open === 'boolean' ? open : box.hidden;
+    box.hidden = !willOpen;
+    document.getElementById('chat-history-btn').setAttribute('aria-expanded', String(willOpen));
+    if (willOpen) loadChatHistory();
+}
+
+function formatChatWhen(iso) {
+    const d = new Date(iso);
+    const today = new Date();
+    const sameDay = d.toDateString() === today.toDateString();
+    return sameDay
+        ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+        : d.toLocaleDateString([], { month: 'short', day: 'numeric', year: d.getFullYear() === today.getFullYear() ? undefined : 'numeric' });
+}
+
+async function loadChatHistory() {
+    const list = document.getElementById('chat-history-list');
+    list.innerHTML = '<p class="home-status">Loading your earlier chats…</p>';
+    try {
+        const response = await fetch(`${API_BASE}/api/chats`, { headers: authHeaders() });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Could not load your earlier chats.');
+        if (!chatHistoryOpen()) return;
+        list.innerHTML = data.chats.length
+            ? data.chats.map(c => `
+                <div class="chat-history-item${c.current ? ' current' : ''}">
+                    <button type="button" class="chat-history-open" onclick="openSavedChat(${c.id})" title="${c.current ? 'This is the chat you have open' : 'Open this chat and carry on where you left off'}">
+                        <span class="chat-history-title">${escapeHtml(c.title)}</span>
+                        <span class="chat-history-meta">${c.current ? 'Open now · ' : ''}${c.questions} ${c.questions === 1 ? 'question' : 'questions'} · ${escapeHtml(formatChatWhen(c.updatedAt))}</span>
+                    </button>
+                    <button type="button" class="chat-history-delete" onclick="deleteSavedChat(${c.id})" title="Delete this chat" aria-label="Delete this chat">🗑</button>
+                </div>`).join('')
+            : '<p class="home-status">No earlier chats yet. Each chat is saved here after its first answer.</p>';
+    } catch (err) {
+        list.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        console.error(err);
+    }
+}
+
+// Shows a saved chat's questions and answers, and Claude remembers it again
+async function openSavedChat(id) {
+    try {
+        const response = await fetch(`${API_BASE}/api/chats/${id}/open`, { method: 'POST', headers: authHeaders() });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Could not open that chat.');
+        clearChat();
+        for (const entry of data.transcript) {
+            appendMessage('user-msg', escapeHtml(entry.question));
+            const reply = entry.reply || {};
+            showAnswer(entry.question, reply, reply.elapsedMs ? reply.elapsedMs / 1000 : null, { replay: true });
+        }
+        document.getElementById('user-prompt').focus();
+    } catch (err) {
+        showToast(err.message);
+        loadChatHistory();
+        console.error(err);
+    }
+}
+
+async function deleteSavedChat(id) {
+    if (!confirm('Delete this chat? It leaves your earlier chats and can\'t be brought back.')) return;
+    try {
+        const response = await fetch(`${API_BASE}/api/chats/${id}`, { method: 'DELETE', headers: authHeaders() });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Could not delete that chat.');
+        // The open chat was the one deleted: the screen starts over too
+        if (data.current) {
+            clearChat();
+            toggleChatHistory(true);
+        } else {
+            loadChatHistory();
+        }
+        showToast('Chat deleted');
+    } catch (err) {
+        showToast(err.message);
+        console.error(err);
+    }
 }
 
 // The logo and the name "OneTouch": back to Home from anywhere, closing
@@ -10056,6 +10335,7 @@ function toggleDashboardDrawer(open) {
 document.addEventListener('keydown', e => {
     if (e.key !== 'Escape' || document.querySelector('dialog[open]')) return;
     if (!document.getElementById('theme-panel').hidden) toggleThemePanel(false);
+    else if (assistantOpen() && chatHistoryOpen()) toggleChatHistory(false);
     else if (assistantOpen()) toggleAssistant(false);
     else if (document.getElementById('dashboard-drawer').classList.contains('open')) toggleDashboardDrawer(false);
 });
@@ -10070,7 +10350,7 @@ async function sendPrompt() {
     if (!userPromptText) return;
 
     // Append User message node to DOM bubble UI
-    appendMessage('user-msg', userPromptText);
+    appendMessage('user-msg', escapeHtml(userPromptText));
     inputField.value = '';
 
     // Shows each step while the answer is worked out, with a running clock
@@ -10094,82 +10374,7 @@ async function sendPrompt() {
         const seconds = progress.finish();
         if (epoch !== chatEpoch) return; // the chat was deleted or restarted meanwhile
 
-        if (data.memoryReset) {
-            appendMessage('system-msg', 'This conversation got long, so Claude started fresh. Earlier questions are no longer remembered.');
-        }
-
-        if (data.error) {
-            appendMessage('ai-msg', `❌ Error: ${escapeHtml(data.error)}`);
-            return;
-        }
-
-        // Clarification or unsupported question: show the explanation only
-        if (data.intent === 'clarify' || data.intent === 'unsupported') {
-            const message = data.message || 'I need a little more detail to run that.';
-            const download = downloadBarHtml(registerExport({ title: 'OneTouch answer', question: userPromptText, tables: buildExportTables(data, message) }));
-            appendMessage('ai-msg', `🙋 ${escapeHtml(message)}` + download + answerTimingHtml(seconds, data.fromCache));
-            return;
-        }
-
-        // Normal query: restate what was fetched, show the rows as a table,
-        // and tuck the assumptions into a collapsible note underneath
-        let html = `<div class="result-title">${escapeHtml(data.message || 'Here is what I found:')}</div>`;
-        // Nothing found anywhere: the server's explanation replaces the empty tables
-        const explanationHtml = data.explanation
-            ? `<div class="result-explanation">${escapeHtml(data.explanation)}</div>` : '';
-        let tablesHtml = '';
-        if (data.explanation && data.allEmpty) {
-            html += explanationHtml;
-        } else if (data.combined) {
-            // Counts across several ticket types: one table, one column per type
-            tablesHtml = renderCombined(data.combined);
-        } else if (data.sections && data.sections.length > 1) {
-            // Lists across several ticket types: one titled table per type
-            tablesHtml = data.sections.map(s =>
-                `<div class="section-title">${escapeHtml(capitalize(nounFor(s.entity, 2)))}</div>` +
-                renderResults(s.rows, s.entity)
-            ).join('');
-        } else {
-            tablesHtml = renderResults(data.results || [], data.entity);
-        }
-        // Counts by one thing can also be shown as a chart (and back)
-        const answer = { data, question: userPromptText, tablesHtml, view: 'table', model: tablesHtml ? answerChartModel(data, userPromptText) : null };
-        if (tablesHtml) html += (answer.model ? answerViewsHtml(answer.model, data.chartable) : '') + `<div class="answer-view">${tablesHtml}</div>`;
-        // Some ticket types found nothing: explain those under the tables
-        if (data.explanation && !data.allEmpty) html += explanationHtml;
-
-        if (data.assumptions && data.assumptions.length > 0) {
-            html += `<details class="assumptions"><summary>How I read your question</summary><ul>` +
-                data.assumptions.map(a => `<li>${escapeHtml(a)}</li>`).join('') +
-                `</ul></details>`;
-        }
-
-        // Star every ticket the answer lists, or all of one type
-        html += starAllHtml(answerTicketNumbers(data));
-
-        // Offer the same tables as a download in any of the export formats, and,
-        // while a chart is showing, a picture of it (also placed in PDF, Word and Excel)
-        const tables = buildExportTables(data);
-        if (tables.length) {
-            html += downloadBarHtml(registerExport({
-                title: data.message || 'One Touch results',
-                question: userPromptText,
-                tables,
-                picture: answer.model ? () => answerPicture(answer) : undefined,
-            }), 'Download as', { pictures: Boolean(answer.model) });
-        }
-
-        const answerId = appendMessage('ai-msg wide', html + answerTimingHtml(seconds, data.fromCache));
-        const answerEl = document.getElementById(answerId);
-        answerEl._answer = answer;
-        paintPictureOptions(answerEl);
-
-        // Parent / child tickets and others linked to the ones in this answer, under it
-        const primary = answerTicketNumbers(data);
-        if (primary.length) showRelated(answerEl, primary, true);
-
-        // The tickets in this answer pop up in Ticket results on Home
-        if (data.shownTickets && data.shownTickets.length) ticketsShown(data.shownTickets);
+        showAnswer(userPromptText, data, seconds);
 
     } catch (err) {
         progress.finish();
@@ -10177,6 +10382,90 @@ async function sendPrompt() {
         appendMessage('ai-msg', `❌ Could not reach the OneTouch server, or the answer was cut off. Please try again.`);
         console.error(err);
     }
+}
+
+// One answer in the chat. replay: drawn again from a saved chat, so it
+// doesn't tell Claude about related tickets again or add to Ticket results.
+function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
+    if (data.memoryReset) {
+        appendMessage('system-msg', 'This conversation got long, so Claude started fresh. Earlier questions are no longer remembered.');
+    }
+
+    if (data.error) {
+        appendMessage('ai-msg', `❌ Error: ${escapeHtml(data.error)}`);
+        return;
+    }
+
+    // Clarification or unsupported question: show the explanation only
+    if (data.intent === 'clarify' || data.intent === 'unsupported') {
+        const message = data.message || 'I need a little more detail to run that.';
+        const download = downloadBarHtml(registerExport({ title: 'OneTouch answer', question: userPromptText, tables: buildExportTables(data, message) }));
+        appendMessage('ai-msg', `🙋 ${escapeHtml(message)}` + download + answerTimingHtml(seconds, data.fromCache));
+        return;
+    }
+
+    // Normal query: restate what was fetched, show the rows as a table,
+    // and tuck the assumptions into a collapsible note underneath
+    let html = `<div class="result-title">${escapeHtml(data.message || 'Here is what I found:')}</div>`;
+    // Nothing found anywhere: the server's explanation replaces the empty tables
+    const explanationHtml = data.explanation
+        ? `<div class="result-explanation">${escapeHtml(data.explanation)}</div>` : '';
+    let tablesHtml = '';
+    if (data.rowsDropped) {
+        // A long saved chat keeps only its newer answers' tables (chats.mjs)
+        html += '<div class="result-explanation">This answer\'s tables were too large to keep in the chat history. Ask the question again to see them.</div>';
+    } else if (data.explanation && data.allEmpty) {
+        html += explanationHtml;
+    } else if (data.combined) {
+        // Counts across several ticket types: one table, one column per type
+        tablesHtml = renderCombined(data.combined);
+    } else if (data.sections && data.sections.length > 1) {
+        // Lists across several ticket types: one titled table per type
+        tablesHtml = data.sections.map(s =>
+            `<div class="section-title">${escapeHtml(capitalize(nounFor(s.entity, 2)))}</div>` +
+            renderResults(s.rows, s.entity)
+        ).join('');
+    } else {
+        tablesHtml = renderResults(data.results || [], data.entity);
+    }
+    // Counts by one thing can also be shown as a chart (and back)
+    const answer = { data, question: userPromptText, tablesHtml, view: 'table', model: tablesHtml ? answerChartModel(data, userPromptText) : null };
+    if (tablesHtml) html += (answer.model ? answerViewsHtml(answer.model, data.chartable) : '') + `<div class="answer-view">${tablesHtml}</div>`;
+    // Some ticket types found nothing: explain those under the tables
+    if (data.explanation && !data.allEmpty && !data.rowsDropped) html += explanationHtml;
+
+    if (data.assumptions && data.assumptions.length > 0) {
+        html += `<details class="assumptions"><summary>How I read your question</summary><ul>` +
+            data.assumptions.map(a => `<li>${escapeHtml(a)}</li>`).join('') +
+            `</ul></details>`;
+    }
+
+    // Star every ticket the answer lists, or all of one type
+    html += starAllHtml(answerTicketNumbers(data));
+
+    // Offer the same tables as a download in any of the export formats, and,
+    // while a chart is showing, a picture of it (also placed in PDF, Word and Excel)
+    const tables = data.rowsDropped ? [] : buildExportTables(data);
+    if (tables.length) {
+        html += downloadBarHtml(registerExport({
+            title: data.message || 'One Touch results',
+            question: userPromptText,
+            tables,
+            picture: answer.model ? () => answerPicture(answer) : undefined,
+        }), 'Download as', { pictures: Boolean(answer.model) });
+    }
+
+    const answerId = appendMessage('ai-msg wide', html + answerTimingHtml(seconds, data.fromCache));
+    const answerEl = document.getElementById(answerId);
+    answerEl._answer = answer;
+    paintPictureOptions(answerEl);
+
+    // Parent / child tickets and others linked to the ones in this answer, under it
+    const primary = answerTicketNumbers(data);
+    if (primary.length) showRelated(answerEl, primary, !replay);
+
+    // The tickets in this answer pop up in Ticket results on Home
+    if (!replay && data.shownTickets && data.shownTickets.length) ticketsShown(data.shownTickets);
 }
 
 // =====================================================================
@@ -10261,7 +10550,9 @@ async function readQueryResponse(response, onStep) {
 }
 
 // "Answered in 2.8 s", or for a repeated question "⚡ Answered in 0.2 s …"
+// (nothing for a saved answer whose time wasn't kept)
 function answerTimingHtml(seconds, fromCache) {
+    if (seconds == null) return '';
     const time = `${seconds.toFixed(1)} s`;
     return fromCache
         ? `<div class="result-timing">⚡ Answered in ${time}: this question was asked before, so the AI step was skipped</div>`
@@ -11981,7 +12272,8 @@ readSignInLink();
 showApp(Boolean(sessionTokenValue));
 loadCurrentUser();
 
-// A reload empties the chat on screen, so Claude forgets it too
+// A reload empties the chat on screen and starts a fresh one; the one
+// before it is under "Earlier chats"
 resetConversation();
 ```
 
@@ -14272,7 +14564,7 @@ const FILES = [
   'tickets.mjs', 'stars.mjs', 'scripts/share.mjs', 'scripts/warmup.mjs', 'scripts/warmup-questions.txt',
   'seen.mjs', 'relations.mjs',
   'prefs.mjs', 'charts.mjs', 'public/charts.js', 'public/customize.js', 'shares.mjs', 'public/families.js',
-  'scripts/signin-links.mjs',
+  'scripts/signin-links.mjs', 'chats.mjs',
 ];
 
 // Not copied in, and why (shown in the appendix)
@@ -19451,6 +19743,113 @@ for (const p of [...people, ...fromEnv]) {
   console.log(`${p.name} (username: ${p.username}, password: ${p.password}): ${link(p)}`);
 }
 console.error(`\n${people.length + fromEnv.length} links. Each one signs in as that person: send it to them only.`);
+```
+
+<a id="b51"></a>
+### B.51 `chats.mjs`
+
+```js
+// =====================================================================
+// SAVED CHATS: each person's AI assistant conversations, kept with their
+// account in the onetouch_auth database. A chat is saved after every
+// answer, so "New chat", a refresh, signing out or a server restart never
+// loses it; reopening one shows its answers again and gives Claude back
+// its memory of it, so follow-ups carry on where they left off.
+// =====================================================================
+
+import { pool } from './auth.mjs';
+
+// The most recently used are kept; older ones drop off
+export const MAX_CHATS = 50;
+// One chat's saved answers. Past this, the tables of its oldest answers are
+// dropped (the answer's text stays, and the page says to ask again).
+const MAX_TRANSCRIPT_BYTES = 4 * 1024 * 1024;
+const MAX_TITLE = 120;
+
+// Safe to run every start (after auth.ensureSchema, which creates users)
+export async function ensureChatsSchema() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS saved_chats (
+      id            serial PRIMARY KEY,
+      user_id       integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title         text NOT NULL,
+      conversation  jsonb NOT NULL,
+      transcript    jsonb NOT NULL,
+      created_at    timestamptz NOT NULL DEFAULT now(),
+      updated_at    timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS saved_chats_recent_idx ON saved_chats (user_id, updated_at DESC);
+  `);
+}
+
+// Newest first, without the contents
+export async function listChats(userId) {
+  const { rows } = await pool.query(
+    `SELECT id, title, jsonb_array_length(transcript) AS questions, created_at, updated_at
+       FROM saved_chats WHERE user_id = $1 ORDER BY updated_at DESC, id DESC`,
+    [userId]);
+  return rows.map(r => ({
+    id: r.id, title: r.title, questions: r.questions,
+    createdAt: r.created_at.toISOString(), updatedAt: r.updated_at.toISOString(),
+  }));
+}
+
+// -> { id, title, conversation, transcript } or null if it isn't this person's
+export async function getChat(userId, id) {
+  const { rows } = await pool.query(
+    'SELECT id, title, conversation, transcript FROM saved_chats WHERE user_id = $1 AND id = $2',
+    [userId, id]);
+  return rows[0] || null;
+}
+
+// Saves a chat as it is now. id null: a new chat. -> its id (a new one if
+// the old row was deleted meanwhile, e.g. from another tab)
+export async function saveChat(userId, id, { conversation, transcript }) {
+  const title = chatTitle(transcript);
+  const kept = JSON.stringify(fitTranscript(transcript));
+  const saved = JSON.stringify(conversation);
+  if (id) {
+    const { rowCount } = await pool.query(
+      `UPDATE saved_chats SET title = $3, conversation = $4, transcript = $5, updated_at = now()
+        WHERE user_id = $1 AND id = $2`,
+      [userId, id, title, saved, kept]);
+    if (rowCount) return id;
+  }
+  const { rows: [row] } = await pool.query(
+    'INSERT INTO saved_chats (user_id, title, conversation, transcript) VALUES ($1, $2, $3, $4) RETURNING id',
+    [userId, title, saved, kept]);
+  await pool.query(
+    `DELETE FROM saved_chats WHERE user_id = $1 AND id NOT IN (
+       SELECT id FROM saved_chats WHERE user_id = $1 ORDER BY updated_at DESC, id DESC LIMIT $2)`,
+    [userId, MAX_CHATS]);
+  return row.id;
+}
+
+export async function deleteChat(userId, id) {
+  await pool.query('DELETE FROM saved_chats WHERE user_id = $1 AND id = $2', [userId, id]);
+}
+
+// The chat's first question names it in the list
+function chatTitle(transcript) {
+  const first = String(transcript[0]?.question || 'Chat').replace(/\s+/g, ' ').trim();
+  return first.length > MAX_TITLE ? `${first.slice(0, MAX_TITLE - 1)}…` : first;
+}
+
+// Over the size cap, the oldest answers lose their tables first
+function fitTranscript(transcript) {
+  let size = JSON.stringify(transcript).length;
+  if (size <= MAX_TRANSCRIPT_BYTES) return transcript;
+  const fitted = transcript.map(entry => ({ ...entry }));
+  for (const entry of fitted) {
+    if (size <= MAX_TRANSCRIPT_BYTES) break;
+    const r = entry.reply;
+    if (!r || r.rowsDropped || !(r.results?.length || r.sections?.length || r.combined)) continue;
+    const before = JSON.stringify(r).length;
+    entry.reply = { ...r, results: [], sections: [], combined: null, chartable: null, rowsDropped: true };
+    size -= before - JSON.stringify(entry.reply).length;
+  }
+  return fitted;
+}
 ```
 
 ## Appendix C: images

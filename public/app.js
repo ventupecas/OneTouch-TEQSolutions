@@ -181,8 +181,10 @@ function handleUnauthorized(response) {
 
 // =====================================================================
 // CONVERSATION MEMORY: the server keeps this session's questions and
-// Claude's answers, so follow-ups ("same but for changes") work.
-// "New chat" clears both the screen and Claude's memory.
+// Claude's answers, so follow-ups ("same but for changes") work, and saves
+// each chat to the person's account after every answer. "New chat" starts
+// a fresh one; the old one stays under "Earlier chats", where reopening it
+// shows its answers again and Claude remembers it.
 // =====================================================================
 
 const WELCOME_HTML = document.getElementById('chat-log').innerHTML;
@@ -196,14 +198,20 @@ function clearChat() {
     chatEpoch += 1;
     document.getElementById('chat-log').innerHTML = WELCOME_HTML;
     forgetRemovedExports();
+    toggleChatHistory(false);
     renderGreetings();
     updateChatControls();
 }
 
-async function resetConversation() {
+// remove: also delete the chat from the history ("Delete chat")
+async function resetConversation(remove = false) {
     if (!sessionTokenValue) return;
     try {
-        const response = await fetch(`${API_BASE}/api/conversation/reset`, { method: 'POST', headers: authHeaders() });
+        const response = await fetch(`${API_BASE}/api/conversation/reset`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ delete: remove }),
+        });
         handleUnauthorized(response);
     } catch (err) {
         console.error('Could not reset the conversation:', err);
@@ -217,17 +225,110 @@ async function newChat() {
 }
 
 // "Delete chat": after a confirmation, the questions and answers disappear,
-// Claude forgets the conversation, and the chat closes
+// Claude forgets the conversation, it leaves the history, and the chat closes
 async function deleteChat() {
     if (!document.querySelector('#chat-log .user-msg')) {
         toggleAssistant(false);
         return;
     }
-    if (!confirm('Delete this chat? Its questions and answers disappear, and the AI assistant forgets the conversation.')) return;
+    if (!confirm('Delete this chat? Its questions and answers disappear, it leaves your earlier chats, and the AI assistant forgets the conversation.')) return;
     clearChat();
     toggleAssistant(false);
-    await resetConversation();
+    await resetConversation(true);
     showToast('Chat deleted');
+}
+
+// ---------------------------------------------------------------------
+// EARLIER CHATS: the list over the chat, newest first. Opening one draws
+// its answers again and Claude carries on with it.
+// ---------------------------------------------------------------------
+
+function chatHistoryOpen() {
+    return !document.getElementById('chat-history').hidden;
+}
+
+function toggleChatHistory(open) {
+    const box = document.getElementById('chat-history');
+    const willOpen = typeof open === 'boolean' ? open : box.hidden;
+    box.hidden = !willOpen;
+    document.getElementById('chat-history-btn').setAttribute('aria-expanded', String(willOpen));
+    if (willOpen) loadChatHistory();
+}
+
+function formatChatWhen(iso) {
+    const d = new Date(iso);
+    const today = new Date();
+    const sameDay = d.toDateString() === today.toDateString();
+    return sameDay
+        ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+        : d.toLocaleDateString([], { month: 'short', day: 'numeric', year: d.getFullYear() === today.getFullYear() ? undefined : 'numeric' });
+}
+
+async function loadChatHistory() {
+    const list = document.getElementById('chat-history-list');
+    list.innerHTML = '<p class="home-status">Loading your earlier chats…</p>';
+    try {
+        const response = await fetch(`${API_BASE}/api/chats`, { headers: authHeaders() });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Could not load your earlier chats.');
+        if (!chatHistoryOpen()) return;
+        list.innerHTML = data.chats.length
+            ? data.chats.map(c => `
+                <div class="chat-history-item${c.current ? ' current' : ''}">
+                    <button type="button" class="chat-history-open" onclick="openSavedChat(${c.id})" title="${c.current ? 'This is the chat you have open' : 'Open this chat and carry on where you left off'}">
+                        <span class="chat-history-title">${escapeHtml(c.title)}</span>
+                        <span class="chat-history-meta">${c.current ? 'Open now · ' : ''}${c.questions} ${c.questions === 1 ? 'question' : 'questions'} · ${escapeHtml(formatChatWhen(c.updatedAt))}</span>
+                    </button>
+                    <button type="button" class="chat-history-delete" onclick="deleteSavedChat(${c.id})" title="Delete this chat" aria-label="Delete this chat">🗑</button>
+                </div>`).join('')
+            : '<p class="home-status">No earlier chats yet. Each chat is saved here after its first answer.</p>';
+    } catch (err) {
+        list.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        console.error(err);
+    }
+}
+
+// Shows a saved chat's questions and answers, and Claude remembers it again
+async function openSavedChat(id) {
+    try {
+        const response = await fetch(`${API_BASE}/api/chats/${id}/open`, { method: 'POST', headers: authHeaders() });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Could not open that chat.');
+        clearChat();
+        for (const entry of data.transcript) {
+            appendMessage('user-msg', escapeHtml(entry.question));
+            const reply = entry.reply || {};
+            showAnswer(entry.question, reply, reply.elapsedMs ? reply.elapsedMs / 1000 : null, { replay: true });
+        }
+        document.getElementById('user-prompt').focus();
+    } catch (err) {
+        showToast(err.message);
+        loadChatHistory();
+        console.error(err);
+    }
+}
+
+async function deleteSavedChat(id) {
+    if (!confirm('Delete this chat? It leaves your earlier chats and can\'t be brought back.')) return;
+    try {
+        const response = await fetch(`${API_BASE}/api/chats/${id}`, { method: 'DELETE', headers: authHeaders() });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Could not delete that chat.');
+        // The open chat was the one deleted: the screen starts over too
+        if (data.current) {
+            clearChat();
+            toggleChatHistory(true);
+        } else {
+            loadChatHistory();
+        }
+        showToast('Chat deleted');
+    } catch (err) {
+        showToast(err.message);
+        console.error(err);
+    }
 }
 
 // The logo and the name "OneTouch": back to Home from anywhere, closing
@@ -624,6 +725,7 @@ function toggleDashboardDrawer(open) {
 document.addEventListener('keydown', e => {
     if (e.key !== 'Escape' || document.querySelector('dialog[open]')) return;
     if (!document.getElementById('theme-panel').hidden) toggleThemePanel(false);
+    else if (assistantOpen() && chatHistoryOpen()) toggleChatHistory(false);
     else if (assistantOpen()) toggleAssistant(false);
     else if (document.getElementById('dashboard-drawer').classList.contains('open')) toggleDashboardDrawer(false);
 });
@@ -638,7 +740,7 @@ async function sendPrompt() {
     if (!userPromptText) return;
 
     // Append User message node to DOM bubble UI
-    appendMessage('user-msg', userPromptText);
+    appendMessage('user-msg', escapeHtml(userPromptText));
     inputField.value = '';
 
     // Shows each step while the answer is worked out, with a running clock
@@ -662,82 +764,7 @@ async function sendPrompt() {
         const seconds = progress.finish();
         if (epoch !== chatEpoch) return; // the chat was deleted or restarted meanwhile
 
-        if (data.memoryReset) {
-            appendMessage('system-msg', 'This conversation got long, so Claude started fresh. Earlier questions are no longer remembered.');
-        }
-
-        if (data.error) {
-            appendMessage('ai-msg', `❌ Error: ${escapeHtml(data.error)}`);
-            return;
-        }
-
-        // Clarification or unsupported question: show the explanation only
-        if (data.intent === 'clarify' || data.intent === 'unsupported') {
-            const message = data.message || 'I need a little more detail to run that.';
-            const download = downloadBarHtml(registerExport({ title: 'OneTouch answer', question: userPromptText, tables: buildExportTables(data, message) }));
-            appendMessage('ai-msg', `🙋 ${escapeHtml(message)}` + download + answerTimingHtml(seconds, data.fromCache));
-            return;
-        }
-
-        // Normal query: restate what was fetched, show the rows as a table,
-        // and tuck the assumptions into a collapsible note underneath
-        let html = `<div class="result-title">${escapeHtml(data.message || 'Here is what I found:')}</div>`;
-        // Nothing found anywhere: the server's explanation replaces the empty tables
-        const explanationHtml = data.explanation
-            ? `<div class="result-explanation">${escapeHtml(data.explanation)}</div>` : '';
-        let tablesHtml = '';
-        if (data.explanation && data.allEmpty) {
-            html += explanationHtml;
-        } else if (data.combined) {
-            // Counts across several ticket types: one table, one column per type
-            tablesHtml = renderCombined(data.combined);
-        } else if (data.sections && data.sections.length > 1) {
-            // Lists across several ticket types: one titled table per type
-            tablesHtml = data.sections.map(s =>
-                `<div class="section-title">${escapeHtml(capitalize(nounFor(s.entity, 2)))}</div>` +
-                renderResults(s.rows, s.entity)
-            ).join('');
-        } else {
-            tablesHtml = renderResults(data.results || [], data.entity);
-        }
-        // Counts by one thing can also be shown as a chart (and back)
-        const answer = { data, question: userPromptText, tablesHtml, view: 'table', model: tablesHtml ? answerChartModel(data, userPromptText) : null };
-        if (tablesHtml) html += (answer.model ? answerViewsHtml(answer.model, data.chartable) : '') + `<div class="answer-view">${tablesHtml}</div>`;
-        // Some ticket types found nothing: explain those under the tables
-        if (data.explanation && !data.allEmpty) html += explanationHtml;
-
-        if (data.assumptions && data.assumptions.length > 0) {
-            html += `<details class="assumptions"><summary>How I read your question</summary><ul>` +
-                data.assumptions.map(a => `<li>${escapeHtml(a)}</li>`).join('') +
-                `</ul></details>`;
-        }
-
-        // Star every ticket the answer lists, or all of one type
-        html += starAllHtml(answerTicketNumbers(data));
-
-        // Offer the same tables as a download in any of the export formats, and,
-        // while a chart is showing, a picture of it (also placed in PDF, Word and Excel)
-        const tables = buildExportTables(data);
-        if (tables.length) {
-            html += downloadBarHtml(registerExport({
-                title: data.message || 'One Touch results',
-                question: userPromptText,
-                tables,
-                picture: answer.model ? () => answerPicture(answer) : undefined,
-            }), 'Download as', { pictures: Boolean(answer.model) });
-        }
-
-        const answerId = appendMessage('ai-msg wide', html + answerTimingHtml(seconds, data.fromCache));
-        const answerEl = document.getElementById(answerId);
-        answerEl._answer = answer;
-        paintPictureOptions(answerEl);
-
-        // Parent / child tickets and others linked to the ones in this answer, under it
-        const primary = answerTicketNumbers(data);
-        if (primary.length) showRelated(answerEl, primary, true);
-
-        // The tickets in this answer pop up in Ticket results on Home
-        if (data.shownTickets && data.shownTickets.length) ticketsShown(data.shownTickets);
+        showAnswer(userPromptText, data, seconds);
 
     } catch (err) {
         progress.finish();
@@ -745,6 +772,90 @@ async function sendPrompt() {
         appendMessage('ai-msg', `❌ Could not reach the OneTouch server, or the answer was cut off. Please try again.`);
         console.error(err);
     }
+}
+
+// One answer in the chat. replay: drawn again from a saved chat, so it
+// doesn't tell Claude about related tickets again or add to Ticket results.
+function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
+    if (data.memoryReset) {
+        appendMessage('system-msg', 'This conversation got long, so Claude started fresh. Earlier questions are no longer remembered.');
+    }
+
+    if (data.error) {
+        appendMessage('ai-msg', `❌ Error: ${escapeHtml(data.error)}`);
+        return;
+    }
+
+    // Clarification or unsupported question: show the explanation only
+    if (data.intent === 'clarify' || data.intent === 'unsupported') {
+        const message = data.message || 'I need a little more detail to run that.';
+        const download = downloadBarHtml(registerExport({ title: 'OneTouch answer', question: userPromptText, tables: buildExportTables(data, message) }));
+        appendMessage('ai-msg', `🙋 ${escapeHtml(message)}` + download + answerTimingHtml(seconds, data.fromCache));
+        return;
+    }
+
+    // Normal query: restate what was fetched, show the rows as a table,
+    // and tuck the assumptions into a collapsible note underneath
+    let html = `<div class="result-title">${escapeHtml(data.message || 'Here is what I found:')}</div>`;
+    // Nothing found anywhere: the server's explanation replaces the empty tables
+    const explanationHtml = data.explanation
+        ? `<div class="result-explanation">${escapeHtml(data.explanation)}</div>` : '';
+    let tablesHtml = '';
+    if (data.rowsDropped) {
+        // A long saved chat keeps only its newer answers' tables (chats.mjs)
+        html += '<div class="result-explanation">This answer\'s tables were too large to keep in the chat history. Ask the question again to see them.</div>';
+    } else if (data.explanation && data.allEmpty) {
+        html += explanationHtml;
+    } else if (data.combined) {
+        // Counts across several ticket types: one table, one column per type
+        tablesHtml = renderCombined(data.combined);
+    } else if (data.sections && data.sections.length > 1) {
+        // Lists across several ticket types: one titled table per type
+        tablesHtml = data.sections.map(s =>
+            `<div class="section-title">${escapeHtml(capitalize(nounFor(s.entity, 2)))}</div>` +
+            renderResults(s.rows, s.entity)
+        ).join('');
+    } else {
+        tablesHtml = renderResults(data.results || [], data.entity);
+    }
+    // Counts by one thing can also be shown as a chart (and back)
+    const answer = { data, question: userPromptText, tablesHtml, view: 'table', model: tablesHtml ? answerChartModel(data, userPromptText) : null };
+    if (tablesHtml) html += (answer.model ? answerViewsHtml(answer.model, data.chartable) : '') + `<div class="answer-view">${tablesHtml}</div>`;
+    // Some ticket types found nothing: explain those under the tables
+    if (data.explanation && !data.allEmpty && !data.rowsDropped) html += explanationHtml;
+
+    if (data.assumptions && data.assumptions.length > 0) {
+        html += `<details class="assumptions"><summary>How I read your question</summary><ul>` +
+            data.assumptions.map(a => `<li>${escapeHtml(a)}</li>`).join('') +
+            `</ul></details>`;
+    }
+
+    // Star every ticket the answer lists, or all of one type
+    html += starAllHtml(answerTicketNumbers(data));
+
+    // Offer the same tables as a download in any of the export formats, and,
+    // while a chart is showing, a picture of it (also placed in PDF, Word and Excel)
+    const tables = data.rowsDropped ? [] : buildExportTables(data);
+    if (tables.length) {
+        html += downloadBarHtml(registerExport({
+            title: data.message || 'One Touch results',
+            question: userPromptText,
+            tables,
+            picture: answer.model ? () => answerPicture(answer) : undefined,
+        }), 'Download as', { pictures: Boolean(answer.model) });
+    }
+
+    const answerId = appendMessage('ai-msg wide', html + answerTimingHtml(seconds, data.fromCache));
+    const answerEl = document.getElementById(answerId);
+    answerEl._answer = answer;
+    paintPictureOptions(answerEl);
+
+    // Parent / child tickets and others linked to the ones in this answer, under it
+    const primary = answerTicketNumbers(data);
+    if (primary.length) showRelated(answerEl, primary, !replay);
+
+    // The tickets in this answer pop up in Ticket results on Home
+    if (!replay && data.shownTickets && data.shownTickets.length) ticketsShown(data.shownTickets);
 }
 
 // =====================================================================
@@ -829,7 +940,9 @@ async function readQueryResponse(response, onStep) {
 }
 
 // "Answered in 2.8 s", or for a repeated question "⚡ Answered in 0.2 s …"
+// (nothing for a saved answer whose time wasn't kept)
 function answerTimingHtml(seconds, fromCache) {
+    if (seconds == null) return '';
     const time = `${seconds.toFixed(1)} s`;
     return fromCache
         ? `<div class="result-timing">⚡ Answered in ${time}: this question was asked before, so the AI step was skipped</div>`
@@ -2549,5 +2662,6 @@ readSignInLink();
 showApp(Boolean(sessionTokenValue));
 loadCurrentUser();
 
-// A reload empties the chat on screen, so Claude forgets it too
+// A reload empties the chat on screen and starts a fresh one; the one
+// before it is under "Earlier chats"
 resetConversation();
