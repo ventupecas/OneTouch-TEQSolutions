@@ -183,7 +183,7 @@ function handleUnauthorized(response) {
 // CONVERSATION MEMORY: the server keeps this session's questions and
 // Claude's answers, so follow-ups ("same but for changes") work, and saves
 // each chat to the person's account after every answer. "New chat" starts
-// a fresh one; the old one stays under "Earlier chats", where reopening it
+// a fresh one; the old one stays under "Chat History", where reopening it
 // shows its answers again and Claude remembers it.
 // =====================================================================
 
@@ -231,7 +231,7 @@ async function deleteChat() {
         toggleAssistant(false);
         return;
     }
-    if (!confirm('Delete this chat? Its questions and answers disappear, it leaves your earlier chats, and the AI assistant forgets the conversation.')) return;
+    if (!confirm('Delete this chat? Its questions and answers disappear, it leaves your chat history, and the AI assistant forgets the conversation.')) return;
     clearChat();
     toggleAssistant(false);
     await resetConversation(true);
@@ -239,7 +239,7 @@ async function deleteChat() {
 }
 
 // ---------------------------------------------------------------------
-// EARLIER CHATS: the list over the chat, newest first. Opening one draws
+// CHAT HISTORY: the list over the chat, newest first. Opening one draws
 // its answers again and Claude carries on with it.
 // ---------------------------------------------------------------------
 
@@ -266,12 +266,12 @@ function formatChatWhen(iso) {
 
 async function loadChatHistory() {
     const list = document.getElementById('chat-history-list');
-    list.innerHTML = '<p class="home-status">Loading your earlier chats…</p>';
+    list.innerHTML = '<p class="home-status">Loading your chat history…</p>';
     try {
         const response = await fetch(`${API_BASE}/api/chats`, { headers: authHeaders() });
         if (handleUnauthorized(response)) return;
         const data = await response.json();
-        if (!response.ok) throw new Error(data.error || 'Could not load your earlier chats.');
+        if (!response.ok) throw new Error(data.error || 'Could not load your chat history.');
         if (!chatHistoryOpen()) return;
         list.innerHTML = data.chats.length
             ? data.chats.map(c => `
@@ -282,7 +282,7 @@ async function loadChatHistory() {
                     </button>
                     <button type="button" class="chat-history-delete" onclick="deleteSavedChat(${c.id})" title="Delete this chat" aria-label="Delete this chat">🗑</button>
                 </div>`).join('')
-            : '<p class="home-status">No earlier chats yet. Each chat is saved here after its first answer.</p>';
+            : '<p class="home-status">No saved chats yet. Each chat is saved here after its first answer.</p>';
     } catch (err) {
         list.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
         console.error(err);
@@ -311,7 +311,7 @@ async function openSavedChat(id) {
 }
 
 async function deleteSavedChat(id) {
-    if (!confirm('Delete this chat? It leaves your earlier chats and can\'t be brought back.')) return;
+    if (!confirm('Delete this chat? It leaves your chat history and can\'t be brought back.')) return;
     try {
         const response = await fetch(`${API_BASE}/api/chats/${id}`, { method: 'DELETE', headers: authHeaders() });
         if (handleUnauthorized(response)) return;
@@ -2663,5 +2663,5 @@ showApp(Boolean(sessionTokenValue));
 loadCurrentUser();
 
 // A reload empties the chat on screen and starts a fresh one; the one
-// before it is under "Earlier chats"
+// before it is under "Chat History"
 resetConversation();

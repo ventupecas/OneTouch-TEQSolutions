@@ -300,17 +300,17 @@
             <div class="assistant-head">
                 <span class="assistant-title">💬 AI Assistant</span>
                 <div class="assistant-head-actions">
-                    <button type="button" class="assistant-minimize" id="chat-history-btn" onclick="toggleChatHistory()" aria-expanded="false" aria-controls="chat-history" title="Your saved chats: open one to see it again and carry on where you left off">🕘 Earlier chats</button>
-                    <button type="button" class="assistant-delete" onclick="deleteChat()" title="Delete this conversation: its questions and answers disappear, it leaves Earlier chats, and the assistant forgets it">🗑 Delete chat</button>
+                    <button type="button" class="assistant-minimize" id="chat-history-btn" onclick="toggleChatHistory()" aria-expanded="false" aria-controls="chat-history" title="Your saved chats: open one to see it again and carry on where you left off">Chat History</button>
+                    <button type="button" class="assistant-delete" onclick="deleteChat()" title="Delete this conversation: its questions and answers disappear, it leaves Chat History, and the assistant forgets it">🗑 Delete chat</button>
                     <button type="button" class="assistant-minimize" onclick="toggleAssistant(false)" title="Close the chat (the conversation is kept; Open chat on Home brings it back)">Minimize ▴</button>
                 </div>
             </div>
             <div class="chat-container">
-                <!-- Earlier chats, over the conversation until one is opened -->
+                <!-- Chat History, over the conversation until one is opened -->
                 <div class="chat-history" id="chat-history" hidden>
                     <div class="chat-history-head">
-                        <span>Earlier chats</span>
-                        <button type="button" class="drawer-close" onclick="toggleChatHistory(false)" aria-label="Close earlier chats">✕</button>
+                        <span>Chat History</span>
+                        <button type="button" class="drawer-close" onclick="toggleChatHistory(false)" aria-label="Close chat history">✕</button>
                     </div>
                     <div class="chat-history-list" id="chat-history-list"></div>
                 </div>
@@ -320,7 +320,7 @@
                 <div class="chat-input-area">
                     <input type="text" id="user-prompt" placeholder="Ask a data question..." onkeydown="if(event.key === 'Enter') sendPrompt()">
                     <button id="send-btn" onclick="sendPrompt()">Ask Claude</button>
-                    <button id="new-chat-btn" type="button" onclick="newChat()" title="Start a fresh chat (this one is kept under Earlier chats)">New chat</button>
+                    <button id="new-chat-btn" type="button" onclick="newChat()" title="Start a fresh chat (this one is kept under Chat History)">New chat</button>
                 </div>
             </div>
         </section>

@@ -308,7 +308,7 @@ body {
 }
 .assistant-minimize[aria-expanded="true"] { background: var(--accent-soft); border-color: var(--accent); }
 
-/* Earlier chats: a list over the conversation */
+/* Chat History: a list over the conversation */
 .chat-history {
     position: absolute;
     inset: 0;

@@ -283,10 +283,10 @@ person can change it with **✏️ Customize Home**.
   the questions asked, e.g. **Open chat (3)**.
 - **🗑 Delete chat**, in the card and at the top of the chat, deletes the conversation. It
   asks first, then the questions and answers disappear, the assistant forgets the
-  conversation, it leaves **Earlier chats**, and the chat closes ("Chat deleted"). An
+  conversation, it leaves **Chat History**, and the chat closes ("Chat deleted"). An
   answer still on its way is dropped. **New chat**, next to **Ask Claude**, starts a fresh
-  chat and keeps the old one under **Earlier chats**.
-- **🕘 Earlier chats**, at the top of the chat, lists your saved chats, newest first. Click
+  chat and keeps the old one under **Chat History**.
+- **Chat History**, at the top of the chat, lists your saved chats, newest first. Click
   one to see its questions and answers again and carry on asking follow-ups; 🗑 deletes it.
 - **Minimize** (or Escape) closes the chat and keeps the conversation.
 
@@ -957,7 +957,7 @@ was carried over.
 - **Every chat is saved** to your account after each answer (`chats.mjs`, the
   `saved_chats` table in `onetouch_auth`): its questions, the answers as the page showed
   them, and Claude's memory of it. So New chat, a reload, signing out or a server restart
-  never loses it: open it again from **🕘 Earlier chats** and Claude remembers it. Each
+  never loses it: open it again from **Chat History** and Claude remembers it. Each
   person keeps their 50 most recent chats; in a chat over 4 MB, the oldest answers' tables
   are dropped (their text stays, and a note says to ask again).
 
@@ -6180,7 +6180,7 @@ app.get('/api/chats', async (req, res) => {
     res.json({ chats: list.map(c => ({ ...c, current: c.id === session.chatId })) });
   } catch (error) {
     console.error('💬 Could not list the chats:', error.message);
-    res.status(503).json({ error: 'Could not load your earlier chats right now.' });
+    res.status(503).json({ error: 'Could not load your chat history right now.' });
   }
 });
 
@@ -7358,17 +7358,17 @@ prepareAccounts();
             <div class="assistant-head">
                 <span class="assistant-title">💬 AI Assistant</span>
                 <div class="assistant-head-actions">
-                    <button type="button" class="assistant-minimize" id="chat-history-btn" onclick="toggleChatHistory()" aria-expanded="false" aria-controls="chat-history" title="Your saved chats: open one to see it again and carry on where you left off">🕘 Earlier chats</button>
-                    <button type="button" class="assistant-delete" onclick="deleteChat()" title="Delete this conversation: its questions and answers disappear, it leaves Earlier chats, and the assistant forgets it">🗑 Delete chat</button>
+                    <button type="button" class="assistant-minimize" id="chat-history-btn" onclick="toggleChatHistory()" aria-expanded="false" aria-controls="chat-history" title="Your saved chats: open one to see it again and carry on where you left off">Chat History</button>
+                    <button type="button" class="assistant-delete" onclick="deleteChat()" title="Delete this conversation: its questions and answers disappear, it leaves Chat History, and the assistant forgets it">🗑 Delete chat</button>
                     <button type="button" class="assistant-minimize" onclick="toggleAssistant(false)" title="Close the chat (the conversation is kept; Open chat on Home brings it back)">Minimize ▴</button>
                 </div>
             </div>
             <div class="chat-container">
-                <!-- Earlier chats, over the conversation until one is opened -->
+                <!-- Chat History, over the conversation until one is opened -->
                 <div class="chat-history" id="chat-history" hidden>
                     <div class="chat-history-head">
-                        <span>Earlier chats</span>
-                        <button type="button" class="drawer-close" onclick="toggleChatHistory(false)" aria-label="Close earlier chats">✕</button>
+                        <span>Chat History</span>
+                        <button type="button" class="drawer-close" onclick="toggleChatHistory(false)" aria-label="Close chat history">✕</button>
                     </div>
                     <div class="chat-history-list" id="chat-history-list"></div>
                 </div>
@@ -7378,7 +7378,7 @@ prepareAccounts();
                 <div class="chat-input-area">
                     <input type="text" id="user-prompt" placeholder="Ask a data question..." onkeydown="if(event.key === 'Enter') sendPrompt()">
                     <button id="send-btn" onclick="sendPrompt()">Ask Claude</button>
-                    <button id="new-chat-btn" type="button" onclick="newChat()" title="Start a fresh chat (this one is kept under Earlier chats)">New chat</button>
+                    <button id="new-chat-btn" type="button" onclick="newChat()" title="Start a fresh chat (this one is kept under Chat History)">New chat</button>
                 </div>
             </div>
         </section>
@@ -7865,7 +7865,7 @@ body {
 }
 .assistant-minimize[aria-expanded="true"] { background: var(--accent-soft); border-color: var(--accent); }
 
-/* Earlier chats: a list over the conversation */
+/* Chat History: a list over the conversation */
 .chat-history {
     position: absolute;
     inset: 0;
@@ -9793,7 +9793,7 @@ function handleUnauthorized(response) {
 // CONVERSATION MEMORY: the server keeps this session's questions and
 // Claude's answers, so follow-ups ("same but for changes") work, and saves
 // each chat to the person's account after every answer. "New chat" starts
-// a fresh one; the old one stays under "Earlier chats", where reopening it
+// a fresh one; the old one stays under "Chat History", where reopening it
 // shows its answers again and Claude remembers it.
 // =====================================================================
 
@@ -9841,7 +9841,7 @@ async function deleteChat() {
         toggleAssistant(false);
         return;
     }
-    if (!confirm('Delete this chat? Its questions and answers disappear, it leaves your earlier chats, and the AI assistant forgets the conversation.')) return;
+    if (!confirm('Delete this chat? Its questions and answers disappear, it leaves your chat history, and the AI assistant forgets the conversation.')) return;
     clearChat();
     toggleAssistant(false);
     await resetConversation(true);
@@ -9849,7 +9849,7 @@ async function deleteChat() {
 }
 
 // ---------------------------------------------------------------------
-// EARLIER CHATS: the list over the chat, newest first. Opening one draws
+// CHAT HISTORY: the list over the chat, newest first. Opening one draws
 // its answers again and Claude carries on with it.
 // ---------------------------------------------------------------------
 
@@ -9876,12 +9876,12 @@ function formatChatWhen(iso) {
 
 async function loadChatHistory() {
     const list = document.getElementById('chat-history-list');
-    list.innerHTML = '<p class="home-status">Loading your earlier chats…</p>';
+    list.innerHTML = '<p class="home-status">Loading your chat history…</p>';
     try {
         const response = await fetch(`${API_BASE}/api/chats`, { headers: authHeaders() });
         if (handleUnauthorized(response)) return;
         const data = await response.json();
-        if (!response.ok) throw new Error(data.error || 'Could not load your earlier chats.');
+        if (!response.ok) throw new Error(data.error || 'Could not load your chat history.');
         if (!chatHistoryOpen()) return;
         list.innerHTML = data.chats.length
             ? data.chats.map(c => `
@@ -9892,7 +9892,7 @@ async function loadChatHistory() {
                     </button>
                     <button type="button" class="chat-history-delete" onclick="deleteSavedChat(${c.id})" title="Delete this chat" aria-label="Delete this chat">🗑</button>
                 </div>`).join('')
-            : '<p class="home-status">No earlier chats yet. Each chat is saved here after its first answer.</p>';
+            : '<p class="home-status">No saved chats yet. Each chat is saved here after its first answer.</p>';
     } catch (err) {
         list.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
         console.error(err);
@@ -9921,7 +9921,7 @@ async function openSavedChat(id) {
 }
 
 async function deleteSavedChat(id) {
-    if (!confirm('Delete this chat? It leaves your earlier chats and can\'t be brought back.')) return;
+    if (!confirm('Delete this chat? It leaves your chat history and can\'t be brought back.')) return;
     try {
         const response = await fetch(`${API_BASE}/api/chats/${id}`, { method: 'DELETE', headers: authHeaders() });
         if (handleUnauthorized(response)) return;
@@ -12273,7 +12273,7 @@ showApp(Boolean(sessionTokenValue));
 loadCurrentUser();
 
 // A reload empties the chat on screen and starts a fresh one; the one
-// before it is under "Earlier chats"
+// before it is under "Chat History"
 resetConversation();
 ```
 

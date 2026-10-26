@@ -310,7 +310,7 @@ app.get('/api/chats', async (req, res) => {
     res.json({ chats: list.map(c => ({ ...c, current: c.id === session.chatId })) });
   } catch (error) {
     console.error('💬 Could not list the chats:', error.message);
-    res.status(503).json({ error: 'Could not load your earlier chats right now.' });
+    res.status(503).json({ error: 'Could not load your chat history right now.' });
   }
 });
 
