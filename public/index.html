@@ -73,11 +73,22 @@
             </nav>
         </div>
         <div class="header-right">
+            <button type="button" class="header-btn notify-btn" id="notify-btn" onclick="toggleNotifications()"
+                    aria-controls="notify-panel" aria-expanded="false" aria-label="Notifications">🔔<span class="notify-count" id="notify-count" hidden></span></button>
             <button type="button" class="header-btn" id="theme-btn" onclick="toggleThemePanel()"
                     aria-controls="theme-panel" aria-expanded="false">🎨 Colors</button>
             <button class="sign-out-btn" type="button" onclick="signOut()">Sign out</button>
         </div>
     </header>
+
+    <!-- 🔔 Notifications: tickets given to you, families moved to your team, members' reports (notifications.js) -->
+    <section class="theme-panel notify-panel" id="notify-panel" role="dialog" aria-label="Notifications" hidden>
+        <div class="theme-panel-head">
+            <span>🔔 Notifications</span>
+            <button type="button" class="drawer-close" onclick="toggleNotifications(false)" aria-label="Close">✕</button>
+        </div>
+        <div id="notify-list"></div>
+    </section>
 
     <!-- 🎨 Colors: each person's color scheme, saved to their account (customize.js) -->
     <section class="theme-panel" id="theme-panel" role="dialog" aria-label="Your colors" hidden>
@@ -150,10 +161,14 @@
                         </div>
                     </section>
 
-                    <!-- Your tickets: Ticket results and starred tickets -->
+                    <!-- Your tickets: the ones assigned to you, Ticket results and starred tickets -->
                     <section class="home-block" data-block="tickets">
                         <div class="home-modes" role="tablist" aria-label="Your tickets">
-                            <button type="button" role="tab" class="home-mode active" data-mode="results" aria-selected="true" aria-controls="home-results" onclick="setHomeMode('results')">
+                            <button type="button" role="tab" class="home-mode active" data-mode="assigned" aria-selected="true" aria-controls="home-assigned" onclick="setHomeMode('assigned')">
+                                <span class="home-mode-name">📋 Assigned to me <span class="star-count" id="assigned-count" hidden>0</span></span>
+                                <span class="home-mode-desc">Highest priority first, then oldest</span>
+                            </button>
+                            <button type="button" role="tab" class="home-mode" data-mode="results" aria-selected="false" aria-controls="home-results" onclick="setHomeMode('results')">
                                 <span class="home-mode-name">🎫 Ticket results</span>
                                 <span class="home-mode-desc">Every ticket the AI assistant has shown you</span>
                             </button>
@@ -163,7 +178,11 @@
                             </button>
                         </div>
 
-                        <div class="home-panel" id="home-results" role="tabpanel">
+                        <div class="home-panel" id="home-assigned" role="tabpanel">
+                            <div class="home-result" id="assigned-result" aria-live="polite"></div>
+                        </div>
+
+                        <div class="home-panel" id="home-results" role="tabpanel" hidden>
                             <div class="home-result" id="ticket-results" aria-live="polite"></div>
                         </div>
 
@@ -423,6 +442,29 @@
         </form>
     </dialog>
 
+    <!-- Telling your project manager you resolved or closed a ticket (notifications.js) -->
+    <dialog class="ask-dialog report-dialog" id="report-dialog" aria-labelledby="report-title">
+        <form method="dialog">
+            <h2 id="report-title">Tell your project manager</h2>
+            <p class="report-ticket" id="report-ticket"></p>
+            <label class="field-label">What did you do?
+                <select id="report-status">
+                    <option value="resolved">I resolved it</option>
+                    <option value="closed">I closed it</option>
+                </select>
+            </label>
+            <label class="field-label">Note (optional)
+                <textarea id="report-note" rows="3" maxlength="500" placeholder="e.g. Restarted the service; the user confirmed it works"></textarea>
+            </label>
+            <p class="theme-note report-hint">This only sends your project manager a notification. The ticket itself doesn't change in OneTouch.</p>
+            <p class="home-status error" id="report-error" role="alert" hidden></p>
+            <div class="builder-foot">
+                <button type="button" class="home-action" onclick="this.closest('dialog').close('cancel')">Cancel</button>
+                <button type="submit" class="primary-btn" id="report-send" value="ok">Send</button>
+            </div>
+        </form>
+    </dialog>
+
     <!-- The tickets behind a bar, slice, point or number of a chart -->
     <dialog class="builder drill-dialog" id="drill-dialog" aria-labelledby="drill-title">
         <div class="builder-head">
@@ -496,6 +538,7 @@
     <script src="customize.js"></script>
     <script src="families.js"></script>
     <script src="teams.js"></script>
+    <script src="notifications.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

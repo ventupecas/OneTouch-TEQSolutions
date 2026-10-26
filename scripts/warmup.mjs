@@ -90,13 +90,15 @@ function describe(data) {
   return { ok: true, text: data.allEmpty ? 'nothing found (explanation ready)' : `${rows.toLocaleString()} ${rows === 1 ? 'row' : 'rows'}` };
 }
 
-// Opens a dashboard the way a browser does: its layout, then every chart's data
+// Opens a dashboard the way a browser does: its layout, then every chart's
+// data. The path is a link signed for the account signed in here, so Metabase
+// keeps the results for that account's view (each person's are kept apart).
 async function openDashboard(dashboardPath) {
-  const uuid = dashboardPath.split('/').pop();
-  const dash = await (await fetch(`${base}/api/public/dashboard/${uuid}`)).json();
+  const token = dashboardPath.split('/').pop();
+  const dash = await (await fetch(`${base}/api/embed/dashboard/${token}`)).json();
   const cards = (dash.dashcards || []).filter(dc => dc.card_id);
   const results = await Promise.all(cards.map(async dc => {
-    const r = await fetch(`${base}/api/public/dashboard/${uuid}/dashcard/${dc.id}/card/${dc.card_id}?parameters=[]`);
+    const r = await fetch(`${base}/api/embed/dashboard/${token}/dashcard/${dc.id}/card/${dc.card_id}`);
     const body = await r.json().catch(() => ({}));
     return r.ok && body.status !== 'failed';
   }));
@@ -176,7 +178,8 @@ if (problems.length) {
   process.exitCode = 1;
 } else {
   console.log('Everything worked. These questions now answer instantly for everyone when asked with');
-  console.log(`the same words (see ${QUESTIONS_FILE}), and every dashboard opens from Metabase's cache.`);
+  console.log(`the same words (see ${QUESTIONS_FILE}), and every dashboard chart works. Metabase keeps each`);
+  console.log('person\'s dashboard results apart (they see different tickets), so only this account\'s are ready now.');
 }
 console.log("Don't restart OneTouch before the presentation: a restart forgets the remembered questions.");
 console.log('='.repeat(64) + '\n');

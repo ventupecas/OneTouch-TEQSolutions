@@ -80,7 +80,8 @@ function youLine(team) {
     if (currentAccess.admin) return 'You\'re an admin: you see every team and every ticket, put people on teams, and move families between them.';
     if (!team) return 'You\'re not on a team yet, so no tickets are assigned to you. An admin can add you to one.';
     if (currentAccess.role === 'project_manager') return `You're the project manager of ${team.name}: you see all of its tickets, hand them out, and see who's working on what.`;
-    return `You're on ${team.name} as ${roleName(currentAccess.role).toLowerCase()}. You see the tickets assigned to you.`;
+    return `You're on ${team.name} as ${roleName(currentAccess.role).toLowerCase()}. You see the tickets assigned to you, ` +
+        'and when you resolve or close one you can tell your project manager from its row.';
 }
 
 function renderTeams() {
@@ -116,7 +117,7 @@ function renderTeams() {
 function teamPickerHtml() {
     return teamsView.data.teams.map(t =>
         `<button type="button" class="team-pick${t.id === teamsView.teamId ? ' active' : ''}" data-team-pick="${t.id}">` +
-        `<span class="team-pick-name">${escapeHtml(t.name)}</span>` +
+        `<span class="team-pick-name">${escapeHtml(t.name)}${t.test ? ' <span class="team-test-tag">Test team</span>' : ''}</span>` +
         `<span class="team-pick-meta">${t.tickets.toLocaleString()} tickets · ${t.members.length} people</span></button>`).join('');
 }
 
@@ -139,13 +140,14 @@ function teamSummaryHtml(team) {
         `<td>${admin ? roleSelectHtml(`data-member-role="${m.id}"`, m.role) : escapeHtml(roleName(m.role))}</td>` +
         loadCells(m.load) +
         (manage ? `<td><button type="button" class="home-action" data-team-show="${m.id}">Their tickets</button></td>` : '') +
-        (admin ? `<td>${teamSelectHtml(`data-member-team="${m.id}"`, team.id, true)}</td>` : '') +
+        (admin ? `<td><div class="team-member-team">${teamSelectHtml(`data-member-team="${m.id}"`, team.id, true, m.test)}` +
+            `<button type="button" class="home-action danger" data-member-remove="${m.id}" title="Take ${escapeHtml(m.name)} off ${escapeHtml(team.name)} and away from their role">Remove from team</button></div></td>` : '') +
         '</tr>').join('');
     const unassignedRow = manage
         ? `<tr class="team-unassigned"><td>Not assigned yet</td><td>—</td>${loadCells(team.unassigned)}` +
           `<td><button type="button" class="home-action" data-team-show="none"${unassigned ? '' : ' disabled'}>Show them</button></td>${admin ? '<td></td>' : ''}</tr>`
         : '';
-    return `<h3>${escapeHtml(team.name)}</h3>` +
+    return `<h3>${escapeHtml(team.name)}${team.test ? ' <span class="team-test-tag">Test team</span>' : ''}</h3>` +
         `<p class="home-status">${team.tickets.toLocaleString()} tickets in ${team.families.toLocaleString()} families · ${team.members.length} people` +
         (manage && unassigned ? ` · <strong>${unassigned.toLocaleString()} not assigned yet</strong>` : '') + '</p>' +
         (team.members.length
@@ -158,8 +160,10 @@ function roleSelectHtml(attr, selected) {
         .map(([value, label]) => `<option value="${value}"${value === selected ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('') + '</select>';
 }
 
-function teamSelectHtml(attr, selected, withNone) {
+// testOnly: for a test account, which may only join a test team
+function teamSelectHtml(attr, selected, withNone, testOnly = false) {
     return `<select ${attr} aria-label="Team">` + (withNone ? `<option value="">No team</option>` : '') + teamsView.data.teams
+        .filter(t => !testOnly || t.test)
         .map(t => `<option value="${t.id}"${t.id === selected ? ' selected' : ''}>${escapeHtml(t.name)}</option>`).join('') + '</select>';
 }
 
@@ -202,6 +206,8 @@ function teamTicketsHtml(team, data) {
     }
     const manage = team.canManage;
     const admin = currentAccess.admin;
+    // Members tell their project manager when they've resolved or closed one (notifications.js)
+    const tell = !manage && canTellManager();
     const rows = data.tickets.map(t => {
         const n = escapeHtml(t.number);
         const summary = String(t.summary || '');
@@ -213,11 +219,12 @@ function teamTicketsHtml(team, data) {
             `<td class="ticket-cell"><button type="button" class="ticket-link" data-ticket="${n}" title="Open ${n}">${n}</button>${starButtonHtml(t.number)}</td>` +
             `<td>${escapeHtml(t.type || '—')}</td>` +
             `<td${summary.length > 100 ? ` title="${escapeHtml(summary)}"` : ''}>${escapeHtml(summary.length > 100 ? `${summary.slice(0, 97)}…` : summary || '—')}</td>` +
-            `<td>${escapeHtml(t.state || '—')}</td>` +
+            `<td>${escapeHtml(t.state || '—')}${reportLineHtml(t.report)}</td>` +
             `<td>${family}</td>` +
             `<td>${manage
                 ? `<select class="team-assign" data-number="${n}" aria-label="Who has ${n}">${assigneeOptions(team, t.assignee?.id ?? null)}</select>`
                 : escapeHtml(t.assignee?.name || 'Not assigned')}</td>` +
+            (tell ? `<td>${reportButtonHtml(t.number, t.report?.mine ? 'Tell them again…' : 'Resolved or closed?…')}</td>` : '') +
             '</tr>';
     }).join('');
     const first = teamsView.offset + 1;
@@ -225,10 +232,23 @@ function teamTicketsHtml(team, data) {
     return `<div class="table-wrap"><table class="result-table"><thead><tr>` +
         (manage ? '<th class="select-cell"></th>' : '') +
         '<th>Ticket</th><th>Type</th><th>Summary</th><th>State</th><th>Family</th><th>Assigned to</th>' +
+        (tell ? '<th>Tell your project manager</th>' : '') +
         `</tr></thead><tbody>${rows}</tbody></table></div>` +
         `<div class="team-pager"><span>${first.toLocaleString()}–${last.toLocaleString()} of ${data.total.toLocaleString()}</span>` +
         `<button type="button" class="home-action" data-team-page="-1"${teamsView.offset ? '' : ' disabled'}>← Previous</button>` +
         `<button type="button" class="home-action" data-team-page="1"${last < data.total ? '' : ' disabled'}>Next →</button></div>`;
+}
+
+// Under a ticket's state: the latest time someone told the project manager
+// they'd resolved or closed it (the state itself is the data's, unchanged)
+function reportLineHtml(report) {
+    if (!report) return '';
+    const note = String(report.note || '');
+    return `<div class="team-report"${note ? ` title="${escapeHtml(note)}"` : ''}>✅ ` +
+        (report.mine ? `You told your project manager you ${escapeHtml(report.status)} it` : `${escapeHtml(report.by || 'Someone')} says it's ${escapeHtml(report.status)}`) +
+        ` · ${escapeHtml(formatShownAt(report.at))}` +
+        (note ? `<span class="team-report-note">“${escapeHtml(note.length > 80 ? `${note.slice(0, 77)}…` : note)}”</span>` : '') +
+        '</div>';
 }
 
 async function assign(numbers, assigneeId) {
@@ -301,23 +321,24 @@ async function moveFamily(familyId) {
 // ---------------------------------------------------------------------
 
 function peopleCardHtml(people) {
-    const rows = people.map(p => `<tr><td>${escapeHtml(p.name)}</td>` +
-        `<td>${teamSelectHtml(`data-person-team="${p.id}"`, teamsView.teamId, false)}</td>` +
+    const rows = people.map(p => `<tr><td>${escapeHtml(p.name)}${p.test ? ' <span class="team-test-tag">Test account</span>' : ''}</td>` +
+        `<td>${teamSelectHtml(`data-person-team="${p.id}"`, teamsView.teamId, false, p.test)}</td>` +
         `<td>${roleSelectHtml(`data-person-role="${p.id}"`, 'project_team')}</td>` +
         `<td><button type="button" class="home-action" data-person-add="${p.id}">Add</button></td></tr>`).join('');
     return `<section class="team-card"><h3>People on no team</h3>` +
         (people.length
-            ? `<p class="home-status">They see no tickets until they're on a team and have tickets assigned.</p>` +
+            ? `<p class="home-status">They see no tickets until they're on a team and have tickets assigned. Test accounts can only join a test team.</p>` +
               `<div class="table-wrap"><table class="result-table team-table"><thead><tr><th>Name</th><th>Team</th><th>Role</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
-            : '<p class="home-status">Everyone is on a team. (Admins and the warm-up account don\'t need one.)</p>') +
+            : '<p class="home-status">Everyone is on a team. (Admins, the warm-up account and the test accounts don\'t join one.)</p>') +
         '</section>';
 }
 
-async function setMembership(userId, teamId, role) {
+// done: what the toast says, from the answer ({ unassigned })
+async function setMembership(userId, teamId, role, done = () => 'Saved') {
     try {
         const data = await teamsFetch(`/api/teams/members/${userId}`, { method: 'PUT', body: JSON.stringify({ teamId, role }) });
         if (!data) return;
-        showToast('Saved');
+        showToast(done(data));
         await loadTeams();
     } catch (err) {
         showToast(err.message);
@@ -372,6 +393,18 @@ document.getElementById('teams-view').addEventListener('click', e => {
     if (e.target.closest('[data-family-lookup]')) { findFamily(); return; }
     const move = e.target.closest('[data-family-move]');
     if (move) { moveFamily(move.dataset.familyMove); return; }
+    const remove = e.target.closest('[data-member-remove]');
+    if (remove) {
+        const team = currentTeam();
+        const member = team?.members.find(m => m.id === Number(remove.dataset.memberRemove));
+        if (!member) return;
+        const held = member.load?.total || 0;
+        if (!confirm(`Take ${member.name} off ${team.name}? They stop being its ${roleName(member.role).toLowerCase()} and stop seeing its tickets.` +
+            (held ? ` Their ${held.toLocaleString()} ${held === 1 ? 'ticket stays' : 'tickets stay'} with ${team.name}, unassigned, for its project manager to hand out.` : ''))) return;
+        setMembership(member.id, null, null, data => `${member.name} is off ${team.name}` +
+            (data.unassigned ? `; ${data.unassigned.toLocaleString()} ${data.unassigned === 1 ? 'ticket is' : 'tickets are'} unassigned now` : ''));
+        return;
+    }
     const add = e.target.closest('[data-person-add]');
     if (add) {
         const id = add.dataset.personAdd;

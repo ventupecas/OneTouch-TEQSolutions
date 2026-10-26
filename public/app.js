@@ -30,13 +30,15 @@ function showLoginError(message) {
     document.getElementById('login-error').textContent = message || '';
 }
 
-// Signed in: the home page, with this person's starred tickets, layout and colors
+// Signed in: the home page, with this person's starred tickets, layout, colors
+// and notifications
 function showApp(signedIn) {
     document.body.classList.toggle('signed-out', !signedIn);
     if (signedIn) {
         switchTab('home');
         loadStars();
         loadPreferences();
+        startNotifications();
     } else if (!fillSignInLink()) {
         document.getElementById('login-email').focus();
     }
@@ -178,6 +180,7 @@ function signOut(message) {
     setCurrentUser(null);
     resetHome();
     resetTeams();
+    resetNotifications();
     resetCustomizing();
     showLoginError(typeof message === 'string' ? message : '');
     showApp(false);
@@ -377,11 +380,8 @@ function switchTab(viewName) {
     if (viewName === 'dashboard') loadDashboards().then(() => maybeStartTour('dashboards'));
     // The Team tab, fresh each time (assignments change)
     if (viewName === 'teams') loadTeams();
-    // Stars may have changed elsewhere (the chat, a dashboard, another computer)
-    if (viewName === 'home') {
-        if (homeMode === 'starred') showStarred();
-        else showTicketResults(true);
-    }
+    // Stars and assignments may have changed elsewhere (the chat, a dashboard, another computer)
+    if (viewName === 'home') showHomeMode(homeMode !== 'starred');
 }
 
 // =====================================================================
@@ -435,7 +435,12 @@ function updateChatControls() {
 // and the detail pages a click on a chart opens
 const dashboardPages = { main: new Map(), details: new Map() };
 let currentMainDashboard = null;
-const pageId = path => (String(path).match(/\/public\/dashboard\/([0-9a-f-]{36})/) || [])[1];
+// A page is known by its signed address (/embed/dashboard/<token>), made for
+// this person by the server; a click link names the page it opens instead
+// (/onetouch/dashboard/<key>), and followDashboardFrame swaps in the address
+const pageId = path => (String(path).match(/\/embed\/dashboard\/([\w-]+\.[\w-]+\.[\w-]+)/) || [])[1];
+const linkedPageKey = path => (String(path).match(/^\/onetouch\/dashboard\/([\w-]+)$/) || [])[1];
+const DASHBOARD_HINT = 'Click a bar, slice, number or blue value for details';
 
 // The dashboard each person had open last ("my:<id>" for one of their own),
 // saved to their account so it opens there next time, on any computer
@@ -493,22 +498,15 @@ async function buildDashboards() {
     try {
         const response = await fetch(`${API_BASE}/api/dashboards`, { headers: authHeaders() });
         if (handleUnauthorized(response)) return false;
-        const { dashboards, details = [], restricted = false } = await response.json();
+        const { dashboards, details = [] } = await response.json();
         for (const d of dashboards) dashboardPages.main.set(pageId(d.path), d);
         for (const d of details) dashboardPages.details.set(pageId(d.path), d);
+        // Each link is signed for this person and shows only their tickets: say which
+        const whose = currentAccess.admin ? '' : currentAccess.role === 'project_manager' && currentAccess.team
+            ? `Only ${currentAccess.team.name}'s tickets` : 'Only your tickets';
+        document.getElementById('dashboard-hint').textContent = whose ? `${DASHBOARD_HINT} · ${whose}` : DASHBOARD_HINT;
         // Which team dashboards this person hid, and which one they had open
         await prefsReady;
-        if (restricted) {
-            // Metabase shows every ticket, so only admins get those dashboards;
-            // Ticket families and their own dashboards show only their tickets
-            document.getElementById('drawer-customize').hidden = true;
-            const last = rememberedDashboard();
-            if (last === 'families') { showFamilies(); return true; }
-            if (last.startsWith('my:') && showBoard(last.slice(3))) return true;
-            message.textContent = 'The Metabase team dashboards show every ticket, so only admins can open them. ' +
-                'Under ☰ Dashboards, Ticket families and your own dashboards show the tickets you can see.';
-            return true;
-        }
         if (!dashboards.length) {
             message.textContent = 'No team dashboards yet. Whoever runs this OneTouch server can create them with: ' +
                 'docker exec analytics_node_app node scripts/metabase-setup.mjs. You can still build your own under ☰ Dashboards.';
@@ -676,6 +674,15 @@ function followDashboardFrame() {
     let where;
     try { where = frame.contentWindow.location; } catch { return; } // not ours (yet)
     if (!where) return;
+    // A click opened another page by name: swap in this person's signed address
+    // for it, with the click's filters and OneTouch's look. replace(), so ← Back
+    // returns to the page that was clicked.
+    const linked = linkedPageKey(where.pathname);
+    if (linked) {
+        const target = [...dashboardPages.main.values(), ...dashboardPages.details.values()].find(d => d.key === linked);
+        if (target) where.replace(`${API_BASE}${target.path}${where.search}${themedFrameHash(where.hash)}`);
+        return;
+    }
     // A click's link can't know OneTouch is dark, so its page opens light: put the
     // look back in place (no reload, and ← Back still returns to the page before)
     const id = pageId(where.pathname);
@@ -1845,22 +1852,30 @@ function showToast(message) {
 // starred tickets
 // =====================================================================
 
-const HOME_MODES = ['results', 'starred'];
-let homeMode = 'results';
+const HOME_MODES = ['assigned', 'results', 'starred'];
+let homeMode = 'assigned';
 // Each search bumps its counter, so an older, slower answer can't replace a newer one
-const homeRuns = { results: 0, starred: 0 };
+const homeRuns = { assigned: 0, results: 0, starred: 0 };
 
-// The list each person had open last, remembered in this browser
+// The list each person had open last, remembered in this browser. (A new
+// name when "Assigned to me" arrived, so everyone opens on it once.)
 function homeModeKey() {
-    return `onetouch-home-mode:${currentUsername}`;
+    return `onetouch-home-tab:${currentUsername}`;
 }
 function rememberedHomeMode() {
-    try { return localStorage.getItem(homeModeKey()) || 'results'; } catch { return 'results'; }
+    try { return localStorage.getItem(homeModeKey()) || 'assigned'; } catch { return 'assigned'; }
+}
+
+// Loads the list that's showing (quiet: without a "Loading…")
+function showHomeMode(quiet = false) {
+    if (homeMode === 'starred') return showStarred(quiet);
+    if (homeMode === 'assigned') return showAssigned(quiet);
+    return showTicketResults(quiet);
 }
 
 // Shows one of Home's lists and loads it (quiet: refresh it without a "Loading…")
 function setHomeMode(mode, quiet = false) {
-    if (!HOME_MODES.includes(mode)) mode = 'results';
+    if (!HOME_MODES.includes(mode)) mode = 'assigned';
     homeMode = mode;
     document.querySelectorAll('.home-mode').forEach(b => {
         const on = b.dataset.mode === mode;
@@ -1871,8 +1886,7 @@ function setHomeMode(mode, quiet = false) {
     if (currentUsername) {
         try { localStorage.setItem(homeModeKey(), mode); } catch { /* not remembered; that's fine */ }
     }
-    if (mode === 'starred') showStarred();
-    else showTicketResults(quiet);
+    showHomeMode(quiet);
 }
 
 // Signing out leaves nothing of this person's on the page
@@ -1882,11 +1896,14 @@ function resetHome() {
     selections.starred.clear();
     latestShown = new Set();
     openedRecord = null;
+    Object.assign(assignedView, { tickets: null, status: 'open', page: 0 });
+    paintAssignedCount();
+    document.getElementById('assigned-result').innerHTML = '';
     document.getElementById('ticket-results').innerHTML = NO_TICKET_RESULTS_HTML;
     document.getElementById('starred-result').innerHTML = '';
     starredTickets.clear();
     refreshStarButtons();
-    setHomeMode('results');
+    setHomeMode('assigned');
     forgetRemovedExports();
 }
 
@@ -1984,15 +2001,16 @@ function ticketDownloadHtml(tickets, title, columns = TICKET_COLUMNS) {
     }));
 }
 
-// One ticket: its heading, a star, a link to its dashboard record, and every field it has
+// One ticket: its heading, a star, a link to its dashboard record, telling
+// your project manager you're done with it (notifications.js), and every field it has
 function ticketCardHtml(t, record) {
-    // The Metabase record pages are for admins only (they show every ticket)
-    const dashboardButton = RECORD_PAGES[t.kind] && currentAccess.admin
+    // Its Metabase record page (signed for this person, so it shows only their tickets)
+    const dashboardButton = RECORD_PAGES[t.kind]
         ? `<button type="button" class="home-action" data-open-dashboard="${escapeHtml(t.number)}">Open in Dashboards ↗</button>` : '';
     let html = `<div class="ticket-head">` +
         `<span class="ticket-type">${escapeHtml(t.type)}</span>` +
         `<span class="ticket-number">${escapeHtml(t.number)}</span>` +
-        starButtonHtml(t.number, true) + dashboardButton +
+        starButtonHtml(t.number, true) + dashboardButton + reportButtonHtml(t.number) +
         `</div>` +
         (t.summary ? `<div class="ticket-summary">${escapeHtml(t.summary)}</div>` : '');
 
@@ -2036,6 +2054,101 @@ async function runHomeSearch(mode, outId, work, quiet = false) {
     }
     forgetRemovedExports();
 }
+
+// =====================================================================
+// ASSIGNED TO ME: the tickets assigned to this person in OneTouch (by their
+// project manager or an admin), highest priority first, then oldest
+// (tickets.mjs ticketsByPriority). Open ones to start with; closed or all at
+// a click, 50 to a page.
+// =====================================================================
+
+const ASSIGNED_PAGE = 50;
+const ASSIGNED_STATUSES = [['open', 'Open'], ['closed', 'Closed'], ['all', 'All']];
+const assignedView = { tickets: null, status: 'open', page: 0 };
+const ASSIGNED_COLUMNS = [
+    ['Ticket', t => t.number],
+    ['Type', t => t.type],
+    ['Summary', t => t.summary],
+    ['State', t => t.state],
+    ['Priority / Risk', t => t.level],
+    ['Opened', t => t.opened ? formatValue('ticket.opened', t.opened) : ''],
+];
+
+// The tab's count: how many open tickets are waiting
+function paintAssignedCount() {
+    const count = document.getElementById('assigned-count');
+    const open = assignedView.tickets ? assignedView.tickets.filter(t => t.open).length : 0;
+    count.hidden = !assignedView.tickets;
+    count.textContent = open.toLocaleString();
+    count.title = `${open.toLocaleString()} open`;
+}
+
+function showAssigned(quiet = false) {
+    if (!sessionTokenValue) return;
+    return runHomeSearch('assigned', 'assigned-result', async () => {
+        const response = await fetch(`${API_BASE}/api/my-tickets`, { headers: authHeaders() });
+        if (handleUnauthorized(response)) return null;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        assignedView.tickets = data.tickets;
+        paintAssignedCount();
+        return assignedHtml();
+    }, quiet);
+}
+
+function assignedHtml() {
+    const all = assignedView.tickets || [];
+    if (!all.length) {
+        return `<p class="home-status">${currentAccess.team
+            ? 'No tickets are assigned to you yet. Your project manager hands them out on the Team tab, and 🔔 tells you when they do.'
+            : 'No tickets are assigned to you. You get some once you\'re on a team and your project manager or an admin assigns them to you.'}</p>`;
+    }
+    const counts = { open: all.filter(t => t.open).length, all: all.length };
+    counts.closed = counts.all - counts.open;
+    const { status } = assignedView;
+    const shown = status === 'all' ? all : all.filter(t => t.open === (status === 'open'));
+    const pages = Math.max(1, Math.ceil(shown.length / ASSIGNED_PAGE));
+    assignedView.page = Math.min(Math.max(assignedView.page, 0), pages - 1);
+    const first = assignedView.page * ASSIGNED_PAGE;
+    const page = shown.slice(first, first + ASSIGNED_PAGE);
+
+    const filter = '<div class="assigned-filter" role="group" aria-label="Which tickets">' + ASSIGNED_STATUSES.map(([key, label]) =>
+        `<button type="button" class="home-action" data-assigned-status="${key}" aria-pressed="${status === key}">${label} (${counts[key].toLocaleString()})</button>`).join('') + '</div>';
+    const which = status === 'all' ? '' : `${status} `;
+    const head = '<div class="results-head">' +
+        `<p class="home-status">${shown.length.toLocaleString()} ${which}${shown.length === 1 ? 'ticket' : 'tickets'} assigned to you, highest priority first, then oldest. ` +
+        'Incidents go by priority and changes by risk. Requests and catalog tasks have no priority, so they come after those.</p>' + filter + '</div>';
+    if (!shown.length) return head + `<p class="home-status">None ${status === 'open' ? 'open: you\'re all caught up.' : 'closed yet.'}</p>`;
+
+    // Members can tell their project manager they've resolved or closed one (notifications.js)
+    const columns = canTellManager()
+        ? [...ASSIGNED_COLUMNS, ['Tell your project manager', () => '', t => reportButtonHtml(t.number, 'Resolved or closed?…')]]
+        : ASSIGNED_COLUMNS;
+    const pager = pages > 1
+        ? `<div class="team-pager"><span>${(first + 1).toLocaleString()}–${(first + page.length).toLocaleString()} of ${shown.length.toLocaleString()}</span>` +
+          `<button type="button" class="home-action" data-assigned-page="-1"${assignedView.page ? '' : ' disabled'}>← Previous</button>` +
+          `<button type="button" class="home-action" data-assigned-page="1"${assignedView.page < pages - 1 ? '' : ' disabled'}>Next →</button></div>`
+        : '';
+    return head + ticketTableHtml(page, columns) + pager +
+        ticketDownloadHtml(shown, `Assigned to me (${status === 'all' ? 'all' : status})`, ASSIGNED_COLUMNS);
+}
+
+// Open / closed / all, and the pages: drawn again from what's loaded
+document.getElementById('assigned-result').addEventListener('click', e => {
+    const status = e.target.closest('[data-assigned-status]');
+    const page = e.target.closest('[data-assigned-page]');
+    if (!status && !page) return;
+    if (status) {
+        assignedView.status = status.dataset.assignedStatus;
+        assignedView.page = 0;
+    } else {
+        assignedView.page += Number(page.dataset.assignedPage);
+    }
+    const out = document.getElementById('assigned-result');
+    out.innerHTML = assignedHtml();
+    forgetRemovedExports();
+    if (page) out.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
 
 // =====================================================================
 // TICKET RESULTS: every ticket the person has been shown, newest first: the

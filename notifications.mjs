@@ -1,0 +1,74 @@
+// =====================================================================
+// NOTIFICATIONS: what someone should hear about, shown under the 🔔 in the
+// header, kept with the accounts in the onetouch_auth database. teams.mjs
+// makes them:
+//
+//   assigned   someone gave you tickets
+//   family     a family was moved to the team you're the project manager of
+//   report     someone on your team says they resolved or closed a ticket
+//
+// Each one keeps who did it, the tickets (up to MAX_NUMBERS of them) and a
+// few details; the page words them.
+// =====================================================================
+
+import { pool } from './auth.mjs';
+
+export const KINDS = ['assigned', 'family', 'report'];
+const MAX_NUMBERS = 100;
+// The newest this many are listed (the unread count covers them all)
+const LIST_LIMIT = 50;
+
+// Safe to run every start (after auth.ensureSchema, which creates users)
+export async function ensureNotificationsSchema() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id          serial PRIMARY KEY,
+      user_id     integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      kind        text NOT NULL CHECK (kind IN (${KINDS.map(k => `'${k}'`).join(', ')})),
+      actor_id    integer REFERENCES users(id) ON DELETE SET NULL,
+      numbers     text[] NOT NULL DEFAULT '{}',
+      detail      jsonb NOT NULL DEFAULT '{}',
+      created_at  timestamptz NOT NULL DEFAULT now(),
+      read_at     timestamptz
+    );
+    CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, id DESC);
+  `);
+}
+
+// The same notification for each of userIds. db: the pool, or a client in
+// the middle of a transaction, so the notification goes in with the change
+export async function notify(db, userIds, { kind, actorId = null, numbers = [], detail = {} }) {
+  if (!userIds.length) return;
+  await db.query(
+    `INSERT INTO notifications (user_id, kind, actor_id, numbers, detail)
+     SELECT unnest($1::int[]), $2, $3, $4::text[], $5::jsonb`,
+    [userIds, kind, actorId, numbers.slice(0, MAX_NUMBERS), JSON.stringify(detail)]);
+}
+
+// -> { unread, notifications: newest first }
+export async function listNotifications(userId) {
+  const { rows } = await pool.query(
+    `SELECT n.id, n.kind, n.numbers, n.detail, n.created_at, n.read_at, coalesce(u.display_name, u.username) AS actor
+       FROM notifications n LEFT JOIN users u ON u.id = n.actor_id
+      WHERE n.user_id = $1 ORDER BY n.id DESC LIMIT ${LIST_LIMIT}`,
+    [userId]);
+  const { rows: [{ unread }] } = await pool.query(
+    'SELECT count(*)::int AS unread FROM notifications WHERE user_id = $1 AND read_at IS NULL', [userId]);
+  return {
+    unread,
+    notifications: rows.map(r => ({
+      id: r.id, kind: r.kind, actor: r.actor, numbers: r.numbers, detail: r.detail,
+      at: r.created_at, read: Boolean(r.read_at),
+    })),
+  };
+}
+
+// Some of this person's notifications (ids), or all of them, as read -> how many
+export async function markRead(userId, ids = null) {
+  const wanted = Array.isArray(ids) ? ids.map(Number).filter(Number.isInteger).slice(0, LIST_LIMIT) : null;
+  const { rowCount } = await pool.query(
+    `UPDATE notifications SET read_at = now()
+      WHERE user_id = $1 AND read_at IS NULL AND ($2::int[] IS NULL OR id = ANY($2::int[]))`,
+    [userId, wanted]);
+  return rowCount;
+}

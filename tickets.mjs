@@ -4,6 +4,9 @@
 // TICKET_PATTERN, never from model output, so nothing unchecked reaches Cube.
 // =====================================================================
 
+import { createHash } from 'node:crypto';
+import { ENTITY_CATALOG } from './business_logic.mjs';
+
 // What each prefix is, which cube holds it, and which of its columns fill
 // the summary table (summary / state / level / team / person / opened)
 export const TICKET_KINDS = {
@@ -145,6 +148,45 @@ export async function ticketSummaries(numbers, runQuery) {
   }
   const looked = await Promise.all([...byPrefix].map(([p, list]) => lookUp(p, list, runQuery)));
   return new Map(looked.flat().map(t => [t.number, t]));
+}
+
+// ---------------------------------------------------------------------
+// ASSIGNED TO ME (Home): someone's OneTouch tickets, most urgent first. Only
+// incidents have a priority (P1-P4); a change's risk stands in for it, as the
+// "Priority / Risk" column already does. Requests and catalog tasks have
+// neither, so they come after everything that has one. The same priority:
+// the oldest first.
+// ---------------------------------------------------------------------
+
+const RISK_RANK = { High: 2, Medium: 3, Low: 4, Standard: 4 };
+const NO_PRIORITY = 5;
+export function priorityRank(t) {
+  if (t.kind === 'INC') return Number((/^P([1-4])\b/.exec(t.level) || [])[1]) || NO_PRIORITY;
+  if (t.kind === 'CHG') return RISK_RANK[t.level] ?? NO_PRIORITY;
+  return NO_PRIORITY;
+}
+
+const OPEN_STATES = Object.fromEntries(Object.entries(TICKET_KINDS)
+  .map(([prefix, kind]) => [prefix, new Set(ENTITY_CATALOG[kind.cube].openStates)]));
+export const isOpen = t => OPEN_STATES[t.kind]?.has(t.state) ?? false;
+
+// The data is frozen, so one list of numbers always sorts the same: kept
+// (newest 200), keyed by the numbers and who's asking
+const sortedLists = new Map();
+// numbers -> [ticket + { open, rank }], most urgent first
+export function ticketsByPriority(numbers, runQuery) {
+  const key = `${runQuery.scopeKey}:${createHash('sha256').update(numbers.join(',')).digest('hex')}`;
+  if (sortedLists.has(key)) return sortedLists.get(key);
+  const sorted = ticketSummaries(numbers, runQuery).then(found => [...found.values()]
+    .map(t => ({ ...t, open: isOpen(t), rank: priorityRank(t) }))
+    .sort((a, b) => a.rank - b.rank
+      || (a.opened ? 0 : 1) - (b.opened ? 0 : 1)
+      || String(a.opened).localeCompare(String(b.opened))
+      || a.number.localeCompare(b.number)));
+  sorted.catch(() => sortedLists.delete(key));
+  sortedLists.set(key, sorted);
+  if (sortedLists.size > 200) sortedLists.delete(sortedLists.keys().next().value);
+  return sorted;
 }
 
 // The ticket numbers anywhere in a set of result rows, in the order they appear

@@ -5,8 +5,16 @@
 //      desk, problems, monitoring, workload, change, change risk, requests,
 //      automation), rebuilt from scratch on every run inside the "OneTouch ITIL"
 //      collection
-//   4. public links for them, saved to metabase-dashboards.json, which the
-//      OneTouch Dashboards tab reads (its drawer groups them by `group`)
+//   4. signed embedding for them (no public links), and their ids saved to
+//      metabase-dashboards.json, which the OneTouch Dashboards tab reads (its
+//      drawer groups them by `group`)
+//
+// WHO SEES WHAT: every dashboard has a "viewer" filter that is locked in the
+// signed link the OneTouch server makes for each person (server.mjs,
+// teams.dashboardViewer), so nobody can change it. Every chart's SQL reads the
+// ticket views only through scopedSql, which keeps the tickets that viewer may
+// see (reporting.visible_tickets, db/init-reporting.sh): admins everything, a
+// project manager their team's, anyone else their own.
 //
 // Safe to re-run (e.g. after changing a chart below):
 //   docker exec analytics_node_app node scripts/metabase-setup.mjs
@@ -20,6 +28,8 @@ const MB = (process.env.METABASE_URL || 'http://metabase:3000').replace(/\/+$/, 
 const ADMIN_EMAIL = process.env.METABASE_ADMIN_EMAIL;
 const ADMIN_PASSWORD = process.env.METABASE_ADMIN_PASSWORD;
 const READER_PASSWORD = process.env.METABASE_DB_PASSWORD;
+// Signs each person's dashboard links (the server uses the same one)
+const EMBEDDING_SECRET = process.env.METABASE_EMBEDDING_SECRET;
 const DB_NAME = 'ServiceNow (OneTouch reporting)';
 const COLLECTION_NAME = 'OneTouch ITIL';
 const OUTPUT_FILE = 'metabase-dashboards.json';
@@ -1265,21 +1275,50 @@ async function freshCollection() {
   return (await api('POST', '/api/collection', { name: COLLECTION_NAME, color: '#10a37f', description: 'Dashboards built by OneTouch (scripts/metabase-setup.mjs). Re-running the script rebuilds them.' })).id;
 }
 
+// ---------------------------------------------------------------------
+// Who sees what: each ticket view, and the column holding the ticket number
+// whose access decides (an approval follows the ticket it approves). A view
+// with no rule here can't be used by a chart; data_as_of holds no tickets.
+// ---------------------------------------------------------------------
+
+const VIEWER = 'viewer';
+const SCOPED_VIEWS = {
+  incidents: 'number', changes: 'number', change_breweries: 'number',
+  requests: 'number', catalog_tasks: 'number', approvals: 'parent',
+};
+const UNSCOPED_VIEWS = ['data_as_of'];
+
+// A chart's SQL with every ticket view narrowed to what {{viewer}} may see.
+// Postgres 16 takes a subquery with or without an alias after it.
+function scopedSql(sql, where) {
+  for (const [, view] of sql.matchAll(/\breporting\.([a-z_]+)\b/g)) {
+    if (!SCOPED_VIEWS[view] && !UNSCOPED_VIEWS.includes(view)) throw new Error(`${where}: reporting.${view} has no access rule (SCOPED_VIEWS).`);
+  }
+  return sql.replace(/\breporting\.([a-z_]+)\b/g, (whole, view) => SCOPED_VIEWS[view]
+    ? `(SELECT * FROM reporting.${view} WHERE {{${VIEWER}}} = 'all' OR ${SCOPED_VIEWS[view]} IN (SELECT number FROM reporting.visible_tickets({{${VIEWER}}})))`
+    : whole);
+}
+
 // The {{name}} variables a card's SQL uses, as Metabase template tags. Each
-// must be one of the dashboard's filters (`params`), which fill it.
+// must be one of the dashboard's filters (`params`), which fill it, or the
+// viewer, which every dashboard has.
 function templateTags(sql, def) {
   const names = [...new Set([...sql.matchAll(/\{\{\s*([a-z_]+)\s*\}\}/g)].map(m => m[1]))];
   return Object.fromEntries(names.map(name => {
+    if (name === VIEWER) return [name, { id: randomUUID(), name, 'display-name': 'Viewer', type: 'text', required: true }];
     const param = (def.params || []).find(p => p.slug === name);
     if (!param) throw new Error(`"${def.name}": {{${name}}} is not one of its filters.`);
     return [name, { id: randomUUID(), name, 'display-name': param.name, type: 'text' }];
   }));
 }
 
-// A click (go(...)) as a Metabase click behaviour: a link to the target's
-// public page, its filters set from the clicked row (Metabase URL-encodes
-// {{Column}} values) or to fixed text. Filters the link doesn't set are
-// hidden, and the page title too: OneTouch's toolbar names the page.
+// A click (go(...)) as a Metabase click behaviour: a link to the target page,
+// its filters set from the clicked row (Metabase URL-encodes {{Column}} values)
+// or to fixed text. Each person's pages have their own signed address, which
+// a link can't know, so it names the page (/onetouch/dashboard/<key>) and
+// OneTouch swaps in the viewer's own address (followDashboardFrame in
+// app.js). Filters the link doesn't set are hidden, and the page title too:
+// OneTouch's toolbar names the page.
 function clickBehavior(link, shells) {
   const target = shells.get(link.to);
   if (!target) throw new Error(`Click target "${link.to}" is not a dashboard.`);
@@ -1290,7 +1329,7 @@ function clickBehavior(link, shells) {
   }).join('&');
   const unused = slugs.filter(s => !(s in link.params));
   const hash = ['titled=false', 'bordered=false', ...(unused.length ? [`hide_parameters=${unused.join(',')}`] : [])].join('&');
-  return { type: 'link', linkType: 'url', linkTemplate: `/public/dashboard/${target.uuid}?${query}#${hash}` };
+  return { type: 'link', linkType: 'url', linkTemplate: `/onetouch/dashboard/${target.def.key}?${query}#${hash}` };
 }
 
 // A card's click settings for its dashboard: whole-card `click`, per-column `links`
@@ -1310,24 +1349,25 @@ function checkDefinitions() {
   const keys = all.map(d => d.key);
   const dupe = keys.find((k, i) => keys.indexOf(k) !== i);
   if (dupe) throw new Error(`Two dashboards use the key "${dupe}".`);
-  const fake = new Map(all.map(def => [def.key, { def, uuid: 'check' }]));
+  const fake = new Map(all.map(def => [def.key, { def }]));
   for (const def of all) {
+    if ((def.params || []).some(p => p.slug === VIEWER)) throw new Error(`"${def.name}": "${VIEWER}" is kept for who's looking; name the filter something else.`);
     for (const p of def.params || []) {
       if (!p.values?.sql && !p.values?.list?.length) throw new Error(`"${def.name}": filter "${p.slug}" needs suggestions (distinct(...) or fixed(...)).`);
     }
     for (const c of def.cards) {
-      templateTags(c.sql, def);
+      const sql = scopedSql(c.sql, `"${def.name}" / "${c.name}"`);
+      if (/\breporting\.(?!data_as_of\b)/.test(c.sql) && !sql.includes(`{{${VIEWER}}}`)) throw new Error(`"${c.name}" reads tickets without the viewer.`);
+      templateTags(sql, def);
       clickSettings(c, fake);
     }
   }
 }
 
-// Step 1: an empty dashboard with its public link, so every page's address
-// is known before any link to it is written
+// Step 1: an empty dashboard, so every page exists before any link to it is written
 async function createShell(def, collectionId) {
   const dash = await api('POST', '/api/dashboard', { name: def.name, description: def.description || null, collection_id: collectionId });
-  const { uuid } = await api('POST', `/api/dashboard/${dash.id}/public_link`);
-  return { id: dash.id, uuid, def };
+  return { id: dash.id, def };
 }
 
 // A filter, with its suggestions: values read from the data become a small
@@ -1360,7 +1400,8 @@ async function fillDashboard(shell, databaseId, collectionId, shells) {
   const positions = layout(def.cards);
   const dashcards = [];
   for (const [i, c] of def.cards.entries()) {
-    const tags = templateTags(c.sql, def);
+    const sql = scopedSql(c.sql, `"${def.name}" / "${c.name}"`);
+    const tags = templateTags(sql, def);
     const card = await api('POST', '/api/card', {
       name: c.name,
       // Shown as the (i) tip on the chart: how to read it
@@ -1368,7 +1409,7 @@ async function fillDashboard(shell, databaseId, collectionId, shells) {
       collection_id: collectionId,
       display: c.display,
       visualization_settings: c.viz || {},
-      dataset_query: { type: 'native', native: { query: c.sql.trim(), 'template-tags': tags }, database: databaseId },
+      dataset_query: { type: 'native', native: { query: sql.trim(), 'template-tags': tags }, database: databaseId },
     });
     dashcards.push({
       id: -(i + 1), card_id: card.id, ...positions[i],
@@ -1378,9 +1419,15 @@ async function fillDashboard(shell, databaseId, collectionId, shells) {
       })),
     });
   }
-  const parameters = [];
+  // Who's looking: locked in each person's signed link, so it never shows as a filter
+  const parameters = [{ id: `p_${VIEWER}`, name: 'Viewer', slug: VIEWER, type: 'string/=', sectionId: 'string', isMultiSelect: false }];
   for (const p of def.params || []) parameters.push(await filterParameter(p, def, databaseId, collectionId));
   await api('PUT', `/api/dashboard/${shell.id}`, { parameters, dashcards });
+  // Signed links only: the viewer is locked, the page's own filters stay for people to change
+  await api('PUT', `/api/dashboard/${shell.id}`, {
+    enable_embedding: true,
+    embedding_params: Object.fromEntries([[VIEWER, 'locked'], ...(def.params || []).map(p => [p.slug, 'enabled'])]),
+  });
   console.log(`Built "${def.name}"${def.params ? ' (detail page)' : ''}: ${def.cards.length} charts.`);
 }
 
@@ -1400,8 +1447,9 @@ async function enableCaching() {
 // ---------------------------------------------------------------------
 
 async function main() {
-  if (!ADMIN_EMAIL || !ADMIN_PASSWORD || !READER_PASSWORD) {
-    throw new Error('Set METABASE_ADMIN_EMAIL, METABASE_ADMIN_PASSWORD and METABASE_DB_PASSWORD in .env, ' +
+  if (!ADMIN_EMAIL || !ADMIN_PASSWORD || !READER_PASSWORD || !/^[0-9a-f]{64}$/.test(EMBEDDING_SECRET || '')) {
+    throw new Error('Set METABASE_ADMIN_EMAIL, METABASE_ADMIN_PASSWORD, METABASE_DB_PASSWORD and METABASE_EMBEDDING_SECRET ' +
+      '(64 hex characters: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))") in .env, ' +
       'then run `docker compose up -d` so the app container sees them.');
   }
   // --cache-only: just switch result caching on, leaving the dashboards (and their links) as they are
@@ -1414,7 +1462,11 @@ async function main() {
   checkDefinitions();
   await waitForMetabase();
   await signIn();
-  await api('PUT', '/api/setting/enable-public-sharing', { value: true });
+  // Each person gets signed links (server.mjs); public links, which show every
+  // ticket to anyone holding one, are switched off
+  await api('PUT', '/api/setting/enable-embedding', { value: true });
+  await api('PUT', '/api/setting/embedding-secret-key', { value: EMBEDDING_SECRET });
+  await api('PUT', '/api/setting/enable-public-sharing', { value: false });
   await enableCaching();
   const databaseId = await connectDatabase();
   const collectionId = await freshCollection();
@@ -1425,10 +1477,10 @@ async function main() {
 
   // The drawer lists `dashboards`; `details` lets OneTouch name the page a click opened
   await writeFile(OUTPUT_FILE, JSON.stringify({
-    dashboards: DASHBOARDS.map(d => ({ key: d.key, group: d.group, name: d.name, description: d.description, uuid: shells.get(d.key).uuid })),
-    details: DETAILS.map(d => ({ key: d.key, name: d.name, uuid: shells.get(d.key).uuid, params: d.params })),
+    dashboards: DASHBOARDS.map(d => ({ key: d.key, group: d.group, name: d.name, description: d.description, id: shells.get(d.key).id })),
+    details: DETAILS.map(d => ({ key: d.key, name: d.name, id: shells.get(d.key).id, params: d.params })),
   }, null, 2) + '\n');
-  console.log(`Saved the public links to ${OUTPUT_FILE}; the OneTouch Dashboards tab shows them now.`);
+  console.log(`Saved the dashboards to ${OUTPUT_FILE}; the OneTouch Dashboards tab signs a link to each for whoever opens it.`);
 }
 
 try {

@@ -130,6 +130,8 @@ services:
       METABASE_DB_PASSWORD: ${METABASE_DB_PASSWORD:-}
       METABASE_ADMIN_EMAIL: ${METABASE_ADMIN_EMAIL:-}
       METABASE_ADMIN_PASSWORD: ${METABASE_ADMIN_PASSWORD:-}
+      # Signs each person's dashboard links (server.mjs, scripts/metabase-setup.mjs)
+      METABASE_EMBEDDING_SECRET: ${METABASE_EMBEDDING_SECRET:-}
     depends_on:
       cube:
         condition: service_started

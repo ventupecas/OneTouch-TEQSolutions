@@ -137,7 +137,7 @@ function resetCustomizing() {
     renderMyDashboards();
     document.getElementById('home-blocks').classList.add('waiting');
     dashboardsLoading = null; // the next person's dashboards open where they left them
-    // The team dashboards are admins only: none stay behind for whoever signs in next
+    // The team dashboards' links are signed for this person: none stay behind for whoever signs in next
     dashboardPages.main.clear();
     dashboardPages.details.clear();
     currentMainDashboard = null;

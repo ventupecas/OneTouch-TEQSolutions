@@ -18,10 +18,15 @@
 // Every Cube query made for someone who isn't an admin goes through
 // restrictQuery, which adds "the ticket is one of theirs". So the AI
 // assistant, search, records, charts and families only ever see those.
+//
+// People hear about changes through notifications.mjs: tickets given to
+// them, a family moved to the team they're the project manager of, and
+// (for a project manager) a member saying they resolved or closed a ticket.
 // =====================================================================
 
 import { createHash } from 'node:crypto';
 import { pool } from './auth.mjs';
+import { notify } from './notifications.mjs';
 
 // They see absolutely everything
 export const ADMIN_USERNAMES = ['vperez', 'lvang', 'lbell'];
@@ -34,8 +39,14 @@ export const ROLES = {
 };
 // Accounts that aren't people (scripts/warmup.mjs) never join a team
 const SERVICE_ACCOUNTS = ['warmup'];
-// Test accounts join teams but never lead one
-const TEST_ACCOUNT = /^tester\d*$/;
+// Test accounts (tester1, tester2, ..., and test.<name>, like the Milwaukee
+// Brewers' players) only ever join a test team, never a real one. A Postgres
+// pattern, also used as a RegExp.
+const TEST_ACCOUNT = '^(tester[0-9]*|test\\.[a-z0-9._-]+)$';
+const isTestAccount = username => new RegExp(TEST_ACCOUNT).test(username);
+// What a member can tell their project manager about one of their tickets
+export const REPORT_STATUSES = { resolved: 'resolved', closed: 'closed' };
+const MAX_NOTE = 500;
 
 const PREFIXES = ['INC', 'CHG', 'RITM', 'SCTASK'];
 const TICKET = /^(INC|CHG|RITM|SCTASK)\d{7}$/;
@@ -95,7 +106,77 @@ export async function ensureTeamsSchema() {
     );
     CREATE INDEX IF NOT EXISTS ticket_assignments_family_idx ON ticket_assignments (family_id);
     CREATE INDEX IF NOT EXISTS ticket_assignments_assignee_idx ON ticket_assignments (assignee_id);
+    -- "I resolved / closed this", told to the project manager. Only a
+    -- message: the ticket itself never changes.
+    CREATE TABLE IF NOT EXISTS ticket_reports (
+      id          serial PRIMARY KEY,
+      number      text NOT NULL,
+      user_id     integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      team_id     integer REFERENCES teams(id) ON DELETE SET NULL,
+      status      text NOT NULL CHECK (status IN ('resolved', 'closed')),
+      note        text,
+      created_at  timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS ticket_reports_number_idx ON ticket_reports (number, created_at DESC);
+    -- A team for trying things out (the Milwaukee Brewers): test accounts
+    -- may join it, and they may join no other
+    ALTER TABLE teams ADD COLUMN IF NOT EXISTS is_test boolean NOT NULL DEFAULT false;
+    -- What the Metabase dashboards may show each person: every ticket's team
+    -- and who has it, and nothing else. analytics_db reads it through
+    -- postgres_fdw as access_reader (db/init-reporting.sh), which can read
+    -- this view and no other table here.
+    CREATE OR REPLACE VIEW ticket_access AS
+      SELECT a.number, f.team_id, a.assignee_id
+        FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id;
+    DO $$ BEGIN
+      IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'access_reader') THEN
+        GRANT SELECT ON ticket_access TO access_reader;
+      END IF;
+    END $$;
   `);
+}
+
+// Who someone is to the Metabase dashboards (a locked filter in their signed
+// link, see server.mjs): everyone ("all"), a team's tickets, or their own.
+// Ends with the scope's key, so Metabase keeps cached results apart for each
+// set of tickets and a change in someone's tickets isn't answered from an old
+// cache. reporting.visible_tickets in analytics_db reads it.
+export function dashboardViewer(scope) {
+  if (scope.all) return 'all';
+  const { access } = scope;
+  return access.role === 'project_manager'
+    ? `team:${access.team.id}:${scope.key}`
+    : `person:${access.userId}:${scope.key}`;
+}
+
+// Test accounts used to be dealt onto teams with everyone else. Takes any
+// that are on a real team off it; their tickets stay with the team,
+// unassigned, for its project manager to hand out. Safe to run every start.
+// -> null, or { people: [usernames], tickets }
+export async function takeTestAccountsOffTeams() {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `SELECT m.user_id, u.username FROM team_members m JOIN users u ON u.id = m.user_id JOIN teams t ON t.id = m.team_id
+        WHERE u.username ~ $1 AND NOT t.is_test FOR UPDATE OF m`, [TEST_ACCOUNT]);
+    if (!rows.length) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    const ids = rows.map(r => r.user_id);
+    const { rowCount } = await client.query(
+      'UPDATE ticket_assignments SET assignee_id = NULL, assigned_at = NULL, assigned_by = NULL WHERE assignee_id = ANY($1::int[])', [ids]);
+    await client.query('DELETE FROM team_members WHERE user_id = ANY($1::int[])', [ids]);
+    await client.query('COMMIT');
+    changed();
+    return { people: rows.map(r => r.username), tickets: rowCount };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -177,15 +258,14 @@ export async function seedTeams(runQuery) {
     // One project manager and one process excellence member per team, then
     // everyone else to whichever team is smallest
     const { rows: people } = await client.query(
-      'SELECT id, username FROM users WHERE is_active AND username <> ALL($1::text[])',
-      [[...ADMIN_USERNAMES, ...SERVICE_ACCOUNTS]]);
+      'SELECT id, username FROM users WHERE is_active AND username <> ALL($1::text[]) AND username !~ $2',
+      [[...ADMIN_USERNAMES, ...SERVICE_ACCOUNTS], TEST_ACCOUNT]);
     people.sort((a, b) => (hash('person', a.username) - hash('person', b.username)) || a.username.localeCompare(b.username));
-    const leaders = people.filter(p => !TEST_ACCOUNT.test(p.username));
     const members = teamIds.map(() => []);
     const placed = new Set();
     const place = (person, team, role) => { members[team].push({ id: person.id, role }); placed.add(person.id); };
-    leaders.slice(0, teamIds.length).forEach((p, t) => place(p, t, 'project_manager'));
-    leaders.slice(teamIds.length, teamIds.length * 2).forEach((p, t) => place(p, t, 'process_excellence'));
+    people.slice(0, teamIds.length).forEach((p, t) => place(p, t, 'project_manager'));
+    people.slice(teamIds.length, teamIds.length * 2).forEach((p, t) => place(p, t, 'process_excellence'));
     for (const p of people.filter(p => !placed.has(p.id))) {
       const smallest = members.reduce((best, list, t) => (list.length < members[best].length ? t : best), 0);
       place(p, smallest, 'project_team');
@@ -324,7 +404,7 @@ const personName = r => r.display_name || r.username;
 export async function listTeams(scope) {
   const { access } = scope;
   const { rows: teams } = await pool.query(
-    `SELECT t.id, t.name, count(f.id)::int AS families, coalesce(sum(f.size), 0)::int AS tickets
+    `SELECT t.id, t.name, t.is_test AS test, count(f.id)::int AS families, coalesce(sum(f.size), 0)::int AS tickets
        FROM teams t LEFT JOIN ticket_families f ON f.team_id = t.id
       ${access.admin ? '' : 'WHERE t.id = $1'}
       GROUP BY t.id ORDER BY t.id`,
@@ -361,24 +441,33 @@ export async function listTeams(scope) {
         canManage: manages,
         unassigned: manages ? loadOf(t.id, null) : null,
         members: members.filter(m => m.team_id === t.id).map(m => ({
-          id: m.id, username: m.username, name: personName(m), role: m.role,
+          id: m.id, username: m.username, name: personName(m), role: m.role, test: isTestAccount(m.username),
           load: manages || m.id === access.userId ? loadOf(t.id, m.id) : null,
         })),
       };
     }),
   };
   if (access.admin) {
+    // Test accounts only while there's a test team for them to join
     const { rows } = await pool.query(
-      `SELECT id, username, display_name FROM users
+      `SELECT id, username, display_name, username ~ $2 AS test FROM users
         WHERE is_active AND id NOT IN (SELECT user_id FROM team_members) AND username <> ALL($1::text[])
-        ORDER BY lower(coalesce(display_name, username))`,
-      [[...ADMIN_USERNAMES, ...SERVICE_ACCOUNTS]]);
-    result.people = rows.map(r => ({ id: r.id, username: r.username, name: personName(r) }));
+          AND (username !~ $2 OR EXISTS (SELECT 1 FROM teams WHERE is_test))
+        ORDER BY username ~ $2, lower(coalesce(display_name, username))`,
+      [[...ADMIN_USERNAMES, ...SERVICE_ACCOUNTS], TEST_ACCOUNT]);
+    result.people = rows.map(r => ({ id: r.id, username: r.username, name: personName(r), test: r.test }));
   }
   return result;
 }
 
-// One page of a team's tickets, grouped by family (biggest first).
+// The tickets assigned to someone in OneTouch (Home's "Assigned to me")
+export async function assignedNumbers(userId) {
+  const { rows } = await pool.query('SELECT number FROM ticket_assignments WHERE assignee_id = $1 ORDER BY number', [userId]);
+  return rows.map(r => r.number);
+}
+
+// One page of a team's tickets, grouped by family (biggest first), each with
+// the latest "I resolved / closed it" someone told the project manager.
 // assignee: a user id, 'none' (unassigned) or null (everyone). Someone who
 // doesn't manage the team only ever gets their own.
 export async function teamTickets(scope, teamId, { assignee = null, kind = null, search = '', offset = 0, limit = 50 } = {}) {
@@ -395,10 +484,18 @@ export async function teamTickets(scope, teamId, { assignee = null, kind = null,
   if (text) { params.push(`%${text}%`); where.push(`a.number LIKE $${params.length}`); }
 
   const from = `FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id
-                LEFT JOIN users u ON u.id = a.assignee_id WHERE ${where.join(' AND ')}`;
-  const { rows: [{ total }] } = await pool.query(`SELECT count(*)::int AS total ${from}`, params);
+                LEFT JOIN users u ON u.id = a.assignee_id`;
+  const filter = `WHERE ${where.join(' AND ')}`;
+  const { rows: [{ total }] } = await pool.query(`SELECT count(*)::int AS total ${from} ${filter}`, params);
   const { rows } = await pool.query(
-    `SELECT a.number, a.family_id, f.size, a.assignee_id, u.username, u.display_name ${from}
+    `SELECT a.number, a.family_id, f.size, a.assignee_id, u.username, u.display_name,
+            r.status AS report_status, r.note AS report_note, r.created_at AS report_at, r.user_id AS report_by_id,
+            coalesce(ru.display_name, ru.username) AS report_by
+       ${from}
+       LEFT JOIN LATERAL (SELECT status, note, created_at, user_id FROM ticket_reports
+                           WHERE number = a.number ORDER BY created_at DESC LIMIT 1) r ON true
+       LEFT JOIN users ru ON ru.id = r.user_id
+       ${filter}
       ORDER BY f.size DESC, a.family_id, a.number
       LIMIT ${Math.min(Math.max(Number(limit) || 50, 1), 200)} OFFSET ${Math.max(Number(offset) || 0, 0)}`,
     params);
@@ -407,12 +504,17 @@ export async function teamTickets(scope, teamId, { assignee = null, kind = null,
     tickets: rows.map(r => ({
       number: r.number, family: { id: r.family_id, size: r.size },
       assignee: r.assignee_id ? { id: r.assignee_id, name: personName(r) } : null,
+      report: r.report_status ? {
+        status: r.report_status, note: r.report_note, at: r.report_at,
+        by: r.report_by, mine: r.report_by_id === scope.access.userId,
+      } : null,
     })),
   };
 }
 
 // Gives tickets of one team to one of its members (null: nobody). Admins can
-// for any team, a project manager for their own. -> how many changed
+// for any team, a project manager for their own. The person they go to gets
+// a notification (unless they gave them to themselves). -> how many changed
 export async function assignTickets(scope, numbers, assigneeId) {
   const wanted = [...new Set((Array.isArray(numbers) ? numbers : []).map(n => String(n).toUpperCase()))].filter(n => TICKET.test(n));
   if (!wanted.length) throw new AccessError('No tickets to assign.');
@@ -429,13 +531,31 @@ export async function assignTickets(scope, numbers, assigneeId) {
     const { rows: on } = await pool.query('SELECT 1 FROM team_members WHERE user_id = $1 AND team_id = $2', [person, teamId]);
     if (!on.length) throw new AccessError('That person isn\'t on this team.');
   }
-  const { rowCount } = await pool.query(
-    `UPDATE ticket_assignments
-        SET assignee_id = $2, assigned_at = CASE WHEN $2::int IS NULL THEN NULL ELSE now() END, assigned_by = $3
-      WHERE number = ANY($1::text[]) AND assignee_id IS DISTINCT FROM $2::int`,
-    [wanted, person, scope.access.userId]);
-  if (rowCount) changed();
-  return rowCount;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: given } = await client.query(
+      `UPDATE ticket_assignments
+          SET assignee_id = $2, assigned_at = CASE WHEN $2::int IS NULL THEN NULL ELSE now() END, assigned_by = $3
+        WHERE number = ANY($1::text[]) AND assignee_id IS DISTINCT FROM $2::int
+        RETURNING number`,
+      [wanted, person, scope.access.userId]);
+    if (given.length && person !== null && person !== scope.access.userId) {
+      const { rows: [team] } = await client.query('SELECT name FROM teams WHERE id = $1', [teamId]);
+      await notify(client, [person], {
+        kind: 'assigned', actorId: scope.access.userId,
+        numbers: given.map(r => r.number).sort(), detail: { count: given.length, team: team.name },
+      });
+    }
+    await client.query('COMMIT');
+    if (given.length) changed();
+    return given.length;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 // A ticket's family: its size, how many of each type, and its team (admins only)
@@ -462,13 +582,13 @@ export async function familyOfTicket(scope, number) {
 
 // Moves a whole family to another team (admins only). Its tickets were the
 // old team's people's, so they become unassigned for the new team's project
-// manager to hand out. -> how many tickets moved
+// manager to hand out, who gets a notification. -> how many tickets moved
 export async function moveFamily(scope, familyId, teamId) {
   requireAdmin(scope);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const { rows: [team] } = await client.query('SELECT id FROM teams WHERE id = $1', [teamId]);
+    const { rows: [team] } = await client.query('SELECT id, name FROM teams WHERE id = $1', [teamId]);
     if (!team) throw new AccessError('There is no such team.');
     const { rows: [family] } = await client.query('SELECT size, team_id FROM ticket_families WHERE id = $1 FOR UPDATE', [familyId]);
     if (!family) throw new AccessError('There is no such family.');
@@ -480,6 +600,17 @@ export async function moveFamily(scope, familyId, teamId) {
     await client.query(
       `UPDATE ticket_assignments SET assignee_id = NULL, assigned_at = NULL, assigned_by = $2
         WHERE family_id = $1 AND assignee_id IS NOT NULL`, [familyId, scope.access.userId]);
+    const { rows: managers } = await client.query(
+      `SELECT user_id FROM team_members WHERE team_id = $1 AND role = 'project_manager' AND user_id <> $2`,
+      [team.id, scope.access.userId]);
+    if (managers.length) {
+      const { rows: tickets } = await client.query(
+        'SELECT number FROM ticket_assignments WHERE family_id = $1 ORDER BY number', [familyId]);
+      await notify(client, managers.map(m => m.user_id), {
+        kind: 'family', actorId: scope.access.userId,
+        numbers: tickets.map(t => t.number), detail: { count: family.size, team: team.name, family: familyId },
+      });
+    }
     await client.query('COMMIT');
     changed();
     return family.size;
@@ -492,8 +623,8 @@ export async function moveFamily(scope, familyId, teamId) {
 }
 
 // Puts someone on a team with a role, changes their role, or (teamId null)
-// takes them off their team (admins only). Leaving a team hands their
-// tickets back to it, unassigned.
+// takes them off their team, and with it their role (admins only). Leaving a
+// team hands their tickets back to it, unassigned. -> { unassigned }: how many
 export async function setMembership(scope, userId, teamId, role) {
   requireAdmin(scope);
   if (teamId !== null && !ROLES[role]) throw new AccessError('Choose a role.');
@@ -502,15 +633,18 @@ export async function setMembership(scope, userId, teamId, role) {
     await client.query('BEGIN');
     const { rows: [user] } = await client.query('SELECT id, username FROM users WHERE id = $1 AND is_active', [userId]);
     if (!user) throw new AccessError('There is no such account.');
-    if (SERVICE_ACCOUNTS.includes(user.username)) throw new AccessError(`${user.username} is a service account and can't join a team.`);
-    if (teamId !== null && !(await client.query('SELECT 1 FROM teams WHERE id = $1', [teamId])).rows.length) {
-      throw new AccessError('There is no such team.');
+    if (teamId !== null) {
+      const { rows: [team] } = await client.query('SELECT is_test FROM teams WHERE id = $1', [teamId]);
+      if (!team) throw new AccessError('There is no such team.');
+      if (SERVICE_ACCOUNTS.includes(user.username)) throw new AccessError(`${user.username} is a service account and can't join a team.`);
+      if (isTestAccount(user.username) && !team.is_test) throw new AccessError(`${user.username} is a test account, so it can only join a test team.`);
     }
     const { rows: [now] } = await client.query('SELECT team_id FROM team_members WHERE user_id = $1 FOR UPDATE', [userId]);
+    let unassigned = 0;
     if (now && now.team_id !== teamId) {
-      await client.query(
+      ({ rowCount: unassigned } = await client.query(
         'UPDATE ticket_assignments SET assignee_id = NULL, assigned_at = NULL, assigned_by = $2 WHERE assignee_id = $1',
-        [userId, scope.access.userId]);
+        [userId, scope.access.userId]));
     }
     if (teamId === null) {
       await client.query('DELETE FROM team_members WHERE user_id = $1', [userId]);
@@ -523,10 +657,59 @@ export async function setMembership(scope, userId, teamId, role) {
     }
     await client.query('COMMIT');
     changed();
+    return { unassigned };
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
     throw error;
   } finally {
     client.release();
   }
+}
+
+// ---------------------------------------------------------------------
+// TELLING THE PROJECT MANAGER: someone on a team says they resolved or
+// closed one of their tickets. Their team's project manager gets a
+// notification, and the Team tab shows it next to the ticket. Nothing in
+// the ticket data changes: the export is a frozen snapshot.
+// ---------------------------------------------------------------------
+
+// -> { told: [project managers' names] }
+export async function reportTicket(scope, number, status, note) {
+  const { access } = scope;
+  const n = String(number || '').toUpperCase().trim();
+  if (!TICKET.test(n)) throw new AccessError('That isn\'t a ticket number.');
+  if (!REPORT_STATUSES[status]) throw new AccessError('Say whether you resolved or closed it.');
+  const text = String(note ?? '').trim().slice(0, MAX_NOTE) || null;
+  if (!access.team) throw new AccessError('You\'re not on a team, so there\'s no project manager to tell.');
+  const { rows: [mine] } = await pool.query(
+    `SELECT 1 FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id
+      WHERE a.number = $1 AND a.assignee_id = $2 AND f.team_id = $3`, [n, access.userId, access.team.id]);
+  if (!mine) throw new AccessError(`${n} isn't assigned to you.`);
+  const { rows: managers } = await pool.query(
+    `SELECT u.id, u.username, u.display_name FROM team_members m JOIN users u ON u.id = m.user_id
+      WHERE m.team_id = $1 AND m.role = 'project_manager' AND m.user_id <> $2 ORDER BY u.id`,
+    [access.team.id, access.userId]);
+  if (!managers.length) {
+    throw new AccessError(access.role === 'project_manager'
+      ? 'You\'re your team\'s project manager, so there\'s nobody else to tell.'
+      : `${access.team.name} has no project manager to tell yet. An admin can add one.`);
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      'INSERT INTO ticket_reports (number, user_id, team_id, status, note) VALUES ($1, $2, $3, $4, $5)',
+      [n, access.userId, access.team.id, status, text]);
+    await notify(client, managers.map(m => m.id), {
+      kind: 'report', actorId: access.userId, numbers: [n], detail: { status, note: text, team: access.team.name },
+    });
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+  return { told: managers.map(personName) };
 }

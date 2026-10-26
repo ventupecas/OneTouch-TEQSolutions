@@ -1,5 +1,5 @@
 import dns from 'node:dns/promises';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import express from 'express';
 import cors from 'cors';
@@ -16,13 +16,14 @@ import { buildExport, validateExport, ExportUnavailableError } from './export.mj
 import * as auth from './auth.mjs';
 import * as stars from './stars.mjs';
 import * as seen from './seen.mjs';
-import { findTickets, ticketRecord, ticketSummaries, ticketNumbersIn, STARRABLE } from './tickets.mjs';
+import { findTickets, ticketRecord, ticketSummaries, ticketNumbersIn, ticketsByPriority, STARRABLE } from './tickets.mjs';
 import { relatedFamilies, describeFamilies, ticketLinks, FAMILY_KINDS, LINK_KIND, familyList, familySummary, familyOf } from './relations.mjs';
 import * as prefs from './prefs.mjs';
 import { chartData, chartValues, chartCatalog, chartTickets, chartFromQuery, teamValues, ChartError } from './charts.mjs';
 import * as shares from './shares.mjs';
 import * as chats from './chats.mjs';
 import * as teams from './teams.mjs';
+import * as notifications from './notifications.mjs';
 import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
 
 dotenv.config();
@@ -35,16 +36,21 @@ app.use(cors({ origin: '*', exposedHeaders: ['Content-Disposition'] }));
 
 // =====================================================================
 // METABASE DASHBOARDS: Metabase only listens on this computer, so its
-// public-dashboard pages (and the scripts and data they load) are passed
+// embedded-dashboard pages (and the scripts and data they load) are passed
 // through this server. That way the Dashboards tab works wherever OneTouch
 // does: localhost, the network address, the tunnel and remote mode.
+// Each person opens them through links signed for them (/api/dashboards),
+// which show only the tickets they may see.
 // =====================================================================
 
 const METABASE_URL = (process.env.METABASE_URL || 'http://localhost:3000').replace(/\/+$/, '');
 const METABASE_DASHBOARDS_FILE = 'metabase-dashboards.json';
-// What a public dashboard page needs from Metabase, and nothing else
-// (no admin pages, no signed-in API)
-const METABASE_PATHS = /^\/(public\/|app\/|api\/public\/|api\/session\/properties$|api\/geojson)/;
+// What a signed dashboard page needs from Metabase, and nothing else (no
+// admin pages, no signed-in API, no public links). Each of its requests
+// carries the signed link, which Metabase checks.
+const METABASE_PATHS = /^\/(embed\/|app\/|api\/embed\/|api\/session\/properties$|api\/geojson)/;
+// How long a signed link works: a sign-in's length, after which the page asks again
+const EMBED_TTL_S = 12 * 60 * 60;
 // Headers passed back to the browser; fetch already undid any compression
 const METABASE_RESPONSE_HEADERS = ['content-type', 'cache-control', 'etag', 'last-modified',
   'content-security-policy', 'x-frame-options', 'location'];
@@ -69,6 +75,15 @@ app.use(async (req, res, next) => {
     res.status(502).send('Metabase is not reachable right now.');
   }
 });
+// A click inside a dashboard that opens another page lands here
+// (/onetouch/dashboard/<page>?filters): the link can't hold each person's
+// signed address, so the page around the frame swaps it in (app.js,
+// followDashboardFrame). Until then, a blank page.
+app.get('/onetouch/dashboard/:key', (req, res) => {
+  res.set('Cache-Control', 'no-store').type('html')
+    .send('<!doctype html><meta charset="utf-8"><title>Opening…</title><body style="margin:0;background:transparent"></body>');
+});
+
 // Exports carry whole result tables back up, so that route gets a bigger limit
 app.use('/api/export', express.json({ limit: '25mb' }));
 // A whole set of dashboards is saved (or a dashboard shared) at once
@@ -275,7 +290,7 @@ function scopedRunner(scope) {
   return run;
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families', '/api/notifications', '/api/my-tickets'], requireLogin);
 
 // Who is signed in (the page shows their display name), and what they may do
 app.get('/api/me', (req, res) => {
@@ -286,19 +301,39 @@ app.get('/api/me', (req, res) => {
   });
 });
 
-// The dashboards built by scripts/metabase-setup.mjs, for the Dashboards tab.
-// Metabase shows every ticket and can't be limited per person, so only admins get them.
+// A Metabase signed-embedding link to one dashboard, its "viewer" filter
+// locked to this person (teams.dashboardViewer): Metabase checks the
+// signature and shows only the tickets that viewer may see
+const base64url = value => Buffer.from(typeof value === 'string' ? value : JSON.stringify(value)).toString('base64url');
+function signedDashboardPath(dashboardId, viewer) {
+  const body = `${base64url({ alg: 'HS256', typ: 'JWT' })}.${base64url({
+    resource: { dashboard: dashboardId },
+    params: { viewer },
+    exp: Math.floor(Date.now() / 1000) + EMBED_TTL_S,
+  })}`;
+  const signature = createHmac('sha256', process.env.METABASE_EMBEDDING_SECRET).update(body).digest('base64url');
+  return `/embed/dashboard/${body}.${signature}`;
+}
+
+// The dashboards built by scripts/metabase-setup.mjs, for the Dashboards tab,
+// each as a link signed for this person: everyone gets them, and each sees
+// only their own tickets in them
 app.get('/api/dashboards', (req, res) => {
-  if (!req.scope.all) return res.json({ dashboards: [], details: [], restricted: true });
   try {
     const { dashboards, details = [] } = JSON.parse(readFileSync(METABASE_DASHBOARDS_FILE, 'utf8'));
+    // A file from before signed links (public links only), or no secret to sign with
+    if (!/^[0-9a-f]{64}$/.test(process.env.METABASE_EMBEDDING_SECRET || '') || dashboards.some(d => !d.id)) {
+      console.error('📊 The dashboards need METABASE_EMBEDDING_SECRET and a run of scripts/metabase-setup.mjs');
+      return res.json({ dashboards: [], details: [] });
+    }
+    const viewer = teams.dashboardViewer(req.scope);
     res.json({
       // `group` is the drawer heading; files from before groups existed get one heading
       dashboards: dashboards.map(d => ({
-        key: d.key, group: d.group || 'Dashboards', name: d.name, description: d.description, path: `/public/dashboard/${d.uuid}`,
+        key: d.key, group: d.group || 'Dashboards', name: d.name, description: d.description, path: signedDashboardPath(d.id, viewer),
       })),
       // The pages a click on a chart opens (not in the drawer); their filters name the page
-      details: details.map(d => ({ key: d.key, name: d.name, path: `/public/dashboard/${d.uuid}`, params: d.params })),
+      details: details.map(d => ({ key: d.key, name: d.name, path: signedDashboardPath(d.id, viewer), params: d.params })),
     });
   } catch {
     res.json({ dashboards: [], details: [] });
@@ -939,6 +974,20 @@ app.post('/api/seen-tickets', async (req, res) => {
   }
 });
 
+// Home's "Assigned to me": every ticket assigned to this person in OneTouch,
+// most urgent first, then oldest (tickets.mjs ticketsByPriority), each marked
+// open or not; the page shows open, closed or all of them
+app.get('/api/my-tickets', async (req, res) => {
+  try {
+    const numbers = await teams.assignedNumbers(req.user.id);
+    const tickets = numbers.length ? await ticketsByPriority(numbers, req.runQuery) : [];
+    res.json({ tickets });
+  } catch (error) {
+    console.error('🎫 Could not load the tickets assigned to someone:', error.message);
+    res.status(502).json({ error: 'Your tickets could not be loaded right now. Please try again.' });
+  }
+});
+
 // ?details=1: also each starred ticket's summary, parent and families (for the
 // Starred tickets list), and the stars that aren't in the data
 app.get('/api/stars', async (req, res) => {
@@ -1200,13 +1249,16 @@ app.put('/api/assignments', async (req, res) => {
   }
 });
 
-// Admins: { teamId (null: no team), role } for one person
+// Admins: { teamId (null: off their team, and no role), role } for one person
+// -> { unassigned }: how many of their tickets went back to the team
 app.put('/api/teams/members/:userId', async (req, res) => {
   try {
     const teamId = req.body?.teamId == null ? null : Number(req.body.teamId);
-    await teams.setMembership(req.scope, Number(req.params.userId), teamId, req.body?.role);
-    console.log(`👥 ${req.user.username} put user ${req.params.userId} on team ${teamId ?? '(none)'} as ${req.body?.role ?? '-'}`);
-    res.json({ ok: true });
+    const { unassigned } = await teams.setMembership(req.scope, Number(req.params.userId), teamId, req.body?.role);
+    console.log(teamId === null
+      ? `👥 ${req.user.username} took user ${req.params.userId} off their team (${unassigned} tickets unassigned)`
+      : `👥 ${req.user.username} put user ${req.params.userId} on team ${teamId} as ${req.body?.role}`);
+    res.json({ ok: true, unassigned });
   } catch (error) {
     teamsFailed(res, error, 'Changing that person\'s team');
   }
@@ -1231,6 +1283,42 @@ app.put('/api/ticket-families/:id/team', async (req, res) => {
     res.json({ moved });
   } catch (error) {
     teamsFailed(res, error, 'Moving that family');
+  }
+});
+
+// Anyone on a team: { number, status: resolved|closed, note } tells their
+// project manager. Only a notification: the ticket itself doesn't change. -> { told }
+app.post('/api/tickets/report', async (req, res) => {
+  try {
+    const { told } = await teams.reportTicket(req.scope, req.body?.number, req.body?.status, req.body?.note);
+    console.log(`👥 ${req.user.username} told ${told.length} project manager(s) they ${req.body?.status} ${req.body?.number}`);
+    res.json({ told });
+  } catch (error) {
+    teamsFailed(res, error, 'Telling your project manager');
+  }
+});
+
+// =====================================================================
+// NOTIFICATIONS (notifications.mjs): the 🔔 in the header
+// =====================================================================
+
+// -> { unread, notifications: newest first }
+app.get('/api/notifications', async (req, res) => {
+  try {
+    res.json(await notifications.listNotifications(req.user.id));
+  } catch (error) {
+    console.error('🔔 Loading notifications failed:', error.message);
+    res.status(503).json({ error: 'Your notifications could not be loaded right now.' });
+  }
+});
+
+// { ids } (none: all of them) -> { read }
+app.post('/api/notifications/read', async (req, res) => {
+  try {
+    res.json({ read: await notifications.markRead(req.user.id, req.body?.ids ?? null) });
+  } catch (error) {
+    console.error('🔔 Marking notifications read failed:', error.message);
+    res.status(503).json({ error: 'That could not be saved right now.' });
   }
 });
 
@@ -1270,11 +1358,18 @@ async function prepareAccounts(attempt = 1) {
     await shares.ensureSharesSchema();
     await chats.ensureChatsSchema();
     await teams.ensureTeamsSchema();
+    await notifications.ensureNotificationsSchema();
   } catch (error) {
     const wait = Math.min(attempt * 2, 15);
     console.error(`🔐 Account database not reachable yet (${error.message}); retrying in ${wait}s`);
     setTimeout(() => prepareAccounts(attempt + 1), wait * 1000).unref();
     return;
+  }
+  try {
+    const off = await teams.takeTestAccountsOffTeams();
+    if (off) console.log(`👥 Took the test accounts off their teams (${off.people.join(', ')}); ${off.tickets.toLocaleString()} of their tickets are now unassigned`);
+  } catch (error) {
+    console.error('👥 Could not take the test accounts off their teams:', error.message);
   }
 
   const file = process.env.ACCOUNTS_FILE ?? auth.DEFAULT_ACCOUNTS_FILE;

@@ -633,10 +633,10 @@ another team, ticket or item there. Clearing the last filter returns you to the 
 What each click opens is set by `click` / `links` on the charts in
 `scripts/metabase-setup.mjs`; the detail pages are its `DETAILS` list.
 
-Metabase itself is at http://localhost:3000 on the server only. The dashboards are
-public links that OneTouch passes through, so anyone with the link can view them.
-Inside OneTouch, only admins get the Metabase dashboards (see [Teams](#teams-and-who-sees-which-tickets)),
-because they show every ticket and can't be limited per person.
+Metabase itself is at http://localhost:3000 on the server only. Everyone signed in to
+OneTouch gets the dashboards, through links signed for them that show only the tickets
+they may see (see [Teams](#teams-and-who-sees-which-tickets)): admins every ticket, a
+project manager their team's, anyone else their own. There are no public links.
 
 ### Teams and who sees which tickets
 
@@ -1191,11 +1191,13 @@ has nothing left to show, so OneTouch goes back to the dashboard it was opened f
 says "No filters left, so you're back on …". **← Back** then doesn't return to the empty page.
 
 **How it works.** Metabase listens only on the server itself, so OneTouch passes its
-public dashboard pages through (`/public/…`, `/app/…` and the public API, read-only, GET
+embedded dashboard pages through (`/embed/…`, `/app/…` and the embed API, read-only, GET
 only). That way the tab works from localhost, the network address, the tunnel and
 remote mode alike. Metabase connects to the database as `metabase_reader`, which can read
-only the `reporting` views. The dashboards are public links: anyone who has a link can
-view that dashboard. `scripts/metabase-setup.mjs` checks every click target and filter
+only the `reporting` views. Each person opens the dashboards through links the server
+signs for them (with `METABASE_EMBEDDING_SECRET`), carrying a locked "viewer" that every
+chart's SQL uses to keep only that person's tickets, so a copied link shows nobody more
+than its owner sees. Public links are switched off. `scripts/metabase-setup.mjs` checks every click target and filter
 before it changes anything in Metabase, including that every filter says where its
 suggestions come from: `distinct(...)` for values read from the reporting views (each
 becomes a small "… suggestions" question that Metabase searches as people type), or
@@ -1324,7 +1326,7 @@ downloads and ITIL dashboards. Everything runs in Docker on one computer, the **
 browser ──► app (Node/Express, port 8000) ──► Claude API: question → Cube JSON query
                  │                         ──► Cube (port 4000) ──► Postgres analytics_db (the CSVs)
                  │                         ──► Postgres onetouch_auth (accounts, sessions)
-                 └── /public/... passed through to Metabase (port 3000) ──► Postgres "reporting" views
+                 └── /embed/... (signed per person) passed through to Metabase (port 3000) ──► Postgres "reporting" views
 ```
 
 | Container | Image | What it does |
@@ -1582,7 +1584,7 @@ Check: `node --check business_logic.mjs` prints nothing.
     `GET /api/shares/:token` opens a link, `DELETE` stops sharing) → `shares.mjs`. Each
     `/api/query` answer also carries `chartable`: the answer as a chart (`chartFromQuery`),
     with any conditions a chart can't hold, or null.
-  - Passes Metabase's public dashboard pages through, so the Dashboards tab works wherever
+  - Signs each person's Metabase dashboard links and passes the embedded pages through, so the Dashboards tab works wherever
     OneTouch does.
   - On start it creates the account, starred-ticket, shown-ticket and preference tables,
     loads `db/accounts.json`, and retries until Postgres is ready.
@@ -1729,8 +1731,8 @@ docker exec analytics_node_app node scripts/users.mjs export
    and turns on public sharing. Then it rebuilds ten dashboards in the "OneTouch ITIL"
    collection from its `DASHBOARDS` list, plus the drill-down pages in `DETAILS`. Before
    changing anything it checks that every click target exists. Finally it writes their
-   public links to `metabase-dashboards.json`, which the Dashboards tab reads.
-2. Make sure `METABASE_DB_PASSWORD`, `METABASE_ADMIN_EMAIL` and `METABASE_ADMIN_PASSWORD`
+   dashboard ids to `metabase-dashboards.json`, which the server signs a link to for each person.
+2. Make sure `METABASE_DB_PASSWORD`, `METABASE_ADMIN_EMAIL`, `METABASE_ADMIN_PASSWORD` and `METABASE_EMBEDDING_SECRET`
    are set in `.env`, then run `docker compose up -d` (this creates `metabase_reader`).
 3. Run, and re-run whenever you change a chart:
    ```

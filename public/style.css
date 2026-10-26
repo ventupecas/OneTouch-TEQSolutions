@@ -404,6 +404,9 @@ body {
 .team-you td { font-weight: 600; }
 .team-you-tag { font-size: 0.72rem; font-weight: 600; color: var(--accent-ink); background: var(--accent-soft); border-radius: 4px; padding: 1px 6px; }
 .team-unassigned td { color: var(--text-2); font-style: italic; }
+.team-test-tag { font-size: 0.72rem; font-weight: 600; color: var(--warn-ink); background: var(--warn-soft); border: 1px solid var(--warn-line); border-radius: 4px; padding: 0 6px; vertical-align: middle; }
+.team-member-team { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.team-member-team .home-action { white-space: nowrap; }
 .team-filters, .team-bulk, .team-pager { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 8px 0; }
 .team-filters label { display: flex; align-items: center; gap: 6px; font-size: 0.87rem; }
 .team-filters input, .team-filters select, .team-bulk select, .team-table select, .result-table select.team-assign {
@@ -470,11 +473,14 @@ body {
 
 .home-modes {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 12px;
     margin-bottom: 16px;
-    max-width: 720px;
+    max-width: 1020px;
 }
+/* Assigned to me: open / closed / all */
+.assigned-filter { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.assigned-filter .home-action[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-softer); color: var(--accent-ink); font-weight: 600; }
 .home-mode {
     display: flex;
     flex-direction: column;
@@ -1036,6 +1042,50 @@ tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
     padding-top: 10px;
 }
 .theme-note { font-size: 0.78rem; color: var(--muted); flex: 1 1 180px; line-height: 1.4; }
+
+/* 🔔 Notifications: the count on the bell, and the list (drops down like 🎨 Colors) */
+.notify-count {
+    display: inline-block;
+    min-width: 18px;
+    margin-left: 4px;
+    padding: 0 5px;
+    box-sizing: border-box;
+    border-radius: 9px;
+    background: var(--accent);
+    color: var(--on-accent);
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 18px;
+    text-align: center;
+}
+.notify-count[hidden] { display: none; }
+.notify-items { list-style: none; margin: 0; padding: 0; }
+.notify-item { padding: 10px 10px; border-bottom: 1px solid var(--border); border-radius: 6px; font-size: 0.88rem; line-height: 1.45; }
+.notify-item:last-child { border-bottom: none; }
+.notify-item.unread { background: var(--accent-softer); box-shadow: inset 3px 0 0 var(--accent); }
+.notify-note { margin: 6px 0 0; padding: 4px 10px; border-left: 3px solid var(--border); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.notify-tickets { margin-top: 4px; font-size: 0.82rem; color: var(--text-2); }
+.notify-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: 6px; font-size: 0.78rem; color: var(--muted); }
+
+/* Telling your project manager you resolved or closed a ticket */
+.report-ticket { margin: 0 0 4px; font-size: 0.9rem; color: var(--text-2); }
+.report-dialog select,
+.report-dialog textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel-bg);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.9rem;
+}
+.report-dialog textarea { resize: vertical; }
+.report-hint { margin: 10px 0 0; }
+.report-dialog .home-status.error { margin: 8px 0 0; }
+.team-report { margin-top: 4px; font-size: 0.8rem; color: var(--text-2); }
+.team-report-note { display: block; font-style: italic; color: var(--muted); }
 
 /* Radio buttons drawn as pills and color swatches (the real input stays, for keyboards) */
 .choice-row { display: flex; flex-wrap: wrap; gap: 6px; }

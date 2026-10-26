@@ -9,17 +9,66 @@ replacing that.
 
 - **Admins** (`ADMIN_USERNAMES` in `teams.mjs`: vperez, lvang, lbell) see every
   ticket. They put people on teams, set roles, move families between teams,
-  and assign any ticket. They're the only ones who see the Metabase
-  dashboards, because those show every ticket and can't be filtered per person.
+  and assign any ticket.
+- **Everyone gets the Metabase dashboards, each showing only their own
+  tickets.** The server signs a Metabase embed link per person
+  (`signedDashboardPath` in `server.mjs`) with a locked `viewer` filter
+  (`dashboardViewer` in `teams.mjs`: `all`, `team:<id>:<key>` or
+  `person:<id>:<key>`). Every chart's SQL reads the ticket views through
+  `scopedSql` (`scripts/metabase-setup.mjs`), which keeps only
+  `reporting.visible_tickets(viewer)`. That function reads OneTouch's live
+  assignments from `onetouch_auth` through `postgres_fdw`, as `access_reader`,
+  which can read only the `ticket_access` view (number, team id, assignee id)
+  and can't log in from outside the Postgres container (`db/init-reporting.sh`).
+  Public links are off. A chart may only use a view listed in `SCOPED_VIEWS`,
+  and the script refuses any other view. Filter suggestions (team names,
+  sites, …) still list every value, but the charts don't.
 - **Project manager**: sees every ticket of their team, assigns them to the
   team's members, and sees each member's workload (Team tab).
 - **Process excellence** and **project team member**: see only the tickets
   assigned to them.
 - People on no team, and the `warmup` service account, see no tickets.
-- There are six teams, named after Molson Coors beers: Coors Light, Miller Lite,
-  Coors Banquet, Blue Moon, Molson Canadian and Miller High Life. Each has one
-  project manager, one process excellence member, and 3–4 project team members
-  (the first members were placed at random).
+- Test accounts (`tester1`, `tester2`, …, and any `test.<name>`) only ever
+  join a **test team** (`teams.is_test`), never a real one. Seeding skips them,
+  an admin can only put them on a test team, and the server takes any that
+  are on a real team off it when it starts (`takeTestAccountsOffTeams`). Their
+  tickets stay with the team, unassigned. `tester1` and `tester2` are on no team.
+- An admin takes someone off a team with **Remove from team** in the Team tab
+  (or by picking "No team"). They lose their role and stop seeing the team's
+  tickets, and their tickets go back to the team, unassigned.
+- There are six real teams, named after Molson Coors beers: Coors Light, Miller
+  Lite, Coors Banquet, Blue Moon, Molson Canadian and Miller High Life. Each has
+  one project manager, one process excellence member, and 2–4 project team
+  members (the first members were placed at random).
+- One test team, the **Milwaukee Brewers**, for trying out the project manager's
+  side: `vperez` (an admin, who still sees everything) is its project manager.
+  Its players are test accounts made on this server only (they're not in
+  `db/accounts.json`): William Contreras (`test.wcontreras`, process
+  excellence), and Christian Yelich (`test.cyelich`), Jackson Chourio
+  (`test.jchourio`) and Brice Turang (`test.bturang`) as project team members.
+  Their passwords are random; set one with
+  `docker exec -it analytics_node_app npm run users -- reset-password test.cyelich`.
+  It starts with no tickets: an admin moves families to it with "Move tickets
+  to another team".
+
+**Assigned to me** (Home's first tab, `GET /api/my-tickets`): everyone's
+OneTouch tickets, most urgent first, then oldest (`ticketsByPriority` in
+`tickets.mjs`). Only incidents have a priority (P1–P4). A change ranks by its
+risk (High like P2, Medium like P3, Low and Standard like P4). Requests and
+catalog tasks have no priority, so they come after everything else. The list
+opens on open tickets, with Closed and All a click away.
+
+**Notifications** (`notifications.mjs`, the 🔔 in the header, checked every
+minute). Each one is saved in the same transaction as the change it reports:
+
+- Someone gets tickets (from their project manager or an admin): they're told
+  which ones. Giving tickets to yourself, or unassigning, tells nobody.
+- An admin moves a family to a team: that team's project manager is told. The
+  tickets arrive unassigned.
+- A member says they resolved or closed one of their tickets (a button on the
+  ticket's record and on its row in the Team tab): their project manager is
+  told, and the Team tab shows it under the ticket's state. This is only a
+  message (`ticket_reports`): the ticket's data never changes.
 
 **Families decide teams.** Tickets linked to each other form one family: a
 parent incident and its children, a bundle request and its child requests, a
