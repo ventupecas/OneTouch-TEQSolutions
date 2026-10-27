@@ -661,10 +661,17 @@ own dashboards. People on no team see no tickets.
 
 **The 👥 Team tab** shows who's on your team and in what role. A project manager also sees
 how many incidents, changes, requests and catalog tasks each person has, and every ticket of
-the team with an **Assigned to** box on each. Tick tickets and use **Give the ticked tickets
-to** to hand out many at once. An admin picks any team at the top, changes anyone's role or
-team in the people table, adds people who are on no team, and can **Move tickets to another
-team**.
+the team with an **Assigned to** box on each. Type part of someone's name (first name, last
+name or username) and the team members who match drop down, each with their role and how
+many tickets they have; pick one with the arrow keys and Enter, or a click. A click on an
+empty box lists the whole team, "Not assigned" takes a ticket back, and Escape puts back who
+had it. Tick tickets and type a name in **Give the ticked tickets to**, then **Assign**, to
+hand out many at once. **Give all…** next to a family of linked tickets gives every one of
+them to one person (after asking, since some may be someone else's), and so does the
+**Give it all to** box on each family in Home's 👪 Team families. Whoever gets them is told
+by the 🔔. An admin picks any team at the top, changes anyone's role or team in the people
+table, adds people who are on no team, and can **Move tickets to another team** or give a
+family to someone on its team.
 
 **Families stay together.** Tickets linked to each other (a parent incident and its
 children, a request and its tasks, an order, everything on one problem, a change and its

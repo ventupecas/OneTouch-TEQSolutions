@@ -409,7 +409,7 @@ body {
 .team-member-team .home-action { white-space: nowrap; }
 .team-filters, .team-bulk, .team-pager { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 8px 0; }
 .team-filters label { display: flex; align-items: center; gap: 6px; font-size: 0.87rem; }
-.team-filters input, .team-filters select, .team-bulk select, .team-table select, .result-table select.team-assign {
+.team-filters input, .team-filters select, .team-bulk select, .team-table select, .person-input {
     padding: 5px 8px;
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -418,6 +418,35 @@ body {
     font: inherit;
     font-size: 0.87rem;
 }
+
+/* A name typed to give tickets or a family (picker.js). The list of matches
+   floats over the page (fixed, placed by the script), so table scroll boxes
+   don't cut it off. */
+.person-picker { display: inline-block; min-width: 190px; max-width: 100%; }
+.person-input { width: 100%; box-sizing: border-box; }
+.person-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
+.person-input::placeholder { color: var(--muted); }
+.person-options {
+    position: fixed;
+    z-index: 60;
+    max-height: 280px;
+    overflow-y: auto;
+    margin: 0;
+    padding: 4px;
+    list-style: none;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px var(--shadow-strong);
+    font-size: 0.87rem;
+}
+.person-option { display: flex; flex-direction: column; gap: 1px; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+.person-option:hover { background: var(--surface-2); }
+.person-option[aria-selected="true"] { background: var(--accent-soft); }
+.person-name { color: var(--text); font-weight: 600; }
+.person-name mark { background: none; color: var(--accent-ink); text-decoration: underline; text-underline-offset: 2px; }
+.person-meta { color: var(--text-2); font-size: 0.78rem; }
+.person-empty { padding: 6px 10px; color: var(--text-2); font-style: italic; }
 .team-bulk { font-size: 0.87rem; }
 .team-pager { justify-content: flex-end; font-size: 0.87rem; color: var(--text-2); }
 .home-action:disabled { opacity: 0.5; cursor: default; }

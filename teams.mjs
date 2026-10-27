@@ -581,7 +581,22 @@ export async function assignTickets(scope, numbers, assigneeId) {
   if (rows.length !== wanted.length) throw new AccessError('Some of those tickets aren\'t on any team.');
   const teamIds = new Set(rows.map(r => r.team_id));
   if (teamIds.size !== 1 || rows[0].team_id === null) throw new AccessError('Assign one team\'s tickets at a time.');
-  const teamId = rows[0].team_id;
+  return giveTickets(scope, rows[0].team_id, wanted, assigneeId);
+}
+
+// Gives a whole family (every ticket in it) to one member of its team (null:
+// nobody), for its team's project manager or an admin -> how many changed
+export async function assignFamily(scope, familyId, assigneeId) {
+  const { rows: [f] } = await pool.query('SELECT id, team_id FROM ticket_families WHERE id = $1', [String(familyId || '')]);
+  if (!f || f.team_id === null) throw new AccessError('There is no such family on a team.');
+  const { rows } = await pool.query('SELECT number FROM ticket_assignments WHERE family_id = $1 ORDER BY number', [f.id]);
+  return giveTickets(scope, f.team_id, rows.map(r => r.number), assigneeId, f.id);
+}
+
+// The tickets (all of them one team's) to one of the team's members, or to
+// nobody. Whoever gets them is told (unless they gave them to themselves).
+// family: the family's id when it's a whole family. -> how many changed
+async function giveTickets(scope, teamId, numbers, assigneeId, family = null) {
   if (!canManage(scope, teamId)) throw new AccessError('Only an admin or this team\'s project manager can assign its tickets.');
   const person = assigneeId === null ? null : Number(assigneeId);
   if (person !== null) {
@@ -596,12 +611,13 @@ export async function assignTickets(scope, numbers, assigneeId) {
           SET assignee_id = $2, assigned_at = CASE WHEN $2::int IS NULL THEN NULL ELSE now() END, assigned_by = $3
         WHERE number = ANY($1::text[]) AND assignee_id IS DISTINCT FROM $2::int
         RETURNING number`,
-      [wanted, person, scope.access.userId]);
+      [numbers, person, scope.access.userId]);
     if (given.length && person !== null && person !== scope.access.userId) {
       const { rows: [team] } = await client.query('SELECT name FROM teams WHERE id = $1', [teamId]);
       await notify(client, [person], {
         kind: 'assigned', actorId: scope.access.userId,
-        numbers: given.map(r => r.number).sort(), detail: { count: given.length, team: team.name },
+        numbers: given.map(r => r.number).sort(),
+        detail: { count: given.length, team: team.name, ...(family ? { family, size: numbers.length } : {}) },
       });
     }
     await client.query('COMMIT');

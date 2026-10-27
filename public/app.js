@@ -2298,12 +2298,14 @@ const TEAM_FAMILY_SORT_KEYS = { Family: 'family', Tickets: 'size', KPIs: 'kpis' 
 function showFamilyKpis(quiet = false) {
     if (!sessionTokenValue || !canSeeFamilies()) return;
     return runHomeSearch('families', 'kpi-families-result', async () => {
-        // Admins can look at any team; a project manager sees their own
-        if (currentAccess.admin && !teamFamiliesView.teams) {
+        // Admins can look at any team; a project manager sees their own. Their
+        // people are the names that can be typed to give a family to (picker.js).
+        if (!teamFamiliesView.teams) {
             const r = await fetch(`${API_BASE}/api/teams`, { headers: authHeaders() });
             if (handleUnauthorized(r)) return null;
             const t = await r.json().catch(() => ({}));
             teamFamiliesView.teams = (t.teams || []).map(team => ({ id: team.id, name: team.name }));
+            if (t.teams) rememberPickerPeople(t);
         }
         const teamId = teamFamiliesView.teamId || currentAccess.team?.id || teamFamiliesView.teams?.[0]?.id;
         if (!teamId) return '<p class="home-status">You\'re not on a team, so there are no families to show.</p>';
@@ -2343,7 +2345,7 @@ function familiesHtml() {
     const head = '<div class="results-head">' +
         `<p class="home-status">${escapeHtml(teamName)}: ${data.total.toLocaleString()} ${sized}${data.total === 1 ? 'family' : 'families'} ${which}, ` +
         `${order}. A family is tickets linked to each other, which always stay with one team. ` +
-        'Open one to see each of its tickets\' KPIs and who has it.</p>' +
+        'Open one to see each of its tickets\' KPIs and who has it, or type a name to give someone all of its tickets.</p>' +
         `<div class="families-controls">${filter}<label><input type="checkbox" data-families-linked${linked ? ' checked' : ''}> Only linked families (2 or more tickets)</label>${teamPick}</div>` +
         '</div>' + KPI_LEGEND_HTML;
     if (!data.families.length) return head + `<p class="home-status">${status === 'open' ? 'No families with open tickets: all caught up.' : 'No families.'}</p>`;
@@ -2356,6 +2358,8 @@ function familiesHtml() {
             (summary ? `<div class="family-sub"${summary.length > 90 ? ` title="${escapeHtml(summary)}"` : ''}>${escapeHtml(summary.length > 90 ? `${summary.slice(0, 87)}…` : summary)}</div>` : '') + '</td>' +
             `<td><strong>${f.size.toLocaleString()}</strong> ${f.size === 1 ? 'ticket' : 'tickets'}<div class="family-kinds">${escapeHtml(kinds)}</div></td>` +
             `<td class="kpi-cell">${kpiChipsHtml(f.kpis)}</td>` +
+            `<td>${personPickerHtml(data.teamId, undefined, `Give all ${f.size.toLocaleString()} tickets of family ${f.id} to`,
+                { placeholder: 'Type a name…', attrs: `data-family="${id}" data-family-size="${f.size}"` })}</td>` +
             `<td><button type="button" class="home-action" data-family-open="${id}" aria-expanded="false">Its tickets</button></td></tr>`;
     }).join('');
     const first = teamFamiliesView.offset + 1;
@@ -2367,7 +2371,7 @@ function familiesHtml() {
         : '';
     return head + '<div class="table-wrap"><table class="result-table" data-sort-list="team-families"><thead><tr>' +
         sortHeadHtml('team-families', 'Family', 'Family (its first ticket)') + sortHeadHtml('team-families', 'Tickets') + sortHeadHtml('team-families', 'KPIs') +
-        '<th></th></tr></thead>' + `<tbody>${rows}</tbody></table></div>` + pager;
+        '<th>Give it all to</th><th></th></tr></thead>' + `<tbody>${rows}</tbody></table></div>` + pager;
 }
 
 // A heading: every family of the team sorted by the server, from the first page
@@ -2398,7 +2402,7 @@ async function toggleFamilyTickets(button) {
     }
     button.setAttribute('aria-expanded', 'true');
     button.textContent = 'Hide its tickets';
-    row.insertAdjacentHTML('afterend', `<tr class="row-detail"><td colspan="4"><div class="family-tickets"><p class="home-status">Loading its tickets…</p></div></td></tr>`);
+    row.insertAdjacentHTML('afterend', `<tr class="row-detail"><td colspan="5"><div class="family-tickets"><p class="home-status">Loading its tickets…</p></div></td></tr>`);
     const box = row.nextElementSibling.querySelector('.family-tickets');
     try {
         const response = await fetch(`${API_BASE}/api/kpis/families/${encodeURIComponent(button.dataset.familyOpen)}`, { headers: authHeaders() });
@@ -2447,6 +2451,13 @@ document.getElementById('kpi-families-result').addEventListener('click', e => {
         teamFamiliesView.offset = Math.max(0, teamFamiliesView.offset + Number(page.dataset.familiesPage) * FAMILY_PAGE);
     }
     showFamilyKpis(true).then(() => { if (page) document.getElementById('kpi-families-result').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+});
+
+// A name typed for a family: all of its tickets go to them (teams.js giveFamily), then the KPIs again
+document.getElementById('kpi-families-result').addEventListener('personpick', e => {
+    const picker = e.target;
+    giveFamily(picker.dataset.family, Number(picker.dataset.familySize), e.detail.id, e.detail.name)
+        .then(done => (done ? showFamilyKpis(true) : setPickerValue(picker, undefined)));
 });
 
 document.getElementById('kpi-families-result').addEventListener('change', e => {

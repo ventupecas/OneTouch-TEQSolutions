@@ -27,6 +27,7 @@ function resetTeams() {
     teamsView.filter = { assignee: '', kind: '', search: '' };
     teamsView.offset = 0;
     teamsView.run += 1;
+    pickerPeople.clear();
     document.getElementById('teams').innerHTML = '';
 }
 
@@ -43,6 +44,11 @@ async function teamsFetch(path, options = {}) {
 }
 
 const currentTeam = () => teamsView.data?.teams.find(t => t.id === teamsView.teamId) || null;
+
+// Each team's people, for the boxes where their names are typed (picker.js)
+function rememberPickerPeople(data) {
+    for (const t of data.teams) setPickerPeople(t.id, t.members, data.roles);
+}
 const roleName = role => teamsView.data?.roles[role] || '';
 
 async function loadTeams() {
@@ -52,6 +58,7 @@ async function loadTeams() {
         const data = await teamsFetch('/api/teams');
         if (!data) return;
         teamsView.data = data;
+        rememberPickerPeople(data);
         if (!currentTeam()) {
             const mine = data.teams.find(t => t.id === currentAccess.team?.id) || data.teams[0];
             teamsView.teamId = mine ? mine.id : null;
@@ -69,6 +76,7 @@ async function refreshTeamCounts() {
         const data = await teamsFetch('/api/teams');
         if (!data) return;
         teamsView.data = data;
+        rememberPickerPeople(data);
         const summary = document.getElementById('team-summary');
         if (summary && currentTeam()) {
             summary.innerHTML = teamSummaryHtml(currentTeam());
@@ -110,7 +118,7 @@ function renderTeams() {
             `<button type="button" class="home-action" data-team-search>Search</button>` +
             `</div>` +
             (manage ? `<div class="team-bulk"><label><input type="checkbox" class="team-select-all"> Tick all on this page</label>` +
-                `<span>Give the ticked tickets to</span> <select id="team-bulk-to" aria-label="Give the ticked tickets to">${assigneeOptions(team, null)}</select>` +
+                `<span>Give the ticked tickets to</span> ${personPickerHtml(team.id, undefined, 'Give the ticked tickets to', { attrs: 'id="team-bulk-to"' })}` +
                 `<button type="button" class="home-action" data-team-bulk>Assign</button></div>` : '') +
             `<div id="team-tickets"></div></section>`;
     }
@@ -174,12 +182,6 @@ function teamSelectHtml(attr, selected, withNone, testOnly = false) {
         .map(t => `<option value="${t.id}"${t.id === selected ? ' selected' : ''}>${escapeHtml(t.name)}</option>`).join('') + '</select>';
 }
 
-// The team's people to give a ticket to (or nobody)
-function assigneeOptions(team, selected) {
-    return `<option value=""${selected ? '' : ' selected'}>Not assigned</option>` + team.members
-        .map(m => `<option value="${m.id}"${m.id === selected ? ' selected' : ''}>${escapeHtml(m.name)} (${escapeHtml(roleName(m.role))})</option>`).join('');
-}
-
 function assigneeFilterOptions(team) {
     const f = teamsView.filter.assignee;
     return `<option value=""${f ? '' : ' selected'}>Everyone</option><option value="none"${f === 'none' ? ' selected' : ''}>Not assigned yet</option>` +
@@ -226,7 +228,9 @@ function teamTicketsHtml(team, data) {
         const n = escapeHtml(t.number);
         const summary = String(t.summary || '');
         const family = t.family.size > 1
-            ? `${t.family.size.toLocaleString()} linked tickets` + (admin ? ` <button type="button" class="link-btn" data-family-find="${n}" title="Move this family to another team">Move…</button>` : '')
+            ? `${t.family.size.toLocaleString()} linked tickets` +
+              (manage ? ` <button type="button" class="link-btn" data-family-give="${escapeHtml(t.family.id)}" data-family-size="${t.family.size}" title="Give all ${t.family.size.toLocaleString()} of them to one person">Give all…</button>` : '') +
+              (admin ? ` <button type="button" class="link-btn" data-family-find="${n}" title="Move this family to another team">Move…</button>` : '')
             : 'On its own' + (admin ? ` <button type="button" class="link-btn" data-family-find="${n}" title="Move this ticket to another team">Move…</button>` : '');
         return '<tr>' +
             (manage ? `<td class="select-cell"><input type="checkbox" class="team-select" value="${n}" aria-label="Tick ${n}"></td>` : '') +
@@ -236,7 +240,7 @@ function teamTicketsHtml(team, data) {
             `<td>${escapeHtml(t.state || '—')}${reportLineHtml(t.report)}</td>` +
             `<td>${family}</td>` +
             `<td>${manage
-                ? `<select class="team-assign" data-number="${n}" aria-label="Who has ${n}">${assigneeOptions(team, t.assignee?.id ?? null)}</select>`
+                ? personPickerHtml(team.id, t.assignee?.id ?? null, `Who has ${t.number}`, { attrs: `data-number="${n}"` })
                 : escapeHtml(t.assignee?.name || 'Not assigned')}</td>` +
             (tell ? `<td>${reportButtonHtml(t.number, t.report?.mine ? 'Tell them again…' : 'Resolved or closed?…')}</td>` : '') +
             '</tr>';
@@ -277,6 +281,27 @@ async function assign(numbers, assigneeId) {
     return true;
 }
 
+// Every ticket of a family to one person (null: nobody), after asking, since
+// some may be other people's now -> true if it was done
+async function giveFamily(familyId, size, assigneeId, name) {
+    const question = assigneeId === null
+        ? `Take back all ${size.toLocaleString()} tickets in this family, so nobody has them?`
+        : `Give all ${size.toLocaleString()} tickets in this family to ${name}? Any of them that are someone else's now go to ${name} too.`;
+    if (!confirm(question)) return false;
+    try {
+        const data = await teamsFetch(`/api/ticket-families/${encodeURIComponent(familyId)}/assignee`, { method: 'PUT', body: JSON.stringify({ assigneeId }) });
+        if (!data) return false;
+        showToast(data.changed
+            ? `${data.changed.toLocaleString()} ${data.changed === 1 ? 'ticket' : 'tickets'} ${assigneeId === null ? 'taken back' : `given to ${name}`}${data.changed < size ? ` (the other ${(size - data.changed).toLocaleString()} already were)` : ''}`
+            : `They all ${assigneeId === null ? 'were unassigned' : `were ${name}'s`} already`);
+        refreshTeamCounts();
+        return true;
+    } catch (err) {
+        showToast(err.message);
+        return false;
+    }
+}
+
 // ---------------------------------------------------------------------
 // Admins: moving a family (all the tickets linked to each other) to another team
 // ---------------------------------------------------------------------
@@ -308,7 +333,10 @@ async function findFamily(number) {
             (f.size > 1 ? ` Includes ${f.sample.map(escapeHtml).join(', ')}${f.size > f.sample.length ? ', …' : ''}.` : '') + '</p>' +
             `<div class="team-filters"><label>Move to ${teamSelectHtml('id="family-move-to"', f.team?.id ?? null, false)}</label>` +
             `<button type="button" class="home-action" data-family-move="${escapeHtml(f.id)}">Move ${f.size === 1 ? 'it' : `all ${f.size.toLocaleString()}`}</button></div>` +
-            `<p class="home-status">They become unassigned, for the new team's project manager to hand out.</p>`;
+            `<p class="home-status">They become unassigned, for the new team's project manager to hand out.</p>` +
+            (f.team ? `<div class="team-filters"><span>Or give ${f.size === 1 ? 'it' : `all ${f.size.toLocaleString()}`} to someone on ${escapeHtml(f.team.name)}</span>` +
+                personPickerHtml(f.team.id, undefined, `Give the family to someone on ${f.team.name}`,
+                    { placeholder: 'Type a name…', attrs: `data-family="${escapeHtml(f.id)}" data-family-size="${f.size}"` }) + '</div>' : '');
     } catch (err) {
         out.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
     }
@@ -398,8 +426,16 @@ document.getElementById('teams-view').addEventListener('click', e => {
     if (e.target.closest('[data-team-bulk]')) {
         const numbers = [...document.querySelectorAll('#team-tickets .team-select:checked')].map(b => b.value);
         if (!numbers.length) { showToast('Tick some tickets first'); return; }
-        const to = document.getElementById('team-bulk-to').value;
-        assign(numbers, to ? Number(to) : null).then(ok => { if (ok) loadTeamTickets(); }).catch(err => showToast(err.message));
+        const to = pickerCurrent(document.getElementById('team-bulk-to'));
+        if (to === undefined) { showToast('Type the name of who gets them (or "Not assigned") first'); return; }
+        assign(numbers, to).then(ok => { if (ok) loadTeamTickets(); }).catch(err => showToast(err.message));
+        return;
+    }
+    // "Give all…": a box to type who gets the whole family, in place of the link
+    const give = e.target.closest('[data-family-give]');
+    if (give) {
+        give.outerHTML = personPickerHtml(teamsView.teamId, undefined, `Give all ${give.dataset.familySize} tickets in this family to`,
+            { placeholder: 'Give all to…', attrs: `data-family="${escapeHtml(give.dataset.familyGive)}" data-family-size="${give.dataset.familySize}"` });
         return;
     }
     const find = e.target.closest('[data-family-find]');
@@ -427,14 +463,25 @@ document.getElementById('teams-view').addEventListener('click', e => {
     }
 });
 
+// A name picked in a ticket's box gives it to them; in a family's, the whole family
+document.getElementById('teams-view').addEventListener('personpick', e => {
+    const picker = e.target;
+    const { id, previous, name } = e.detail;
+    if (picker.dataset.number) {
+        assign([picker.dataset.number], id)
+            .then(ok => { if (!ok) setPickerValue(picker, previous); })
+            .catch(err => { setPickerValue(picker, previous); showToast(err.message); });
+    } else if (picker.dataset.family) {
+        giveFamily(picker.dataset.family, Number(picker.dataset.familySize), id, name).then(done => {
+            if (!done) setPickerValue(picker, undefined);
+            loadTeamTickets(true);
+        });
+    }
+});
+
 document.getElementById('teams-view').addEventListener('change', e => {
     const t = e.target;
-    if (t.classList.contains('team-assign')) {
-        const previous = [...t.options].find(o => o.defaultSelected)?.value ?? '';
-        assign([t.dataset.number], t.value ? Number(t.value) : null)
-            .then(() => { for (const o of t.options) o.defaultSelected = o.selected; })
-            .catch(err => { t.value = previous; showToast(err.message); });
-    } else if (t.id === 'team-filter-assignee' || t.id === 'team-filter-kind') {
+    if (t.id === 'team-filter-assignee' || t.id === 'team-filter-kind') {
         teamsView.filter[t.id === 'team-filter-kind' ? 'kind' : 'assignee'] = t.value;
         teamsView.offset = 0;
         loadTeamTickets();

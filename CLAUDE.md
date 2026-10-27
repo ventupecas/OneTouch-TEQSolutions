@@ -23,6 +23,12 @@ replacing that.
   Public links are off. A chart may only use a view listed in `SCOPED_VIEWS`,
   and the script refuses any other view. Filter suggestions (team names,
   sites, …) still list every value, but the charts don't.
+- **Assigning** is done by typing a name (`public/picker.js`): a project
+  manager or admin types part of a team member's name and picks from the
+  matches, for one ticket, the ticked tickets, or a whole family at once
+  ("Give all…" on the Team tab, "Give it all to" in Team families;
+  `PUT /api/ticket-families/:id/assignee`, `teams.assignFamily`). Only the
+  family's team's people can be picked, and they're notified.
 - **Project manager**: sees every ticket of their team, assigns them to the
   team's members, and sees each member's workload (Team tab).
 - **Process excellence** and **project team member**: see only the tickets

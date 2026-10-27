@@ -1365,6 +1365,19 @@ app.get('/api/ticket-families', async (req, res) => {
 });
 
 // Admins: { teamId } -> the whole family moves to that team -> { moved }
+// A project manager (their team's families) or an admin: { assigneeId } (null:
+// nobody) gets every ticket in the family -> { changed }
+app.put('/api/ticket-families/:id/assignee', async (req, res) => {
+  try {
+    const assigneeId = req.body?.assigneeId ?? null;
+    const changed = await teams.assignFamily(req.scope, String(req.params.id).toUpperCase(), assigneeId);
+    console.log(`👥 ${req.user.username} gave family ${req.params.id} (${changed} tickets changed) to user ${assigneeId ?? '(nobody)'}`);
+    res.json({ changed });
+  } catch (error) {
+    teamsFailed(res, error, 'Assigning that family');
+  }
+});
+
 app.put('/api/ticket-families/:id/team', async (req, res) => {
   try {
     const moved = await teams.moveFamily(req.scope, String(req.params.id).toUpperCase(), Number(req.body?.teamId));

@@ -118,7 +118,10 @@ function notificationText(n, html = false) {
     const who = text(n.actor || 'Someone');
     const count = d.count || n.numbers.length;
     if (n.kind === 'assigned') {
-        return `${who} gave you ${count === 1 ? ticket(n.numbers[0]) : `${count.toLocaleString()} tickets`}${d.team ? ` on ${text(d.team)}` : ''}.`;
+        const on = d.team ? ` on ${text(d.team)}` : '';
+        // A whole family at once
+        if (d.family && d.size > 1) return `${who} gave you the family of ${d.size.toLocaleString()} linked tickets around ${ticket(d.family)}${on}.`;
+        return `${who} gave you ${count === 1 ? ticket(n.numbers[0]) : `${count.toLocaleString()} tickets`}${on}.`;
     }
     if (n.kind === 'family') {
         return count === 1
