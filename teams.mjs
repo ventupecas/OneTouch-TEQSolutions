@@ -45,6 +45,8 @@ const SERVICE_ACCOUNTS = ['warmup'];
 // pattern, also used as a RegExp.
 const TEST_ACCOUNT = '^(tester[0-9]*|test\\.[a-z0-9._-]+)$';
 const isTestAccount = username => new RegExp(TEST_ACCOUNT).test(username);
+// Not a person's account (mail.mjs never emails these)
+export const isTestOrServiceAccount = username => isTestAccount(username) || SERVICE_ACCOUNTS.includes(username);
 // What a member can tell their project manager about one of their tickets
 export const REPORT_STATUSES = { resolved: 'resolved', closed: 'closed' };
 const MAX_NOTE = 500;

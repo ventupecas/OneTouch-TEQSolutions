@@ -102,6 +102,8 @@ function setCurrentUser(user) {
     document.getElementById('teams-tab').hidden = !(currentAccess.admin || currentAccess.team);
     // Home's "Team families": project managers and admins
     document.getElementById('kpi-families-tab').hidden = !canSeeFamilies();
+    // The 🔔 panel's "Email me these too" (notifications.js)
+    paintEmailSetting(user ? user.email : null);
     renderGreetings();
     // Each person's home page opens on the search they used last
     if (currentUsername) setHomeMode(rememberedHomeMode());

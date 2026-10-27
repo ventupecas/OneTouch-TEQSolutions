@@ -6,12 +6,18 @@
 //   docker exec -it analytics_node_app npm run users -- reset-password jsmith
 //   docker exec -it analytics_node_app npm run users -- deactivate jsmith
 //   docker exec -it analytics_node_app npm run users -- activate jsmith
+//   docker exec -it analytics_node_app npm run users -- email jsmith jane.smith@example.com
 //
 // Many at once, from a CSV with a header row: Username, Display Name, Password
 // (Display Name is optional). The file is piped in, so it never has to be
 // copied into the project folder. From PowerShell:
 //   Get-Content $HOME\Downloads\people.csv | docker exec -i analytics_node_app node scripts/users.mjs import -
 // Existing usernames are skipped, never overwritten.
+//
+// Email addresses for the notification emails (mail.mjs), many at once, from a
+// CSV with a header row: Username, Email (also piped in, never saved here):
+//   Get-Content $HOME\Downloads\emails.csv | docker exec -i analytics_node_app node scripts/users.mjs emails -
+// Addresses stay in the database only; `export` never writes them.
 //
 // Sharing accounts with clones of the repo:
 //   docker exec analytics_node_app node scripts/users.mjs export
@@ -33,6 +39,8 @@ const USAGE = `Usage: npm run users -- <command> [args]
   reset-password <username>         Set a new password (signs them out everywhere)
   deactivate <username>             Block sign-in (signs them out everywhere)
   activate <username>               Allow sign-in again
+  email <username> <address|none>   Where their notifications are emailed ("none" takes it away)
+  emails <file.csv | ->             Set many addresses from a CSV (columns: Username, Email)
   import <file.csv | ->             Add everyone in a CSV (columns: Username, Display Name, Password);
                                     "-" reads the CSV from stdin. Existing usernames are skipped.
   export [file]                     Write every account to db/accounts.json (or [file]) for clones;
@@ -104,6 +112,31 @@ function parseCsv(text) {
   return rows.filter(r => r.some(v => v.trim() !== ''));
 }
 
+// Many email addresses at once: a CSV with Username and Email columns
+async function importEmails(source) {
+  const fs = await import('node:fs/promises');
+  const text = (source === '-' ? await readStdin() : await fs.readFile(source, 'utf8')).replace(/^﻿/, '');
+  const [header, ...rows] = parseCsv(text);
+  if (!header) throw new Error('The CSV is empty.');
+  const col = name => header.findIndex(h => h.trim().toLowerCase().replace(/[\s_-]+/g, '') === name);
+  const iUser = col('username'), iEmail = col('email');
+  if (iUser < 0 || iEmail < 0) throw new Error(`The header row needs "Username" and "Email" columns (found: ${header.join(', ')}).`);
+  const set = [], failed = [];
+  for (const [index, row] of rows.entries()) {
+    try {
+      set.push(await auth.setEmail((row[iUser] || '').trim(), (row[iEmail] || '').trim() || null));
+    } catch (err) {
+      failed.push(`line ${index + 2}: ${err.message}`);
+    }
+  }
+  console.log(`Set ${set.length} of ${rows.length} email ${rows.length === 1 ? 'address' : 'addresses'}.`);
+  if (failed.length) {
+    console.log('  Not set:');
+    for (const f of failed) console.log(`    ${f}`);
+    process.exitCode = 1;
+  }
+}
+
 async function importCsv(source) {
   const fs = await import('node:fs/promises');
   const text = (source === '-' ? await readStdin() : await fs.readFile(source, 'utf8')).replace(/^﻿/, '');
@@ -164,6 +197,7 @@ async function main() {
         username: u.username,
         name: u.display_name || '',
         status: !u.is_active ? 'deactivated' : u.locked ? 'locked (too many tries)' : 'active',
+        email: u.email ? `${u.email}${u.email_notifications ? '' : ' (turned off)'}` : '',
         created: u.created_at.toISOString().slice(0, 10),
         'last sign-in': u.last_login_at ? u.last_login_at.toISOString().replace('T', ' ').slice(0, 16) : 'never',
       })));
@@ -184,6 +218,16 @@ async function main() {
       if (!username) throw new Error(`Give a username: ${command} <username>`);
       const name = await auth.setActive(username, command === 'activate');
       return console.log(command === 'activate' ? `${name} can sign in again.` : `${name} can no longer sign in and was signed out.`);
+    }
+    case 'email': {
+      const address = displayName;
+      if (!username || !address) throw new Error('Give a username and an address: email <username> <address|none>');
+      const name = await auth.setEmail(username, address.toLowerCase() === 'none' ? null : address);
+      return console.log(address.toLowerCase() === 'none' ? `${name} has no email address now.` : `${name}'s notifications go to ${address.toLowerCase()}.`);
+    }
+    case 'emails': {
+      if (!username) throw new Error('Give a CSV file, or "-" to read it from stdin: emails <file.csv | ->');
+      return importEmails(username);
     }
     case 'export': {
       const fs = await import('node:fs/promises');

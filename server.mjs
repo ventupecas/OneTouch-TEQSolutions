@@ -24,6 +24,7 @@ import * as shares from './shares.mjs';
 import * as chats from './chats.mjs';
 import * as teams from './teams.mjs';
 import * as notifications from './notifications.mjs';
+import { startMail, mailEnabled } from './mail.mjs';
 import * as kpis from './kpis.mjs';
 import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
 
@@ -294,12 +295,28 @@ function scopedRunner(scope) {
 app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families', '/api/notifications', '/api/my-tickets', '/api/kpis'], requireLogin);
 
 // Who is signed in (the page shows their display name), and what they may do
-app.get('/api/me', (req, res) => {
+app.get('/api/me', async (req, res) => {
   const { admin, role, team } = req.scope.access;
+  // Their own email address and whether their notifications are emailed (mail.mjs)
+  const email = await auth.emailSettings(req.user.id).catch(() => ({ address: null, on: false }));
   res.json({
     username: req.user.username, displayName: req.user.displayName,
     access: { admin, role, roleName: teams.ROLES[role] || null, team, tickets: req.scope.count, note: teams.scopeNote(req.scope) },
+    email: { ...email, enabled: mailEnabled() },
   });
+});
+
+// { on } -> their notifications are emailed to them, or not (the 🔔 panel's switch)
+app.put('/api/me/email', async (req, res) => {
+  if (typeof req.body?.on !== 'boolean') return res.status(400).json({ error: 'Say whether to email you: { "on": true } or { "on": false }.' });
+  try {
+    const email = await auth.setEmailNotifications(req.user.id, req.body.on);
+    console.log(`✉️  ${req.user.username} turned email ${req.body.on ? 'on' : 'off'}`);
+    res.json({ email: { ...email, enabled: mailEnabled() } });
+  } catch (error) {
+    console.error('✉️  Saving the email setting failed:', error.message);
+    res.status(503).json({ error: 'That could not be saved right now.' });
+  }
 });
 
 // A Metabase signed-embedding link to one dashboard, its "viewer" filter
@@ -1521,6 +1538,8 @@ async function prepareAccounts(attempt = 1) {
     setTimeout(() => prepareAccounts(attempt + 1), wait * 1000).unref();
     return;
   }
+  // Notifications go out by email too, once the tables are there (off without a Brevo key)
+  startMail();
   try {
     const off = await teams.takeTestAccountsOffTeams();
     if (off) console.log(`👥 Took the test accounts off their teams (${off.people.join(', ')}); ${off.tickets.toLocaleString()} of their tickets are now unassigned`);

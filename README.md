@@ -708,6 +708,26 @@ by the 🔔. An admin picks any team at the top, changes anyone's role or team i
 table, adds people who are on no team, and can **Move tickets to another team** or give a
 family to someone on its team.
 
+**Notifications by email.** Everything the 🔔 shows is also emailed (`mail.mjs`), from
+`notifications@onetouch.fyi` through Brevo: someone gets tickets (one email per hand-out,
+however many tickets), a family is moved to a project manager's team, or a member says they
+resolved or closed a ticket. An email says who did what and which ticket numbers, with an
+**Open OneTouch** button; ticket summaries and a member's note stay behind the sign-in. Each
+person turns it on or off with **✉️ Email me these too** at the top of the 🔔 panel (on by
+default), which also shows the address. Addresses are set by an admin
+(`docker exec analytics_node_app npm run users -- email <username> <address>`, or many at once
+from a CSV with `emails -`) and live only in the database, never in `db/accounts.json`.
+Test accounts and `warmup` are never emailed. A failed send is tried again (up to five
+times) and never undoes the change; a notification more than an hour old when its turn
+comes isn't sent, so switching email on later doesn't send old news.
+
+To switch it on: in Brevo, authenticate the domain `onetouch.fyi` (its DNS records go in
+Cloudflare) and add the sender `notifications@onetouch.fyi`; create an API key (SMTP & API →
+API keys) and put it in `.env` as `BREVO_API_KEY`; restart the app. While `MAIL_ONLY_TO` in
+`.env` lists addresses, only those are emailed: try it out that way, check with
+`docker exec analytics_node_app npm run mail-test -- <address>`, then delete the line and
+restart to email everyone. Brevo's free plan sends 300 emails a day.
+
 **Families stay together.** Tickets linked to each other (a parent incident and its
 children, a request and its tasks, an order, everything on one problem, a change and its
 incidents) form one family, and a family always belongs to one team. So moving a ticket to
@@ -2287,6 +2307,18 @@ WARMUP_PASSWORD=
 # real person or warmup). Create them with scripts/users.mjs add tester1 "Test Account 1".
 TESTER1_PASSWORD=
 TESTER2_PASSWORD=
+
+# Optional: notification emails (mail.mjs), sent through Brevo (brevo.com). Without a key,
+# email is off and notifications only show under the 🔔. Brevo → SMTP & API → API keys.
+BREVO_API_KEY=
+# The sender, on a domain authenticated in Brevo, and the name it shows
+MAIL_FROM=notifications@onetouch.fyi
+MAIL_FROM_NAME=OneTouch
+# Where the emails' "Open OneTouch" button goes
+APP_URL=https://onetouch.fyi
+# While trying email out: only these addresses (comma-separated) are emailed. Delete the
+# line (or leave it empty) to email everyone with an address on file.
+MAIL_ONLY_TO=
 ```
 
 <a id="b5"></a>

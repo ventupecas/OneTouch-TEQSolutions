@@ -126,6 +126,14 @@ minute). Each one is saved in the same transaction as the change it reports:
   told, and the Team tab shows it under the ticket's state. This is only a
   message (`ticket_reports`): the ticket's data never changes.
 
+**Each notification is also emailed** (`mail.mjs`, through Brevo's API, from
+`notifications@onetouch.fyi`): an outbox on the `notifications` table, sent after the
+change commits, retried up to 5 times, never older than an hour. Only to people with
+`users.email` set (an admin sets it: `npm run users -- email|emails`; never in
+`db/accounts.json`) who haven't unticked "Email me these too" in the 🔔 panel; never test
+or service accounts; only `MAIL_ONLY_TO` while that's set. An email holds who did what
+and the ticket numbers, never summaries or notes. No `BREVO_API_KEY` in `.env`: off.
+
 **Families decide teams.** Tickets linked to each other form one family: a
 parent incident and its children, a bundle request and its child requests, a
 request and its catalog tasks, an order (REQ), everything linked to one

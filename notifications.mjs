@@ -8,7 +8,9 @@
 //   report     someone on your team says they resolved or closed a ticket
 //
 // Each one keeps who did it, the tickets (up to MAX_NUMBERS of them) and a
-// few details; the page words them.
+// few details; the page words them. Each is also emailed (mail.mjs): its
+// email_state starts 'pending', and the sender marks it 'sent', 'skipped'
+// (with why) or 'failed'. Those made before email existed are 'before'.
 // =====================================================================
 
 import { pool } from './auth.mjs';
@@ -32,6 +34,16 @@ export async function ensureNotificationsSchema() {
       read_at     timestamptz
     );
     CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, id DESC);
+
+    -- Email (mail.mjs). The notifications already here when this column arrives
+    -- are 'before', so they're never emailed; every later one starts 'pending'.
+    ALTER TABLE notifications ADD COLUMN IF NOT EXISTS email_state text NOT NULL DEFAULT 'before';
+    ALTER TABLE notifications ALTER COLUMN email_state SET DEFAULT 'pending';
+    ALTER TABLE notifications ADD COLUMN IF NOT EXISTS email_tries integer NOT NULL DEFAULT 0;
+    ALTER TABLE notifications ADD COLUMN IF NOT EXISTS email_next_at timestamptz;
+    ALTER TABLE notifications ADD COLUMN IF NOT EXISTS emailed_at timestamptz;
+    ALTER TABLE notifications ADD COLUMN IF NOT EXISTS email_note text;
+    CREATE INDEX IF NOT EXISTS notifications_email_idx ON notifications (id) WHERE email_state = 'pending';
   `);
 }
 

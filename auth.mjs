@@ -76,6 +76,11 @@ export async function ensureSchema() {
     -- so it round-trips exactly through the accounts file; see syncAccounts)
     ALTER TABLE users ADD COLUMN IF NOT EXISTS
       updated_at timestamptz NOT NULL DEFAULT date_trunc('milliseconds', now());
+
+    -- Where OneTouch emails this person about their notifications (mail.mjs), and
+    -- whether they want it. Never in the accounts file, so addresses stay off GitHub.
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS email text;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS email_notifications boolean NOT NULL DEFAULT true;
   `);
 }
 
@@ -225,9 +230,37 @@ export async function setActive(username, active) {
 
 export async function listUsers() {
   const { rows } = await pool.query(
-    `SELECT username, display_name, is_active, locked_until > now() AS locked, created_at, last_login_at
+    `SELECT username, display_name, email, email_notifications, is_active, locked_until > now() AS locked, created_at, last_login_at
        FROM users ORDER BY username`);
   return rows;
+}
+
+// ---------------------------------------------------------------------
+// Email addresses (mail.mjs sends the notifications): set by an admin with
+// the users command; each person turns the emails on or off in the 🔔 panel
+// ---------------------------------------------------------------------
+
+const EMAIL_ADDRESS = /^[^\s@<>()",;:]+@[^\s@<>()",;:]+\.[a-z]{2,}$/i;
+
+// address: '' or null takes it away -> the username
+export async function setEmail(username, address) {
+  const name = normalizeUsername(username);
+  const email = String(address ?? '').trim().toLowerCase() || null;
+  if (email && !EMAIL_ADDRESS.test(email)) throw new Error(`"${address}" isn't an email address.`);
+  const { rows } = await pool.query('UPDATE users SET email = $2 WHERE username = $1 RETURNING username', [name, email]);
+  if (!rows.length) throw new Error(`No user named "${name}".`);
+  return name;
+}
+
+// -> { address (or null), on }
+export async function emailSettings(userId) {
+  const { rows: [u] } = await pool.query('SELECT email, email_notifications FROM users WHERE id = $1', [userId]);
+  return { address: u?.email || null, on: Boolean(u?.email_notifications) };
+}
+
+export async function setEmailNotifications(userId, on) {
+  await pool.query('UPDATE users SET email_notifications = $2 WHERE id = $1', [userId, Boolean(on)]);
+  return emailSettings(userId);
 }
 
 // ---------------------------------------------------------------------

@@ -110,6 +110,47 @@ async function markNotificationsRead() {
     }
 }
 
+// ---------------------------------------------------------------------
+// ✉️ Email me these too: the 🔔's notifications by email as well (mail.mjs
+// on the server), to the address an admin put on file for this person
+// ---------------------------------------------------------------------
+
+let emailSetting = null; // { address, on, enabled } from /api/me; null when signed out
+
+// email: from /api/me (undefined: keep what's there, e.g. right after signing in)
+function paintEmailSetting(email) {
+    if (email !== undefined) emailSetting = email;
+    const box = document.getElementById('notify-email');
+    const e = emailSetting;
+    box.hidden = !e;
+    if (!e) return;
+    const input = document.getElementById('notify-email-on');
+    input.checked = Boolean(e.address && e.on);
+    input.disabled = !e.address;
+    document.getElementById('notify-email-to').textContent = !e.address ? 'There\'s no email address on file for you. An admin can add one.'
+        : !e.enabled ? `They'll go to ${e.address} once email is set up on this server.`
+        : e.on ? `Each one is emailed to ${e.address}.` : `Off. They'd go to ${e.address}.`;
+}
+
+document.getElementById('notify-email-on').addEventListener('change', async e => {
+    const on = e.target.checked;
+    try {
+        const response = await fetch(`${API_BASE}/api/me/email`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ on }),
+        });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        paintEmailSetting(data.email);
+        showToast(on ? `✉️ Your notifications will be emailed to ${data.email.address} too` : '✉️ No more notification emails; they still show here');
+    } catch (err) {
+        paintEmailSetting();
+        showToast(`❌ ${err.message}`);
+    }
+});
+
 // One notification in words. html: ticket numbers become links, the rest is escaped.
 function notificationText(n, html = false) {
     const text = html ? escapeHtml : String;

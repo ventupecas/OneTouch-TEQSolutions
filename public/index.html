@@ -95,6 +95,11 @@
             <span>🔔 Notifications</span>
             <button type="button" class="drawer-close" onclick="toggleNotifications(false)" aria-label="Close">✕</button>
         </div>
+        <!-- ✉️ These by email too (mail.mjs), for anyone with an address on file -->
+        <div class="notify-email" id="notify-email" hidden>
+            <label><input type="checkbox" id="notify-email-on"> ✉️ Email me these too</label>
+            <span class="notify-email-to" id="notify-email-to"></span>
+        </div>
         <div id="notify-list"></div>
     </section>
 

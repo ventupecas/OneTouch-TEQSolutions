@@ -97,7 +97,8 @@
     "users": "node scripts/users.mjs",
     "remote": "node remote.mjs",
     "share": "node scripts/share.mjs",
-    "warmup": "node scripts/warmup.mjs"
+    "warmup": "node scripts/warmup.mjs",
+    "mail-test": "node scripts/mail-test.mjs"
   },
   "repository": {
     "type": "git",
