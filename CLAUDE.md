@@ -58,6 +58,37 @@ risk (High like P2, Medium like P3, Low and Standard like P4). Requests and
 catalog tasks have no priority, so they come after everything else. The list
 opens on open tickets, with Closed and All a click away.
 
+**KPIs** (`kpis.mjs`). Every ticket's KPI fields are read from Cube once at
+start, because the data is frozen. Ages count to the end of the data, not
+today, and "typical" means the median for that kind of ticket.
+
+- **Each ticket's KPIs** appear in "Assigned to me" (`POST /api/kpis/tickets`).
+  Anyone may get them for a ticket they can see, so most people only see
+  their own tickets' KPIs.
+  - Incidents: open for / resolved in (against the median for its
+    priority), last update, reassigned, reopened, SLA breach recorded, plus
+    workaround, was a P1, caused by a change and problem when they apply.
+  - Changes: open for, lead time, window, past its planned end / starts
+    soon, outcome, approval, outage, emergency or expedited.
+  - Requests: open for / fulfilled in, last update, approval.
+  - Catalog tasks: open for / closed in (to their last update, since tasks
+    have no closing date), last update, SLA.
+- **Each family's KPIs** are only for its team's project manager and admins
+  (Home's "Team families", `GET /api/kpis/families` and
+  `/api/kpis/families/:id`). They cover: tickets, how many are closed,
+  oldest open, no update for a week, highest priority, median resolve and
+  fulfil times, SLA breaches, reassignments, reopens, successful changes,
+  incidents caused by its changes, how long it's been active, people on it,
+  and open-but-unassigned. Families with open tickets come first.
+
+**Sorting** (`public/sorting.js`). Every ticket list and table sorts by any of its
+columns: a heading sorts ascending, then descending, then back to the list's own order.
+Lists shown a page at a time sort all of their tickets, not just the page; the Team tab,
+Team families and the Families page are sorted by the server, from every ticket's summary
+read once at start (`tickets.mjs` `loadTicketIndex`). That index only orders tickets the
+person may already see; it never decides what they see. Charts sort with their ⇅ menu,
+the builder's Order, or an answer's Order menu: by count or by their groups, either way.
+
 **Notifications** (`notifications.mjs`, the 🔔 in the header, checked every
 minute). Each one is saved in the same transaction as the change it reports:
 

@@ -168,6 +168,11 @@
                                 <span class="home-mode-name">📋 Assigned to me <span class="star-count" id="assigned-count" hidden>0</span></span>
                                 <span class="home-mode-desc">Highest priority first, then oldest</span>
                             </button>
+                            <!-- Project managers and admins: their team's families and each one's KPIs -->
+                            <button type="button" role="tab" class="home-mode" data-mode="families" id="kpi-families-tab" aria-selected="false" aria-controls="home-families" onclick="setHomeMode('families')" hidden>
+                                <span class="home-mode-name">👪 Team families <span class="star-count" id="kpi-families-count" hidden>0</span></span>
+                                <span class="home-mode-desc">Each family's KPIs, the most urgent first</span>
+                            </button>
                             <button type="button" role="tab" class="home-mode" data-mode="results" aria-selected="false" aria-controls="home-results" onclick="setHomeMode('results')">
                                 <span class="home-mode-name">🎫 Ticket results</span>
                                 <span class="home-mode-desc">Every ticket the AI assistant has shown you</span>
@@ -180,6 +185,10 @@
 
                         <div class="home-panel" id="home-assigned" role="tabpanel">
                             <div class="home-result" id="assigned-result" aria-live="polite"></div>
+                        </div>
+
+                        <div class="home-panel" id="home-families" role="tabpanel" hidden>
+                            <div class="home-result" id="kpi-families-result" aria-live="polite"></div>
                         </div>
 
                         <div class="home-panel" id="home-results" role="tabpanel" hidden>
@@ -275,13 +284,6 @@
                                 <input type="search" id="families-q" placeholder="Find a ticket's families: INC1813970, RITM0440458…" aria-label="Ticket number">
                                 <button type="submit" class="primary-btn">Find</button>
                             </form>
-                            <label class="families-sort">Order
-                                <select id="families-sort">
-                                    <option value="size">Biggest families first</option>
-                                    <option value="newest">Newest parent first</option>
-                                    <option value="oldest">Oldest parent first</option>
-                                </select>
-                            </label>
                         </div>
                         <div id="families-list"></div>
                     </div>
@@ -390,14 +392,12 @@
                         <div class="display-picker" id="b-display" role="radiogroup" aria-label="Chart type"></div>
                         <p class="field-note" id="b-display-note"></p>
                         <div class="builder-row" id="b-cut">
-                            <label class="field-label">Show
+                            <label class="field-label" id="b-limit-wrap">Show
                                 <select id="b-limit"></select>
                             </label>
+                            <!-- Ascending or descending, by count or by the groups (customize.js paintDisplay) -->
                             <label class="field-label">Order
-                                <select id="b-sort">
-                                    <option value="count">Biggest first</option>
-                                    <option value="label">In order (A to Z, P1 first)</option>
-                                </select>
+                                <select id="b-sort"></select>
                             </label>
                         </div>
                         <div class="builder-row" id="b-color-row">
@@ -534,6 +534,7 @@
         </div>
     </div>
 
+    <script src="sorting.js"></script>
     <script src="charts.js"></script>
     <script src="customize.js"></script>
     <script src="families.js"></script>

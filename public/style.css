@@ -473,11 +473,38 @@ body {
 
 .home-modes {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 12px;
     margin-bottom: 16px;
-    max-width: 1020px;
+    max-width: 1360px;
 }
+/* KPIs (kpis.mjs): green on track, amber to keep an eye on, red needs attention */
+.kpi-list { display: flex; flex-wrap: wrap; gap: 4px; }
+td.kpi-cell { min-width: 260px; }
+.kpi {
+    font-size: 0.75rem;
+    line-height: 1.5;
+    padding: 0 7px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-primary);
+    color: var(--text-2);
+    white-space: nowrap;
+    cursor: default;
+}
+.kpi b { font-weight: 600; color: inherit; }
+.kpi-good { background: var(--accent-softer); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); color: var(--accent-ink); }
+.kpi-warn { background: var(--warn-softer); border-color: var(--warn-line); color: var(--warn-ink); }
+.kpi-bad { background: var(--danger-soft); border-color: var(--danger-line); color: var(--danger); }
+.kpi-none { font-size: 0.8rem; color: var(--muted); }
+.kpi-legend { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; font-size: 0.8rem; color: var(--muted); }
+.family-sub { font-size: 0.8rem; color: var(--text-2); white-space: normal; max-width: 280px; margin-top: 2px; }
+.family-kinds { font-size: 0.8rem; color: var(--muted); }
+.family-tickets { padding: 12px 14px; }
+.family-tickets h4 { margin: 0 0 6px; font-size: 0.92rem; }
+.families-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.families-controls label { display: inline-flex; align-items: center; gap: 6px; font-size: 0.87rem; }
+.families-controls select { padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-bg); color: var(--text); font: inherit; font-size: 0.87rem; }
 /* Assigned to me: open / closed / all */
 .assigned-filter { display: inline-flex; gap: 6px; flex-wrap: wrap; }
 .assigned-filter .home-action[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-softer); color: var(--accent-ink); font-weight: 600; }
@@ -935,6 +962,36 @@ tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
 .result-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .result-table td[title] { cursor: help; }
 
+/* Headings that sort the table (sorting.js): the whole heading is the button.
+   ▲ ascending, ▼ descending; ↕ on hover where it isn't sorted yet. */
+.result-table th.sortable { padding: 0; }
+.sort-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    padding: 8px 12px;
+    background: none;
+    border: 0;
+    font: inherit;
+    font-weight: 600;
+    color: inherit;
+    text-align: inherit;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.result-table th.sortable.num .sort-btn { justify-content: flex-end; }
+.sort-btn:hover { color: var(--accent-ink); }
+.sort-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.sort-arrow { display: inline-block; min-width: 0.9em; font-size: 0.75em; color: var(--muted); opacity: 0; }
+.sort-arrow::after { content: '↕'; }
+.sort-btn:hover .sort-arrow,
+.sort-btn:focus-visible .sort-arrow { opacity: 1; }
+.result-table th[aria-sort="ascending"] .sort-arrow,
+.result-table th[aria-sort="descending"] .sort-arrow { opacity: 1; color: var(--accent-ink); }
+.result-table th[aria-sort="ascending"] .sort-arrow::after { content: '▲'; }
+.result-table th[aria-sort="descending"] .sort-arrow::after { content: '▼'; }
+
 /* Single-ticket lookups: label on the left, value on the right */
 .result-table.detail th { width: 200px; background: var(--surface-2); white-space: nowrap; }
 .result-table.detail td.long { white-space: pre-wrap; max-width: 700px; }
@@ -1322,6 +1379,10 @@ tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
 .tile-btn:hover { background: var(--surface-2); border-color: var(--border); color: var(--text); }
 .tile-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .tile-btn[aria-pressed="true"] { color: var(--accent-ink); background: var(--accent-soft); }
+/* ⇅: the chart's order. The menu lies, invisible, over the icon, so a click opens it. */
+.tile-sort { position: relative; display: inline-flex; align-items: center; }
+.tile-sort select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.tile-sort:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
 .tile-body { position: relative; min-width: 0; transition: opacity 0.15s; }
 /* New numbers loading: the old drawing stays, dimmed (no jump to "Loading…") */
 .tile-body.refreshing { opacity: 0.45; }
@@ -1517,6 +1578,16 @@ dialog.ask-dialog {
 /* "Show as": the answer's table or one of its charts */
 .answer-views { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 8px; }
 .answer-views-label { font-size: 0.8rem; color: var(--muted); margin-right: 2px; }
+.answer-order { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-size: 0.8rem; color: var(--muted); }
+.answer-order select {
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--panel-bg);
+    color: var(--text-2);
+    font: inherit;
+    font-size: 0.8rem;
+}
 .view-btn {
     display: inline-flex;
     align-items: center;
@@ -1819,8 +1890,7 @@ span.family-chip { color: var(--text-2); background: var(--surface-3); }
 .family-kind.active .family-kind-count { background: rgba(255, 255, 255, 0.25); color: var(--on-accent); }
 .families-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 12px; }
 .families-find { display: flex; gap: 8px; flex: 1 1 360px; max-width: 560px; }
-.families-find input,
-.families-sort select {
+.families-find input {
     padding: 7px 10px;
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -1830,7 +1900,6 @@ span.family-chip { color: var(--text-2); background: var(--surface-3); }
     font-size: 0.9rem;
 }
 .families-find input { flex: 1; min-width: 0; }
-.families-sort { display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--text-2); }
 .families-about { margin: 0 0 10px; color: var(--text-2); line-height: 1.5; font-size: 0.9rem; }
 .families-about .home-action { margin-left: 6px; }
 .families-table { max-height: none; }

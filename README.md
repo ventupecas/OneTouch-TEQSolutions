@@ -521,13 +521,16 @@ Dashboards tour once too, the next time they open Dashboards.
    nothing, for one total.
 4. **Show it as**: columns, sideways bars, line, area, donut, table, or one big number.
    Then how many to show (top 5 to top 50; the rest add up in a note, or in "Other" on a
-   donut), the order (biggest first, or natural order: A to Z, P1 first, New before Closed),
-   the color, and the size (small, medium or wide).
+   donut), the order (biggest or smallest first, or by the groups themselves, ascending or
+   descending: A to Z with P1 first and New before Closed, or the reverse; over time, oldest
+   or newest first), the color, and the size (small, medium or wide). The top N are always
+   the biggest; the order only changes how they're lined up.
 5. **Title**: or leave it empty for an automatic one such as "Open incidents by priority".
 
 Every chart shows a tooltip with the number and its share when you point at a bar, slice
 or line (or tab to it). Its buttons appear when you point at it: **▦** shows it as a table,
-**⤓** downloads it (its numbers in any format, a picture of it, and PDF / Word / Excel with
+**⇅** changes its order (the same choices as the builder's; on someone else's shared
+dashboard, only for you, on that page), **⤓** downloads it (its numbers in any format, a picture of it, and PDF / Word / Excel with
 the picture in them; see [2.5 Downloads](#25-downloads)), **✎** edits it, **◀ ▶** move it,
 **📌** (on a dashboard) puts a copy on Home, and **🗑** removes it. A builder opened from a
 dashboard with filters shows them under the preview, and the preview uses them.
@@ -555,8 +558,9 @@ of OneTouch, not Metabase, so it works the same for everyone and opens where you
   incidents** (106).
 - **One row per family**, biggest first: the parent (or the order, problem or change), its
   summary, state, priority or risk, team, when it was opened, and how many it holds ("212
-  child incidents"). **Order** can also be newest or oldest parent first. 50 rows at a time,
-  then **Show 50 more**.
+  child incidents"). Click any heading to sort every family of the tab by it (the server
+  sorts them all, not just the rows showing), again for the other way, and a third time for
+  biggest first again. 50 rows at a time, then **Show 50 more**.
 - **Click a row** to open the whole family under it: a line saying who the parent is ("INC1808293
   is the parent incident. Its 212 child incidents are listed under it"), what the members
   share and where they differ, the parent on the first row and every child under it (25,

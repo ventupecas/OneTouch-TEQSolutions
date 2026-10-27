@@ -60,6 +60,7 @@ const SIZES = ['small', 'medium', 'large'];
 const LIMITS = [5, 10, 15, 20, 30, 50];
 const COLORS = ['accent', '1', '2', '3', '4', '5', '6', '7', '8'];
 const STATUSES = ['all', 'open', 'closed'];
+const DIRECTIONS = ['asc', 'desc'];
 const DATE_PRESETS = ['all', '7', '30', '90', 'custom'];
 // A condition: is one of the values, is none of them, or contains a word
 const FILTER_OPS = ['equals', 'notEquals', 'contains'];
@@ -121,6 +122,16 @@ export function sanitizeChart(input) {
   let display = DISPLAYS.includes(c.display) ? c.display : (groupBy ? 'bar' : 'number');
   if (!groupBy) display = 'number';
 
+  // The groups' order: by their count ('count') or their own value ('label':
+  // A to Z, P1 first; over time, oldest first), either way (direction).
+  // Charts saved before they had a direction keep the order they had.
+  let sort = c.sort === 'label' ? 'label' : 'count';
+  let direction = DIRECTIONS.includes(c.direction) ? c.direction : null;
+  if (!direction) {
+    if (src.times[groupBy]) sort = 'label';
+    direction = sort === 'label' ? 'asc' : 'desc';
+  }
+
   return {
     id: typeof c.id === 'string' && ID.test(c.id) ? c.id : newId(),
     title: String(c.title ?? '').replace(/\s+/g, ' ').trim().slice(0, 80),
@@ -131,7 +142,8 @@ export function sanitizeChart(input) {
     groupBy,
     display,
     limit: LIMITS.includes(Number(c.limit)) ? Number(c.limit) : 10,
-    sort: c.sort === 'label' ? 'label' : 'count',
+    sort,
+    direction,
     size: SIZES.includes(c.size) ? c.size : 'medium',
     color: COLORS.includes(String(c.color)) ? String(c.color) : 'accent',
   };
@@ -247,10 +259,20 @@ function naturalOrder(cube, field) {
   };
 }
 
+// The groups in the chart's order: by count or by their own value, either
+// way. "(Not set)" comes last when ordered by value; ties go in natural order.
+function inChartOrder(rows, cube, chart) {
+  const natural = naturalOrder(cube, chart.groupBy);
+  const sign = chart.direction === 'desc' ? -1 : 1;
+  return [...rows].sort(chart.sort === 'label'
+    ? (a, b) => (a.value === null || b.value === null ? natural(a, b) : sign * natural(a, b))
+    : (a, b) => sign * (a.count - b.count) || natural(a, b));
+}
+
 // chart (+ its dashboard's filter row) -> { chart, total, rows: [{ value, count }],
-// other: { count, groups } | null, days, skipped }. rows: for a time grouping every
-// period, oldest first; otherwise the chart's top N by count, in the chart's order,
-// with the rest as one "other" count.
+// other: { count, groups } | null, days, skipped }. rows, in the chart's order:
+// for a time grouping every period; otherwise the chart's top N by count, with
+// the rest as one "other" count.
 export async function chartData(input, runQuery, scopeInput) {
   const chart = sanitizeChart(input);
   const scope = sanitizeScope(scopeInput);
@@ -289,13 +311,13 @@ export async function chartData(input, runQuery, scopeInput) {
   });
 
   const total = groups.reduce((sum, g) => sum + g.count, 0);
-  if (isTime) return { chart, total, rows: groups, other: null, days, skipped };
+  if (isTime) return { chart, total, rows: inChartOrder(groups, cube, chart), other: null, days, skipped };
 
+  // The biggest N, whichever way they're shown
   const top = groups.slice(0, chart.limit);
   const rest = groups.slice(chart.limit);
-  if (chart.sort === 'label') top.sort(naturalOrder(cube, chart.groupBy));
   const other = rest.length ? { count: rest.reduce((sum, g) => sum + g.count, 0), groups: rest.length } : null;
-  return { chart, total, rows: top, other, days, skipped };
+  return { chart, total, rows: inChartOrder(top, cube, chart), other, days, skipped };
 }
 
 // The tickets behind one bar, slice or point (value: that group's value; null
@@ -422,9 +444,13 @@ export function chartFromQuery(entity, query) {
     dropped.push(`${label(field)} ${OP_WORDS[f.operator] || f.operator}${shown ? ` ${shown}` : ''}`);
   }
   if (from || to) chart.dates = { preset: 'custom', from, to };
-  // Sorted by the field itself (A to Z, P1 first) rather than by the count
-  const order = Array.isArray(query.order) ? query.order.map(o => o?.member ?? o?.[0]) : Object.keys(query.order || {});
-  if (!isTime && order[0] === dimensions[0]) chart.sort = 'label';
+  // The answer's order: by the field itself (A to Z, P1 first; oldest first)
+  // or by the count, either way
+  const [first, dir] = Array.isArray(query.order)
+    ? [query.order[0]?.member ?? query.order[0]?.[0], query.order[0]?.direction ?? query.order[0]?.[1]]
+    : Object.entries(query.order || {})[0] || [];
+  if (first === dimensions[0]) Object.assign(chart, { sort: 'label', direction: dir === 'desc' ? 'desc' : 'asc' });
+  else if (first === measures[0]) Object.assign(chart, { sort: 'count', direction: dir === 'asc' ? 'asc' : 'desc' });
   // The answer's "top N", as the nearest a chart offers
   const limit = Number(query.limit) || 0;
   if (!isTime && limit) chart.limit = LIMITS.find(n => n >= limit) || 50;

@@ -27,6 +27,7 @@
 import { createHash } from 'node:crypto';
 import { pool } from './auth.mjs';
 import { notify } from './notifications.mjs';
+import { sortRows } from './tickets.mjs';
 
 // They see absolutely everything
 export const ADMIN_USERNAMES = ['vperez', 'lvang', 'lbell'];
@@ -460,6 +461,48 @@ export async function listTeams(scope) {
   return result;
 }
 
+// May this person see this ticket (and so its KPIs)? Admins any, a project
+// manager their team's, anyone else the ones assigned to them
+const scopeSets = new WeakMap(); // scope -> Set of its ticket numbers
+export function canSeeTicket(scope, number) {
+  if (scope.all) return true;
+  if (!scopeSets.has(scope)) scopeSets.set(scope, new Set(Object.values(scope.byKind).flat()));
+  return scopeSets.get(scope).has(number);
+}
+
+// A team's families with their tickets and who has each, for its project
+// manager or an admin -> Map(id -> { id, size, members: [{ number, assigneeId }] })
+export async function teamFamilies(scope, teamId) {
+  if (!canManage(scope, teamId)) throw new AccessError('Only an admin or this team\'s project manager can see its families.');
+  const { rows } = await pool.query(
+    `SELECT f.id, f.size, a.number, a.assignee_id
+       FROM ticket_families f JOIN ticket_assignments a ON a.family_id = f.id
+      WHERE f.team_id = $1 ORDER BY f.id, a.number`, [teamId]);
+  const families = new Map();
+  for (const r of rows) {
+    if (!families.has(r.id)) families.set(r.id, { id: r.id, size: r.size, members: [] });
+    families.get(r.id).members.push({ number: r.number, assigneeId: r.assignee_id });
+  }
+  return families;
+}
+
+// One family's tickets and who has each, for its team's project manager or
+// an admin -> { id, size, team: { id, name }, members: [{ number, assigneeId, assignee }] }
+export async function familyMembers(scope, familyId) {
+  const { rows: [f] } = await pool.query(
+    'SELECT f.id, f.size, f.team_id, t.name FROM ticket_families f LEFT JOIN teams t ON t.id = f.team_id WHERE f.id = $1', [String(familyId || '')]);
+  if (!f) throw new AccessError('There is no such family.');
+  if (!f.team_id || !canManage(scope, f.team_id)) throw new AccessError('Only an admin or this family\'s project manager can see it.');
+  const { rows } = await pool.query(
+    `SELECT a.number, a.assignee_id, u.username, u.display_name
+       FROM ticket_assignments a LEFT JOIN users u ON u.id = a.assignee_id
+      WHERE a.family_id = $1 ORDER BY a.number`, [f.id]);
+  return {
+    id: f.id, size: f.size, team: { id: f.team_id, name: f.name },
+    members: rows.map(r => ({ number: r.number, assigneeId: r.assignee_id, assignee: r.assignee_id ? personName(r) : null })),
+  };
+}
+
 // The tickets assigned to someone in OneTouch (Home's "Assigned to me")
 export async function assignedNumbers(userId) {
   const { rows } = await pool.query('SELECT number FROM ticket_assignments WHERE assignee_id = $1 ORDER BY number', [userId]);
@@ -470,7 +513,10 @@ export async function assignedNumbers(userId) {
 // the latest "I resolved / closed it" someone told the project manager.
 // assignee: a user id, 'none' (unassigned) or null (everyone). Someone who
 // doesn't manage the team only ever gets their own.
-export async function teamTickets(scope, teamId, { assignee = null, kind = null, search = '', offset = 0, limit = 50 } = {}) {
+// sort: { by, dir: 'asc' | 'desc', valueOf } orders every match before the
+// page is cut: by 'family' (its size), 'assignee' (their name), or anything
+// else through valueOf(number) (the ticket's summary, from server.mjs).
+export async function teamTickets(scope, teamId, { assignee = null, kind = null, search = '', offset = 0, limit = 50, sort = null } = {}) {
   if (!canManage(scope, teamId)) {
     if (scope.access.team?.id !== teamId) throw new AccessError('That is not your team.');
     assignee = scope.access.userId;
@@ -483,32 +529,43 @@ export async function teamTickets(scope, teamId, { assignee = null, kind = null,
   const text = String(search || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20);
   if (text) { params.push(`%${text}%`); where.push(`a.number LIKE $${params.length}`); }
 
-  const from = `FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id
-                LEFT JOIN users u ON u.id = a.assignee_id`;
-  const filter = `WHERE ${where.join(' AND ')}`;
-  const { rows: [{ total }] } = await pool.query(`SELECT count(*)::int AS total ${from} ${filter}`, params);
-  const { rows } = await pool.query(
-    `SELECT a.number, a.family_id, f.size, a.assignee_id, u.username, u.display_name,
-            r.status AS report_status, r.note AS report_note, r.created_at AS report_at, r.user_id AS report_by_id,
-            coalesce(ru.display_name, ru.username) AS report_by
-       ${from}
-       LEFT JOIN LATERAL (SELECT status, note, created_at, user_id FROM ticket_reports
-                           WHERE number = a.number ORDER BY created_at DESC LIMIT 1) r ON true
-       LEFT JOIN users ru ON ru.id = r.user_id
-       ${filter}
-      ORDER BY f.size DESC, a.family_id, a.number
-      LIMIT ${Math.min(Math.max(Number(limit) || 50, 1), 200)} OFFSET ${Math.max(Number(offset) || 0, 0)}`,
+  // Every match (a team has about 10,000 tickets at most), so a sort covers them all
+  const { rows: all } = await pool.query(
+    `SELECT a.number, a.family_id, f.size, a.assignee_id, u.username, u.display_name
+       FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id
+       LEFT JOIN users u ON u.id = a.assignee_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY f.size DESC, a.family_id, a.number`,
     params);
+  let list = all;
+  if (sort) {
+    const valueOf = sort.by === 'family' ? r => r.size
+      : sort.by === 'assignee' ? r => (r.assignee_id ? personName(r) : null)
+        : r => sort.valueOf(r.number);
+    list = sortRows(all, valueOf, sort.dir);
+  }
+  const start = Math.max(Number(offset) || 0, 0);
+  const rows = list.slice(start, start + Math.min(Math.max(Number(limit) || 50, 1), 200));
+  const { rows: reports } = await pool.query(
+    `SELECT DISTINCT ON (r.number) r.number, r.status, r.note, r.created_at, r.user_id, coalesce(u.display_name, u.username) AS by
+       FROM ticket_reports r LEFT JOIN users u ON u.id = r.user_id
+      WHERE r.number = ANY($1::text[])
+      ORDER BY r.number, r.created_at DESC`,
+    [rows.map(r => r.number)]);
+  const latest = new Map(reports.map(r => [r.number, r]));
   return {
-    total,
-    tickets: rows.map(r => ({
-      number: r.number, family: { id: r.family_id, size: r.size },
-      assignee: r.assignee_id ? { id: r.assignee_id, name: personName(r) } : null,
-      report: r.report_status ? {
-        status: r.report_status, note: r.report_note, at: r.report_at,
-        by: r.report_by, mine: r.report_by_id === scope.access.userId,
-      } : null,
-    })),
+    total: list.length,
+    tickets: rows.map(r => {
+      const report = latest.get(r.number);
+      return {
+        number: r.number, family: { id: r.family_id, size: r.size },
+        assignee: r.assignee_id ? { id: r.assignee_id, name: personName(r) } : null,
+        report: report ? {
+          status: report.status, note: report.note, at: report.created_at,
+          by: report.by, mine: report.user_id === scope.access.userId,
+        } : null,
+      };
+    }),
   };
 }
 

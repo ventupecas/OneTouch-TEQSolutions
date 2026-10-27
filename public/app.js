@@ -100,6 +100,8 @@ function setCurrentUser(user) {
     else if (user.access) currentAccess = user.access;
     // The Team tab: admins, and anyone on a team
     document.getElementById('teams-tab').hidden = !(currentAccess.admin || currentAccess.team);
+    // Home's "Team families": project managers and admins
+    document.getElementById('kpi-families-tab').hidden = !canSeeFamilies();
     renderGreetings();
     // Each person's home page opens on the search they used last
     if (currentUsername) setHomeMode(rememberedHomeMode());
@@ -1132,7 +1134,8 @@ function formatValue(member, raw) {
     return v;
 }
 
-// One table cell; long text is cut short with the full value on hover
+// One table cell; long text is cut short with the full value on hover.
+// A value shown differently from the data's (a date, a count) sorts by the data's.
 function cellHtml(member, raw, truncate) {
     const { column } = splitMember(member);
     const text = formatValue(member, raw);
@@ -1141,8 +1144,9 @@ function cellHtml(member, raw, truncate) {
     if (truncate && LONG_TEXT.has(column) && text.length > 120) {
         return `<td${cls} title="${escapeHtml(text)}">${escapeHtml(text.slice(0, 117))}…</td>`;
     }
+    const sortAttr = raw !== null && raw !== undefined && String(raw) !== text ? ` data-sort="${escapeHtml(String(raw))}"` : '';
     // A ticket number opens that ticket (its record and family), with a star next to it
-    return `<td${cls}>${ticketValueHtml(raw, text)}</td>`;
+    return `<td${cls}${sortAttr}>${ticketValueHtml(raw, text)}</td>`;
 }
 
 // A value that is a ticket number (a parent, a request, a change…): a link that
@@ -1179,18 +1183,16 @@ function renderResults(rows, entity) {
         return `<div class="table-wrap"><table class="result-table detail"><tbody>${body}</tbody></table></div>`;
     }
 
-    // Everything else: a normal table with a header row. A row with a ticket number
-    // opens, on click, into that ticket's full record and related tickets.
-    const head = columns.map(c => {
-        const cls = c.endsWith('.count') ? ' class="num"' : '';
-        return `<th${cls}>${escapeHtml(columnLabel(c))}</th>`;
-    }).join('');
+    // Everything else: a normal table with a header row, sorted by a click on a
+    // heading. A row with a ticket number opens, on click, into that ticket's
+    // full record and related tickets.
+    const head = columns.map(c => sortHeadHtml('', c, columnLabel(c), c.endsWith('.count') ? 'num' : '')).join('');
     const numberColumn = columns.find(c => c.endsWith('.number'));
     const body = rows.map(r => {
         const number = numberColumn && STARRABLE.test(String(r[numberColumn])) ? String(r[numberColumn]) : null;
         if (!number) return `<tr>${columns.map(c => cellHtml(c, r[c], true)).join('')}</tr>`;
         const cells = columns.map(c => c === numberColumn
-            ? `<td class="ticket-cell"><span class="expand-caret" aria-hidden="true">▸</span>${escapeHtml(number)}${starButtonHtml(number)}</td>`
+            ? `<td class="ticket-cell" data-sort="${escapeHtml(number)}"><span class="expand-caret" aria-hidden="true">▸</span>${escapeHtml(number)}${starButtonHtml(number)}</td>`
             : cellHtml(c, r[c], true)).join('');
         return `<tr class="expandable" data-expand="${escapeHtml(number)}" tabindex="0" aria-expanded="false"` +
             ` title="Click to see ${escapeHtml(number)}'s full record and related tickets">${cells}</tr>`;
@@ -1198,7 +1200,7 @@ function renderResults(rows, entity) {
     const caption = `${rows.length.toLocaleString()} ${rows.length === 1 ? 'row' : 'rows'}`;
 
     return `<div class="result-caption">${caption}</div>` +
-        `<div class="table-wrap"><table class="result-table"><thead><tr>${head}</tr></thead>` +
+        `<div class="table-wrap"><table class="result-table" data-sort-list=""><thead><tr>${head}</tr></thead>` +
         `<tbody>${body}</tbody></table></div>`;
 }
 
@@ -1275,6 +1277,7 @@ function answerChartModel(data, question) {
             const ordered = time ? [...combined.rows].sort((a, b) => String(a.key).localeCompare(String(b.key))) : combined.rows;
             return {
                 kind: 'series',
+                time,
                 chart: { ...base, groupLabel: columnLabel(dimension) },
                 series: {
                     categories: ordered.map(r => ({ value: r.key, label: time ? periodLabel(dimension, r.key) : formatValue(dimension, r.key) })),
@@ -1297,7 +1300,32 @@ function answerViewsHtml(model, chartable) {
         `${icon(v)}<span>${ANSWER_VIEW_NAMES[v]}</span></button>`).join('');
     const save = model.kind === 'single' && chartable
         ? '<button type="button" class="view-btn save" data-answer-save title="Put this on Home or one of your dashboards, as a chart that stays">📌 Save as a chart</button>' : '';
-    return `<div class="answer-views" role="group" aria-label="Show this answer as"><span class="answer-views-label">Show as</span>${buttons}${save}</div>`;
+    // While a chart shows: its order (the table sorts by its own headings)
+    const order = `<label class="answer-order" hidden>Order <select data-answer-order>` +
+        answerOrderChoices(model).map(([value, label]) => `<option value="${value}">${escapeHtml(label)}</option>`).join('') + '</select></label>';
+    return `<div class="answer-views" role="group" aria-label="Show this answer as"><span class="answer-views-label">Show as</span>${buttons}${save}${order}</div>`;
+}
+
+// The orders an answer's chart offers: as the answer had it, or ascending /
+// descending by count (or a total, or one ticket type's) or by its groups
+function answerOrderChoices(model) {
+    const asAnswered = ['', 'As answered'];
+    if (model.kind === 'single') return [asAnswered, ...chartOrderChoices(model.chart)];
+    const group = model.chart.groupLabel;
+    return [
+        asAnswered,
+        ['total:desc', 'Biggest total first'], ['total:asc', 'Smallest total first'],
+        ...(model.time ? [['label:asc', 'Oldest first'], ['label:desc', 'Newest first']] : [['label:asc', `${group}, A to Z`], ['label:desc', `${group}, Z to A`]]),
+        ...model.series.series.flatMap((x, k) => [[`s${k}:desc`, `Most ${x.name.toLowerCase()} first`], [`s${k}:asc`, `Fewest ${x.name.toLowerCase()} first`]]),
+    ];
+}
+
+// The answer's numbers in the order picked for its chart -> { data } or { series }
+function orderedAnswer(answer) {
+    const model = answer.model;
+    const [by, direction] = (answer.order || '').split(':');
+    if (model.kind === 'series') return { series: by ? orderSeries(model.series, by, direction) : model.series };
+    return { data: by ? { ...model.data, rows: orderChartRows(model.data.rows, by, direction) } : model.data };
 }
 
 function setAnswerView(el, view) {
@@ -1313,6 +1341,7 @@ function setAnswerView(el, view) {
     resizeWatcher.unobserve(box);
     box._drawn = null;
     box._pick = null;
+    el.querySelector('.answer-order').hidden = view === 'table';
     if (view === 'table') {
         box.className = 'answer-view';
         box.innerHTML = answer.tablesHtml;
@@ -1320,8 +1349,9 @@ function setAnswerView(el, view) {
     } else {
         box.className = 'answer-view tile-body answer-chart';
         const model = answer.model;
-        if (model.kind === 'series') drawSeriesChart(box, model.chart, model.series, view);
-        else drawChart(box, { ...model.chart, display: view }, model.data, false);
+        const ordered = orderedAnswer(answer);
+        if (model.kind === 'series') drawSeriesChart(box, model.chart, ordered.series, view);
+        else drawChart(box, { ...model.chart, display: view }, ordered.data, false);
         // An answer that is exactly a chart: a click lists the tickets behind a mark
         if (model.drill) box._pick = row => openDrill({ chart: model.drill, value: row ? row.value : null, label: row ? groupLabel(model.drill, row.value, true) : '' });
         box.classList.toggle('drillable', Boolean(box._pick));
@@ -1337,9 +1367,10 @@ function answerPicture(answer) {
     if (!answer.model || answer.view === 'table') return null;
     const model = answer.model;
     const subtitle = `Question: ${answer.question}`;
+    const ordered = orderedAnswer(answer);
     return model.kind === 'series'
-        ? { chart: model.chart, series: model.series, display: answer.view, title: model.chart.title, subtitle }
-        : { chart: { ...model.chart, display: answer.view }, data: model.data, title: model.chart.title, subtitle };
+        ? { chart: model.chart, series: ordered.series, display: answer.view, title: model.chart.title, subtitle }
+        : { chart: { ...model.chart, display: answer.view }, data: ordered.data, title: model.chart.title, subtitle };
 }
 
 // "📌 Save as a chart": the chart builder, filled in from the answer, saving to Home or a dashboard
@@ -1372,22 +1403,22 @@ function renderCombined(combined) {
             `<tr><td>${escapeHtml(capitalize(nounFor(e, 2)))}</td><td class="num">${(totals.counts[e] || 0).toLocaleString()}</td></tr>`
         ).join('');
         return `<div class="result-big">${totals.total.toLocaleString()} <span>${totals.total === 1 ? 'ticket' : 'tickets'}</span></div>` +
-            `<div class="table-wrap"><table class="result-table"><thead><tr><th>Ticket Type</th><th class="num">Number of Tickets</th></tr></thead>` +
+            `<div class="table-wrap"><table class="result-table" data-sort-list=""><thead><tr>${sortHeadHtml('', 'Ticket Type')}${sortHeadHtml('', 'Number of Tickets', 'Number of Tickets', 'num')}</tr></thead>` +
             `<tbody>${body}</tbody><tfoot><tr><td>Total</td><td class="num">${totals.total.toLocaleString()}</td></tr></tfoot></table></div>`;
     }
 
     // Grouped: the grouping column, one column per ticket type, and a total
-    const typeHeads = entities.map(e => `<th class="num">${escapeHtml(capitalize(nounFor(e, 2)))}</th>`).join('');
-    const head = `<th>${escapeHtml(columnLabel(dimension))}</th>${typeHeads}<th class="num">Total</th>`;
+    const typeHeads = entities.map(e => sortHeadHtml('', e, capitalize(nounFor(e, 2)), 'num')).join('');
+    const head = `${sortHeadHtml('', dimension, columnLabel(dimension))}${typeHeads}${sortHeadHtml('', 'Total', 'Total', 'num')}`;
     const cell = n => `<td class="num">${n ? n.toLocaleString() : '—'}</td>`;
     const body = rows.map(r =>
-        `<tr><td>${escapeHtml(formatValue(dimension, r.key))}</td>${entities.map(e => cell(r.counts[e])).join('')}` +
+        `<tr><td data-sort="${escapeHtml(String(r.key ?? ''))}">${escapeHtml(formatValue(dimension, r.key))}</td>${entities.map(e => cell(r.counts[e])).join('')}` +
         `<td class="num total">${r.total.toLocaleString()}</td></tr>`
     ).join('');
     const foot = `<tr><td>Total</td>${entities.map(e => cell(totals.counts[e])).join('')}<td class="num">${totals.total.toLocaleString()}</td></tr>`;
 
     return `<div class="result-caption">${rows.length.toLocaleString()} ${rows.length === 1 ? 'row' : 'rows'}</div>` +
-        `<div class="table-wrap"><table class="result-table"><thead><tr>${head}</tr></thead>` +
+        `<div class="table-wrap"><table class="result-table" data-sort-list=""><thead><tr>${head}</tr></thead>` +
         `<tbody>${body}</tbody><tfoot>${foot}</tfoot></table></div>`;
 }
 
@@ -1852,10 +1883,12 @@ function showToast(message) {
 // starred tickets
 // =====================================================================
 
-const HOME_MODES = ['assigned', 'results', 'starred'];
+const HOME_MODES = ['assigned', 'families', 'results', 'starred'];
 let homeMode = 'assigned';
 // Each search bumps its counter, so an older, slower answer can't replace a newer one
-const homeRuns = { assigned: 0, results: 0, starred: 0 };
+const homeRuns = { assigned: 0, families: 0, results: 0, starred: 0 };
+// "Team families" (family KPIs) is for project managers and admins
+const canSeeFamilies = () => Boolean(currentAccess.admin || currentAccess.role === 'project_manager');
 
 // The list each person had open last, remembered in this browser. (A new
 // name when "Assigned to me" arrived, so everyone opens on it once.)
@@ -1870,12 +1903,14 @@ function rememberedHomeMode() {
 function showHomeMode(quiet = false) {
     if (homeMode === 'starred') return showStarred(quiet);
     if (homeMode === 'assigned') return showAssigned(quiet);
+    if (homeMode === 'families') return showFamilyKpis(quiet);
     return showTicketResults(quiet);
 }
 
 // Shows one of Home's lists and loads it (quiet: refresh it without a "Loading…")
 function setHomeMode(mode, quiet = false) {
-    if (!HOME_MODES.includes(mode)) mode = 'assigned';
+    const wanted = mode;
+    if (!HOME_MODES.includes(mode) || (mode === 'families' && !canSeeFamilies())) mode = 'assigned';
     homeMode = mode;
     document.querySelectorAll('.home-mode').forEach(b => {
         const on = b.dataset.mode === mode;
@@ -1883,7 +1918,9 @@ function setHomeMode(mode, quiet = false) {
         b.setAttribute('aria-selected', String(on));
     });
     for (const m of HOME_MODES) document.getElementById(`home-${m}`).hidden = m !== mode;
-    if (currentUsername) {
+    // Not remembered when it fell back: a project manager's "Team families" is
+    // asked for again once their access has loaded
+    if (currentUsername && mode === wanted) {
         try { localStorage.setItem(homeModeKey(), mode); } catch { /* not remembered; that's fine */ }
     }
     showHomeMode(quiet);
@@ -1896,9 +1933,13 @@ function resetHome() {
     selections.starred.clear();
     latestShown = new Set();
     openedRecord = null;
+    resetSorts();
     Object.assign(assignedView, { tickets: null, status: 'open', page: 0 });
     paintAssignedCount();
     document.getElementById('assigned-result').innerHTML = '';
+    Object.assign(teamFamiliesView, { teamId: null, teams: null, status: 'open', linked: true, offset: 0, data: null });
+    document.getElementById('kpi-families-count').hidden = true;
+    document.getElementById('kpi-families-result').innerHTML = '';
     document.getElementById('ticket-results').innerHTML = NO_TICKET_RESULTS_HTML;
     document.getElementById('starred-result').innerHTML = '';
     starredTickets.clear();
@@ -1933,6 +1974,32 @@ const TICKET_COLUMNS = [
 ];
 const STARRED_COLUMN = ['Starred', t => formatStarredAt(starredTickets.get(t.number))];
 
+// What a column sorts by where that isn't the text people read (sorting.js):
+// dates as the data writes them, Priority / Risk by how urgent, a family by
+// its size, KPIs by how much needs attention
+const TICKET_SORT_VALUES = {
+    Ticket: t => t.number,
+    'Priority / Risk': t => (t.level ? levelRank(t) : ''),
+    Opened: t => t.opened || '',
+    Shown: t => t.shownAt || '',
+    Starred: t => starredTickets.get(t.number) || '',
+    Family: t => Math.max(0, ...(t.families || []).map(f => f.size)) || '',
+    'Assigned to': t => t.assignee || '',
+    KPIs: t => (t.kpis ? kpiAttention(t.kpis.map(k => k.tone)) : t.attention ?? ''),
+};
+const ticketSortValue = ([label, get]) => TICKET_SORT_VALUES[label] || get;
+// Columns of buttons, with nothing to sort by
+const UNSORTED_COLUMNS = new Set(['Tell your project manager']);
+
+// How urgent a ticket is, as Assigned to me is ordered (tickets.mjs priorityRank):
+// an incident's priority, a change's risk; 5 for requests and tasks
+function levelRank(t) {
+    const kind = t.kind || String(t.number).match(/^[A-Z]+/)?.[0];
+    if (kind === 'INC') return Number((/^P([1-4])\b/.exec(t.level) || [])[1]) || 5;
+    if (kind === 'CHG') return { High: 2, Medium: 3, Low: 4, Standard: 4 }[t.level] ?? 5;
+    return 5;
+}
+
 // Each ticket's parent and the families it is in (relations.mjs ticketLinks),
 // in Ticket results and Starred tickets. The third item draws the cell: the
 // parent and each family's anchor open that ticket's record, with its related tickets.
@@ -1966,27 +2033,35 @@ function formatStarredAt(iso) {
 // in `highlight` (e.g. the latest answer's tickets) get `highlightClass`.
 // select: the list's name ('results', 'starred'): each row gets a checkbox,
 // and the header's ticks them all.
-function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set(), highlightClass = 'fresh', { select = null, rowClass = null } = {}) {
+// sort: the list's name, so a click on a heading sorts it and the sort stays
+// while the page is open (the tickets come in that sort); '': sorts, but
+// forgets it when drawn again; false: no sorting (sorting.js)
+function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set(), highlightClass = 'fresh', { select = null, rowClass = null, sort = '' } = {}) {
+    const sortable = sort !== false;
+    if (sort) tickets = sortedTickets(tickets, sort, columns, ticketSortValue);
     const head = (select ? `<th class="select-cell"><input type="checkbox" class="select-all" data-select-list="${select}" aria-label="Select all"></th>` : '') +
-        columns.map(([label]) => `<th>${escapeHtml(label)}</th>`).join('');
+        columns.map(([label]) => (sortable && !UNSORTED_COLUMNS.has(label) ? sortHeadHtml(sort, label) : `<th>${escapeHtml(label)}</th>`)).join('');
     const body = tickets.map((t, i) => {
         const cls = [highlight.has(t.number) ? highlightClass : '', rowClass ? rowClass(t, i) : ''].filter(Boolean).join(' ');
         return (cls ? `<tr class="${cls}">` : '<tr>') +
         (select ? `<td class="select-cell"><input type="checkbox" class="row-select" data-select-list="${select}" value="${escapeHtml(t.number)}" aria-label="Select ${escapeHtml(t.number)}"></td>` : '') +
         columns.map(([label, get, html], i) => {
+        const by = sortable && TICKET_SORT_VALUES[label];
+        const sortAttr = by ? ` data-sort="${escapeHtml(String(by(t) ?? ''))}"` : '';
         if (i === 0) {
-            return `<td class="ticket-cell"><button type="button" class="ticket-link" data-ticket="${escapeHtml(t.number)}"` +
+            return `<td class="ticket-cell"${sortAttr}><button type="button" class="ticket-link" data-ticket="${escapeHtml(t.number)}"` +
                 ` title="Open ${escapeHtml(t.number)}">${escapeHtml(t.number)}</button>${starButtonHtml(t.number)}</td>`;
         }
-        if (html) return `<td class="${label === 'Family' ? 'family-cell' : 'parent-cell'}">${html(t)}</td>`;
+        if (html) return `<td class="${label === 'Family' ? 'family-cell' : label === 'KPIs' ? 'kpi-cell' : 'parent-cell'}"${sortAttr}>${html(t)}</td>`;
         const text = String(get(t) || '');
         if (label === 'Summary' && text.length > 120) {
             return `<td title="${escapeHtml(text)}">${escapeHtml(text.slice(0, 117))}…</td>`;
         }
-        return `<td>${escapeHtml(text || '—')}</td>`;
+        return `<td${sortAttr}>${escapeHtml(text || '—')}</td>`;
     }).join('') + '</tr>';
     }).join('');
-    return `<div class="table-wrap"><table class="result-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+    return `<div class="table-wrap"><table class="result-table"${sortable ? ` data-sort-list="${escapeHtml(sort)}"` : ''}>` +
+        `<thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 function ticketDownloadHtml(tickets, title, columns = TICKET_COLUMNS) {
@@ -2014,7 +2089,7 @@ function ticketCardHtml(t, record) {
         `</div>` +
         (t.summary ? `<div class="ticket-summary">${escapeHtml(t.summary)}</div>` : '');
 
-    if (!record) return html + ticketTableHtml([t]) + ticketDownloadHtml([t], t.number);
+    if (!record) return html + ticketTableHtml([t], TICKET_COLUMNS, new Set(), 'fresh', { sort: false }) + ticketDownloadHtml([t], t.number);
 
     const fields = Object.entries(record.fields);
     const body = fields.map(([member, value]) => {
@@ -2093,7 +2168,7 @@ function showAssigned(quiet = false) {
         assignedView.tickets = data.tickets;
         paintAssignedCount();
         return assignedHtml();
-    }, quiet);
+    }, quiet).then(() => fillTicketKpis(document.getElementById('assigned-result')));
 }
 
 function assignedHtml() {
@@ -2106,7 +2181,13 @@ function assignedHtml() {
     const counts = { open: all.filter(t => t.open).length, all: all.length };
     counts.closed = counts.all - counts.open;
     const { status } = assignedView;
-    const shown = status === 'all' ? all : all.filter(t => t.open === (status === 'open'));
+    // Each ticket's KPIs (filled in once the page is drawn, fillTicketKpis; sorted by
+    // the server's count of what needs attention); members can tell their project
+    // manager they've resolved or closed one (notifications.js)
+    const columns = [...ASSIGNED_COLUMNS, KPI_COLUMN,
+        ...(canTellManager() ? [['Tell your project manager', () => '', t => reportButtonHtml(t.number, 'Resolved or closed?…')]] : [])];
+    // Sorted by a heading: all of them, before they're cut into pages
+    const shown = sortedTickets(status === 'all' ? all : all.filter(t => t.open === (status === 'open')), 'assigned', columns, ticketSortValue);
     const pages = Math.max(1, Math.ceil(shown.length / ASSIGNED_PAGE));
     assignedView.page = Math.min(Math.max(assignedView.page, 0), pages - 1);
     const first = assignedView.page * ASSIGNED_PAGE;
@@ -2115,25 +2196,41 @@ function assignedHtml() {
     const filter = '<div class="assigned-filter" role="group" aria-label="Which tickets">' + ASSIGNED_STATUSES.map(([key, label]) =>
         `<button type="button" class="home-action" data-assigned-status="${key}" aria-pressed="${status === key}">${label} (${counts[key].toLocaleString()})</button>`).join('') + '</div>';
     const which = status === 'all' ? '' : `${status} `;
+    const sort = listSorts.get('assigned');
+    const order = sort
+        ? `sorted by ${sort.col}, ${sort.dir === 'asc' ? 'ascending' : 'descending'} (click its heading again to change that). `
+        : 'highest priority first, then oldest. Incidents go by priority and changes by risk. Requests and catalog tasks have no priority, so they come after those. ' +
+          'Click any heading to sort by it. ';
     const head = '<div class="results-head">' +
-        `<p class="home-status">${shown.length.toLocaleString()} ${which}${shown.length === 1 ? 'ticket' : 'tickets'} assigned to you, highest priority first, then oldest. ` +
-        'Incidents go by priority and changes by risk. Requests and catalog tasks have no priority, so they come after those.</p>' + filter + '</div>';
+        `<p class="home-status">${shown.length.toLocaleString()} ${which}${shown.length === 1 ? 'ticket' : 'tickets'} assigned to you, ${order}</p>` + filter + '</div>' +
+        KPI_LEGEND_HTML;
     if (!shown.length) return head + `<p class="home-status">None ${status === 'open' ? 'open: you\'re all caught up.' : 'closed yet.'}</p>`;
 
-    // Members can tell their project manager they've resolved or closed one (notifications.js)
-    const columns = canTellManager()
-        ? [...ASSIGNED_COLUMNS, ['Tell your project manager', () => '', t => reportButtonHtml(t.number, 'Resolved or closed?…')]]
-        : ASSIGNED_COLUMNS;
     const pager = pages > 1
         ? `<div class="team-pager"><span>${(first + 1).toLocaleString()}–${(first + page.length).toLocaleString()} of ${shown.length.toLocaleString()}</span>` +
           `<button type="button" class="home-action" data-assigned-page="-1"${assignedView.page ? '' : ' disabled'}>← Previous</button>` +
           `<button type="button" class="home-action" data-assigned-page="1"${assignedView.page < pages - 1 ? '' : ' disabled'}>Next →</button></div>`
         : '';
-    return head + ticketTableHtml(page, columns) + pager +
+    return head + ticketTableHtml(page, columns, new Set(), 'fresh', { sort: 'assigned' }) + pager +
         ticketDownloadHtml(shown, `Assigned to me (${status === 'all' ? 'all' : status})`, ASSIGNED_COLUMNS);
 }
 
-// Open / closed / all, and the pages: drawn again from what's loaded
+// Drawn again from what's loaded
+function redrawAssigned() {
+    const out = document.getElementById('assigned-result');
+    out.innerHTML = assignedHtml();
+    forgetRemovedExports();
+    fillTicketKpis(out);
+    return out;
+}
+
+// A heading: every ticket sorted, from the first page
+pagedSorts.assigned = () => {
+    assignedView.page = 0;
+    redrawAssigned();
+};
+
+// Open / closed / all, and the pages
 document.getElementById('assigned-result').addEventListener('click', e => {
     const status = e.target.closest('[data-assigned-status]');
     const page = e.target.closest('[data-assigned-page]');
@@ -2144,10 +2241,220 @@ document.getElementById('assigned-result').addEventListener('click', e => {
     } else {
         assignedView.page += Number(page.dataset.assignedPage);
     }
-    const out = document.getElementById('assigned-result');
-    out.innerHTML = assignedHtml();
-    forgetRemovedExports();
+    const out = redrawAssigned();
     if (page) out.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+
+// =====================================================================
+// KPIs (kpis.mjs): each ticket's in "Assigned to me", each family's (and its
+// tickets') in a project manager's "Team families". Green: on track; amber:
+// keep an eye on it; red: needs attention. Hovering one says what it means.
+// =====================================================================
+
+const KPI_LEGEND_HTML = '<p class="kpi-legend">KPIs: <span class="kpi kpi-good">on track</span><span class="kpi kpi-warn">keep an eye on it</span>' +
+    '<span class="kpi kpi-bad">needs attention</span> · hover one for what it means. Ages count to the end of the data, not today.</p>';
+// A table column whose cells fillTicketKpis fills in
+const KPI_COLUMN = ['KPIs', () => '', t => `<div data-kpis="${escapeHtml(t.number)}"><span class="kpi-none">Loading…</span></div>`];
+
+function kpiChipsHtml(list) {
+    if (!list?.length) return '<span class="kpi-none">—</span>';
+    return '<div class="kpi-list">' + list.map(k => `<span class="kpi kpi-${['good', 'warn', 'bad'].includes(k.tone) ? k.tone : 'info'}"` +
+        `${k.detail ? ` title="${escapeHtml(k.detail)}"` : ''}>${escapeHtml(k.label)} <b>${escapeHtml(k.value)}</b></span>`).join('') + '</div>';
+}
+
+// Fills the KPI cells in a container ([data-kpis="<number>"]) for the tickets showing
+async function fillTicketKpis(container) {
+    const cells = [...container.querySelectorAll('[data-kpis]')];
+    if (!cells.length) return;
+    try {
+        const response = await fetch(`${API_BASE}/api/kpis/tickets`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ numbers: cells.map(c => c.dataset.kpis) }),
+        });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        for (const cell of cells) if (cell.isConnected) cell.innerHTML = kpiChipsHtml(data.kpis[cell.dataset.kpis]);
+    } catch (err) {
+        console.error('Could not load the KPIs:', err);
+        for (const cell of cells) if (cell.isConnected) cell.innerHTML = '<span class="kpi-none">KPIs unavailable</span>';
+    }
+}
+
+// ---------------------------------------------------------------------
+// TEAM FAMILIES (project managers and admins): the team's families, those
+// with open tickets first, by their most urgent open ticket and then their
+// oldest; each with its KPIs, and its tickets' at a click
+// ---------------------------------------------------------------------
+
+const FAMILY_PAGE = 25;
+const FAMILY_TICKETS_SHOWN = 50;
+const KIND_LABELS = { INC: ['incident', 'incidents'], CHG: ['change', 'changes'], RITM: ['request', 'requests'], SCTASK: ['catalog task', 'catalog tasks'] };
+const teamFamiliesView = { teamId: null, teams: null, status: 'open', linked: true, offset: 0, data: null };
+// What the server sorts the families by for each heading (no sort: the most urgent first)
+const TEAM_FAMILY_SORT_KEYS = { Family: 'family', Tickets: 'size', KPIs: 'kpis' };
+
+function showFamilyKpis(quiet = false) {
+    if (!sessionTokenValue || !canSeeFamilies()) return;
+    return runHomeSearch('families', 'kpi-families-result', async () => {
+        // Admins can look at any team; a project manager sees their own
+        if (currentAccess.admin && !teamFamiliesView.teams) {
+            const r = await fetch(`${API_BASE}/api/teams`, { headers: authHeaders() });
+            if (handleUnauthorized(r)) return null;
+            const t = await r.json().catch(() => ({}));
+            teamFamiliesView.teams = (t.teams || []).map(team => ({ id: team.id, name: team.name }));
+        }
+        const teamId = teamFamiliesView.teamId || currentAccess.team?.id || teamFamiliesView.teams?.[0]?.id;
+        if (!teamId) return '<p class="home-status">You\'re not on a team, so there are no families to show.</p>';
+        const q = new URLSearchParams({
+            team: teamId, status: teamFamiliesView.status, linked: teamFamiliesView.linked ? 1 : 0, offset: teamFamiliesView.offset, limit: FAMILY_PAGE,
+            ...sortQuery('team-families', TEAM_FAMILY_SORT_KEYS),
+        });
+        const response = await fetch(`${API_BASE}/api/kpis/families?${q}`, { headers: authHeaders() });
+        if (handleUnauthorized(response)) return null;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        teamFamiliesView.data = data;
+        teamFamiliesView.teamId = data.teamId;
+        const count = document.getElementById('kpi-families-count');
+        count.textContent = data.counts.open.toLocaleString();
+        count.title = `${data.counts.open.toLocaleString()} with open tickets`;
+        count.hidden = false;
+        return familiesHtml();
+    }, quiet);
+}
+
+function familiesHtml() {
+    const { data, status, linked } = teamFamiliesView;
+    const teamName = teamFamiliesView.teams?.find(t => t.id === data.teamId)?.name || currentAccess.team?.name || 'Your team';
+    const which = status === 'open' ? 'with open tickets' : '';
+    const sized = linked ? 'linked ' : '';
+    const filter = '<div class="assigned-filter" role="group" aria-label="Which families">' +
+        [['open', 'Needs attention', data.counts.open], ['all', 'All', data.counts.all]].map(([key, label, n]) =>
+            `<button type="button" class="home-action" data-families-status="${key}" aria-pressed="${status === key}">${label} (${n.toLocaleString()})</button>`).join('') + '</div>';
+    const teamPick = currentAccess.admin && teamFamiliesView.teams?.length
+        ? `<label>Team <select data-families-team>${teamFamiliesView.teams.map(t => `<option value="${t.id}"${t.id === data.teamId ? ' selected' : ''}>${escapeHtml(t.name)}</option>`).join('')}</select></label>`
+        : '';
+    const sort = listSorts.get('team-families');
+    const order = sort
+        ? `sorted by ${sort.col === 'KPIs' ? 'how many KPIs need attention' : sort.col}, ${sort.dir === 'asc' ? 'ascending' : 'descending'}`
+        : 'the most urgent first (the highest-priority open ticket, then the oldest)';
+    const head = '<div class="results-head">' +
+        `<p class="home-status">${escapeHtml(teamName)}: ${data.total.toLocaleString()} ${sized}${data.total === 1 ? 'family' : 'families'} ${which}, ` +
+        `${order}. A family is tickets linked to each other, which always stay with one team. ` +
+        'Open one to see each of its tickets\' KPIs and who has it.</p>' +
+        `<div class="families-controls">${filter}<label><input type="checkbox" data-families-linked${linked ? ' checked' : ''}> Only linked families (2 or more tickets)</label>${teamPick}</div>` +
+        '</div>' + KPI_LEGEND_HTML;
+    if (!data.families.length) return head + `<p class="home-status">${status === 'open' ? 'No families with open tickets: all caught up.' : 'No families.'}</p>`;
+    const rows = data.families.map(f => {
+        const id = escapeHtml(f.id);
+        const summary = String(f.ticket?.summary || '');
+        const kinds = Object.entries(f.kinds).map(([k, n]) => `${n} ${KIND_LABELS[k][n === 1 ? 0 : 1]}`).join(', ');
+        return `<tr data-family-row="${id}">` +
+            `<td class="ticket-cell" data-sort="${id}"><button type="button" class="ticket-link" data-ticket="${id}" title="Open ${id}">${id}</button>${starButtonHtml(f.id)}` +
+            (summary ? `<div class="family-sub"${summary.length > 90 ? ` title="${escapeHtml(summary)}"` : ''}>${escapeHtml(summary.length > 90 ? `${summary.slice(0, 87)}…` : summary)}</div>` : '') + '</td>' +
+            `<td><strong>${f.size.toLocaleString()}</strong> ${f.size === 1 ? 'ticket' : 'tickets'}<div class="family-kinds">${escapeHtml(kinds)}</div></td>` +
+            `<td class="kpi-cell">${kpiChipsHtml(f.kpis)}</td>` +
+            `<td><button type="button" class="home-action" data-family-open="${id}" aria-expanded="false">Its tickets</button></td></tr>`;
+    }).join('');
+    const first = teamFamiliesView.offset + 1;
+    const last = teamFamiliesView.offset + data.families.length;
+    const pager = data.total > FAMILY_PAGE
+        ? `<div class="team-pager"><span>${first.toLocaleString()}–${last.toLocaleString()} of ${data.total.toLocaleString()}</span>` +
+          `<button type="button" class="home-action" data-families-page="-1"${teamFamiliesView.offset ? '' : ' disabled'}>← Previous</button>` +
+          `<button type="button" class="home-action" data-families-page="1"${last < data.total ? '' : ' disabled'}>Next →</button></div>`
+        : '';
+    return head + '<div class="table-wrap"><table class="result-table" data-sort-list="team-families"><thead><tr>' +
+        sortHeadHtml('team-families', 'Family', 'Family (its first ticket)') + sortHeadHtml('team-families', 'Tickets') + sortHeadHtml('team-families', 'KPIs') +
+        '<th></th></tr></thead>' + `<tbody>${rows}</tbody></table></div>` + pager;
+}
+
+// A heading: every family of the team sorted by the server, from the first page
+pagedSorts['team-families'] = () => {
+    teamFamiliesView.offset = 0;
+    showFamilyKpis(true);
+};
+
+const FAMILY_TICKET_COLUMNS = [
+    ['Ticket', t => t.number],
+    ['Type', t => t.type],
+    ['Summary', t => t.summary],
+    ['State', t => t.state],
+    ['Priority / Risk', t => t.level],
+    ['Assigned to', t => t.assignee || 'Not assigned yet'],
+    ['KPIs', () => '', t => kpiChipsHtml(t.kpis)],
+];
+
+// A family's tickets, each with who has it and its KPIs, in a row under the family
+async function toggleFamilyTickets(button) {
+    const row = button.closest('tr');
+    const open = row.nextElementSibling?.classList.contains('row-detail');
+    if (open) {
+        row.nextElementSibling.remove();
+        button.setAttribute('aria-expanded', 'false');
+        button.textContent = 'Its tickets';
+        return;
+    }
+    button.setAttribute('aria-expanded', 'true');
+    button.textContent = 'Hide its tickets';
+    row.insertAdjacentHTML('afterend', `<tr class="row-detail"><td colspan="4"><div class="family-tickets"><p class="home-status">Loading its tickets…</p></div></td></tr>`);
+    const box = row.nextElementSibling.querySelector('.family-tickets');
+    try {
+        const response = await fetch(`${API_BASE}/api/kpis/families/${encodeURIComponent(button.dataset.familyOpen)}`, { headers: authHeaders() });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        if (!box.isConnected) return;
+        // In the server's order: open ones first, then the most urgent, then the oldest
+        Object.assign(box, { familyId: data.id, familyTickets: data.tickets, showAll: false });
+        drawFamilyTickets(box);
+    } catch (err) {
+        if (box.isConnected) box.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+    }
+}
+
+// A family's tickets, the first FAMILY_TICKETS_SHOWN (or all of them), in the
+// sort of its own headings; each family keeps its own sort
+function drawFamilyTickets(box) {
+    const list = `family:${box.familyId}`;
+    const tickets = sortedTickets(box.familyTickets, list, FAMILY_TICKET_COLUMNS, ticketSortValue);
+    const drawn = box.showAll ? tickets : tickets.slice(0, FAMILY_TICKETS_SHOWN);
+    box.innerHTML = `<h4>${tickets.length.toLocaleString()} ${tickets.length === 1 ? 'ticket' : 'tickets'} in this family</h4>` +
+        ticketTableHtml(drawn, FAMILY_TICKET_COLUMNS, new Set(), 'fresh', { sort: list }) +
+        (drawn.length < tickets.length ? `<p class="home-status">Showing ${drawn.length} of ${tickets.length.toLocaleString()}. ` +
+            `<button type="button" class="link-btn" data-family-all>Show all ${tickets.length.toLocaleString()}</button></p>` : '');
+}
+pagedSorts.family = table => drawFamilyTickets(table.closest('.family-tickets'));
+
+document.getElementById('kpi-families-result').addEventListener('click', e => {
+    const status = e.target.closest('[data-families-status]');
+    const page = e.target.closest('[data-families-page]');
+    const open = e.target.closest('[data-family-open]');
+    const all = e.target.closest('[data-family-all]');
+    if (open) { toggleFamilyTickets(open); return; }
+    if (all) {
+        const box = all.closest('.family-tickets');
+        box.showAll = true;
+        drawFamilyTickets(box);
+        return;
+    }
+    if (!status && !page) return;
+    if (status) {
+        teamFamiliesView.status = status.dataset.familiesStatus;
+        teamFamiliesView.offset = 0;
+    } else {
+        teamFamiliesView.offset = Math.max(0, teamFamiliesView.offset + Number(page.dataset.familiesPage) * FAMILY_PAGE);
+    }
+    showFamilyKpis(true).then(() => { if (page) document.getElementById('kpi-families-result').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+});
+
+document.getElementById('kpi-families-result').addEventListener('change', e => {
+    if (e.target.matches('[data-families-linked]')) teamFamiliesView.linked = e.target.checked;
+    else if (e.target.matches('[data-families-team]')) teamFamiliesView.teamId = Number(e.target.value);
+    else return;
+    teamFamiliesView.offset = 0;
+    showFamilyKpis(true);
 });
 
 // =====================================================================
@@ -2195,7 +2502,7 @@ function showTicketResults(quiet = false) {
             'Click a ticket number to see its full record, or its parent or family to see those.</p>' +
             `<button type="button" class="home-action danger" onclick="clearTicketResults(${tickets.length})">🧹 Clear ticket results</button></div>` +
             starAllHtml(tickets.map(t => t.number)) + selectBarHtml('results') +
-            ticketTableHtml(tickets, columns, latestShown, 'fresh', { select: 'results' }) + ticketDownloadHtml(tickets, 'Ticket results', columns);
+            ticketTableHtml(tickets, columns, latestShown, 'fresh', { select: 'results', sort: 'results' }) + ticketDownloadHtml(tickets, 'Ticket results', columns);
     }, quiet).then(() => paintSelection('results'));
 }
 
@@ -2448,7 +2755,7 @@ function showStarred(quiet = false) {
             'Tick tickets to unstar several at once.</p>' +
             `<button type="button" class="home-action danger" onclick="unstarAll()">☆ Unstar all</button></div>` +
             unstarByIssueHtml(data.tickets) + selectBarHtml('starred') +
-            ticketTableHtml(data.tickets, columns, new Set(), 'fresh', { select: 'starred' }) + missing + ticketDownloadHtml(data.tickets, 'Starred tickets', columns);
+            ticketTableHtml(data.tickets, columns, new Set(), 'fresh', { select: 'starred', sort: 'starred' }) + missing + ticketDownloadHtml(data.tickets, 'Starred tickets', columns);
     }, quiet).then(() => paintSelection('starred'));
 }
 
@@ -2759,6 +3066,14 @@ document.addEventListener('keydown', e => {
         e.preventDefault();
         toggleTicketRow(e.target);
     }
+});
+
+// An answer's chart in another order
+document.addEventListener('change', e => {
+    if (!e.target.matches('[data-answer-order]')) return;
+    const el = e.target.closest('.msg');
+    el._answer.order = e.target.value;
+    setAnswerView(el, el._answer.view);
 });
 
 // =====================================================================

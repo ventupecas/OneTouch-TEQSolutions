@@ -122,9 +122,11 @@ function resetCustomizing() {
     prefs.tour = defaultTour();
     prefsReady = Promise.resolve();
     prefsLoadFailed = false;
+    teamValuesLoading = null; // the Team filter's choices come from this person's tickets
     sharedBoards.clear();
     closeTour(false);
     document.getElementById('bf-team-pop').hidden = true;
+    document.getElementById('bf-team-list').innerHTML = '';
     for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close('cancel');
     applyTheme(prefs.theme);
     try { localStorage.removeItem(THEME_CACHE_KEY); } catch { /* nothing kept */ }
@@ -288,13 +290,16 @@ const TILE_BUTTONS = {
     pin: ['📌', 'Add a copy to Home'],
     remove: ['🗑', 'Remove this chart'],
 };
-const HOME_TILE_BUTTONS = ['table', 'download', 'edit', 'earlier', 'later', 'remove'];
-const BOARD_TILE_BUTTONS = ['table', 'download', 'edit', 'earlier', 'later', 'pin', 'remove'];
-// Charts on someone else's shared dashboard: look, don't touch
-const SHARED_TILE_BUTTONS = ['table'];
+// sort: ⇅, a menu of the chart's orders (ascending or descending, by count or by its groups)
+const HOME_TILE_BUTTONS = ['table', 'sort', 'download', 'edit', 'earlier', 'later', 'remove'];
+const BOARD_TILE_BUTTONS = ['table', 'sort', 'download', 'edit', 'earlier', 'later', 'pin', 'remove'];
+// Charts on someone else's shared dashboard: look (in any order), don't touch
+const SHARED_TILE_BUTTONS = ['table', 'sort'];
 
 function tileHtml(chart, buttons, extraClass = '') {
-    const actions = buttons.map(a => `<button type="button" class="tile-btn" data-tile-action="${a}" title="${TILE_BUTTONS[a][1]}" aria-label="${TILE_BUTTONS[a][1]}">${TILE_BUTTONS[a][0]}</button>`).join('');
+    const actions = buttons.map(a => (a === 'sort'
+        ? '<label class="tile-btn tile-sort" title="Order" hidden><span aria-hidden="true">⇅</span><select data-tile-sort aria-label="Order of this chart"></select></label>'
+        : `<button type="button" class="tile-btn" data-tile-action="${a}" title="${TILE_BUTTONS[a][1]}" aria-label="${TILE_BUTTONS[a][1]}">${TILE_BUTTONS[a][0]}</button>`)).join('');
     return `<article class="chart-tile size-${chart.size} ${extraClass}" data-chart-id="${escapeHtml(chart.id)}">` +
         `<div class="tile-head"><div class="tile-titles"><h3 class="tile-title"></h3><p class="tile-sub"></p></div>` +
         (actions ? `<div class="tile-actions">${actions}</div>` : '') + `</div>` +
@@ -318,6 +323,7 @@ async function fillTile(tile, chart, asTable = tile._asTable || false, scope = t
         if (body._run !== run) return;
         tile.querySelector('.tile-title').textContent = chartTitle(chart);
         tile.querySelector('.tile-sub').textContent = chartDescription(chart);
+        paintTileSort(tile, chart);
         const data = await fetchChartData(chart, scope);
         if (!data || body._run !== run || !tile.isConnected) return;
         tile._data = data;
@@ -346,6 +352,37 @@ async function fillTile(tile, chart, asTable = tile._asTable || false, scope = t
         if (body._run === run) body.classList.remove('refreshing');
     }
 }
+
+// ⇅: the chart's order, picked from its menu (only for charts with groups)
+function paintTileSort(tile, chart) {
+    const pick = tile.querySelector('[data-tile-sort]');
+    if (!pick) return;
+    const box = pick.closest('.tile-sort');
+    box.hidden = !chart.groupBy || chart.display === 'number';
+    if (box.hidden) return;
+    const { sort, direction } = chartOrder(chart);
+    const choices = chartOrderChoices(chart);
+    const current = `${sort}:${direction}`;
+    pick.innerHTML = choices.map(([value, label]) => `<option value="${value}"${value === current ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('');
+    box.title = `Order: ${choices.find(([value]) => value === current)?.[1] || ''}`;
+}
+
+// A new order from ⇅: your own chart keeps it; a shared dashboard's chart
+// changes only on this page
+document.addEventListener('change', e => {
+    if (!e.target.matches('[data-tile-sort]')) return;
+    const tile = e.target.closest('.chart-tile');
+    const [sort, direction] = e.target.value.split(':');
+    const chart = { ...tile._chart, sort, direction };
+    const { where, list, index } = tilePlace(tile);
+    if (tile.querySelector('[data-tile-action="edit"]') && index >= 0) {
+        if (where === 'home') list[index] = { ...list[index], chart };
+        else list[index] = chart;
+        savePreference(where === 'home' ? 'home' : 'dashboards');
+        if (where === 'board') updateShareSoon(currentBoard());
+    }
+    fillTile(tile, chart);
+});
 
 // The list a tile belongs to: Home's sections, or the open dashboard's charts
 function tilePlace(tile) {
@@ -916,7 +953,6 @@ function paintBuilder() {
         `<optgroup label="Over time">${src.times.map(([k, l]) => `<option value="${k}">${escapeHtml(l)}</option>`).join('')}</optgroup>`;
     document.getElementById('b-group').value = d.groupBy;
     document.getElementById('b-limit').value = String(d.limit);
-    document.getElementById('b-sort').value = d.sort;
     document.querySelectorAll('input[name="b-size"]').forEach(r => { r.checked = r.value === d.size; });
     document.querySelectorAll('input[name="b-color"]').forEach(r => { r.checked = r.value === d.color; });
     paintFilters();
@@ -935,8 +971,15 @@ function paintDisplay() {
     document.getElementById('b-display-note').textContent = grouped
         ? (isTimeField(d.groupBy) && ['bar', 'hbar', 'donut'].includes(d.display) ? 'Tip: Line or Area shows a trend over time best.' : '')
         : 'Choose something to group by to draw a chart; with nothing to group by, the chart is one number.';
-    // Top N and order: only for categories (time always shows every period, oldest first)
-    document.getElementById('b-cut').hidden = !grouped || isTimeField(d.groupBy) || d.display === 'number';
+    // Top N: only for categories (time always shows every period). Order: either
+    // way, by count or by the groups (over time: oldest or newest first)
+    document.getElementById('b-cut').hidden = !grouped || d.display === 'number';
+    document.getElementById('b-limit-wrap').hidden = isTimeField(d.groupBy);
+    if (grouped) {
+        const { sort, direction } = chartOrder(d);
+        document.getElementById('b-sort').innerHTML = chartOrderChoices(d)
+            .map(([value, label]) => `<option value="${value}"${value === `${sort}:${direction}` ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('');
+    }
     document.getElementById('b-color-row').hidden = !['bar', 'hbar', 'line', 'area'].includes(d.display);
     document.getElementById('b-title').placeholder = `${chartAutoTitle(d)} (automatic)`;
 }
@@ -1045,9 +1088,12 @@ function builderInput(e) {
         paintFilterCount(Number(t.dataset.filterValue));
     } else if (t.id === 'b-group') {
         const wasGrouped = Boolean(d.groupBy);
+        const wasTime = isTimeField(d.groupBy);
         d.groupBy = t.value;
         if (d.groupBy && !wasGrouped) d.display = isTimeField(d.groupBy) ? 'line' : 'bar';
         else if (isTimeField(d.groupBy) && ['hbar', 'donut'].includes(d.display)) d.display = 'line';
+        // From categories to time or back: the usual order for it (oldest first; biggest first)
+        if (isTimeField(d.groupBy) !== wasTime) Object.assign(d, isTimeField(d.groupBy) ? { sort: 'label', direction: 'asc' } : { sort: 'count', direction: 'desc' });
         paintDisplay();
     } else if (t.name === 'b-display') {
         d.display = t.value;
@@ -1055,7 +1101,7 @@ function builderInput(e) {
     } else if (t.id === 'b-limit') {
         d.limit = Number(t.value);
     } else if (t.id === 'b-sort') {
-        d.sort = t.value;
+        [d.sort, d.direction] = t.value.split(':');
     } else if (t.name === 'b-color') {
         d.color = t.value;
     } else if (t.name === 'b-size') {
@@ -1120,19 +1166,22 @@ async function afterPreferences() {
 // Saved with the dashboard.
 // ---------------------------------------------------------------------
 
-let teamsLoading = null;
-function loadTeams() {
-    if (!teamsLoading) {
-        teamsLoading = (async () => {
+// The Team filter's choices: the ServiceNow teams in this person's tickets, busiest
+// first. (Not "loadTeams": that's the Team tab's, in teams.js, and the page's
+// scripts share one scope, so the later one would replace this.)
+let teamValuesLoading = null;
+function loadTeamValues() {
+    if (!teamValuesLoading) {
+        teamValuesLoading = (async () => {
             const response = await fetch(`${API_BASE}/api/charts/teams`, { headers: authHeaders() });
             if (handleUnauthorized(response)) return [];
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
             return data.values;
         })();
-        teamsLoading.catch(() => { teamsLoading = null; });
+        teamValuesLoading.catch(() => { teamValuesLoading = null; });
     }
-    return teamsLoading;
+    return teamValuesLoading;
 }
 
 function buildBoardFilters() {
@@ -1233,7 +1282,7 @@ async function paintTeamList() {
     if (!board) return;
     try {
         if (!list.children.length) list.innerHTML = '<p class="chart-loading">Loading teams…</p>';
-        const values = await loadTeams();
+        const values = await loadTeamValues();
         const search = document.getElementById('bf-team-search').value.trim().toLowerCase();
         const chosen = new Set(board.scope?.teams || []);
         const all = [...values.filter(v => chosen.has(v.value)), ...values.filter(v => !chosen.has(v.value))]

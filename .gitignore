@@ -35,3 +35,6 @@ mbdata/
 Thumbs.db
 .DS_Store
 desktop.ini
+
+# 📝 Personal Claude Code notes: our chats and progress (CLAUDE.local.md), never shared
+CLAUDE.local.md

@@ -38,7 +38,7 @@ const FAMILY_KIND_INFO = {
     },
 };
 const FAMILIES_PAGE = 50;
-const familiesState = { kind: 'parent-incident', sort: 'size', loaded: 0, total: 0, summary: null, run: 0 };
+const familiesState = { kind: 'parent-incident', loaded: 0, total: 0, summary: null, run: 0 };
 
 // ---------------------------------------------------------------------
 // Showing the page (from the ☰ Dashboards drawer)
@@ -70,11 +70,10 @@ function hideFamilies() {
 function resetFamilies() {
     hideFamilies();
     showRecordFamily('');
-    Object.assign(familiesState, { kind: 'parent-incident', sort: 'size', loaded: 0, total: 0, summary: null, run: familiesState.run + 1 });
+    Object.assign(familiesState, { kind: 'parent-incident', loaded: 0, total: 0, summary: null, run: familiesState.run + 1 });
     document.getElementById('families-list').innerHTML = '';
     document.getElementById('families-kinds').innerHTML = '';
     document.getElementById('families-q').value = '';
-    document.getElementById('families-sort').value = 'size';
 }
 
 async function familiesFetch(path) {
@@ -94,14 +93,15 @@ function paintFamilyKinds() {
         `<span class="family-kind-count">${summary[kind] ? summary[kind].families.toLocaleString() : '…'}</span></button>`).join('');
 }
 
-// One kind's families, biggest first (or by the chosen order); more: the next page
-async function loadFamilies(more = false) {
+// One kind's families, biggest first (or sorted by a heading); more: the next page;
+// quiet: keep the list showing until the new one is ready (a heading was clicked)
+async function loadFamilies(more = false, quiet = false) {
     const run = more ? familiesState.run : ++familiesState.run;
     const list = document.getElementById('families-list');
     const kind = familiesState.kind;
     const info = FAMILY_KIND_INFO[kind];
     if (!more) {
-        list.innerHTML = '<p class="home-status">Loading the families…</p>';
+        if (!quiet) list.innerHTML = '<p class="home-status">Loading the families…</p>';
         familiesState.loaded = 0;
     }
     try {
@@ -111,7 +111,8 @@ async function loadFamilies(more = false) {
             familiesState.summary = summary.kinds;
         }
         paintFamilyKinds();
-        const data = await familiesFetch(`/api/families/${kind}?sort=${familiesState.sort}&offset=${familiesState.loaded}&limit=${FAMILIES_PAGE}`);
+        const q = new URLSearchParams({ ...sortQuery('families', FAMILY_SORT_KEYS), offset: familiesState.loaded, limit: FAMILIES_PAGE });
+        const data = await familiesFetch(`/api/families/${kind}?${q}`);
         if (!data || run !== familiesState.run) return;
         familiesState.total = data.total;
         familiesState.loaded += data.families.length;
@@ -140,10 +141,13 @@ function paintFamiliesMore() {
 }
 
 const FAMILY_HEADS = ['Parent', 'Summary', 'State', 'Priority / Risk', 'Team', 'Opened', 'Family'];
+// What the server sorts the list by for each heading (no sort: the biggest families first)
+const FAMILY_SORT_KEYS = { Parent: 'parent', Summary: 'summary', State: 'state', 'Priority / Risk': 'level', Team: 'team', Opened: 'opened', Family: 'size' };
 
-function familyTableHtml(rowsHtml, withKind) {
+// list: 'families' for the page's list of one kind (sorted by the server), '' for others
+function familyTableHtml(rowsHtml, withKind, list = 'families') {
     const heads = withKind ? ['Parent', 'Kind of family', ...FAMILY_HEADS.slice(1)] : FAMILY_HEADS;
-    return `<div class="table-wrap families-table"><table class="result-table"><thead><tr>${heads.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead>` +
+    return `<div class="table-wrap families-table"><table class="result-table" data-sort-list="${list}"><thead><tr>${heads.map(h => sortHeadHtml(list, h)).join('')}</tr></thead>` +
         `<tbody>${rowsHtml}</tbody></table></div>`;
 }
 
@@ -161,10 +165,12 @@ function familyRowsHtml(families, withKind) {
         const cell = text => `<td>${escapeHtml(text || '—')}</td>`;
         const short = String(summary || '');
         return `<tr class="family-row" data-kind="${kind}" data-anchor="${escapeHtml(f.anchor)}" tabindex="0" aria-expanded="false" title="Click to see the whole family">` +
-            `<td class="ticket-cell"><span class="expand-caret" aria-hidden="true">▸</span>${anchor}</td>` +
+            `<td class="ticket-cell" data-sort="${escapeHtml(f.anchor)}"><span class="expand-caret" aria-hidden="true">▸</span>${anchor}</td>` +
             (withKind ? cell(info.tab) : '') +
             (short.length > 110 ? `<td title="${escapeHtml(short)}">${escapeHtml(short.slice(0, 107))}…</td>` : cell(short)) +
-            cell(t?.state) + cell(t?.level) + cell(t?.team) + cell(t?.opened ? formatValue('ticket.opened', t.opened) : '') +
+            cell(t?.state) +
+            `<td data-sort="${t?.level ? levelRank(t) : ''}">${escapeHtml(t?.level || '—')}</td>` + cell(t?.team) +
+            `<td data-sort="${escapeHtml(t?.opened || '')}">${escapeHtml(t?.opened ? formatValue('ticket.opened', t.opened) : '—')}</td>` +
             `<td class="family-size">${f.children.toLocaleString()} ${f.children === 1 ? info.child[0] : info.child[1]}</td></tr>`;
     }).join('');
 }
@@ -217,7 +223,7 @@ async function findFamilies(number) {
             list.innerHTML = `<p class="families-about">${escapeHtml(data.number)} has no parent, children or other linked tickets.${open} ${back}</p>`;
         } else {
             list.innerHTML = `<p class="families-about"><b>${escapeHtml(data.number)}</b> is in ${data.families.length} ${data.families.length === 1 ? 'family' : 'families'}.${open} ${back}</p>` +
-                familyTableHtml(familyRowsHtml(data.families, true), true);
+                familyTableHtml(familyRowsHtml(data.families, true), true, '');
             // One family: open it straight away
             if (data.families.length === 1) toggleFamilyRow(list.querySelector('tr.family-row'));
         }
@@ -257,10 +263,8 @@ document.getElementById('families-find').addEventListener('submit', e => {
     e.preventDefault();
     findFamilies(document.getElementById('families-q').value);
 });
-document.getElementById('families-sort').addEventListener('change', e => {
-    familiesState.sort = e.target.value;
-    loadFamilies();
-});
+// A heading of the list: every family of the kind, sorted by the server, from the first page
+pagedSorts.families = () => loadFamilies(false, true);
 
 // ---------------------------------------------------------------------
 // THE TICKET WINDOW: one ticket's record, its family first, over the page.

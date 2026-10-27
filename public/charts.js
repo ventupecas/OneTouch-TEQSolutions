@@ -95,6 +95,35 @@ function chartTitle(chart) {
     return chart.title || chartAutoTitle(chart);
 }
 
+// How a chart's groups are ordered: by their count ('count') or their own value
+// ('label': A to Z, P1 first; over time, oldest first), ascending or descending.
+// Charts saved before they had a direction keep the order they had (as
+// charts.mjs sanitizeChart). -> { sort, direction }
+function chartOrder(chart) {
+    if (chart.direction === 'asc' || chart.direction === 'desc') return { sort: chart.sort === 'label' ? 'label' : 'count', direction: chart.direction };
+    if (isTimeField(chart.groupBy) || chart.sort === 'label') return { sort: 'label', direction: 'asc' };
+    return { sort: 'count', direction: 'desc' };
+}
+
+// The orders a grouped chart can have, as [value ('sort:direction'), what people read]
+function chartOrderChoices(chart) {
+    const field = fieldLabel(chart.source, chart.groupBy);
+    return isTimeField(chart.groupBy)
+        ? [['label:asc', 'Oldest first'], ['label:desc', 'Newest first'], ['count:desc', 'Biggest first'], ['count:asc', 'Smallest first']]
+        : [['count:desc', 'Biggest first'], ['count:asc', 'Smallest first'],
+            ['label:asc', `${field}, in order (A to Z, P1 first)`], ['label:desc', `${field}, reversed (Z to A)`]];
+}
+
+// Rows ({ value, count }) of a chart drawn in the page (an AI answer) in an
+// order: by count, or by value with "(Not set)" last, ascending or descending
+function orderChartRows(rows, sort, direction) {
+    const sign = direction === 'desc' ? -1 : 1;
+    const byValue = (a, b) => (a.value === null || b.value === null
+        ? (a.value === null) - (b.value === null)
+        : sign * sortCollator.compare(String(a.value), String(b.value)));
+    return [...rows].sort(sort === 'label' ? byValue : (a, b) => sign * (a.count - b.count) || byValue(a, b));
+}
+
 const fmtDay = day => periodLabel('x_day', day, true);
 
 function datesText(dates) {
@@ -152,8 +181,8 @@ const chartDataCache = new Map();
 
 // What changes the numbers; how it looks (display, color, size) doesn't
 function chartDataKey(chart, scope) {
-    const { source, status, dates, filters, groupBy, limit, sort } = chart;
-    return JSON.stringify({ source, status, dates, filters, groupBy, limit, sort, scope: scope || null });
+    const { source, status, dates, filters, groupBy, limit } = chart;
+    return JSON.stringify({ source, status, dates, filters, groupBy, limit, ...chartOrder(chart), scope: scope || null });
 }
 
 function fetchChartData(chart, scope = null) {
@@ -367,17 +396,20 @@ function lineHtml(chart, data, width, area) {
     return html + '</svg>';
 }
 
-// The donut's slices: at most six, the rest folded into "Other"
+// The donut's slices: at most six, the biggest, in the chart's order; the rest
+// folded into "Other"
 function donutParts(chart, data) {
-    let parts = data.rows.map((r, i) => ({ ...r, label: groupLabel(chart, r.value), slot: r.slot || i + 1, index: i }));
+    let parts = data.rows.map((r, i) => ({ ...r, label: groupLabel(chart, r.value), index: i }));
     let otherCount = data.other?.count || 0;
     let otherGroups = data.other?.groups || 0;
     if (parts.length + (otherCount ? 1 : 0) > DONUT_SLICES) {
-        const folded = parts.slice(DONUT_SLICES - 1);
-        parts = parts.slice(0, DONUT_SLICES - 1);
+        const kept = new Set([...parts].sort((a, b) => b.count - a.count).slice(0, DONUT_SLICES - 1));
+        const folded = parts.filter(p => !kept.has(p));
+        parts = parts.filter(p => kept.has(p));
         otherCount += folded.reduce((s, r) => s + r.count, 0);
         otherGroups += folded.length;
     }
+    parts = parts.map((p, i) => ({ ...p, slot: p.slot || i + 1 }));
     if (otherCount) parts.push({ value: '__other', label: `Other (${otherGroups.toLocaleString()})`, count: otherCount, other: true, index: 'other' });
     return parts;
 }
@@ -421,16 +453,18 @@ function donutHtml(chart, data, width) {
     return `<div class="chart-donut${side ? ' side' : ''}">${svg}<ul class="chart-legend">${legend}</ul></div>`;
 }
 
-// The table view: every chart has one (and "Table" charts are only this)
+// The table view: every chart has one (and "Table" charts are only this).
+// Its headings sort it ("Other" stays last); the chart's own order is its ⇅.
 function chartTableHtml(chart, data) {
     const label = chart.groupBy ? fieldLabel(chart.source, chart.groupBy) : 'Tickets';
-    const rows = data.rows.map(r => `<tr><td>${escapeHtml(groupLabel(chart, r.value, true))}</td>` +
+    const rows = data.rows.map(r => `<tr><td data-sort="${escapeHtml(String(r.value ?? ''))}">${escapeHtml(groupLabel(chart, r.value, true))}</td>` +
         `<td class="num">${r.count.toLocaleString()}</td><td class="num">${share(r.count, data.total)}</td></tr>`);
     if (data.other) {
-        rows.push(`<tr class="chart-other-row"><td>Other (${data.other.groups.toLocaleString()} more)</td>` +
+        rows.push(`<tr class="chart-other-row sort-pinned"><td>Other (${data.other.groups.toLocaleString()} more)</td>` +
             `<td class="num">${data.other.count.toLocaleString()}</td><td class="num">${share(data.other.count, data.total)}</td></tr>`);
     }
-    return `<div class="table-wrap chart-table"><table class="result-table"><thead><tr><th>${escapeHtml(label)}</th><th class="num">Count</th><th class="num">Share</th></tr></thead>` +
+    return `<div class="table-wrap chart-table"><table class="result-table" data-sort-list=""><thead><tr>${sortHeadHtml('', label)}` +
+        `${sortHeadHtml('', 'Count', 'Count', 'num')}${sortHeadHtml('', 'Share', 'Share', 'num')}</tr></thead>` +
         `<tbody>${rows.join('')}</tbody><tfoot><tr><td>Total</td><td class="num">${data.total.toLocaleString()}</td><td class="num">100%</td></tr></tfoot></table></div>`;
 }
 
@@ -537,10 +571,24 @@ function seriesLineHtml(chart, s, width) {
 }
 
 function seriesTableHtml(chart, s) {
-    const head = `<th>${escapeHtml(chart.groupLabel || '')}</th>${s.series.map(x => `<th class="num">${escapeHtml(x.name)}</th>`).join('')}<th class="num">Total</th>`;
-    const body = s.categories.map((c, i) => `<tr><td>${escapeHtml(c.label)}</td>${s.series.map(x => `<td class="num">${x.values[i].toLocaleString()}</td>`).join('')}` +
+    const head = sortHeadHtml('', 'group', chart.groupLabel || '') + s.series.map(x => sortHeadHtml('', x.name, x.name, 'num')).join('') + sortHeadHtml('', 'Total', 'Total', 'num');
+    const body = s.categories.map((c, i) => `<tr><td data-sort="${escapeHtml(String(c.value ?? ''))}">${escapeHtml(c.label)}</td>${s.series.map(x => `<td class="num">${x.values[i].toLocaleString()}</td>`).join('')}` +
         `<td class="num">${s.series.reduce((t, x) => t + x.values[i], 0).toLocaleString()}</td></tr>`).join('');
-    return `<div class="table-wrap chart-table"><table class="result-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+    return `<div class="table-wrap chart-table"><table class="result-table" data-sort-list=""><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+// A chart of several series in an order: 'label' (its categories' own), 'total',
+// or 's<k>' (the k-th series' values), ascending or descending
+function orderSeries(s, by, direction) {
+    const sign = direction === 'desc' ? -1 : 1;
+    const value = i => (by === 'total' ? s.series.reduce((t, x) => t + x.values[i], 0) : by === 'label' ? null : s.series[Number(by.slice(1))]?.values[i] ?? 0);
+    const label = (i, j) => sortCollator.compare(String(s.categories[i].value ?? ''), String(s.categories[j].value ?? ''));
+    const order = s.categories.map((_, i) => i).sort((i, j) => (by === 'label' ? sign * label(i, j) : sign * (value(i) - value(j)) || label(i, j)));
+    return {
+        ...s,
+        categories: order.map(i => s.categories[i]),
+        series: s.series.map(x => ({ ...x, values: order.map(i => x.values[i]) })),
+    };
 }
 
 // ---------------------------------------------------------------------

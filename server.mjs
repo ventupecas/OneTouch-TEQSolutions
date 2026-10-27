@@ -16,7 +16,7 @@ import { buildExport, validateExport, ExportUnavailableError } from './export.mj
 import * as auth from './auth.mjs';
 import * as stars from './stars.mjs';
 import * as seen from './seen.mjs';
-import { findTickets, ticketRecord, ticketSummaries, ticketNumbersIn, ticketsByPriority, STARRABLE } from './tickets.mjs';
+import { findTickets, ticketRecord, ticketSummaries, ticketNumbersIn, ticketsByPriority, isOpen, priorityRank, STARRABLE, loadTicketIndex, TICKET_SORTS, sortRows } from './tickets.mjs';
 import { relatedFamilies, describeFamilies, ticketLinks, FAMILY_KINDS, LINK_KIND, familyList, familySummary, familyOf } from './relations.mjs';
 import * as prefs from './prefs.mjs';
 import { chartData, chartValues, chartCatalog, chartTickets, chartFromQuery, teamValues, ChartError } from './charts.mjs';
@@ -24,6 +24,7 @@ import * as shares from './shares.mjs';
 import * as chats from './chats.mjs';
 import * as teams from './teams.mjs';
 import * as notifications from './notifications.mjs';
+import * as kpis from './kpis.mjs';
 import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
 
 dotenv.config();
@@ -290,7 +291,7 @@ function scopedRunner(scope) {
   return run;
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families', '/api/notifications', '/api/my-tickets'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families', '/api/notifications', '/api/my-tickets', '/api/kpis'], requireLogin);
 
 // Who is signed in (the page shows their display name), and what they may do
 app.get('/api/me', (req, res) => {
@@ -882,17 +883,24 @@ app.get('/api/families/find', async (req, res) => {
   }
 });
 
-// ?sort=size|newest|oldest&offset&limit -> { total, families: one page of rows }
+// ?sort=parent|summary|state|level|team|opened|size&dir=asc|desc&offset&limit
+// -> { total, families: one page of rows } (no sort: the biggest families first)
 app.get('/api/families/:kind', async (req, res) => {
   const kind = req.params.kind;
   if (!FAMILY_KINDS.includes(kind)) return res.status(400).json({ error: 'Unknown kind of family.' });
   const offset = Math.max(0, Number.parseInt(req.query.offset, 10) || 0);
   const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 50));
+  const by = req.query.sort;
+  const dir = req.query.dir === 'desc' ? 'desc' : 'asc';
   try {
     let list = await familyList(kind, req.runQuery);
-    // Ticket numbers go up over time, so the newest parent has the highest number
-    if (req.query.sort === 'newest') list = [...list].sort((a, b) => b.anchor.localeCompare(a.anchor));
-    if (req.query.sort === 'oldest') list = [...list].sort((a, b) => a.anchor.localeCompare(b.anchor));
+    if (by === 'parent') list = sortRows(list, f => f.anchor, dir);
+    else if (by === 'size') list = sortRows(list, f => f.children, dir);
+    else if (['summary', 'state', 'level', 'team', 'opened'].includes(by)) {
+      // By what the parent's summary says (an order or a problem record isn't a ticket, so has none)
+      const index = await loadTicketIndex(runCubeQuery);
+      list = sortRows(list, f => (index.has(f.anchor) ? TICKET_SORTS[by](index.get(f.anchor)) : null), dir);
+    }
     res.json({ kind, total: list.length, families: await withAnchors(list.slice(offset, offset + limit), req.runQuery) });
   } catch (error) {
     familiesFailed(res, error);
@@ -981,10 +989,79 @@ app.get('/api/my-tickets', async (req, res) => {
   try {
     const numbers = await teams.assignedNumbers(req.user.id);
     const tickets = numbers.length ? await ticketsByPriority(numbers, req.runQuery) : [];
-    res.json({ tickets });
+    // How much each one's KPIs need attention, so the list sorts by them across every page
+    const found = await kpis.ticketKpis(tickets.map(t => t.number), runCubeQuery)
+      .catch(error => { console.error('📏 Could not work out the KPIs for sorting:', error.message); return { kpis: {} }; });
+    res.json({ tickets: tickets.map(t => ({ ...t, attention: found.kpis[t.number] ? kpis.attention(found.kpis[t.number]) : null })) });
   } catch (error) {
     console.error('🎫 Could not load the tickets assigned to someone:', error.message);
     res.status(502).json({ error: 'Your tickets could not be loaded right now. Please try again.' });
+  }
+});
+
+// =====================================================================
+// KPIs (kpis.mjs): a ticket's for anyone who may see that ticket (so, for
+// most people, only the tickets assigned to them); a family's only for its
+// team's project manager or an admin. The KPIs come from every ticket read
+// once with a fixed query, and only checked numbers are answered for.
+// =====================================================================
+
+// { numbers } (up to 200) -> { asOf, kpis: { number: [kpi] } }, leaving out any this person may not see
+app.post('/api/kpis/tickets', async (req, res) => {
+  const numbers = [...new Set((Array.isArray(req.body?.numbers) ? req.body.numbers : []).map(n => String(n).toUpperCase()))]
+    .filter(n => STARRABLE.test(n) && teams.canSeeTicket(req.scope, n)).slice(0, 200);
+  try {
+    res.json(await kpis.ticketKpis(numbers, runCubeQuery));
+  } catch (error) {
+    console.error('📏 Ticket KPIs failed:', error.message);
+    res.status(502).json({ error: 'The KPIs could not be worked out right now. Please try again.' });
+  }
+});
+
+// ?team=<id> (admins; a project manager gets their own)&status=open|all&linked=0|1&offset&limit
+// &sort=family|size|kpis&dir=asc|desc -> one page of the team's families, most
+// in need of attention first (or in that sort), each with its KPIs
+app.get('/api/kpis/families', async (req, res) => {
+  try {
+    const teamId = Number(req.query.team) || req.scope.access.team?.id;
+    if (!teamId) return res.status(403).json({ error: 'You\'re not on a team, so there are no families to show.' });
+    const families = await teams.teamFamilies(req.scope, teamId);
+    const page = await kpis.teamFamilyKpis(families, {
+      status: req.query.status === 'all' ? 'all' : 'open',
+      linked: req.query.linked !== '0',
+      offset: Math.max(Number(req.query.offset) || 0, 0),
+      limit: Math.min(Math.max(Number(req.query.limit) || 25, 1), 100),
+      sort: ['family', 'size', 'kpis'].includes(req.query.sort) ? req.query.sort : null,
+      dir: req.query.dir === 'desc' ? 'desc' : 'asc',
+    }, runCubeQuery);
+    // Each family is named after its first ticket (the numbers were just checked)
+    const summaries = await ticketSummaries(page.families.map(f => f.id), runCubeQuery)
+      .catch(error => { console.error('📏 Could not load family summaries:', error.message); return new Map(); });
+    res.json({ ...page, teamId, families: page.families.map(f => ({ ...f, ticket: summaries.get(f.id) || null })) });
+  } catch (error) {
+    teamsFailed(res, error, 'Loading the families\' KPIs');
+  }
+});
+
+// One family: its KPIs, and each of its tickets with who has it and its KPIs
+app.get('/api/kpis/families/:id', async (req, res) => {
+  try {
+    const family = await teams.familyMembers(req.scope, String(req.params.id).toUpperCase());
+    const numbers = family.members.map(m => m.number);
+    const [found, summaries] = await Promise.all([
+      kpis.oneFamilyKpis(family.members, runCubeQuery),
+      ticketSummaries(numbers, runCubeQuery).catch(() => new Map()),
+    ]);
+    // Open ones first, then the most urgent, then the oldest (as Assigned to me)
+    const tickets = family.members
+      .map(m => {
+        const t = { ...summaries.get(m.number), number: m.number, assignee: m.assignee, kpis: found.tickets[m.number] || [] };
+        return { ...t, open: t.kind ? isOpen(t) : false, rank: t.kind ? priorityRank(t) : 5 };
+      })
+      .sort((a, b) => (b.open - a.open) || a.rank - b.rank || String(a.opened || '~').localeCompare(String(b.opened || '~')));
+    res.json({ id: family.id, size: family.size, team: family.team, asOf: found.asOf, kpis: found.kpis, tickets });
+  } catch (error) {
+    teamsFailed(res, error, 'Loading that family\'s KPIs');
   }
 });
 
@@ -1222,11 +1299,23 @@ app.get('/api/teams', async (req, res) => {
 
 // ?assignee=<user id>|none&kind=INC&search=&offset&limit -> { total, tickets }:
 // one page of a team's tickets with who has each one, and each one's summary
+// ...&sort=number|type|summary|state|family|assignee&dir=asc|desc: every match in that order, then the page
+const TEAM_TICKET_SORTS = ['number', 'type', 'summary', 'state', 'family', 'assignee'];
 app.get('/api/teams/:id/tickets', async (req, res) => {
   try {
+    let sort = null;
+    if (TEAM_TICKET_SORTS.includes(req.query.sort)) {
+      const by = req.query.sort;
+      // What the ticket's summary says (these numbers are checked by teamTickets before they're sorted)
+      const index = ['type', 'summary', 'state'].includes(by) ? await loadTicketIndex(runCubeQuery) : null;
+      sort = {
+        by, dir: req.query.dir === 'desc' ? 'desc' : 'asc',
+        valueOf: number => (by === 'number' ? number : index.has(number) ? TICKET_SORTS[by](index.get(number)) : null),
+      };
+    }
     const page = await teams.teamTickets(req.scope, Number(req.params.id), {
       assignee: req.query.assignee || null, kind: req.query.kind || null, search: req.query.search || '',
-      offset: req.query.offset, limit: req.query.limit,
+      offset: req.query.offset, limit: req.query.limit, sort,
     });
     // The numbers are already this person's to see, so their summaries come straight from Cube
     const summaries = await ticketSummaries(page.tickets.map(t => t.number), runCubeQuery)
@@ -1399,6 +1488,15 @@ async function seedTeamsWhenReady(attempt = 1) {
   try {
     const seeded = await teams.seedTeams(runCubeQuery);
     if (seeded) console.log(`👥 Set up ${seeded.teams} teams: ${seeded.people} people, ${seeded.families.toLocaleString()} families, ${seeded.tickets.toLocaleString()} tickets`);
+    // Cube answers: read every ticket's KPI fields now, so the first Home page doesn't wait
+    const t0 = Date.now();
+    kpis.load(runCubeQuery)
+      .then(d => console.log(`📏 KPIs ready: ${d.tickets.size.toLocaleString()} tickets in ${((Date.now() - t0) / 1000).toFixed(1)}s`))
+      .catch(error => console.error(`📏 Could not read the tickets for KPIs yet (${error.message}); the first page that needs them tries again`));
+    // And their summaries, for sorting long lists by any column
+    loadTicketIndex(runCubeQuery)
+      .then(index => console.log(`↕️  Sorting ready: ${index.size.toLocaleString()} tickets in ${((Date.now() - t0) / 1000).toFixed(1)}s`))
+      .catch(error => console.error(`↕️  Could not read the tickets for sorting yet (${error.message}); the first sorted list tries again`));
   } catch (error) {
     const wait = Math.min(attempt * 5, 60);
     console.error(`👥 Could not set up the teams yet (${error.message}); retrying in ${wait}s`);

@@ -8,6 +8,8 @@
 // =====================================================================
 
 const TEAM_PAGE_SIZE = 50;
+// The ticket list's headings, and what the server sorts every ticket by for each
+const TEAM_TICKET_SORT_KEYS = { Ticket: 'number', Type: 'type', Summary: 'summary', State: 'state', Family: 'family', 'Assigned to': 'assignee' };
 const TEAM_KINDS = [['INC', 'Incidents'], ['CHG', 'Changes'], ['RITM', 'Requests'], ['SCTASK', 'Catalog tasks']];
 
 const teamsView = {
@@ -68,7 +70,10 @@ async function refreshTeamCounts() {
         if (!data) return;
         teamsView.data = data;
         const summary = document.getElementById('team-summary');
-        if (summary && currentTeam()) summary.innerHTML = teamSummaryHtml(currentTeam());
+        if (summary && currentTeam()) {
+            summary.innerHTML = teamSummaryHtml(currentTeam());
+            restoreSorts(summary);
+        }
         const picker = document.getElementById('team-picker');
         if (picker) picker.innerHTML = teamPickerHtml();
     } catch (err) {
@@ -111,6 +116,7 @@ function renderTeams() {
     }
     if (currentAccess.admin) html += familyCardHtml() + peopleCardHtml(data.people || []);
     box.innerHTML = html;
+    restoreSorts(box);
     if (team) loadTeamTickets();
 }
 
@@ -132,8 +138,9 @@ function teamSummaryHtml(team) {
     const manage = team.canManage;
     const admin = currentAccess.admin;
     const unassigned = team.unassigned?.total || 0;
-    const head = '<th>Name</th><th>Role</th>' + TEAM_KINDS.map(([, label]) => `<th class="num">${label}</th>`).join('') + '<th class="num">Total</th>' +
-        (manage ? '<th></th>' : '') + (admin ? '<th>Team</th>' : '');
+    const head = sortHeadHtml('team-members', 'Name') + sortHeadHtml('team-members', 'Role') +
+        TEAM_KINDS.map(([, label]) => sortHeadHtml('team-members', label, label, 'num')).join('') + sortHeadHtml('team-members', 'Total', 'Total', 'num') +
+        (manage ? '<th></th>' : '') + (admin ? sortHeadHtml('team-members', 'Team') : '');
     const rows = team.members.map(m =>
         `<tr${m.username === currentUsername ? ' class="team-you"' : ''}>` +
         `<td>${escapeHtml(m.name)}${m.username === currentUsername ? ' <span class="team-you-tag">you</span>' : ''}</td>` +
@@ -144,14 +151,14 @@ function teamSummaryHtml(team) {
             `<button type="button" class="home-action danger" data-member-remove="${m.id}" title="Take ${escapeHtml(m.name)} off ${escapeHtml(team.name)} and away from their role">Remove from team</button></div></td>` : '') +
         '</tr>').join('');
     const unassignedRow = manage
-        ? `<tr class="team-unassigned"><td>Not assigned yet</td><td>—</td>${loadCells(team.unassigned)}` +
+        ? `<tr class="team-unassigned sort-pinned"><td>Not assigned yet</td><td>—</td>${loadCells(team.unassigned)}` +
           `<td><button type="button" class="home-action" data-team-show="none"${unassigned ? '' : ' disabled'}>Show them</button></td>${admin ? '<td></td>' : ''}</tr>`
         : '';
     return `<h3>${escapeHtml(team.name)}${team.test ? ' <span class="team-test-tag">Test team</span>' : ''}</h3>` +
         `<p class="home-status">${team.tickets.toLocaleString()} tickets in ${team.families.toLocaleString()} families · ${team.members.length} people` +
         (manage && unassigned ? ` · <strong>${unassigned.toLocaleString()} not assigned yet</strong>` : '') + '</p>' +
         (team.members.length
-            ? `<div class="table-wrap"><table class="result-table team-table"><thead><tr>${head}</tr></thead><tbody>${rows}${unassignedRow}</tbody></table></div>`
+            ? `<div class="table-wrap"><table class="result-table team-table" data-sort-list="team-members"><thead><tr>${head}</tr></thead><tbody>${rows}${unassignedRow}</tbody></table></div>`
             : '<p class="home-status">Nobody is on this team yet.</p>');
 }
 
@@ -179,13 +186,14 @@ function assigneeFilterOptions(team) {
         team.members.map(m => `<option value="${m.id}"${String(m.id) === f ? ' selected' : ''}>${escapeHtml(m.name)}</option>`).join('');
 }
 
-async function loadTeamTickets() {
+// quiet: keep the list showing until the new one is ready (a heading was clicked)
+async function loadTeamTickets(quiet = false) {
     const team = currentTeam();
     const out = document.getElementById('team-tickets');
     if (!team || !out) return;
     const run = ++teamsView.run;
-    out.innerHTML = '<p class="home-status">Loading tickets…</p>';
-    const q = new URLSearchParams({ offset: teamsView.offset, limit: TEAM_PAGE_SIZE });
+    if (!quiet) out.innerHTML = '<p class="home-status">Loading tickets…</p>';
+    const q = new URLSearchParams({ offset: teamsView.offset, limit: TEAM_PAGE_SIZE, ...sortQuery('team-tickets', TEAM_TICKET_SORT_KEYS) });
     for (const [key, value] of Object.entries(teamsView.filter)) if (value) q.set(key, value);
     try {
         const data = await teamsFetch(`/api/teams/${team.id}/tickets?${q}`);
@@ -198,6 +206,12 @@ async function loadTeamTickets() {
         console.error(err);
     }
 }
+
+// A heading: every ticket that matches, sorted by the server, from the first page
+pagedSorts['team-tickets'] = () => {
+    teamsView.offset = 0;
+    loadTeamTickets(true);
+};
 
 function teamTicketsHtml(team, data) {
     if (!data.total) {
@@ -229,9 +243,9 @@ function teamTicketsHtml(team, data) {
     }).join('');
     const first = teamsView.offset + 1;
     const last = teamsView.offset + data.tickets.length;
-    return `<div class="table-wrap"><table class="result-table"><thead><tr>` +
+    return `<div class="table-wrap"><table class="result-table" data-sort-list="team-tickets"><thead><tr>` +
         (manage ? '<th class="select-cell"></th>' : '') +
-        '<th>Ticket</th><th>Type</th><th>Summary</th><th>State</th><th>Family</th><th>Assigned to</th>' +
+        Object.keys(TEAM_TICKET_SORT_KEYS).map(label => sortHeadHtml('team-tickets', label)).join('') +
         (tell ? '<th>Tell your project manager</th>' : '') +
         `</tr></thead><tbody>${rows}</tbody></table></div>` +
         `<div class="team-pager"><span>${first.toLocaleString()}–${last.toLocaleString()} of ${data.total.toLocaleString()}</span>` +
@@ -328,7 +342,7 @@ function peopleCardHtml(people) {
     return `<section class="team-card"><h3>People on no team</h3>` +
         (people.length
             ? `<p class="home-status">They see no tickets until they're on a team and have tickets assigned. Test accounts can only join a test team.</p>` +
-              `<div class="table-wrap"><table class="result-table team-table"><thead><tr><th>Name</th><th>Team</th><th>Role</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
+              `<div class="table-wrap"><table class="result-table team-table" data-sort-list=""><thead><tr>${['Name', 'Team', 'Role'].map(h => sortHeadHtml('', h)).join('')}<th></th></tr></thead><tbody>${rows}</tbody></table></div>`
             : '<p class="home-status">Everyone is on a team. (Admins, the warm-up account and the test accounts don\'t join one.)</p>') +
         '</section>';
 }

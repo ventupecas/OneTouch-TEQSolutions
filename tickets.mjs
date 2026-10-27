@@ -189,6 +189,68 @@ export function ticketsByPriority(numbers, runQuery) {
   return sorted;
 }
 
+// ---------------------------------------------------------------------
+// SORTING long lists by any column (the Team tab's tickets, the Families
+// page): every ticket's summary, read from Cube once (the data is frozen),
+// so thousands of tickets sort without asking Cube again. It only ever
+// orders tickets someone may already see; what they're shown still comes
+// from their own queries.
+// ---------------------------------------------------------------------
+
+const INDEX_MAX_ROWS = 50000;
+let ticketIndex = null; // Promise of Map(number -> ticket summary)
+
+export function loadTicketIndex(runCubeQuery) {
+  if (!ticketIndex) {
+    ticketIndex = (async () => {
+      const index = new Map();
+      for (const [prefix, kind] of Object.entries(TICKET_KINDS)) {
+        const dimensions = [...new Set(['number', ...Object.values(kind.fields)])].map(c => `${kind.cube}.${c}`);
+        const rows = await runCubeQuery({ dimensions, limit: INDEX_MAX_ROWS });
+        if (rows.length >= INDEX_MAX_ROWS) throw new Error(`${kind.cube} has ${INDEX_MAX_ROWS.toLocaleString()} tickets or more; tickets.mjs indexes at most that many`);
+        for (const row of rows) {
+          const t = toTicket(prefix, row);
+          index.set(t.number, t);
+        }
+      }
+      return index;
+    })();
+    ticketIndex.catch(() => { ticketIndex = null; }); // try again next time
+  }
+  return ticketIndex;
+}
+
+// What a ticket sorts by in each column people can sort (Priority / Risk by
+// how urgent, as Assigned to me; requests and tasks have neither, so none)
+export const TICKET_SORTS = {
+  number: t => t.number,
+  type: t => t.type,
+  summary: t => t.summary,
+  state: t => t.state,
+  level: t => (t.level ? priorityRank(t) : null),
+  team: t => t.team,
+  person: t => t.person,
+  opened: t => t.opened,
+};
+
+const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
+
+// rows sorted by valueOf(row): numbers as numbers, text A to Z ('P2' before
+// 'P10'). dir: 'asc' | 'desc'. Rows with no value (null or '') come last
+// either way, and ties keep the order they came in.
+export function sortRows(rows, valueOf, dir = 'asc') {
+  const sign = dir === 'desc' ? -1 : 1;
+  const empty = v => v === null || v === undefined || v === '';
+  return rows
+    .map((row, i) => ({ row, i, v: valueOf(row) }))
+    .sort((a, b) => {
+      if (empty(a.v) || empty(b.v)) return (empty(a.v) - empty(b.v)) || a.i - b.i;
+      const c = typeof a.v === 'number' && typeof b.v === 'number' ? a.v - b.v : collator.compare(String(a.v), String(b.v));
+      return sign * c || a.i - b.i;
+    })
+    .map(k => k.row);
+}
+
 // The ticket numbers anywhere in a set of result rows, in the order they appear
 export function ticketNumbersIn(rows) {
   const found = new Set();
