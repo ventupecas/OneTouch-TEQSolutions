@@ -111,7 +111,7 @@ async function loadFamilies(more = false, quiet = false) {
             familiesState.summary = summary.kinds;
         }
         paintFamilyKinds();
-        const q = new URLSearchParams({ ...sortQuery('families', FAMILY_SORT_KEYS), offset: familiesState.loaded, limit: FAMILIES_PAGE });
+        const q = new URLSearchParams({ ...sortQuery('families', FAMILY_SORT_KEYS), ...lookupQuery('families'), offset: familiesState.loaded, limit: FAMILIES_PAGE });
         const data = await familiesFetch(`/api/families/${kind}?${q}`);
         if (!data || run !== familiesState.run) return;
         familiesState.total = data.total;
@@ -121,10 +121,14 @@ async function loadFamilies(more = false, quiet = false) {
             list.querySelector('tbody').insertAdjacentHTML('beforeend', rows);
         } else {
             const counts = familiesState.summary[kind];
-            list.innerHTML = `<p class="families-about"><b>${data.total.toLocaleString()} ${escapeHtml(info.tab.toLowerCase())}</b>, ` +
+            const all = data.before ?? data.total;
+            list.innerHTML = `<p class="families-about"><b>${all.toLocaleString()} ${escapeHtml(info.tab.toLowerCase())}</b>, ` +
                 `holding ${counts.tickets.toLocaleString()} ${counts.tickets === 1 ? info.child[0] : info.child[1]}. ${escapeHtml(info.about)} ` +
                 'Click a row to see the whole family, or any ticket number, parent or child, to open that ticket.</p>' +
-                familyTableHtml(rows, false) + '<div class="families-more"></div>';
+                (!all ? `<p class="home-status">None of the tickets you can see are in ${escapeHtml(info.tab.toLowerCase())}.</p>`
+                    : lookupBarHtml('families', FAMILY_HEADS, { mode: 'list', noun: 'families', count: { shown: data.total, total: all } }) +
+                      (data.total ? familyTableHtml(rows, false) : '<p class="home-status">No families match what you typed. Change it, or press Escape in the box to see them all.</p>')) +
+                '<div class="families-more"></div>';
         }
         paintFamiliesMore();
     } catch (err) {
@@ -135,6 +139,7 @@ async function loadFamilies(more = false, quiet = false) {
 function paintFamiliesMore() {
     const box = document.querySelector('#families-list .families-more');
     if (!box) return;
+    if (!familiesState.total) { box.innerHTML = ''; return; }
     const left = familiesState.total - familiesState.loaded;
     box.innerHTML = `<span class="home-status">Showing ${familiesState.loaded.toLocaleString()} of ${familiesState.total.toLocaleString()}.</span>` +
         (left > 0 ? `<button type="button" class="home-action" data-families-more>Show ${Math.min(left, FAMILIES_PAGE).toLocaleString()} more</button>` : '');
@@ -151,26 +156,40 @@ function familyTableHtml(rowsHtml, withKind, list = 'families') {
         `<tbody>${rowsHtml}</tbody></table></div>`;
 }
 
-// One row per family: its parent (or order / problem / change), and how many it holds
+// One row per family: its parent (or order / problem / change), and how many it
+// holds. Its columns are what the server made (relations.mjs familyRow): the
+// parent's own, or, for an order, a problem record or a parent that isn't yours
+// to see, those of the family's tickets you may see, which the row says.
 function familyRowsHtml(families, withKind) {
     return families.map(f => {
-        const info = FAMILY_KIND_INFO[f.kind || familiesState.kind];
         const kind = f.kind || familiesState.kind;
-        const t = f.ticket;
+        const info = FAMILY_KIND_INFO[kind];
+        const r = f.row || {};
         // A ticket opens; an order shows its requests; a problem record isn't in the data
         const anchor = /^PRB/.test(f.anchor)
             ? `<span class="family-anchor-text">${escapeHtml(f.anchor)}</span>`
             : `<button type="button" class="ticket-link" data-ticket="${escapeHtml(f.anchor)}" title="Open ${escapeHtml(f.anchor)}">${escapeHtml(f.anchor)}</button>${starFor(f.anchor)}`;
-        const summary = t ? t.summary : kind === 'order' ? 'An order of several requests' : kind === 'problem' ? "Problem record (the record itself isn't in this export)" : 'Not in this export';
-        const cell = text => `<td>${escapeHtml(text || '—')}</td>`;
-        const short = String(summary || '');
+        // Something in every cell: what's there, or why there's nothing
+        const cell = (label, text, sort = null) => (text
+            ? `<td${sort === null ? '' : ` data-sort="${escapeHtml(String(sort))}"`}>${escapeHtml(text)}</td>`
+            : `<td data-sort="">${blankHtml(label, r)}</td>`);
+        const summary = String(r.summary || '');
+        const made = r.from === 'members'
+            ? `<div class="family-sub">${r.count
+                ? `From its ${r.count.toLocaleString()} ${r.count === 1 ? info.child[0] : info.child[1]}${/^(PRB|REQ)/.test(f.anchor) ? '' : ' you can see'}`
+                : 'None of its tickets are yours to see'}</div>` : '';
+        const summaryCell = summary
+            ? `<td${summary.length > 110 ? ` title="${escapeHtml(summary)}"` : ''}>${escapeHtml(summary.length > 110 ? `${summary.slice(0, 107)}…` : summary)}${made}</td>`
+            : `<td data-sort="">${blankHtml('Summary', r)}${made}</td>`;
+        const level = r.level && r.from === 'members' && r.count > 1 ? `${r.level} (highest)` : r.level;
         return `<tr class="family-row" data-kind="${kind}" data-anchor="${escapeHtml(f.anchor)}" tabindex="0" aria-expanded="false" title="Click to see the whole family">` +
             `<td class="ticket-cell" data-sort="${escapeHtml(f.anchor)}"><span class="expand-caret" aria-hidden="true">▸</span>${anchor}</td>` +
-            (withKind ? cell(info.tab) : '') +
-            (short.length > 110 ? `<td title="${escapeHtml(short)}">${escapeHtml(short.slice(0, 107))}…</td>` : cell(short)) +
-            cell(t?.state) +
-            `<td data-sort="${t?.level ? levelRank(t) : ''}">${escapeHtml(t?.level || '—')}</td>` + cell(t?.team) +
-            `<td data-sort="${escapeHtml(t?.opened || '')}">${escapeHtml(t?.opened ? formatValue('ticket.opened', t.opened) : '—')}</td>` +
+            (withKind ? `<td>${escapeHtml(info.tab)}</td>` : '') +
+            summaryCell +
+            cell('State', r.state) +
+            cell('Priority / Risk', level, r.rank ?? '') +
+            cell('Team', r.team) +
+            cell('Opened', r.opened ? formatValue('ticket.opened', r.opened) : '', r.opened || '') +
             `<td class="family-size">${f.children.toLocaleString()} ${f.children === 1 ? info.child[0] : info.child[1]}</td></tr>`;
     }).join('');
 }
@@ -223,6 +242,7 @@ async function findFamilies(number) {
             list.innerHTML = `<p class="families-about">${escapeHtml(data.number)} has no parent, children or other linked tickets.${open} ${back}</p>`;
         } else {
             list.innerHTML = `<p class="families-about"><b>${escapeHtml(data.number)}</b> is in ${data.families.length} ${data.families.length === 1 ? 'family' : 'families'}.${open} ${back}</p>` +
+                (data.families.length >= 2 ? lookupBarHtml('', ['Parent', 'Kind of family', ...FAMILY_HEADS.slice(1)], { noun: 'families' }) : '') +
                 familyTableHtml(familyRowsHtml(data.families, true), true, '');
             // One family: open it straight away
             if (data.families.length === 1) toggleFamilyRow(list.querySelector('tr.family-row'));
@@ -263,8 +283,10 @@ document.getElementById('families-find').addEventListener('submit', e => {
     e.preventDefault();
     findFamilies(document.getElementById('families-q').value);
 });
-// A heading of the list: every family of the kind, sorted by the server, from the first page
+// A heading of the list, or a lookup: every family of the kind, sorted or looked
+// through by the server, from the first page
 pagedSorts.families = () => loadFamilies(false, true);
+pagedLookups.families = pagedSorts.families;
 
 // ---------------------------------------------------------------------
 // THE TICKET WINDOW: one ticket's record, its family first, over the page.

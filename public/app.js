@@ -387,28 +387,31 @@ function switchTab(viewName) {
 }
 
 // =====================================================================
-// AI ASSISTANT: the chat opens over the page from Home's "Any question about
-// the data" card (Open chat, or its example question). Minimize closes it and
-// keeps the conversation; Delete chat removes it.
+// AI ASSISTANT: the chat opens over the page from the "Ask Claude" bar in
+// the header: a question typed there is asked in the chat, and with nothing
+// typed the chat opens as it was. A click anywhere outside the chat (the
+// header too) or Minimize closes it and keeps the conversation; Delete chat
+// removes it.
 // =====================================================================
 
 function assistantOpen() {
     return document.getElementById('assistant-panel').classList.contains('open');
 }
 
-// Opens or closes the conversation (no argument: the opposite of now)
-function toggleAssistant(open) {
+// Opens or closes the conversation (no argument: the opposite of now).
+// refocus: closing from inside the chat puts the keys back in the header's bar
+function toggleAssistant(open, { refocus = true } = {}) {
     const panel = document.getElementById('assistant-panel');
     const willOpen = typeof open === 'boolean' ? open : !assistantOpen();
     panel.classList.toggle('open', willOpen);
     document.getElementById('assistant-backdrop').classList.toggle('open', willOpen);
-    document.getElementById('open-chat-btn').setAttribute('aria-expanded', String(willOpen));
+    document.getElementById('nav-ask-input').setAttribute('aria-expanded', String(willOpen));
     if (willOpen) {
         const chatLog = document.getElementById('chat-log');
         chatLog.scrollTop = chatLog.scrollHeight;
         document.getElementById('user-prompt').focus();
-    } else if (panel.contains(document.activeElement)) {
-        document.getElementById('open-chat-btn').focus();
+    } else if (refocus && panel.contains(document.activeElement)) {
+        document.getElementById('nav-ask-input').focus();
     }
     updateChatControls();
 }
@@ -420,13 +423,44 @@ function askAssistant(question) {
     sendPrompt();
 }
 
-// Home's chat buttons: Open chat says how many questions the conversation has,
-// and Delete chat appears once there is something to delete
+// The header's bar: a question is asked in the chat; nothing typed opens the chat as it was
+function askFromHeader() {
+    const input = document.getElementById('nav-ask-input');
+    const question = input.value.trim();
+    if (!question) {
+        toggleAssistant(true);
+        return;
+    }
+    input.value = '';
+    askAssistant(question);
+}
+
+// The header's bar says how many questions the open conversation has
 function updateChatControls() {
     const asked = document.querySelectorAll('#chat-log .user-msg').length;
-    document.getElementById('open-chat-btn').textContent = asked ? `💬 Open chat (${asked})` : '💬 Open chat';
-    document.getElementById('delete-chat-btn').hidden = !asked;
+    const count = document.getElementById('nav-ask-count');
+    count.hidden = !asked;
+    count.textContent = asked.toLocaleString();
+    document.getElementById('nav-ask-btn').title = asked
+        ? `Ask Claude. With nothing typed, this opens your chat (${asked.toLocaleString()} ${asked === 1 ? 'question' : 'questions'} so far)`
+        : 'Ask Claude. With nothing typed, this opens the chat';
 }
+
+// A click anywhere outside the open chat closes it, the header included (its
+// buttons still do their job in the same click). A window opened over the chat
+// (a ticket, a chart's tickets) and the tour don't count as outside.
+document.addEventListener('pointerdown', e => {
+    if (!assistantOpen() || e.target.closest?.('#assistant-panel, dialog, #tour')) return;
+    toggleAssistant(false, { refocus: false });
+}, true);
+
+// "/" anywhere but in a box being typed in: to the header's Ask bar
+document.addEventListener('keydown', e => {
+    if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || document.body.classList.contains('signed-out')) return;
+    if (e.target.closest?.('input, textarea, select, [contenteditable="true"]') || document.querySelector('dialog[open]') || tourState) return;
+    e.preventDefault();
+    document.getElementById('nav-ask-input').focus();
+});
 
 // =====================================================================
 // DASHBOARDS TAB: the Metabase dashboards made by scripts/metabase-setup.mjs,
@@ -1198,8 +1232,10 @@ function renderResults(rows, entity) {
             ` title="Click to see ${escapeHtml(number)}'s full record and related tickets">${cells}</tr>`;
     }).join('');
     const caption = `${rows.length.toLocaleString()} ${rows.length === 1 ? 'row' : 'rows'}`;
+    // A list of tickets can be looked up by any of its columns (lookup.js)
+    const bar = numberColumn && rows.length >= 2 ? lookupBarHtml('', columns.map(columnLabel)) : '';
 
-    return `<div class="result-caption">${caption}</div>` +
+    return `<div class="result-caption">${caption}</div>` + bar +
         `<div class="table-wrap"><table class="result-table" data-sort-list=""><thead><tr>${head}</tr></thead>` +
         `<tbody>${body}</tbody></table></div>`;
 }
@@ -1883,10 +1919,10 @@ function showToast(message) {
 // starred tickets
 // =====================================================================
 
-const HOME_MODES = ['assigned', 'families', 'results', 'starred'];
+const HOME_MODES = ['assigned', 'charts', 'families', 'results', 'starred'];
 let homeMode = 'assigned';
 // Each search bumps its counter, so an older, slower answer can't replace a newer one
-const homeRuns = { assigned: 0, families: 0, results: 0, starred: 0 };
+const homeRuns = { assigned: 0, charts: 0, families: 0, results: 0, starred: 0 };
 // "Team families" (family KPIs) is for project managers and admins
 const canSeeFamilies = () => Boolean(currentAccess.admin || currentAccess.role === 'project_manager');
 
@@ -1903,14 +1939,18 @@ function rememberedHomeMode() {
 function showHomeMode(quiet = false) {
     if (homeMode === 'starred') return showStarred(quiet);
     if (homeMode === 'assigned') return showAssigned(quiet);
+    if (homeMode === 'charts') return showMyCharts(quiet);
     if (homeMode === 'families') return showFamilyKpis(quiet);
     return showTicketResults(quiet);
 }
 
-// Shows one of Home's lists and loads it (quiet: refresh it without a "Loading…")
-function setHomeMode(mode, quiet = false) {
+// Shows one of Home's lists and loads it (quiet: refresh it without a "Loading…").
+// keepDrill: a bar of My charts was clicked, so Assigned to me shows only its tickets
+// (until Home's lists are switched again)
+function setHomeMode(mode, quiet = false, { keepDrill = false } = {}) {
     const wanted = mode;
     if (!HOME_MODES.includes(mode) || (mode === 'families' && !canSeeFamilies())) mode = 'assigned';
+    if (!keepDrill) assignedView.drill = null;
     homeMode = mode;
     document.querySelectorAll('.home-mode').forEach(b => {
         const on = b.dataset.mode === mode;
@@ -1934,9 +1974,12 @@ function resetHome() {
     latestShown = new Set();
     openedRecord = null;
     resetSorts();
-    Object.assign(assignedView, { tickets: null, status: 'open', page: 0 });
+    resetLookups();
+    Object.assign(assignedView, { tickets: null, status: 'open', page: 0, drill: null });
     paintAssignedCount();
     document.getElementById('assigned-result').innerHTML = '';
+    myChartsView.status = null;
+    document.getElementById('my-charts-result').innerHTML = '';
     Object.assign(teamFamiliesView, { teamId: null, teams: null, status: 'open', linked: true, offset: 0, data: null });
     document.getElementById('kpi-families-count').hidden = true;
     document.getElementById('kpi-families-result').innerHTML = '';
@@ -1979,6 +2022,7 @@ const STARRED_COLUMN = ['Starred', t => formatStarredAt(starredTickets.get(t.num
 // its size, KPIs by how much needs attention
 const TICKET_SORT_VALUES = {
     Ticket: t => t.number,
+    Parent: t => t.parent || '',
     'Priority / Risk': t => (t.level ? levelRank(t) : ''),
     Opened: t => t.opened || '',
     Shown: t => t.shownAt || '',
@@ -1988,8 +2032,47 @@ const TICKET_SORT_VALUES = {
     KPIs: t => (t.kpis ? kpiAttention(t.kpis.map(k => k.tone)) : t.attention ?? ''),
 };
 const ticketSortValue = ([label, get]) => TICKET_SORT_VALUES[label] || get;
-// Columns of buttons, with nothing to sort by
+// Columns of buttons, with nothing to sort by or look up
 const UNSORTED_COLUMNS = new Set(['Tell your project manager']);
+
+// What a list shows where a ticket has nothing, so no cell is left blank, and
+// (on hover) why. tickets.mjs blankText gives the server the same words.
+const BLANK_WHY = {
+    'No priority': 'Requests and catalog tasks have no priority or risk in ServiceNow',
+    'No team (no catalog tasks)': 'A request\'s team is the team doing its catalog tasks, and this request has none',
+    'Not assigned': 'Nobody was assigned this ticket in ServiceNow',
+    'No parent': 'This ticket has no parent ticket',
+    'Not linked': 'This ticket isn\'t linked to any other ticket',
+    'No summary': 'The export has no summary for this ticket',
+    'No KPIs': 'None of the KPIs apply to this ticket',
+    'Not recorded': 'The export has nothing here for this ticket',
+};
+function blankText(label, t) {
+    if (t.missing) return '';
+    const requestOrTask = t.kind === 'RITM' || t.kind === 'SCTASK';
+    if (label === 'Priority / Risk') return requestOrTask ? 'No priority' : 'Not recorded';
+    if (label === 'Team') return t.kind === 'RITM' ? 'No team (no catalog tasks)' : 'Not recorded';
+    if (label === 'Assigned To / Requested For') return t.kind === 'INC' || t.kind === 'SCTASK' ? 'Not assigned' : 'Not recorded';
+    if (label === 'Summary') return 'No summary';
+    if (label === 'Parent') return 'No parent';
+    if (label === 'Family') return 'Not linked';
+    if (label === 'KPIs') return 'No KPIs';
+    return 'Not recorded';
+}
+function blankHtml(label, t) {
+    const text = blankText(label, t);
+    return text ? `<span class="blank" title="${escapeHtml(BLANK_WHY[text] || '')}">${escapeHtml(text)}</span>` : '—';
+}
+
+// What a ticket's column shows, for looking it up (lookup.js): its text (or what
+// shows in its place), a date as the data writes it too, its KPIs' words
+function ticketLookupText([label, get], t) {
+    if (label === 'KPIs') return t.kpis ? t.kpis.map(k => `${k.label} ${k.value}`).join(' · ') : t.kpiText || blankText(label, t);
+    const text = String(get(t) || '') || blankText(label, t);
+    return label === 'Opened' && t.opened ? `${text} ${t.opened}` : text;
+}
+// The columns a list can be looked up by
+const lookupColumns = columns => columns.filter(([label]) => !UNSORTED_COLUMNS.has(label));
 
 // How urgent a ticket is, as Assigned to me is ordered (tickets.mjs priorityRank):
 // an incident's priority, a change's risk; 5 for requests and tasks
@@ -2005,10 +2088,11 @@ function levelRank(t) {
 // parent and each family's anchor open that ticket's record, with its related tickets.
 const OPENABLE = /^(INC|CHG|RITM|SCTASK|REQ)\d{7}$/;
 const LINK_COLUMNS = [
-    ['Parent', t => t.parent || '', t => t.parent && OPENABLE.test(t.parent)
-        ? `<button type="button" class="ticket-link" data-ticket="${escapeHtml(t.parent)}" title="Open ${escapeHtml(t.parent)}">${escapeHtml(t.parent)}</button>` : '—'],
+    ['Parent', t => t.parent || '', t => (t.parent && OPENABLE.test(t.parent)
+        ? `<button type="button" class="ticket-link" data-ticket="${escapeHtml(t.parent)}" title="Open ${escapeHtml(t.parent)}">${escapeHtml(t.parent)}</button>`
+        : t.parent ? escapeHtml(t.parent) : blankHtml('Parent', t))],
     ['Family', t => (t.families || []).map(f => `${f.name} (${f.size} ${f.size === 1 ? 'ticket' : 'tickets'})`).join('; '),
-        t => (t.families || []).length ? t.families.map(familyChipHtml).join('') : '—'],
+        t => ((t.families || []).length ? t.families.map(familyChipHtml).join('') : blankHtml('Family', t))],
 ];
 
 // "Parent incident INC1813985 · 6": opens the anchor's record and its related tickets
@@ -2036,9 +2120,14 @@ function formatStarredAt(iso) {
 // sort: the list's name, so a click on a heading sorts it and the sort stays
 // while the page is open (the tickets come in that sort); '': sorts, but
 // forgets it when drawn again; false: no sorting (sorting.js)
-function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set(), highlightClass = 'fresh', { select = null, rowClass = null, sort = '' } = {}) {
+// lookup: a 🔍 box over a list of two or more, keeping what's typed while the page
+// is open under that name ('': forgets it when drawn again); false: no box, for
+// a list that looks itself up (lookup.js)
+// Every cell shows something: where a ticket has nothing, it says why (blankText).
+function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set(), highlightClass = 'fresh', { select = null, rowClass = null, sort = '', lookup = '' } = {}) {
     const sortable = sort !== false;
     if (sort) tickets = sortedTickets(tickets, sort, columns, ticketSortValue);
+    const bar = lookup !== false && tickets.length >= 2 ? lookupBarHtml(lookup, lookupColumns(columns).map(([label]) => label)) : '';
     const head = (select ? `<th class="select-cell"><input type="checkbox" class="select-all" data-select-list="${select}" aria-label="Select all"></th>` : '') +
         columns.map(([label]) => (sortable && !UNSORTED_COLUMNS.has(label) ? sortHeadHtml(sort, label) : `<th>${escapeHtml(label)}</th>`)).join('');
     const body = tickets.map((t, i) => {
@@ -2054,13 +2143,15 @@ function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set(
         }
         if (html) return `<td class="${label === 'Family' ? 'family-cell' : label === 'KPIs' ? 'kpi-cell' : 'parent-cell'}"${sortAttr}>${html(t)}</td>`;
         const text = String(get(t) || '');
+        // Empty sorts last, whatever it says in its place
+        if (!text) return `<td data-sort="">${blankHtml(label, t)}</td>`;
         if (label === 'Summary' && text.length > 120) {
             return `<td title="${escapeHtml(text)}">${escapeHtml(text.slice(0, 117))}…</td>`;
         }
-        return `<td${sortAttr}>${escapeHtml(text || '—')}</td>`;
+        return `<td${sortAttr}>${escapeHtml(text)}</td>`;
     }).join('') + '</tr>';
     }).join('');
-    return `<div class="table-wrap"><table class="result-table"${sortable ? ` data-sort-list="${escapeHtml(sort)}"` : ''}>` +
+    return bar + `<div class="table-wrap"><table class="result-table"${sortable ? ` data-sort-list="${escapeHtml(sort)}"` : ''}>` +
         `<thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
@@ -2122,6 +2213,7 @@ async function runHomeSearch(mode, outId, work, quiet = false) {
         const html = await work();
         if (run !== homeRuns[mode] || html === null) return;
         out.innerHTML = html;
+        applyLookups(out);
     } catch (err) {
         if (run !== homeRuns[mode]) return;
         out.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
@@ -2139,7 +2231,8 @@ async function runHomeSearch(mode, outId, work, quiet = false) {
 
 const ASSIGNED_PAGE = 50;
 const ASSIGNED_STATUSES = [['open', 'Open'], ['closed', 'Closed'], ['all', 'All']];
-const assignedView = { tickets: null, status: 'open', page: 0 };
+// drill: a bar or slice clicked in "My charts" ({ label, test }): only its tickets
+const assignedView = { tickets: null, status: 'open', page: 0, drill: null };
 const ASSIGNED_COLUMNS = [
     ['Ticket', t => t.number],
     ['Type', t => t.type],
@@ -2158,17 +2251,25 @@ function paintAssignedCount() {
     count.title = `${open.toLocaleString()} open`;
 }
 
+// The tickets assigned to this person (also what "My charts" draws) -> true, or
+// false if the session ended
+async function loadAssignedTickets() {
+    const token = sessionTokenValue;
+    const response = await fetch(`${API_BASE}/api/my-tickets`, { headers: authHeaders() });
+    // Signed out (and maybe someone else in) meanwhile: these aren't theirs to show
+    if (token !== sessionTokenValue) return false;
+    if (handleUnauthorized(response)) return false;
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+    assignedView.tickets = data.tickets;
+    paintAssignedCount();
+    return true;
+}
+
 function showAssigned(quiet = false) {
     if (!sessionTokenValue) return;
-    return runHomeSearch('assigned', 'assigned-result', async () => {
-        const response = await fetch(`${API_BASE}/api/my-tickets`, { headers: authHeaders() });
-        if (handleUnauthorized(response)) return null;
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
-        assignedView.tickets = data.tickets;
-        paintAssignedCount();
-        return assignedHtml();
-    }, quiet).then(() => fillTicketKpis(document.getElementById('assigned-result')));
+    return runHomeSearch('assigned', 'assigned-result', async () => ((await loadAssignedTickets()) ? assignedHtml() : null), quiet)
+        .then(() => fillTicketKpis(document.getElementById('assigned-result')));
 }
 
 function assignedHtml() {
@@ -2186,8 +2287,12 @@ function assignedHtml() {
     // manager they've resolved or closed one (notifications.js)
     const columns = [...ASSIGNED_COLUMNS, KPI_COLUMN,
         ...(canTellManager() ? [['Tell your project manager', () => '', t => reportButtonHtml(t.number, 'Resolved or closed?…')]] : [])];
-    // Sorted by a heading: all of them, before they're cut into pages
-    const shown = sortedTickets(status === 'all' ? all : all.filter(t => t.open === (status === 'open')), 'assigned', columns, ticketSortValue);
+    const { drill } = assignedView;
+    const inStatus = status === 'all' ? all : all.filter(t => t.open === (status === 'open'));
+    const listed = drill ? inStatus.filter(drill.test) : inStatus;
+    // Looked up and sorted by a heading: all of them, before they're cut into pages
+    const matched = lookedUpTickets(listed, 'assigned', lookupColumns(columns), ticketLookupText);
+    const shown = sortedTickets(matched, 'assigned', columns, ticketSortValue);
     const pages = Math.max(1, Math.ceil(shown.length / ASSIGNED_PAGE));
     assignedView.page = Math.min(Math.max(assignedView.page, 0), pages - 1);
     const first = assignedView.page * ASSIGNED_PAGE;
@@ -2202,16 +2307,22 @@ function assignedHtml() {
         : 'highest priority first, then oldest. Incidents go by priority and changes by risk. Requests and catalog tasks have no priority, so they come after those. ' +
           'Click any heading to sort by it. ';
     const head = '<div class="results-head">' +
-        `<p class="home-status">${shown.length.toLocaleString()} ${which}${shown.length === 1 ? 'ticket' : 'tickets'} assigned to you, ${order}</p>` + filter + '</div>' +
-        KPI_LEGEND_HTML;
-    if (!shown.length) return head + `<p class="home-status">None ${status === 'open' ? 'open: you\'re all caught up.' : 'closed yet.'}</p>`;
+        `<p class="home-status">${listed.length.toLocaleString()} ${which}${listed.length === 1 ? 'ticket' : 'tickets'} assigned to you, ${order}</p>` + filter + '</div>' +
+        (drill ? `<div class="drill-chip" role="status">📊 Only the ones in <b>${escapeHtml(drill.label)}</b>, from My charts ` +
+            '<button type="button" class="home-action" data-assigned-drill-clear>✕ Show them all</button></div>' : '');
+    if (!listed.length) {
+        return head + `<p class="home-status">${drill ? `None ${which}in ${escapeHtml(drill.label)}.` : `None ${status === 'open' ? 'open: you\'re all caught up.' : 'closed yet.'}`}</p>`;
+    }
+    const bar = lookupBarHtml('assigned', lookupColumns(columns).map(([label]) => label),
+        { mode: 'list', count: { shown: shown.length, total: listed.length } });
+    if (!shown.length) return head + bar + '<p class="home-status">No tickets match what you typed. Change it, or press Escape in the box to see them all.</p>';
 
     const pager = pages > 1
         ? `<div class="team-pager"><span>${(first + 1).toLocaleString()}–${(first + page.length).toLocaleString()} of ${shown.length.toLocaleString()}</span>` +
           `<button type="button" class="home-action" data-assigned-page="-1"${assignedView.page ? '' : ' disabled'}>← Previous</button>` +
           `<button type="button" class="home-action" data-assigned-page="1"${assignedView.page < pages - 1 ? '' : ' disabled'}>Next →</button></div>`
         : '';
-    return head + ticketTableHtml(page, columns, new Set(), 'fresh', { sort: 'assigned' }) + pager +
+    return head + bar + KPI_LEGEND_HTML + ticketTableHtml(page, columns, new Set(), 'fresh', { sort: 'assigned', lookup: false }) + pager +
         ticketDownloadHtml(shown, `Assigned to me (${status === 'all' ? 'all' : status})`, ASSIGNED_COLUMNS);
 }
 
@@ -2224,14 +2335,21 @@ function redrawAssigned() {
     return out;
 }
 
-// A heading: every ticket sorted, from the first page
+// A heading, or a lookup: every ticket sorted or looked through, from the first page
 pagedSorts.assigned = () => {
     assignedView.page = 0;
     redrawAssigned();
 };
+pagedLookups.assigned = pagedSorts.assigned;
 
-// Open / closed / all, and the pages
+// Open / closed / all, the pages, and back from a chart's bar to them all
 document.getElementById('assigned-result').addEventListener('click', e => {
+    if (e.target.closest('[data-assigned-drill-clear]')) {
+        assignedView.drill = null;
+        assignedView.page = 0;
+        redrawAssigned();
+        return;
+    }
     const status = e.target.closest('[data-assigned-status]');
     const page = e.target.closest('[data-assigned-page]');
     if (!status && !page) return;
@@ -2246,6 +2364,179 @@ document.getElementById('assigned-result').addEventListener('click', e => {
 });
 
 // =====================================================================
+// MY CHARTS (Home): the tickets assigned to this person, drawn: by type,
+// state, priority or risk, how their KPIs look, when they were opened, and
+// the ServiceNow team that worked them. Open ones, closed ones or all, from
+// the same list as "Assigned to me" (charts.js draws them). A click on a bar
+// or slice shows those tickets there.
+// =====================================================================
+
+const myChartsView = { status: null }; // null: the open ones if there are any, else all
+
+const KPI_TONES = [['bad', 'Needs attention', 8], ['warn', 'Keep an eye on it', 4], ['good', 'On track', 3]];
+// How a ticket's KPIs look, as one word: its worst (kpis.mjs attention: each red counts 100, each amber 1)
+function kpiToneOf(t) {
+    if (t.attention === null || t.attention === undefined) return 'No KPIs';
+    return t.attention >= 100 ? 'Needs attention' : t.attention >= 1 ? 'Keep an eye on it' : 'On track';
+}
+
+// "2026-08-14 08:44:55" -> its ISO week, "2026-W33" (charts.js names it by its Monday)
+function isoWeekOf(raw) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(raw || ''));
+    if (!m) return '';
+    const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+    d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7)); // that week's Thursday decides its year
+    const week = Math.ceil(((d - Date.UTC(d.getUTCFullYear(), 0, 1)) / 86400000 + 1) / 7);
+    return `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+}
+
+// Every week (or month, for a long stretch) from the first ticket opened to the
+// last, so a quiet one shows as a gap -> { field, periods, of(ticket) }
+function openedPeriods(tickets) {
+    const days = tickets.map(t => String(t.opened || '').slice(0, 10)).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
+    if (!days.length) return { field: 'opened_week', periods: [], of: () => '' };
+    const [first, last] = [days[0], days.at(-1)];
+    const weeks = [];
+    const [, fy, fw] = isoWeekOf(first).match(/^(\d{4})-W(\d{2})$/);
+    const [, ly, lw] = isoWeekOf(last).match(/^(\d{4})-W(\d{2})$/);
+    const end = isoWeekMonday(Number(ly), Number(lw));
+    for (const d = isoWeekMonday(Number(fy), Number(fw)); d <= end; d.setUTCDate(d.getUTCDate() + 7)) weeks.push(isoWeekOf(d.toISOString()));
+    if (weeks.length <= 26) return { field: 'opened_week', periods: weeks, of: t => isoWeekOf(t.opened) };
+    const months = [];
+    for (let y = Number(first.slice(0, 4)), m = Number(first.slice(5, 7)); `${y}-${String(m).padStart(2, '0')}` <= last.slice(0, 7); m === 12 ? (y += 1, m = 1) : (m += 1)) {
+        months.push(`${y}-${String(m).padStart(2, '0')}`);
+    }
+    return { field: 'opened_month', periods: months, of: t => String(t.opened || '').slice(0, 7) };
+}
+
+// Each chart: what it groups the tickets by (value), how it's drawn, its order,
+// the colors of its groups, and how the list names its bar when one is clicked
+const MY_CHARTS = [
+    { key: 'type', title: 'By type', display: 'donut', value: t => t.type, slots: { Incident: 1, Change: 2, Request: 3, 'Catalog task': 4 }, drill: v => `Type: ${v}` },
+    { key: 'state', title: 'By state', display: 'hbar', value: t => t.state || 'Not recorded', drill: v => `State: ${v}` },
+    { key: 'level', title: 'By priority or risk', display: 'bar', value: t => t.level || blankText('Priority / Risk', t),
+        order: (a, b) => a.rank - b.rank || sortCollator.compare(a.value, b.value), drill: v => `Priority or risk: ${v}`,
+        sub: 'Incidents have a priority and changes a risk; requests and catalog tasks have neither.' },
+    { key: 'kpis', title: 'How their KPIs look', display: 'donut', value: kpiToneOf, drill: v => `KPIs: ${v}`,
+        slots: Object.fromEntries(KPI_TONES.map(([, label, slot]) => [label, slot])), order: (a, b) => a.rank - b.rank,
+        sub: 'By each ticket\'s worst KPI: red needs attention, amber keep an eye on it, green on track.' },
+    { key: 'opened', title: 'When they were opened', display: 'bar', time: true, drill: v => `Opened ${v}` },
+    { key: 'team', title: 'By ServiceNow team', display: 'hbar', value: t => t.team || blankText('Team', t), limit: 10, drill: v => `ServiceNow team: ${v}`,
+        sub: 'The assignment group that worked each ticket in ServiceNow (a request\'s is the team of its catalog tasks).' },
+];
+
+// One chart's numbers, as charts.js draws them: { rows: [{ value, count, slot }], total, other }
+function myChartData(def, tickets, periods) {
+    const valueOf = def.time ? periods.of : def.value;
+    const counts = new Map(def.time ? periods.periods.map(p => [p, 0]) : []);
+    const rank = new Map();
+    for (const t of tickets) {
+        const v = valueOf(t);
+        if (!v) continue;
+        counts.set(v, (counts.get(v) || 0) + 1);
+        if (def.key === 'level') rank.set(v, Math.min(rank.get(v) ?? 9, t.level ? levelRank(t) : 9));
+    }
+    if (def.key === 'kpis') KPI_TONES.forEach(([, label], i) => rank.set(label, i));
+    let rows = [...counts].map(([value, count]) => ({ value, count, rank: rank.get(value) ?? 9, ...(def.slots?.[value] ? { slot: def.slots[value] } : {}) }));
+    // Tickets without KPIs: a grey slice
+    if (def.key === 'kpis') rows.forEach(r => { if (r.value === 'No KPIs') r.other = true; });
+    if (!def.time) rows.sort(def.order || ((a, b) => b.count - a.count || sortCollator.compare(a.value, b.value)));
+    let other = null;
+    if (def.limit && rows.length > def.limit) {
+        const rest = rows.slice(def.limit);
+        other = { count: rest.reduce((n, r) => n + r.count, 0), groups: rest.length };
+        rows = rows.slice(0, def.limit);
+    }
+    return { rows, total: tickets.length, other };
+}
+
+function myChartsTickets() {
+    const all = assignedView.tickets || [];
+    if (!myChartsView.status) myChartsView.status = all.some(t => t.open) ? 'open' : 'all';
+    const { status } = myChartsView;
+    return status === 'all' ? all : all.filter(t => t.open === (status === 'open'));
+}
+
+function myChartsHtml() {
+    const all = assignedView.tickets || [];
+    if (!all.length) {
+        return `<p class="home-status">${currentAccess.team
+            ? 'No tickets are assigned to you yet, so there is nothing to draw. Your project manager hands them out on the Team tab.'
+            : 'No tickets are assigned to you, so there is nothing to draw. You get some once you\'re on a team and your project manager or an admin assigns them to you.'}</p>`;
+    }
+    const tickets = myChartsTickets();
+    const { status } = myChartsView;
+    const counts = { open: all.filter(t => t.open).length, all: all.length };
+    counts.closed = counts.all - counts.open;
+    const filter = '<div class="assigned-filter" role="group" aria-label="Which tickets to draw">' + ASSIGNED_STATUSES.map(([key, label]) =>
+        `<button type="button" class="home-action" data-mycharts-status="${key}" aria-pressed="${status === key}">${label} (${counts[key].toLocaleString()})</button>`).join('') + '</div>';
+    const which = status === 'all' ? '' : `${status} `;
+    const head = '<div class="results-head">' +
+        `<p class="home-status">The ${tickets.length.toLocaleString()} ${which}${tickets.length === 1 ? 'ticket' : 'tickets'} assigned to you, in charts. ` +
+        'Hover a bar or slice for its numbers, or click it to list those tickets in Assigned to me.</p>' + filter + '</div>';
+    if (!tickets.length) return head + `<p class="home-status">None ${status === 'open' ? 'open: you\'re all caught up.' : 'closed yet.'}</p>`;
+    return head + '<div class="tile-grid my-charts">' + MY_CHARTS.map(def =>
+        `<article class="chart-tile size-medium" data-my-chart="${def.key}">` +
+        `<div class="tile-head"><div class="tile-titles"><h3 class="tile-title">${escapeHtml(def.title)}</h3>` +
+        (def.sub ? `<p class="tile-sub">${escapeHtml(def.sub)}</p>` : '') + '</div>' +
+        '<div class="tile-actions"><button type="button" class="tile-btn" data-my-chart-table aria-pressed="false" title="Show as a table" aria-label="Show as a table">▦</button></div></div>' +
+        '<div class="tile-body drillable"></div><p class="chart-note" hidden></p></article>').join('') + '</div>';
+}
+
+// Draws each chart into its box (once the boxes are on the page, so they have a width)
+function drawMyCharts() {
+    const out = document.getElementById('my-charts-result');
+    const tickets = myChartsTickets();
+    const periods = openedPeriods(tickets);
+    for (const tile of out.querySelectorAll('[data-my-chart]')) {
+        const def = MY_CHARTS.find(d => d.key === tile.dataset.myChart);
+        const chart = { id: `my-${def.key}`, title: def.title, groupBy: def.time ? periods.field : def.key, display: def.display, size: 'medium', color: 'accent' };
+        const data = myChartData(def, tickets, periods);
+        const body = tile.querySelector('.tile-body');
+        drawChart(body, chart, data, tile._asTable || false);
+        body._pick = row => row && showMyChartTickets(def, row.value, groupLabel(chart, row.value, true), periods);
+        const note = tile.querySelector('.chart-note');
+        note.textContent = tile._asTable ? '' : chartNote(chart, data);
+        note.hidden = !note.textContent;
+    }
+}
+
+// A bar or slice: Assigned to me, showing only its tickets
+function showMyChartTickets(def, value, label, periods) {
+    const valueOf = def.time ? periods.of : def.value;
+    assignedView.drill = { label: def.drill(def.time ? `in ${label.replace(/^Week of/, 'the week of')}` : label), test: t => valueOf(t) === value };
+    assignedView.status = myChartsView.status;
+    assignedView.page = 0;
+    setHomeMode('assigned', false, { keepDrill: true });
+    document.getElementById('home-assigned').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function showMyCharts(quiet = false) {
+    if (!sessionTokenValue) return;
+    return runHomeSearch('charts', 'my-charts-result', async () => ((await loadAssignedTickets()) ? myChartsHtml() : null), quiet)
+        .then(() => { if (homeMode === 'charts') drawMyCharts(); });
+}
+
+document.getElementById('my-charts-result').addEventListener('click', e => {
+    const status = e.target.closest('[data-mycharts-status]');
+    if (status) {
+        myChartsView.status = status.dataset.mychartsStatus;
+        document.getElementById('my-charts-result').innerHTML = myChartsHtml();
+        drawMyCharts();
+        return;
+    }
+    const table = e.target.closest('[data-my-chart-table]');
+    if (table) {
+        const tile = table.closest('[data-my-chart]');
+        tile._asTable = !tile._asTable;
+        table.setAttribute('aria-pressed', String(tile._asTable));
+        table.title = tile._asTable ? 'Show the chart' : 'Show as a table';
+        table.setAttribute('aria-label', table.title);
+        drawMyCharts();
+    }
+});
+
+// =====================================================================
 // KPIs (kpis.mjs): each ticket's in "Assigned to me", each family's (and its
 // tickets') in a project manager's "Team families". Green: on track; amber:
 // keep an eye on it; red: needs attention. Hovering one says what it means.
@@ -2257,7 +2548,7 @@ const KPI_LEGEND_HTML = '<p class="kpi-legend">KPIs: <span class="kpi kpi-good">
 const KPI_COLUMN = ['KPIs', () => '', t => `<div data-kpis="${escapeHtml(t.number)}"><span class="kpi-none">Loading…</span></div>`];
 
 function kpiChipsHtml(list) {
-    if (!list?.length) return '<span class="kpi-none">—</span>';
+    if (!list?.length) return `<span class="kpi-none" title="${escapeHtml(BLANK_WHY['No KPIs'])}">No KPIs</span>`;
     return '<div class="kpi-list">' + list.map(k => `<span class="kpi kpi-${['good', 'warn', 'bad'].includes(k.tone) ? k.tone : 'info'}"` +
         `${k.detail ? ` title="${escapeHtml(k.detail)}"` : ''}>${escapeHtml(k.label)} <b>${escapeHtml(k.value)}</b></span>`).join('') + '</div>';
 }
@@ -2294,6 +2585,8 @@ const KIND_LABELS = { INC: ['incident', 'incidents'], CHG: ['change', 'changes']
 const teamFamiliesView = { teamId: null, teams: null, status: 'open', linked: true, offset: 0, data: null };
 // What the server sorts the families by for each heading (no sort: the most urgent first)
 const TEAM_FAMILY_SORT_KEYS = { Family: 'family', Tickets: 'size', KPIs: 'kpis' };
+// The columns the server can look the families up by (server.mjs)
+const TEAM_FAMILY_LOOKUP_COLUMNS = ['Family', 'Tickets', 'KPIs'];
 
 function showFamilyKpis(quiet = false) {
     if (!sessionTokenValue || !canSeeFamilies()) return;
@@ -2311,9 +2604,11 @@ function showFamilyKpis(quiet = false) {
         if (!teamId) return '<p class="home-status">You\'re not on a team, so there are no families to show.</p>';
         const q = new URLSearchParams({
             team: teamId, status: teamFamiliesView.status, linked: teamFamiliesView.linked ? 1 : 0, offset: teamFamiliesView.offset, limit: FAMILY_PAGE,
-            ...sortQuery('team-families', TEAM_FAMILY_SORT_KEYS),
+            ...sortQuery('team-families', TEAM_FAMILY_SORT_KEYS), ...lookupQuery('team-families'),
         });
+        const token = sessionTokenValue;
         const response = await fetch(`${API_BASE}/api/kpis/families?${q}`, { headers: authHeaders() });
+        if (token !== sessionTokenValue) return null; // signed out meanwhile: not for whoever is here now
         if (handleUnauthorized(response)) return null;
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
@@ -2342,13 +2637,16 @@ function familiesHtml() {
     const order = sort
         ? `sorted by ${sort.col === 'KPIs' ? 'how many KPIs need attention' : sort.col}, ${sort.dir === 'asc' ? 'ascending' : 'descending'}`
         : 'the most urgent first (the highest-priority open ticket, then the oldest)';
+    const all = data.before ?? data.total;
     const head = '<div class="results-head">' +
-        `<p class="home-status">${escapeHtml(teamName)}: ${data.total.toLocaleString()} ${sized}${data.total === 1 ? 'family' : 'families'} ${which}, ` +
+        `<p class="home-status">${escapeHtml(teamName)}: ${all.toLocaleString()} ${sized}${all === 1 ? 'family' : 'families'} ${which}, ` +
         `${order}. A family is tickets linked to each other, which always stay with one team. ` +
         'Open one to see each of its tickets\' KPIs and who has it, or type a name to give someone all of its tickets.</p>' +
         `<div class="families-controls">${filter}<label><input type="checkbox" data-families-linked${linked ? ' checked' : ''}> Only linked families (2 or more tickets)</label>${teamPick}</div>` +
-        '</div>' + KPI_LEGEND_HTML;
-    if (!data.families.length) return head + `<p class="home-status">${status === 'open' ? 'No families with open tickets: all caught up.' : 'No families.'}</p>`;
+        '</div>';
+    if (!all) return head + `<p class="home-status">${status === 'open' ? 'No families with open tickets: all caught up.' : 'No families.'}</p>`;
+    const bar = lookupBarHtml('team-families', TEAM_FAMILY_LOOKUP_COLUMNS, { mode: 'list', noun: 'families', count: { shown: data.total, total: all } });
+    if (!data.families.length) return head + bar + '<p class="home-status">No families match what you typed. Change it, or press Escape in the box to see them all.</p>';
     const rows = data.families.map(f => {
         const id = escapeHtml(f.id);
         const summary = String(f.ticket?.summary || '');
@@ -2369,16 +2667,17 @@ function familiesHtml() {
           `<button type="button" class="home-action" data-families-page="-1"${teamFamiliesView.offset ? '' : ' disabled'}>← Previous</button>` +
           `<button type="button" class="home-action" data-families-page="1"${last < data.total ? '' : ' disabled'}>Next →</button></div>`
         : '';
-    return head + '<div class="table-wrap"><table class="result-table" data-sort-list="team-families"><thead><tr>' +
+    return head + bar + KPI_LEGEND_HTML + '<div class="table-wrap"><table class="result-table" data-sort-list="team-families"><thead><tr>' +
         sortHeadHtml('team-families', 'Family', 'Family (its first ticket)') + sortHeadHtml('team-families', 'Tickets') + sortHeadHtml('team-families', 'KPIs') +
         '<th>Give it all to</th><th></th></tr></thead>' + `<tbody>${rows}</tbody></table></div>` + pager;
 }
 
-// A heading: every family of the team sorted by the server, from the first page
+// A heading, or a lookup: every family of the team sorted or looked through by the server, from the first page
 pagedSorts['team-families'] = () => {
     teamFamiliesView.offset = 0;
-    showFamilyKpis(true);
+    return showFamilyKpis(true);
 };
+pagedLookups['team-families'] = pagedSorts['team-families'];
 
 const FAMILY_TICKET_COLUMNS = [
     ['Ticket', t => t.number],
@@ -2419,17 +2718,26 @@ async function toggleFamilyTickets(button) {
 }
 
 // A family's tickets, the first FAMILY_TICKETS_SHOWN (or all of them), in the
-// sort of its own headings; each family keeps its own sort
+// sort of its own headings and looked up by its own box; each family keeps both
 function drawFamilyTickets(box) {
     const list = `family:${box.familyId}`;
-    const tickets = sortedTickets(box.familyTickets, list, FAMILY_TICKET_COLUMNS, ticketSortValue);
+    const all = box.familyTickets;
+    const tickets = sortedTickets(lookedUpTickets(all, list, FAMILY_TICKET_COLUMNS, ticketLookupText), list, FAMILY_TICKET_COLUMNS, ticketSortValue);
     const drawn = box.showAll ? tickets : tickets.slice(0, FAMILY_TICKETS_SHOWN);
-    box.innerHTML = `<h4>${tickets.length.toLocaleString()} ${tickets.length === 1 ? 'ticket' : 'tickets'} in this family</h4>` +
-        ticketTableHtml(drawn, FAMILY_TICKET_COLUMNS, new Set(), 'fresh', { sort: list }) +
-        (drawn.length < tickets.length ? `<p class="home-status">Showing ${drawn.length} of ${tickets.length.toLocaleString()}. ` +
-            `<button type="button" class="link-btn" data-family-all>Show all ${tickets.length.toLocaleString()}</button></p>` : '');
+    const bar = all.length >= 2
+        ? lookupBarHtml(list, FAMILY_TICKET_COLUMNS.map(([label]) => label), { mode: 'list', count: { shown: tickets.length, total: all.length } }) : '';
+    box.innerHTML = `<h4>${all.length.toLocaleString()} ${all.length === 1 ? 'ticket' : 'tickets'} in this family</h4>` + bar +
+        (tickets.length
+            ? ticketTableHtml(drawn, FAMILY_TICKET_COLUMNS, new Set(), 'fresh', { sort: list, lookup: false }) +
+              (drawn.length < tickets.length ? `<p class="home-status">Showing ${drawn.length} of ${tickets.length.toLocaleString()}. ` +
+                  `<button type="button" class="link-btn" data-family-all>Show all ${tickets.length.toLocaleString()}</button></p>` : '')
+            : '<p class="home-status">None of its tickets match what you typed.</p>');
 }
 pagedSorts.family = table => drawFamilyTickets(table.closest('.family-tickets'));
+pagedLookups.family = list => {
+    const box = document.querySelector(`.lookup-bar[data-lookup="${CSS.escape(list)}"]`)?.closest('.family-tickets');
+    if (box) drawFamilyTickets(box);
+};
 
 document.getElementById('kpi-families-result').addEventListener('click', e => {
     const status = e.target.closest('[data-families-status]');
@@ -2513,7 +2821,7 @@ function showTicketResults(quiet = false) {
             'Click a ticket number to see its full record, or its parent or family to see those.</p>' +
             `<button type="button" class="home-action danger" onclick="clearTicketResults(${tickets.length})">🧹 Clear ticket results</button></div>` +
             starAllHtml(tickets.map(t => t.number)) + selectBarHtml('results') +
-            ticketTableHtml(tickets, columns, latestShown, 'fresh', { select: 'results', sort: 'results' }) + ticketDownloadHtml(tickets, 'Ticket results', columns);
+            ticketTableHtml(tickets, columns, latestShown, 'fresh', { select: 'results', sort: 'results', lookup: 'results' }) + ticketDownloadHtml(tickets, 'Ticket results', columns);
     }, quiet).then(() => paintSelection('results'));
 }
 
@@ -2766,7 +3074,7 @@ function showStarred(quiet = false) {
             'Tick tickets to unstar several at once.</p>' +
             `<button type="button" class="home-action danger" onclick="unstarAll()">☆ Unstar all</button></div>` +
             unstarByIssueHtml(data.tickets) + selectBarHtml('starred') +
-            ticketTableHtml(data.tickets, columns, new Set(), 'fresh', { select: 'starred', sort: 'starred' }) + missing + ticketDownloadHtml(data.tickets, 'Starred tickets', columns);
+            ticketTableHtml(data.tickets, columns, new Set(), 'fresh', { select: 'starred', sort: 'starred', lookup: 'starred' }) + missing + ticketDownloadHtml(data.tickets, 'Starred tickets', columns);
     }, quiet).then(() => paintSelection('starred'));
 }
 
@@ -2857,8 +3165,11 @@ function paintSelection(list) {
     const n = selections[list].size;
     const all = out.querySelector('.select-all');
     if (all) {
-        all.checked = n > 0 && n === boxes.length;
-        all.indeterminate = n > 0 && n < boxes.length;
+        // Ticked "all": every ticket the lookup is showing
+        const showing = boxes.filter(b => lookupShows(b.closest('tr')));
+        const ticked = showing.filter(b => b.checked).length;
+        all.checked = ticked > 0 && ticked === showing.length;
+        all.indeterminate = n > 0 && !all.checked;
     }
     const bar = out.querySelector('.select-bar');
     if (!bar) return;
@@ -2885,7 +3196,8 @@ document.addEventListener('click', e => {
     const box = e.target.closest?.('.row-select, .select-all');
     if (box) {
         const list = box.dataset.selectList;
-        const boxes = [...document.getElementById(LIST_BOXES[list]).querySelectorAll('.row-select')];
+        // The rows the lookup is showing (all of them when nothing is typed)
+        const boxes = [...document.getElementById(LIST_BOXES[list]).querySelectorAll('.row-select')].filter(b => lookupShows(b.closest('tr')));
         if (box.classList.contains('select-all')) {
             for (const b of boxes) box.checked ? selections[list].add(b.value) : selections[list].delete(b.value);
         } else {
@@ -2941,6 +3253,11 @@ document.addEventListener('click', e => {
         const numbers = issue.dataset.unstarMany.split(',');
         unstarMany(numbers, `the ${numbers.length} in ${issue.dataset.what}`);
     }
+});
+
+// A lookup in Ticket results or Starred tickets: the header's tick box follows what shows
+document.addEventListener('lookedup', e => {
+    for (const [list, id] of Object.entries(LIST_BOXES)) if (e.target.closest(`#${id}`)) paintSelection(list);
 });
 
 // Enter in the question box asks
@@ -3054,10 +3371,6 @@ document.addEventListener('click', e => {
     if (view) { setAnswerView(view.closest('.msg'), view.dataset.answerView); return; }
     const saveChart = e.target.closest('[data-answer-save]');
     if (saveChart) { saveAnswerChart(saveChart.closest('.msg')); return; }
-
-    // Home's example question is asked in the chat
-    const example = e.target.closest('[data-example]');
-    if (example) { askAssistant(example.dataset.example); return; }
 
     const record = e.target.closest('[data-open-dashboard]');
     if (record) { openInDashboards(record.dataset.openDashboard); return; }

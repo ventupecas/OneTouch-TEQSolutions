@@ -22,8 +22,10 @@ export const TICKET_KINDS = {
   },
   RITM: {
     cube: 'sc_req_item', label: 'Request',
-    // Requests have no team or priority; the catalog item stands in for a missing summary
-    fields: { summary: 'short_description', item: 'item', state: 'state', person: 'requested_for', opened: 'opened', parent: 'request' },
+    // Requests have no team or priority; the catalog item stands in for a missing
+    // summary, who opened it for a missing "requested for", and the teams doing its
+    // catalog tasks for its team (toTicket)
+    fields: { summary: 'short_description', item: 'item', state: 'state', person: 'requested_for', opener: 'opened_by', opened: 'opened', parent: 'request' },
     lead: ['number', 'short_description', 'item', 'state', 'stage', 'approval', 'requested_for', 'opened_by', 'opened', 'closed', 'request', 'location'],
   },
   SCTASK: {
@@ -60,19 +62,24 @@ export function parseTicketNumbers(text) {
 
 export const prefixOf = number => number.match(/^[A-Z]+/)[0];
 
+// A request's team: the teams doing its catalog tasks, most tasks first
+// ("A, B"), from the ticket index once it has loaded. RITM -> text.
+let requestTeams = new Map();
+
 // One Cube row -> the summary the ticket tables show (also used by relations.mjs)
 export function toTicket(prefix, row) {
   const { cube, label, fields } = TICKET_KINDS[prefix];
   const value = key => (fields[key] ? row[`${cube}.${fields[key]}`] ?? '' : '');
+  const number = row[`${cube}.number`];
   return {
-    number: row[`${cube}.number`],
+    number,
     kind: prefix,
     type: label,
     summary: value('summary') || value('item'),
     state: value('state'),
     level: value('level'),
-    team: value('team'),
-    person: value('person'),
+    team: value('team') || (prefix === 'RITM' ? requestTeams.get(number) || '' : ''),
+    person: value('person') || (value('opener') ? `${value('opener')} (opened it)` : ''),
     opened: value('opened'),
     parent: value('parent'),
   };
@@ -139,6 +146,8 @@ export async function findTickets(text, runQuery) {
 // Summaries for a list of exact ticket numbers (e.g. everything someone has
 // been shown), without the search's 200-number limit -> Map(number -> ticket)
 export async function ticketSummaries(numbers, runQuery) {
+  // Just after a start: requests get their teams once the index has loaded
+  await ticketIndex?.catch(() => null);
   const byPrefix = new Map();
   for (const n of new Set(numbers)) {
     if (!STARRABLE.test(n)) continue;
@@ -200,18 +209,44 @@ export function ticketsByPriority(numbers, runQuery) {
 const INDEX_MAX_ROWS = 50000;
 let ticketIndex = null; // Promise of Map(number -> ticket summary)
 
+// The link columns each ticket keeps in the index (t.links), so a family's
+// tickets are found without asking Cube (relations.mjs familyRow). A request's
+// order and a task's request are already its `parent`.
+const INDEX_LINKS = {
+  INC: { parentIncident: 'parent_incident', problem: 'problem', causedByChange: 'caused_by_change' },
+  CHG: { fixesIncident: 'incident', problem: 'problem' },
+  RITM: { bundle: 'parent' },
+  SCTASK: {},
+};
+
 export function loadTicketIndex(runCubeQuery) {
   if (!ticketIndex) {
     ticketIndex = (async () => {
       const index = new Map();
       for (const [prefix, kind] of Object.entries(TICKET_KINDS)) {
-        const dimensions = [...new Set(['number', ...Object.values(kind.fields)])].map(c => `${kind.cube}.${c}`);
+        const links = INDEX_LINKS[prefix];
+        const dimensions = [...new Set(['number', ...Object.values(kind.fields), ...Object.values(links)])].map(c => `${kind.cube}.${c}`);
         const rows = await runCubeQuery({ dimensions, limit: INDEX_MAX_ROWS });
         if (rows.length >= INDEX_MAX_ROWS) throw new Error(`${kind.cube} has ${INDEX_MAX_ROWS.toLocaleString()} tickets or more; tickets.mjs indexes at most that many`);
         for (const row of rows) {
           const t = toTicket(prefix, row);
+          t.links = Object.fromEntries(Object.entries(links).map(([key, column]) => [key, String(row[`${kind.cube}.${column}`] ?? '').trim()]));
           index.set(t.number, t);
         }
+      }
+      // Each request's team: the teams of its catalog tasks, the one with the most tasks first
+      const byRequest = new Map();
+      for (const t of index.values()) {
+        if (t.kind !== 'SCTASK' || !t.parent || !t.team) continue;
+        if (!byRequest.has(t.parent)) byRequest.set(t.parent, new Map());
+        const teams = byRequest.get(t.parent);
+        teams.set(t.team, (teams.get(t.team) || 0) + 1);
+      }
+      requestTeams = new Map([...byRequest].map(([number, teams]) =>
+        [number, [...teams].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([team]) => team).join(', ')]));
+      for (const [number, team] of requestTeams) {
+        const t = index.get(number);
+        if (t && !t.team) t.team = team;
       }
       return index;
     })();
@@ -249,6 +284,65 @@ export function sortRows(rows, valueOf, dir = 'asc') {
       return sign * c || a.i - b.i;
     })
     .map(k => k.row);
+}
+
+// ---------------------------------------------------------------------
+// LOOKING UP tickets in the long lists the server pages (the Team tab's
+// tickets, Team families, the Families page) by what their columns show,
+// the same way the page looks through the lists it holds (public/lookup.js):
+// every word typed must appear, in the chosen column or else in any column;
+// "words in quotes" stay together. Case and spacing don't matter.
+// ---------------------------------------------------------------------
+
+export const LOOKUP_MAX_LENGTH = 100;
+
+// 'p2 "service desk"' -> ['p2', 'service desk']
+export function lookupTerms(q) {
+  const text = String(q ?? '').slice(0, LOOKUP_MAX_LENGTH).toLowerCase();
+  const terms = [];
+  for (const [, phrase, word] of text.matchAll(/"([^"]*)"?|(\S+)/g)) {
+    const term = (phrase ?? word ?? '').replace(/\s+/g, ' ').trim();
+    if (term) terms.push(term);
+  }
+  return terms;
+}
+
+// A request's ?q=&col= -> { terms, col } ('' for any of the labels), or null when nothing was typed
+export function parseLookup(query, labels) {
+  const terms = lookupTerms(query.q);
+  if (!terms.length) return null;
+  return { terms, col: labels.includes(query.col) ? query.col : '' };
+}
+
+const looseText = value => String(value ?? '').toLowerCase().replace(/\s+/g, ' ');
+
+// texts: { column label: what the list shows in it }
+export function lookupMatches(texts, { terms, col }) {
+  const values = (col ? [texts[col]] : Object.values(texts)).map(looseText);
+  return terms.every(term => values.some(v => v.includes(term)));
+}
+
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// "2026-08-14 08:44:55" -> "Aug 14, 2026, 8:44 AM 2026-08-14 08:44:55": the date as
+// the page shows it, and as the data writes it, so either can be looked up
+export function openedText(raw) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}):(\d{2}))?/.exec(String(raw || ''));
+  if (!m) return String(raw || '');
+  const hour = Number(m[4]);
+  const time = m[4] === undefined ? '' : `, ${hour % 12 || 12}:${m[5]} ${hour < 12 ? 'AM' : 'PM'}`;
+  return `${SHORT_MONTHS[Number(m[2]) - 1]} ${Number(m[3])}, ${m[1]}${time} ${raw}`;
+}
+
+// What a list shows in a column where a ticket has nothing, so no cell is left
+// blank (public/app.js blankText shows the same words)
+export function blankText(column, t) {
+  if (t.missing) return '';
+  const requestOrTask = t.kind === 'RITM' || t.kind === 'SCTASK';
+  if (column === 'Priority / Risk') return requestOrTask ? 'No priority' : 'Not recorded';
+  if (column === 'Team') return t.kind === 'RITM' ? 'No team (no catalog tasks)' : 'Not recorded';
+  if (column === 'Summary') return 'No summary';
+  return 'Not recorded';
 }
 
 // The ticket numbers anywhere in a set of result rows, in the order they appear

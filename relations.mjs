@@ -19,7 +19,7 @@
 // TICKET_NUMBER, never from model output.
 // =====================================================================
 
-import { TICKET_KINDS, toTicket, prefixOf } from './tickets.mjs';
+import { TICKET_KINDS, toTicket, prefixOf, priorityRank } from './tickets.mjs';
 
 const TICKET_NUMBER = /^(INC|CHG|RITM|SCTASK)\d{7}$/;
 const MAX_TICKETS = 500;      // tickets looked at per request
@@ -505,4 +505,92 @@ export async function familyOf(kind, anchor, runQuery) {
   const fixes = fixesNumber ? (await queryTickets('INC', [['number', [fixesNumber]]], runQuery)) : [];
   const fixed = fixesNumber ? [fixes[0] || missing(fixesNumber, 'Incident')] : [];
   return fixed.length || caused.length ? changeFamily(anchor, change[0], fixed, caused, wanted) : null;
+}
+
+// =====================================================================
+// A FAMILY'S ROW on the Ticket families page: its anchor ticket's own
+// summary, state, priority, team and opening date when it is a ticket this
+// person may see. Otherwise (an order, a problem record, or a parent that
+// isn't theirs) the same, made from the family's tickets they may see: the
+// commonest summary and team, each state with how many have it, the most
+// urgent priority, and when the first was opened. From the ticket index
+// (tickets.mjs), so a whole list sorts and is looked up without asking Cube.
+// =====================================================================
+
+// What a family holds besides its anchor, as the page names it
+export const FAMILY_CHILD_NOUNS = {
+  'parent-incident': ['child incident', 'child incidents'], 'bundle-request': ['child request', 'child requests'],
+  'request-tasks': ['catalog task', 'catalog tasks'], order: ['request', 'requests'],
+  problem: ['linked ticket', 'linked tickets'], 'change-incident': ['linked incident', 'linked incidents'],
+};
+
+let membersFor = null; // { index, byKind: Map(kind -> Map(anchor -> [ticket])) }, built once per index
+
+// Each family's tickets besides its anchor (for an order or a problem, all of them)
+function familyMembersByKind(index) {
+  if (membersFor?.index === index) return membersFor.byKind;
+  const byKind = new Map(FAMILY_KINDS.map(kind => [kind, new Map()]));
+  const add = (kind, anchor, t) => {
+    if (!anchor || !t) return;
+    const families = byKind.get(kind);
+    if (!families.has(anchor)) families.set(anchor, []);
+    families.get(anchor).push(t);
+  };
+  for (const t of index.values()) {
+    const links = t.links || {};
+    if (t.kind === 'INC') {
+      add('parent-incident', links.parentIncident, t);
+      add('problem', links.problem, t);
+      add('change-incident', links.causedByChange, t);
+    } else if (t.kind === 'CHG') {
+      add('problem', links.problem, t);
+      add('change-incident', t.number, links.fixesIncident && index.get(links.fixesIncident));
+    } else if (t.kind === 'RITM') {
+      add('bundle-request', links.bundle, t);
+      add('order', t.parent, t);
+    } else if (t.kind === 'SCTASK') {
+      add('request-tasks', t.parent, t);
+    }
+  }
+  membersFor = { index, byKind };
+  return byKind;
+}
+
+// The values, most common first: [[value, how many]]
+function commonest(values) {
+  const counts = new Map();
+  for (const v of values) if (v) counts.set(v, (counts.get(v) || 0) + 1);
+  return [...counts].sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])));
+}
+
+// One row's values for a family's tickets taken together
+function rowFromTickets(tickets) {
+  const summaries = commonest(tickets.map(t => t.summary));
+  const states = commonest(tickets.map(t => t.state));
+  const teams = commonest(tickets.map(t => t.team));
+  const urgent = tickets.filter(t => t.level).sort((a, b) => priorityRank(a) - priorityRank(b))[0];
+  const others = (list, one, many) => (list.length > 1 ? ` (and ${list.length - 1} other ${list.length === 2 ? one : many})` : '');
+  return {
+    kind: commonest(tickets.map(t => t.kind))[0]?.[0] || '',
+    summary: summaries.length ? summaries[0][0] + others(summaries, 'summary', 'summaries') : '',
+    state: states.length === 1 ? states[0][0]
+      : states.slice(0, 3).map(([state, n]) => `${state} (${n})`).join(', ') + (states.length > 3 ? `, and ${states.length - 3} more` : ''),
+    level: urgent?.level || '',
+    rank: urgent ? priorityRank(urgent) : null,
+    team: teams.length ? teams[0][0] + others(teams, 'team', 'teams') : '',
+    opened: tickets.map(t => t.opened).filter(Boolean).sort()[0] || '',
+    count: tickets.length,
+  };
+}
+
+// -> { kind, summary, state, level, rank, team, opened, count, from: 'anchor' | 'members' }.
+// canSee(number): whether this person may see that ticket.
+export function familyRow(kind, anchor, index, canSee) {
+  const own = index.get(anchor);
+  if (own && canSee(anchor)) {
+    const { kind: k, summary, state, level, team, opened } = own;
+    return { kind: k, summary, state, level, rank: level ? priorityRank(own) : null, team, opened, count: 1, from: 'anchor' };
+  }
+  const members = (familyMembersByKind(index).get(kind)?.get(anchor) || []).filter(t => canSee(t.number));
+  return { ...rowFromTickets(members), from: 'members' };
 }

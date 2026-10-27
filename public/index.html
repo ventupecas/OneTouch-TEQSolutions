@@ -71,6 +71,14 @@
                 <!-- Admins and anyone on a team (teams.js) -->
                 <button class="tab-btn" data-tab="teams" id="teams-tab" onclick="switchTab('teams')" hidden>👥 Team</button>
             </nav>
+            <!-- The AI assistant: a question typed here is asked in the chat; with nothing typed, the chat opens (app.js) -->
+            <form class="nav-ask" id="nav-ask" role="search" aria-label="Ask Claude about the data" onsubmit="event.preventDefault(); askFromHeader();">
+                <input type="search" id="nav-ask-input" placeholder="Ask Claude about the data…" autocomplete="off" enterkeyhint="send"
+                       aria-label="Ask Claude a question about the data" aria-controls="assistant-panel" aria-expanded="false" maxlength="2000">
+                <button type="submit" class="nav-ask-btn" id="nav-ask-btn" title="Ask Claude. With nothing typed, this opens the chat">
+                    💬 Ask<span class="nav-ask-count" id="nav-ask-count" hidden></span>
+                </button>
+            </form>
         </div>
         <div class="header-right">
             <button type="button" class="header-btn notify-btn" id="notify-btn" onclick="toggleNotifications()"
@@ -145,28 +153,16 @@
                 <p class="home-status home-empty" id="home-empty" hidden>Your Home page is empty. Click <b>Customize Home</b> to add sections or charts.</p>
 
                 <div class="home-blocks waiting" id="home-blocks">
-                    <!-- The AI assistant: an example question, and the open / delete chat buttons -->
-                    <section class="home-block" data-block="assistant">
-                        <div class="search-guide">
-                            <div class="guide-card">
-                                <span class="guide-title">💬 Any question about the data</span>
-                                <span class="guide-text">In plain English. The AI assistant answers with a table you can download, and remembers the conversation for follow-ups.</span>
-                                <button type="button" class="guide-example" data-example="How many open incidents are there by priority?">How many open incidents are there by priority?</button>
-                                <div class="chat-controls">
-                                    <button type="button" class="home-action" id="open-chat-btn" onclick="toggleAssistant(true)"
-                                            aria-controls="assistant-panel" aria-expanded="false">💬 Open chat</button>
-                                    <button type="button" class="home-action danger" id="delete-chat-btn" hidden onclick="deleteChat()">🗑 Delete chat</button>
-                                </div>
-                            </div>
-                        </div>
-                    </section>
-
-                    <!-- Your tickets: the ones assigned to you, Ticket results and starred tickets -->
+                    <!-- Your tickets: the ones assigned to you (as a list and in charts), Ticket results and starred tickets -->
                     <section class="home-block" data-block="tickets">
                         <div class="home-modes" role="tablist" aria-label="Your tickets">
                             <button type="button" role="tab" class="home-mode active" data-mode="assigned" aria-selected="true" aria-controls="home-assigned" onclick="setHomeMode('assigned')">
                                 <span class="home-mode-name">📋 Assigned to me <span class="star-count" id="assigned-count" hidden>0</span></span>
                                 <span class="home-mode-desc">Highest priority first, then oldest</span>
+                            </button>
+                            <button type="button" role="tab" class="home-mode" data-mode="charts" aria-selected="false" aria-controls="home-charts" onclick="setHomeMode('charts')">
+                                <span class="home-mode-name">📊 My charts</span>
+                                <span class="home-mode-desc">The tickets assigned to you, in charts</span>
                             </button>
                             <!-- Project managers and admins: their team's families and each one's KPIs -->
                             <button type="button" role="tab" class="home-mode" data-mode="families" id="kpi-families-tab" aria-selected="false" aria-controls="home-families" onclick="setHomeMode('families')" hidden>
@@ -185,6 +181,10 @@
 
                         <div class="home-panel" id="home-assigned" role="tabpanel">
                             <div class="home-result" id="assigned-result" aria-live="polite"></div>
+                        </div>
+
+                        <div class="home-panel" id="home-charts" role="tabpanel" hidden>
+                            <div class="home-result" id="my-charts-result"></div>
                         </div>
 
                         <div class="home-panel" id="home-families" role="tabpanel" hidden>
@@ -322,7 +322,7 @@
             </div>
         </section>
 
-        <!-- AI ASSISTANT, opened from the bar in the header; floats over any page -->
+        <!-- AI ASSISTANT, opened from the Ask bar in the header; floats over any page, and a click outside it closes it -->
         <div class="assistant-backdrop" id="assistant-backdrop" onclick="toggleAssistant(false)"></div>
         <section class="assistant-panel" id="assistant-panel" aria-label="AI Assistant">
             <div class="assistant-head">
@@ -330,7 +330,7 @@
                 <div class="assistant-head-actions">
                     <button type="button" class="assistant-minimize" id="chat-history-btn" onclick="toggleChatHistory()" aria-expanded="false" aria-controls="chat-history" title="Your saved chats: open one to see it again and carry on where you left off">Chat History</button>
                     <button type="button" class="assistant-delete" onclick="deleteChat()" title="Delete this conversation: its questions and answers disappear, it leaves Chat History, and the assistant forgets it">🗑 Delete chat</button>
-                    <button type="button" class="assistant-minimize" onclick="toggleAssistant(false)" title="Close the chat (the conversation is kept; Open chat on Home brings it back)">Minimize ▴</button>
+                    <button type="button" class="assistant-minimize" onclick="toggleAssistant(false)" title="Close the chat (the conversation is kept; the Ask bar at the top brings it back)">Minimize ▴</button>
                 </div>
             </div>
             <div class="chat-container">
@@ -535,6 +535,7 @@
     </div>
 
     <script src="sorting.js"></script>
+    <script src="lookup.js"></script>
     <script src="picker.js"></script>
     <script src="charts.js"></script>
     <script src="customize.js"></script>

@@ -209,6 +209,56 @@ body {
 .sign-out-btn:hover { color: var(--header-strong); border-color: var(--header-line-hover); }
 .sign-out-btn { flex-shrink: 0; }
 .header-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+/* The Ask bar, right of the page buttons: a question for the AI assistant from any page */
+.nav-ask { display: flex; align-items: stretch; min-width: 0; }
+.nav-ask input {
+    width: clamp(170px, 24vw, 360px);
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 5px 10px;
+    border: 1px solid var(--header-line);
+    border-right: none;
+    border-radius: 6px 0 0 6px;
+    background: color-mix(in srgb, var(--header-strong) 7%, transparent);
+    color: var(--header-strong);
+    font: inherit;
+    font-size: 0.9rem;
+}
+.nav-ask input::placeholder { color: var(--header-text); }
+.nav-ask input:hover { border-color: var(--header-line-hover); }
+.nav-ask input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
+.nav-ask-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border: 1px solid var(--accent);
+    border-radius: 0 6px 6px 0;
+    background: var(--accent);
+    color: var(--on-accent);
+    font-size: 0.9rem;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.nav-ask-btn:hover { filter: brightness(1.08); }
+.nav-ask-btn:focus-visible { outline: 2px solid var(--header-strong); outline-offset: 2px; }
+/* How many questions the open chat has */
+.nav-ask-count {
+    min-width: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--on-accent) 25%, transparent);
+    font-size: 0.75rem;
+    line-height: 18px;
+    text-align: center;
+}
+.nav-ask-count[hidden] { display: none; }
+/* On a header that is itself the accent color: a white button, and a white focus ring */
+:root[data-header="accent"] .nav-ask-btn { background: #ffffff; border-color: #ffffff; color: color-mix(in srgb, var(--accent) 70%, #000); }
+:root[data-header="accent"] .nav-ask-count { background: color-mix(in srgb, var(--accent) 18%, #fff); }
+:root[data-header="accent"] .nav-ask input:focus { outline-color: #ffffff; border-color: #ffffff; }
 .header-btn[aria-expanded="true"] { color: var(--header-strong); border-color: var(--header-line-hover); }
 
 /* The page that's showing (Home or Dashboards) lights up in the accent color */
@@ -460,14 +510,7 @@ body {
 }
 .home-welcome { margin: 0 0 12px; font-size: 1.6rem; }
 
-/* The AI assistant's card: what it does, an example question, open / delete chat */
-.search-guide {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 12px;
-    margin-bottom: 20px;
-    max-width: 720px;
-}
+/* A card on Home (Your dashboards) */
 .guide-card {
     display: flex;
     flex-direction: column;
@@ -478,26 +521,48 @@ body {
     padding: 14px 16px;
 }
 .guide-title { font-weight: 700; }
-.guide-text { font-size: 0.87rem; color: var(--text-2); line-height: 1.45; }
-.guide-example {
-    align-self: flex-start;
-    max-width: 100%;
-    margin-top: 2px;
-    background: var(--accent-softer);
-    border: 1px dashed var(--accent);
-    border-radius: 6px;
-    padding: 6px 10px;
-    color: var(--accent-ink);
-    font: inherit;
-    font-size: 0.85rem;
-    text-align: left;
-    cursor: pointer;
-    overflow-wrap: anywhere;
-}
-.guide-example::before { content: 'Try: '; color: var(--muted); }
-.guide-example:hover { background: var(--accent-soft); border-style: solid; }
-.chat-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
 .home-action.danger { color: var(--danger); }
+
+/* 🔍 Looking up a list's tickets by any of its columns (lookup.js) */
+.lookup-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 8px 0; font-size: 0.87rem; color: var(--text-2); }
+.lookup-icon { font-size: 0.9rem; }
+.lookup-input {
+    flex: 0 1 320px;
+    min-width: 160px;
+    box-sizing: border-box;
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel-bg);
+    color: var(--text);
+    font: inherit;
+}
+.lookup-input:focus, .lookup-col:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
+.lookup-input::placeholder { color: var(--muted); }
+.lookup-in { display: inline-flex; align-items: center; gap: 6px; }
+.lookup-col { max-width: 220px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-bg); color: var(--text); font: inherit; }
+.lookup-count { color: var(--muted); font-size: 0.82rem; }
+/* A row the lookup hides (a long family's hidden rows show while something is typed) */
+tr.lookup-miss { display: none !important; }
+.family.collapsed table.looking tr.more-member { display: table-row; }
+
+/* A cell with nothing in the data says so (and why, on hover) */
+.blank { color: var(--muted); font-style: italic; }
+
+/* Assigned to me, showing only the tickets of a bar clicked in My charts */
+.drill-chip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 8px 0;
+    padding: 6px 10px;
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    background: var(--accent-softer);
+    font-size: 0.87rem;
+}
+.my-charts { margin-top: 12px; }
 .home-action.danger:hover { background: var(--danger-soft); border-color: var(--danger-line); }
 
 .home-modes {
@@ -1254,7 +1319,6 @@ tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
 /* Until this person's layout has loaded (no flash of the default one) */
 .home-blocks.waiting { visibility: hidden; }
 .home-block[data-block] { grid-column: 1 / -1; min-width: 0; }
-.home-block > .search-guide { margin-bottom: 0; }
 .home-block .home-modes { margin-bottom: 12px; }
 /* While customizing, each section is outlined and has its own buttons */
 .home.editing .home-block[data-block] { outline: 2px dashed var(--border); outline-offset: 6px; border-radius: 8px; }

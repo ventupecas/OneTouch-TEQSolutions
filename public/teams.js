@@ -15,7 +15,7 @@ const TEAM_KINDS = [['INC', 'Incidents'], ['CHG', 'Changes'], ['RITM', 'Requests
 const teamsView = {
     data: null,     // GET /api/teams: { teams, roles, people? }
     teamId: null,   // the team showing
-    filter: { assignee: '', kind: '', search: '' },
+    filter: { assignee: '', kind: '' }, // what's typed in the 🔍 box is the 'team-tickets' lookup (lookup.js)
     offset: 0,
     run: 0,         // bumped on every load, so an answer for an older view is dropped
 };
@@ -24,7 +24,7 @@ const teamsView = {
 function resetTeams() {
     teamsView.data = null;
     teamsView.teamId = null;
-    teamsView.filter = { assignee: '', kind: '', search: '' };
+    teamsView.filter = { assignee: '', kind: '' };
     teamsView.offset = 0;
     teamsView.run += 1;
     pickerPeople.clear();
@@ -114,9 +114,9 @@ function renderTeams() {
             `<label>Type <select id="team-filter-kind"><option value="">All types</option>` +
             TEAM_KINDS.map(([k, label]) => `<option value="${k}"${teamsView.filter.kind === k ? ' selected' : ''}>${label}</option>`).join('') +
             `</select></label>` +
-            `<label>Ticket number <input type="search" id="team-filter-search" value="${escapeHtml(teamsView.filter.search)}" placeholder="e.g. 1813970"></label>` +
-            `<button type="button" class="home-action" data-team-search>Search</button>` +
             `</div>` +
+            // Any of the list's columns; the server looks through all of the team's tickets
+            lookupBarHtml('team-tickets', Object.keys(TEAM_TICKET_SORT_KEYS), { mode: 'list' }) +
             (manage ? `<div class="team-bulk"><label><input type="checkbox" class="team-select-all"> Tick all on this page</label>` +
                 `<span>Give the ticked tickets to</span> ${personPickerHtml(team.id, undefined, 'Give the ticked tickets to', { attrs: 'id="team-bulk-to"' })}` +
                 `<button type="button" class="home-action" data-team-bulk>Assign</button></div>` : '') +
@@ -195,12 +195,13 @@ async function loadTeamTickets(quiet = false) {
     if (!team || !out) return;
     const run = ++teamsView.run;
     if (!quiet) out.innerHTML = '<p class="home-status">Loading tickets…</p>';
-    const q = new URLSearchParams({ offset: teamsView.offset, limit: TEAM_PAGE_SIZE, ...sortQuery('team-tickets', TEAM_TICKET_SORT_KEYS) });
+    const q = new URLSearchParams({ offset: teamsView.offset, limit: TEAM_PAGE_SIZE, ...sortQuery('team-tickets', TEAM_TICKET_SORT_KEYS), ...lookupQuery('team-tickets') });
     for (const [key, value] of Object.entries(teamsView.filter)) if (value) q.set(key, value);
     try {
         const data = await teamsFetch(`/api/teams/${team.id}/tickets?${q}`);
         if (!data || run !== teamsView.run) return;
         out.innerHTML = teamTicketsHtml(team, data);
+        setLookupCount('team-tickets', data.total, data.before ?? data.total);
         const all = document.querySelector('#teams .team-select-all');
         if (all) all.checked = false;
     } catch (err) {
@@ -209,15 +210,16 @@ async function loadTeamTickets(quiet = false) {
     }
 }
 
-// A heading: every ticket that matches, sorted by the server, from the first page
+// A heading, or a lookup: every ticket that matches, sorted or looked through by the server, from the first page
 pagedSorts['team-tickets'] = () => {
     teamsView.offset = 0;
-    loadTeamTickets(true);
+    return loadTeamTickets(true);
 };
+pagedLookups['team-tickets'] = pagedSorts['team-tickets'];
 
 function teamTicketsHtml(team, data) {
     if (!data.total) {
-        return `<p class="home-status">${teamsView.filter.assignee || teamsView.filter.kind || teamsView.filter.search
+        return `<p class="home-status">${teamsView.filter.assignee || teamsView.filter.kind || lookupActive('team-tickets')
             ? 'No tickets match.' : team.canManage ? 'This team has no tickets.' : 'No tickets are assigned to you yet.'}</p>`;
     }
     const manage = team.canManage;
@@ -235,9 +237,9 @@ function teamTicketsHtml(team, data) {
         return '<tr>' +
             (manage ? `<td class="select-cell"><input type="checkbox" class="team-select" value="${n}" aria-label="Tick ${n}"></td>` : '') +
             `<td class="ticket-cell"><button type="button" class="ticket-link" data-ticket="${n}" title="Open ${n}">${n}</button>${starButtonHtml(t.number)}</td>` +
-            `<td>${escapeHtml(t.type || '—')}</td>` +
-            `<td${summary.length > 100 ? ` title="${escapeHtml(summary)}"` : ''}>${escapeHtml(summary.length > 100 ? `${summary.slice(0, 97)}…` : summary || '—')}</td>` +
-            `<td>${escapeHtml(t.state || '—')}${reportLineHtml(t.report)}</td>` +
+            `<td>${t.type ? escapeHtml(t.type) : blankHtml('Type', t)}</td>` +
+            `<td${summary.length > 100 ? ` title="${escapeHtml(summary)}"` : ''}>${summary ? escapeHtml(summary.length > 100 ? `${summary.slice(0, 97)}…` : summary) : blankHtml('Summary', t)}</td>` +
+            `<td>${t.state ? escapeHtml(t.state) : blankHtml('State', t)}${reportLineHtml(t.report)}</td>` +
             `<td>${family}</td>` +
             `<td>${manage
                 ? personPickerHtml(team.id, t.assignee?.id ?? null, `Who has ${t.number}`, { attrs: `data-number="${n}"` })
@@ -396,7 +398,8 @@ document.getElementById('teams-view').addEventListener('click', e => {
     const pick = e.target.closest('[data-team-pick]');
     if (pick) {
         teamsView.teamId = Number(pick.dataset.teamPick);
-        teamsView.filter = { assignee: '', kind: '', search: '' };
+        teamsView.filter = { assignee: '', kind: '' };
+        listLookups.delete('team-tickets');
         teamsView.offset = 0;
         renderTeams();
         return;
@@ -414,12 +417,6 @@ document.getElementById('teams-view').addEventListener('click', e => {
     const page = e.target.closest('[data-team-page]');
     if (page) {
         teamsView.offset = Math.max(0, teamsView.offset + Number(page.dataset.teamPage) * TEAM_PAGE_SIZE);
-        loadTeamTickets();
-        return;
-    }
-    if (e.target.closest('[data-team-search]')) {
-        teamsView.filter.search = document.getElementById('team-filter-search').value.trim();
-        teamsView.offset = 0;
         loadTeamTickets();
         return;
     }
@@ -504,6 +501,5 @@ document.getElementById('teams-view').addEventListener('change', e => {
 
 document.getElementById('teams-view').addEventListener('keydown', e => {
     if (e.key !== 'Enter') return;
-    if (e.target.id === 'team-filter-search') document.querySelector('#teams [data-team-search]').click();
     if (e.target.id === 'family-find') findFamily();
 });

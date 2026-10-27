@@ -95,6 +95,25 @@ read once at start (`tickets.mjs` `loadTicketIndex`). That index only orders tic
 person may already see; it never decides what they see. Charts sort with their ⇅ menu,
 the builder's Order, or an answer's Order menu: by count or by their groups, either way.
 
+**Looking up** (`public/lookup.js`). Every ticket list has a 🔍 box that finds its
+tickets by any of its columns (or one picked column): every word must appear, "quoted
+words" stay together. Lists the page holds whole are looked up where they are; lists
+shown a page at a time look through all of their tickets, the Team tab, Team families
+and the Families page on the server (`?q=&col=`, `tickets.mjs` `lookupMatches`), only
+ever among the tickets that person may already see.
+
+**No blank cells.** Where the data has nothing, a list says why ("No priority" for
+requests and catalog tasks, "Not assigned", "No parent", …; `blankText` in `app.js` and
+`tickets.mjs`). A request's team is the team of its catalog tasks, and a request with no
+"requested for" shows who opened it. On the Families page, an order, a problem record or
+a parent that isn't the person's own gets its row from the family's tickets they may see
+(`relations.mjs` `familyRow`), never from a ticket they can't see.
+
+**My charts** (Home): the tickets assigned to that person, drawn by type, state, priority,
+KPIs, week opened and ServiceNow team, from the same list as "Assigned to me"; a click on a
+bar shows those tickets in "Assigned to me". **The AI assistant** is the Ask bar in the
+header (right of 👥 Team) on every page; a click anywhere outside the chat closes it.
+
 **Notifications** (`notifications.mjs`, the 🔔 in the header, checked every
 minute). Each one is saved in the same transaction as the change it reports:
 

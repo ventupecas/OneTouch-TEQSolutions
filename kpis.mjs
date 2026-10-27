@@ -239,6 +239,9 @@ export async function ticketKpis(numbers, runCubeQuery) {
 // One family's KPIs: its tickets taken together. members: [{ number, assigneeId }]
 // ---------------------------------------------------------------------
 
+// { INC: 2, CHG: 1 } -> "2 incidents, 1 change"
+export const kindsText = kinds => Object.entries(kinds).map(([k, n]) => `${n} ${KIND_NAMES[k][n === 1 ? 0 : 1]}`).join(', ');
+
 function familySummary(members, d) {
   const tickets = members.map(m => d.tickets.get(m.number)).filter(Boolean);
   const open = tickets.filter(t => t.open);
@@ -255,7 +258,7 @@ function familyKpis(members, d, summary = familySummary(members, d)) {
   const { tickets, open, kinds } = summary;
   const { asOf, typical } = d;
   const list = [];
-  const mix = Object.entries(kinds).map(([k, n]) => `${n} ${KIND_NAMES[k][n === 1 ? 0 : 1]}`).join(', ');
+  const mix = kindsText(kinds);
   list.push(kpi('tickets', 'Tickets', tickets.length, 'info', mix));
   const closed = tickets.length - open.length;
   list.push(kpi('progress', 'Closed', `${closed} of ${tickets.length}`, open.length ? 'warn' : 'good',
@@ -317,9 +320,10 @@ export const attention = list => list.reduce((n, k) => n + (k.tone === 'bad' ? 1
 // families: Map(id -> { id, size, members }). status: 'open' | 'all';
 // linked: only families of 2 or more tickets. sort: 'family' (its first
 // ticket's number), 'size' or 'kpis' (how much needs attention), with dir
-// 'asc' | 'desc', instead of the most urgent first.
-// -> { asOf, counts: { open, all }, total, families: [{ id, size, kinds, open, kpis }] } (one page)
-export async function teamFamilyKpis(families, { status = 'open', linked = true, offset = 0, limit = 25, sort = null, dir = 'asc' }, runCubeQuery) {
+// 'asc' | 'desc', instead of the most urgent first. matches({ id, size, kinds, kpis }):
+// only the families it says yes to (a lookup typed over the list).
+// -> { asOf, counts: { open, all }, total, before (total before the lookup), families: [{ id, size, kinds, open, kpis }] } (one page)
+export async function teamFamilyKpis(families, { status = 'open', linked = true, offset = 0, limit = 25, sort = null, dir = 'asc', matches = null }, runCubeQuery) {
   const d = data || await load(runCubeQuery);
   const rows = [];
   for (const f of families.values()) {
@@ -328,12 +332,14 @@ export async function teamFamilyKpis(families, { status = 'open', linked = true,
   }
   const counts = { open: rows.filter(r => r.s.open.length).length, all: rows.length };
   let shown = status === 'all' ? rows : rows.filter(r => r.s.open.length);
+  const before = shown.length;
   shown.sort((a, b) => (b.s.open.length ? 1 : 0) - (a.s.open.length ? 1 : 0)
     || a.s.rank - b.s.rank
     || (a.s.oldestOpen ?? Infinity) - (b.s.oldestOpen ?? Infinity)
     || b.f.size - a.f.size
     || a.f.id.localeCompare(b.f.id));
-  if (sort === 'kpis') for (const r of shown) r.kpis = familyKpis(r.f.members, d, r.s);
+  if (sort === 'kpis' || matches) for (const r of shown) r.kpis = familyKpis(r.f.members, d, r.s);
+  if (matches) shown = shown.filter(r => matches({ id: r.f.id, size: r.f.size, kinds: r.s.kinds, kpis: r.kpis }));
   const valueOf = { family: r => r.f.id, size: r => r.f.size, kpis: r => attention(r.kpis) }[sort];
   if (valueOf) shown = sortRows(shown, valueOf, dir);
   const page = shown.slice(offset, offset + limit);
@@ -341,6 +347,7 @@ export async function teamFamilyKpis(families, { status = 'open', linked = true,
     asOf: new Date(d.asOf).toISOString(),
     counts,
     total: shown.length,
+    before,
     families: page.map(({ f, s, kpis }) => ({ id: f.id, size: f.size, kinds: s.kinds, open: s.open.length, kpis: kpis || familyKpis(f.members, d, s) })),
   };
 }

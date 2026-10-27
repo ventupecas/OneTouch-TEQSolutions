@@ -20,8 +20,9 @@ const MAX_BYTES = 512 * 1024;
 
 const MODES = ['light', 'dark', 'system'];
 const HEADERS = ['dark', 'accent', 'light'];
-// Home's own sections, besides charts
-const HOME_SECTIONS = ['assistant', 'tickets', 'shortcuts'];
+// Home's own sections, besides charts. (The AI assistant's card moved to the
+// search bar in the header, so an "assistant" section saved before is dropped.)
+const HOME_SECTIONS = ['tickets', 'shortcuts'];
 const ID = /^[A-Za-z0-9_-]{1,40}$/;
 const DASHBOARD_KEY = /^[a-z0-9-]{1,60}$/;
 

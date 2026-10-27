@@ -16,8 +16,8 @@ import { buildExport, validateExport, ExportUnavailableError } from './export.mj
 import * as auth from './auth.mjs';
 import * as stars from './stars.mjs';
 import * as seen from './seen.mjs';
-import { findTickets, ticketRecord, ticketSummaries, ticketNumbersIn, ticketsByPriority, isOpen, priorityRank, STARRABLE, loadTicketIndex, TICKET_SORTS, sortRows } from './tickets.mjs';
-import { relatedFamilies, describeFamilies, ticketLinks, FAMILY_KINDS, LINK_KIND, familyList, familySummary, familyOf } from './relations.mjs';
+import { findTickets, ticketRecord, ticketSummaries, ticketNumbersIn, ticketsByPriority, isOpen, priorityRank, STARRABLE, loadTicketIndex, TICKET_SORTS, sortRows, parseLookup, lookupMatches, openedText, blankText } from './tickets.mjs';
+import { relatedFamilies, describeFamilies, ticketLinks, FAMILY_KINDS, LINK_KIND, familyList, familySummary, familyOf, familyRow, FAMILY_CHILD_NOUNS } from './relations.mjs';
 import * as prefs from './prefs.mjs';
 import { chartData, chartValues, chartCatalog, chartTickets, chartFromQuery, teamValues, ChartError } from './charts.mjs';
 import * as shares from './shares.mjs';
@@ -845,10 +845,33 @@ app.post('/api/tickets/related', async (req, res) => {
 // one family with all its members, and the families a ticket is in
 // =====================================================================
 
-// Each family row with its anchor's summary (null for an order or a problem record)
-async function withAnchors(rows, runQuery) {
-  const summaries = await ticketSummaries(rows.map(r => r.anchor), runQuery);
-  return rows.map(r => ({ ...r, ticket: summaries.get(r.anchor) || null }));
+// What each family's row shows (relations.mjs familyRow): its anchor ticket's own
+// summary, state, priority, team and opening date when this person may see it,
+// or else those of the family's tickets they may see. -> function(kind, family row)
+async function familyRows(req) {
+  const index = await loadTicketIndex(runCubeQuery);
+  const canSee = number => teams.canSeeTicket(req.scope, number);
+  const made = new Map();
+  return (kind, f) => {
+    const key = `${kind}|${f.anchor}`;
+    if (!made.has(key)) made.set(key, familyRow(kind, f.anchor, index, canSee));
+    return made.get(key);
+  };
+}
+
+// The Families page's columns, as the page shows them, for looking a family up
+const FAMILY_LOOKUP_COLUMNS = ['Parent', 'Summary', 'State', 'Priority / Risk', 'Team', 'Opened', 'Family'];
+function familyLookupTexts(kind, f, row) {
+  const [one, many] = FAMILY_CHILD_NOUNS[kind];
+  return {
+    Parent: f.anchor,
+    Summary: row.summary || blankText('Summary', row),
+    State: row.state || blankText('State', row),
+    'Priority / Risk': row.level || blankText('Priority / Risk', row),
+    Team: row.team || blankText('Team', row),
+    Opened: row.opened ? openedText(row.opened) : blankText('Opened', row),
+    Family: `${f.children.toLocaleString()} ${f.children === 1 ? one : many}`,
+  };
 }
 
 function familiesFailed(res, error) {
@@ -870,21 +893,23 @@ app.get('/api/families/find', async (req, res) => {
   const number = String(req.query.number || '').trim().toUpperCase();
   if (!STARRABLE.test(number)) return res.status(400).json({ error: 'Type a ticket number, like INC1813970, CHG1100098, RITM0440458 or SCTASK0595823.' });
   try {
-    const [links, found] = await Promise.all([ticketLinks([number], req.runQuery), ticketSummaries([number], req.runQuery)]);
+    const [links, found, rowOf] = await Promise.all([ticketLinks([number], req.runQuery), ticketSummaries([number], req.runQuery), familyRows(req)]);
     const rows = [];
     for (const f of links.get(number)?.families || []) {
       const kind = LINK_KIND[f.kind];
       const entry = (await familyList(kind, req.runQuery)).find(e => e.anchor === f.anchor);
-      if (entry) rows.push({ kind, ...entry });
+      if (entry) rows.push({ kind, ...entry, row: rowOf(kind, entry) });
     }
-    res.json({ number, known: found.has(number), families: await withAnchors(rows, req.runQuery) });
+    res.json({ number, known: found.has(number), families: rows });
   } catch (error) {
     familiesFailed(res, error);
   }
 });
 
 // ?sort=parent|summary|state|level|team|opened|size&dir=asc|desc&offset&limit
-// -> { total, families: one page of rows } (no sort: the biggest families first)
+// &q=<words>&col=<column>: only the families whose row shows those words
+// -> { total, before (the total before that lookup), families: one page of rows,
+// each with what it shows } (no sort: the biggest families first)
 app.get('/api/families/:kind', async (req, res) => {
   const kind = req.params.kind;
   if (!FAMILY_KINDS.includes(kind)) return res.status(400).json({ error: 'Unknown kind of family.' });
@@ -892,16 +917,15 @@ app.get('/api/families/:kind', async (req, res) => {
   const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 50));
   const by = req.query.sort;
   const dir = req.query.dir === 'desc' ? 'desc' : 'asc';
+  const lookup = parseLookup(req.query, FAMILY_LOOKUP_COLUMNS);
   try {
-    let list = await familyList(kind, req.runQuery);
+    const [all, rowOf] = await Promise.all([familyList(kind, req.runQuery), familyRows(req)]);
+    let list = lookup ? all.filter(f => lookupMatches(familyLookupTexts(kind, f, rowOf(kind, f)), lookup)) : all;
     if (by === 'parent') list = sortRows(list, f => f.anchor, dir);
     else if (by === 'size') list = sortRows(list, f => f.children, dir);
-    else if (['summary', 'state', 'level', 'team', 'opened'].includes(by)) {
-      // By what the parent's summary says (an order or a problem record isn't a ticket, so has none)
-      const index = await loadTicketIndex(runCubeQuery);
-      list = sortRows(list, f => (index.has(f.anchor) ? TICKET_SORTS[by](index.get(f.anchor)) : null), dir);
-    }
-    res.json({ kind, total: list.length, families: await withAnchors(list.slice(offset, offset + limit), req.runQuery) });
+    else if (by === 'level') list = sortRows(list, f => rowOf(kind, f).rank, dir);
+    else if (['summary', 'state', 'team', 'opened'].includes(by)) list = sortRows(list, f => rowOf(kind, f)[by], dir);
+    res.json({ kind, total: list.length, before: all.length, families: list.slice(offset, offset + limit).map(f => ({ ...f, row: rowOf(kind, f) })) });
   } catch (error) {
     familiesFailed(res, error);
   }
@@ -989,10 +1013,16 @@ app.get('/api/my-tickets', async (req, res) => {
   try {
     const numbers = await teams.assignedNumbers(req.user.id);
     const tickets = numbers.length ? await ticketsByPriority(numbers, req.runQuery) : [];
-    // How much each one's KPIs need attention, so the list sorts by them across every page
+    // How much each one's KPIs need attention, so the list sorts by them across every
+    // page, and what they say, so it can be looked up by them (the page draws them itself)
     const found = await kpis.ticketKpis(tickets.map(t => t.number), runCubeQuery)
       .catch(error => { console.error('📏 Could not work out the KPIs for sorting:', error.message); return { kpis: {} }; });
-    res.json({ tickets: tickets.map(t => ({ ...t, attention: found.kpis[t.number] ? kpis.attention(found.kpis[t.number]) : null })) });
+    res.json({
+      tickets: tickets.map(t => {
+        const list = found.kpis[t.number];
+        return { ...t, attention: list ? kpis.attention(list) : null, kpiText: list ? list.map(k => `${k.label} ${k.value}`).join(' · ') : '' };
+      }),
+    });
   } catch (error) {
     console.error('🎫 Could not load the tickets assigned to someone:', error.message);
     res.status(502).json({ error: 'Your tickets could not be loaded right now. Please try again.' });
@@ -1018,14 +1048,25 @@ app.post('/api/kpis/tickets', async (req, res) => {
   }
 });
 
+// The columns of Team families on Home, for looking a family up
+const TEAM_FAMILY_LOOKUP_COLUMNS = ['Family', 'Tickets', 'KPIs'];
+
 // ?team=<id> (admins; a project manager gets their own)&status=open|all&linked=0|1&offset&limit
-// &sort=family|size|kpis&dir=asc|desc -> one page of the team's families, most
-// in need of attention first (or in that sort), each with its KPIs
+// &sort=family|size|kpis&dir=asc|desc&q=<words>&col=<column> -> one page of the team's
+// families, most in need of attention first (or in that sort), each with its KPIs
 app.get('/api/kpis/families', async (req, res) => {
   try {
     const teamId = Number(req.query.team) || req.scope.access.team?.id;
     if (!teamId) return res.status(403).json({ error: 'You\'re not on a team, so there are no families to show.' });
     const families = await teams.teamFamilies(req.scope, teamId);
+    const lookup = parseLookup(req.query, TEAM_FAMILY_LOOKUP_COLUMNS);
+    // A family is named after its first ticket and that ticket's summary (the numbers were just checked)
+    const index = lookup ? await loadTicketIndex(runCubeQuery) : null;
+    const matches = lookup && (f => lookupMatches({
+      Family: `${f.id} ${index.get(f.id)?.summary || ''}`,
+      Tickets: `${f.size.toLocaleString()} ${f.size === 1 ? 'ticket' : 'tickets'} ${kpis.kindsText(f.kinds)}`,
+      KPIs: f.kpis.map(k => `${k.label} ${k.value}`).join(' · '),
+    }, lookup));
     const page = await kpis.teamFamilyKpis(families, {
       status: req.query.status === 'all' ? 'all' : 'open',
       linked: req.query.linked !== '0',
@@ -1033,6 +1074,7 @@ app.get('/api/kpis/families', async (req, res) => {
       limit: Math.min(Math.max(Number(req.query.limit) || 25, 1), 100),
       sort: ['family', 'size', 'kpis'].includes(req.query.sort) ? req.query.sort : null,
       dir: req.query.dir === 'desc' ? 'desc' : 'asc',
+      matches,
     }, runCubeQuery);
     // Each family is named after its first ticket (the numbers were just checked)
     const summaries = await ticketSummaries(page.families.map(f => f.id), runCubeQuery)
@@ -1297,30 +1339,42 @@ app.get('/api/teams', async (req, res) => {
   }
 });
 
-// ?assignee=<user id>|none&kind=INC&search=&offset&limit -> { total, tickets }:
+// The Team tab's ticket columns, for looking tickets up
+const TEAM_TICKET_LOOKUP_COLUMNS = ['Ticket', 'Type', 'Summary', 'State', 'Family', 'Assigned to'];
+
+// ?assignee=<user id>|none&kind=INC&q=<words>&col=<column>&offset&limit -> { total, before, tickets }:
 // one page of a team's tickets with who has each one, and each one's summary
 // ...&sort=number|type|summary|state|family|assignee&dir=asc|desc: every match in that order, then the page
 const TEAM_TICKET_SORTS = ['number', 'type', 'summary', 'state', 'family', 'assignee'];
 app.get('/api/teams/:id/tickets', async (req, res) => {
   try {
+    const lookup = parseLookup(req.query, TEAM_TICKET_LOOKUP_COLUMNS);
     let sort = null;
+    // What each ticket's summary says (these numbers are checked by teamTickets before they're sorted or looked up)
+    const index = lookup || ['type', 'summary', 'state'].includes(req.query.sort) ? await loadTicketIndex(runCubeQuery) : null;
     if (TEAM_TICKET_SORTS.includes(req.query.sort)) {
       const by = req.query.sort;
-      // What the ticket's summary says (these numbers are checked by teamTickets before they're sorted)
-      const index = ['type', 'summary', 'state'].includes(by) ? await loadTicketIndex(runCubeQuery) : null;
       sort = {
         by, dir: req.query.dir === 'desc' ? 'desc' : 'asc',
         valueOf: number => (by === 'number' ? number : index.has(number) ? TICKET_SORTS[by](index.get(number)) : null),
       };
     }
+    const matches = lookup && (r => {
+      const t = index.get(r.number) || {};
+      return lookupMatches({
+        Ticket: r.number, Type: t.type, Summary: t.summary || blankText('Summary', t), State: t.state || blankText('State', t),
+        Family: r.familySize > 1 ? `${r.familySize.toLocaleString()} linked tickets` : 'On its own',
+        'Assigned to': r.assignee || 'Not assigned',
+      }, lookup);
+    });
     const page = await teams.teamTickets(req.scope, Number(req.params.id), {
-      assignee: req.query.assignee || null, kind: req.query.kind || null, search: req.query.search || '',
+      assignee: req.query.assignee || null, kind: req.query.kind || null, matches,
       offset: req.query.offset, limit: req.query.limit, sort,
     });
     // The numbers are already this person's to see, so their summaries come straight from Cube
     const summaries = await ticketSummaries(page.tickets.map(t => t.number), runCubeQuery)
       .catch(error => { console.error('👥 Could not load ticket summaries:', error.message); return new Map(); });
-    res.json({ total: page.total, tickets: page.tickets.map(t => ({ ...summaries.get(t.number), ...t })) });
+    res.json({ total: page.total, before: page.before, tickets: page.tickets.map(t => ({ ...summaries.get(t.number), ...t })) });
   } catch (error) {
     teamsFailed(res, error, 'Loading the team\'s tickets');
   }

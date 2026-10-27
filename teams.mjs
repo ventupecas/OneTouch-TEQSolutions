@@ -516,7 +516,10 @@ export async function assignedNumbers(userId) {
 // sort: { by, dir: 'asc' | 'desc', valueOf } orders every match before the
 // page is cut: by 'family' (its size), 'assignee' (their name), or anything
 // else through valueOf(number) (the ticket's summary, from server.mjs).
-export async function teamTickets(scope, teamId, { assignee = null, kind = null, search = '', offset = 0, limit = 50, sort = null } = {}) {
+// matches({ number, familySize, assignee }): only the tickets it says yes to (a
+// lookup typed over the list; assignee is a name or null). -> { total, before
+// (the total before that lookup), tickets: one page }
+export async function teamTickets(scope, teamId, { assignee = null, kind = null, matches = null, offset = 0, limit = 50, sort = null } = {}) {
   if (!canManage(scope, teamId)) {
     if (scope.access.team?.id !== teamId) throw new AccessError('That is not your team.');
     assignee = scope.access.userId;
@@ -526,8 +529,6 @@ export async function teamTickets(scope, teamId, { assignee = null, kind = null,
   if (assignee === 'none') where.push('a.assignee_id IS NULL');
   else if (assignee) { params.push(Number(assignee)); where.push(`a.assignee_id = $${params.length}`); }
   if (PREFIXES.includes(kind)) { params.push(`${kind}%`); where.push(`a.number LIKE $${params.length}`); }
-  const text = String(search || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20);
-  if (text) { params.push(`%${text}%`); where.push(`a.number LIKE $${params.length}`); }
 
   // Every match (a team has about 10,000 tickets at most), so a sort covers them all
   const { rows: all } = await pool.query(
@@ -537,12 +538,14 @@ export async function teamTickets(scope, teamId, { assignee = null, kind = null,
       WHERE ${where.join(' AND ')}
       ORDER BY f.size DESC, a.family_id, a.number`,
     params);
-  let list = all;
+  let list = matches
+    ? all.filter(r => matches({ number: r.number, familySize: r.size, assignee: r.assignee_id ? personName(r) : null }))
+    : all;
   if (sort) {
     const valueOf = sort.by === 'family' ? r => r.size
       : sort.by === 'assignee' ? r => (r.assignee_id ? personName(r) : null)
         : r => sort.valueOf(r.number);
-    list = sortRows(all, valueOf, sort.dir);
+    list = sortRows(list, valueOf, sort.dir);
   }
   const start = Math.max(Number(offset) || 0, 0);
   const rows = list.slice(start, start + Math.min(Math.max(Number(limit) || 50, 1), 200));
@@ -555,6 +558,7 @@ export async function teamTickets(scope, teamId, { assignee = null, kind = null,
   const latest = new Map(reports.map(r => [r.number, r]));
   return {
     total: list.length,
+    before: all.length,
     tickets: rows.map(r => {
       const report = latest.get(r.number);
       return {

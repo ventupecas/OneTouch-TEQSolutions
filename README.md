@@ -263,25 +263,31 @@ speed matters less than you might expect.
 ### Home page and the AI assistant
 
 The header is one row: the OneTouch logo and name, the signed-in person's name, then the
-**🏠 Home** and **📈 Dashboards** buttons. The one for the page you're on lights up green
-(or in your own accent color; see [Making it your own](#making-it-your-own-colors-home-and-your-own-dashboards)).
-**🎨 Colors** and **Sign out** are at the right. Clicking **Home**, the logo or the name
+**🏠 Home**, **📈 Dashboards** and **👥 Team** buttons, and right of them the **Ask Claude
+about the data…** bar (the AI assistant, on every page). The button for the page you're on
+lights up green (or in your own accent color; see [Making it your own](#making-it-your-own-colors-home-and-your-own-dashboards)).
+**🔔**, **🎨 Colors** and **Sign out** are at the right. Clicking **Home**, the logo or the name
 **OneTouch** goes back to Home from anywhere, closing the AI chat, the colors panel or the
 dashboards drawer if one is open. On a phone, the buttons wrap onto more lines.
 
 After signing in, people land on **Home**: "Welcome, *first name*!" in the top-left corner,
-then the **💬 Any question about the data** card, then **Ticket results** and **Starred
-tickets** (everything you've starred, newest first). That is the default order; each
-person can change it with **✏️ Customize Home**.
+then their tickets: **📋 Assigned to me**, **📊 My charts** (the same tickets drawn as charts),
+**👪 Team families** (project managers and admins), **Ticket results** and **Starred
+tickets** (everything you've starred, newest first). Each person can add charts and
+dashboard shortcuts with **✏️ Customize Home**.
 
-**The AI assistant** is reached from that card:
+**The AI assistant** is the **Ask Claude about the data…** bar in the header, right of the
+**👥 Team** button, on every page (**/** jumps to it):
 
-- **Try: How many open incidents are there by priority?** asks that question and opens the
-  chat over the page with the answer. Ask anything else in plain English in the chat's own
-  box, including follow-ups.
-- **💬 Open chat** opens the chat, empty or with the conversation so far. Its label counts
-  the questions asked, e.g. **Open chat (3)**.
-- **🗑 Delete chat**, in the card and at the top of the chat, deletes the conversation. It
+- Type a question in plain English, like "How many open incidents are there by priority?",
+  and press **Enter** (or **💬 Ask**). The chat opens over the page with the answer. Ask
+  follow-ups in the chat's own box.
+- **💬 Ask** with nothing typed opens the chat, empty or with the conversation so far. A
+  small count on it says how many questions the open conversation has.
+- **A click anywhere outside the chat closes it**, the header included (a click on
+  Dashboards, 🔔 or Colors closes the chat and does its own job at once). The conversation
+  is kept. Windows opened from the chat (a ticket, a chart's tickets) don't close it.
+- **🗑 Delete chat**, at the top of the chat, deletes the conversation. It
   asks first, then the questions and answers disappear, the assistant forgets the
   conversation, it leaves **Chat History**, and the chat closes ("Chat deleted"). An
   answer still on its way is dropped. **New chat**, next to **Ask Claude**, starts a fresh
@@ -289,6 +295,28 @@ person can change it with **✏️ Customize Home**.
 - **Chat History**, at the top of the chat, lists your saved chats, newest first. Click
   one to see its questions and answers again and carry on asking follow-ups; 🗑 deletes it.
 - **Minimize** (or Escape) closes the chat and keeps the conversation.
+
+**Every ticket list has a 🔍 Look up box** above it (Assigned to me, a family's tickets,
+Ticket results, Starred tickets, the families in a ticket's record, the AI's answers, a
+chart's tickets, the Team tab and the Ticket families page). It finds tickets by anything
+their columns show: in **every column**, or in the one picked next to the box. Every word
+typed must appear ("change high" finds changes with a high risk); "words in quotes" stay
+together; a date can be typed as shown ("Sep 1, 2026") or as the data writes it
+(2026-09-01). Lists shown a page at a time look through all of their tickets (the server
+does it for the Team tab, Team families and the Families page). Escape empties the box.
+The box remembers what's typed until you sign out.
+
+**No cell is left blank.** Where the data has nothing, the cell says why (hover for more):
+requests and catalog tasks show **No priority** (they have none in ServiceNow), a ticket
+nobody was assigned **Not assigned**, a ticket with no parent **No parent**, and so on. A
+request's **Team** is the team doing its catalog tasks ("No team (no catalog tasks)" when it
+has none), and a request with no "requested for" shows who opened it ("*name* (opened it)").
+
+**📊 My charts** draws the tickets assigned to you: by type, state, priority or risk, how
+their KPIs look, when they were opened (week by week), and the ServiceNow team that worked
+them. Pick open, closed or all; hover a bar or slice for its numbers; **▦** shows a chart as
+a table; a click on a bar or slice opens **Assigned to me** with only those tickets (and
+**✕ Show them all** to go back).
 
 **Ticket results** is every ticket the AI assistant has shown you, newest first. When an
 answer lists tickets, they appear at the top of the list automatically, highlighted, and a
@@ -558,9 +586,15 @@ of OneTouch, not Metabase, so it works the same for everyone and opens where you
   incidents** (106).
 - **One row per family**, biggest first: the parent (or the order, problem or change), its
   summary, state, priority or risk, team, when it was opened, and how many it holds ("212
-  child incidents"). Click any heading to sort every family of the tab by it (the server
-  sorts them all, not just the rows showing), again for the other way, and a third time for
-  biggest first again. 50 rows at a time, then **Show 50 more**.
+  child incidents"). Every column is filled in. An order or a problem record isn't a ticket,
+  and a parent may belong to someone else (people only see their own tickets), so those rows
+  are made from the family's tickets you may see: the commonest summary and team, each state
+  with how many have it ("Closed (769), Resolved (95)"), the most urgent priority ("P2 - High
+  (highest)") and when the first was opened, with a line saying so ("From its 18 requests").
+  Click any heading to sort every family of the tab by it (the server sorts them all, not
+  just the rows showing), again for the other way, and a third time for biggest first again.
+  The 🔍 box looks up every family of the tab by any column. 50 rows at a time, then
+  **Show 50 more**.
 - **Click a row** to open the whole family under it: a line saying who the parent is ("INC1808293
   is the parent incident. Its 212 child incidents are listed under it"), what the members
   share and where they differ, the parent on the first row and every child under it (25,
@@ -661,7 +695,8 @@ own dashboards. People on no team see no tickets.
 
 **The 👥 Team tab** shows who's on your team and in what role. A project manager also sees
 how many incidents, changes, requests and catalog tasks each person has, and every ticket of
-the team with an **Assigned to** box on each. Type part of someone's name (first name, last
+the team with an **Assigned to** box on each (the 🔍 box above the list looks the team's
+tickets up by any column: number, type, summary, state, family or who has it). Type part of someone's name (first name, last
 name or username) and the team members who match drop down, each with their role and how
 many tickets they have; pick one with the arrow keys and Enter, or a click. A click on an
 empty box lists the whole team, "Not assigned" takes a ticket back, and Escape puts back who
@@ -802,12 +837,13 @@ it in the tab's `sessionStorage`, so:
 ## 2.2 The page around the tabs
 
 - **Header:** one row with the OneTouch logo and name (click either to go back to Home), the
-  signed-in person's display name (or their username if they have none), the **🏠 Home**
-  and **📈 Dashboards** buttons (the page you're on lights up in the accent color, green by
-  default), and **🎨 Colors** and **Sign out** at the right.
+  signed-in person's display name (or their username if they have none), the **🏠 Home**,
+  **📈 Dashboards** and **👥 Team** buttons (the page you're on lights up in the accent
+  color, green by default), the **Ask Claude about the data…** bar (the AI assistant), and
+  **🔔**, **🎨 Colors** and **Sign out** at the right.
 - **Home** is the first page after signing in: "Welcome, *first name*!" in the top-left
-  corner, the AI assistant's card (an example question, **Open chat**, **Delete chat**),
-  then ticket results and starred tickets (see
+  corner, then your tickets (Assigned to me, My charts, Team families, ticket results and
+  starred tickets; see
   [Home page and the AI assistant](#home-page-and-the-ai-assistant) in Part 1). Each person
   can reorder or hide those and add charts with **✏️ Customize Home** (see
   [Making it your own](#making-it-your-own-colors-home-and-your-own-dashboards)).
@@ -826,11 +862,12 @@ it in the tab's `sessionStorage`, so:
 
 ### Asking
 
-On Home, click **💬 Open chat** (or the example question) in the "Any question about the
-data" card. The chat opens over the page. Type a question in its box and press **Enter**
-or click **Ask Claude**. **Minimize ▴** or Escape closes it and keeps the conversation;
-**Open chat (*n*)** reopens it. **🗑 Delete chat** (at the top of the chat, or on Home)
-deletes the conversation after a confirmation, and Claude forgets it too. If you send
+Type a question in the **Ask Claude about the data…** bar in the header (on any page) and
+press **Enter**. The chat opens over the page with the answer; ask follow-ups in its own box
+(**Enter** or **Ask Claude**). A click anywhere outside the chat, **Minimize ▴** or Escape
+closes it and keeps the conversation; **💬 Ask** with nothing typed reopens it.
+**🗑 Delete chat** (at the top of the chat) deletes the conversation after a confirmation,
+and Claude forgets it too. If you send
 another question before the first answer arrives, it waits its turn: questions in one
 session always run in order.
 
@@ -14652,7 +14689,8 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 |---|---|
 | `server.mjs` | Express app (port 8000): sign-in routes, `/api/query` (one-shot translator with per-session conversation memory), `/api/export`, `/api/tickets/search` and `/api/stars` (home page), dashboards list, and a pass-through of Metabase public-dashboard pages |
 | `tickets.mjs` | Home page ticket search: parses INC/CHG/RITM/SCTASK/REQ numbers and builds its own Cube queries from them (never from model output); full records use Cube's `/meta` column list |
-| `relations.mjs` | Related tickets: from the link columns only (incident.parent_incident, sc_req_item.parent / request, sc_task.request_item, change_request.incident, incident.caused_by_change, *.problem), the families a ticket is in, with `same` / `differ` comparisons and every member (the page lists 25 but downloads all, via `familyExportTables` in app.js); one ticket gets all its families, a list only families 2+ of its tickets share. `POST /api/tickets/related` (conversation: true adds `describeFamilies` to Claude's pendingNote). The family builders (`parentIncidentFamily`, `bundleFamily`, …) are shared with the Ticket families page: `familyList` / `familySummary` / `familyOf` (`/api/families…`). `ticketLinks`: per ticket, its parent and families (`key` = kind:anchor, name, size) for the Ticket results / Starred lists, cached per ticket |
+| `relations.mjs` | Related tickets: from the link columns only (incident.parent_incident, sc_req_item.parent / request, sc_task.request_item, change_request.incident, incident.caused_by_change, *.problem), the families a ticket is in, with `same` / `differ` comparisons and every member (the page lists 25 but downloads all, via `familyExportTables` in app.js); one ticket gets all its families, a list only families 2+ of its tickets share. `POST /api/tickets/related` (conversation: true adds `describeFamilies` to Claude's pendingNote). The family builders (`parentIncidentFamily`, `bundleFamily`, …) are shared with the Ticket families page: `familyList` / `familySummary` / `familyOf` (`/api/families…`). `familyRow(kind, anchor, index, canSee)`: a page row's columns, the anchor's own if this person may see it, else made from the family's visible tickets (from the index's links); the route sorts and looks up by them. `ticketLinks`: per ticket, its parent and families (`key` = kind:anchor, name, size) for the Ticket results / Starred lists, cached per ticket |
+| `public/lookup.js` | The 🔍 box over every ticket list (`lookupBarHtml(list, labels, { mode, count, noun })`): every word must appear, in the picked column or any; "quotes" keep a phrase; same rules as `tickets.mjs` `lookupTerms` / `lookupMatches` on the server. Mode `rows`: the box sits right before the list's `.table-wrap` and hides non-matching rows (`tr.lookup-miss`, a `.row-detail` follows its row; cell text = its `title` or text, plus a raw date from `data-sort`), fired as `lookedup` so Ticket results / Starred tick-all only what shows. Mode `list`: the list registers `pagedLookups[name]` and redraws (Assigned to me and a family's tickets filter their data with `lookedUpTickets` + app.js `ticketLookupText`; Team families, the Team tab and the Families page send `lookupQuery(list)` = `q`/`col` to the server), then `restoreLookupFocus` gives the new box the keys. Named lists keep what's typed in `listLookups` (cleared on sign-out); `ticketTableHtml(…, { lookup })` adds a rows box to any list of 2+ |
 | `public/families.js` | The 👪 Ticket families page in the Dashboards tab (built into OneTouch: `showFamilies` / `hideFamilies`, remembered as `last: 'families'`) and the ticket window (`openTicketDialog`, with a back trail); ticket numbers clicked on that page, in that window or in a chart's ticket list (`openDrill`) open there, not on Home. Also `showRecordFamily(number)`: the family band (`#record-family`) above a Metabase incident / change / request record, called by app.js's `followDashboardFrame`; a ticket in it with a record page opens that page (`openInDashboards`), others the ticket window |
 | `stars.mjs` | Each person's starred tickets, in `onetouch_auth` (`starred_tickets`, created on start); `addStars` stars many at once ("Star all", `PUT /api/stars`) up to `MAX_STARS`; `removeStars` unstars many (`POST /api/stars/remove`: ticked rows, "Unstar by issue", "Unstar all"). `GET /api/stars?details=1` adds summaries, parents and families |
 | `seen.mjs` | Each person's "Ticket results": every ticket shown to them (`seen_tickets`, created on start). `/api/query` records the ticket numbers in each answer (`ticketNumbersIn`) before replying and returns them as `shownTickets`; `GET /api/seen-tickets` returns the list with summaries (`ticketSummaries`); `DELETE /api/seen-tickets` empties it ("Clear ticket results"), `POST /api/seen-tickets/remove` removes ticked rows (`removeSeen`); the list carries each ticket's parent and families (`ticketLinks`) |
@@ -14664,7 +14702,7 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 | `export.mjs` | Tables -> pdf/docx/xlsx/csv/txt/rtf, and zip/7z bundles (7-Zip). An optional `chart` (a PNG data URL the browser drew) goes above the tables in pdf/docx/xlsx/rtf and into archives; tables marked `note` stay out of CSV |
 | `auth.mjs` | Accounts and sessions in the `onetouch_auth` Postgres DB (its own role `onetouch_app`); scrypt hashes; `db/accounts.json` export/sync |
 | `remote.mjs` | "Remote mode" for clones: serves `public/` on localhost and forwards `/api`, `/public`, `/app` to a OneTouch server |
-| `public/` | The single-page UI (`index.html`, `app.js`, `style.css`); no build step. Home has the AI assistant's card (example question, Open chat, Delete chat; the chat opens as a panel over the page; ticket rows in its answers open in place into the record plus related tickets via `toggleTicketRow`; a record's families go above its fields: `showRelated(container, numbers, conversation, before)`, with `familyRoleLine` saying where the ticket sits and the anchor first. Ticket numbers in fields and answer cells are links via `ticketValueHtml`. Ticket results / Starred tickets have checkboxes (`selections`, `selectBarHtml`): ask the AI about the ticked ones (`askAboutTicked`), remove, unstar, or both (`unstarAndRemove`)), ticket results (a clicked ticket's record) and starred tickets; Dashboards is the other tab. Delete chat resets the server conversation and bumps `chatEpoch` so a late answer is dropped. `customize.js` (colors panel, Customize Home, My dashboards and their filter row, hiding team dashboards, the chart builder, the drill-down list, sharing, the tours of Home and of the Dashboards page (`TOURS`, `startTour(name)`, `maybeStartTour(name)`), saving preferences) and `charts.js` (SVG charts incl. several series, tooltips, table view, click-through via a box's `_pick`, pictures for downloads via `chartPicture` / `picturePng`) load before `app.js`; their start-up work (`buildThemePanel`, `buildBuilder`, `buildBoardFilters`) is called from `app.js` because they use its helpers. Every color in `style.css` is a variable (`:root`, `[data-theme="dark"]`, `[data-header=...]`); never hard-code one |
+| `public/` | The single-page UI (`index.html`, `app.js`, `style.css`); no build step. The AI assistant is the header's Ask bar (`#nav-ask`, `askFromHeader`: a question is asked in the chat, nothing typed opens it; "/" focuses it; a capturing `pointerdown` on the document closes the chat on any click outside it, header included, except inside a `<dialog>` or the tour; the chat opens as a panel over the page; ticket rows in its answers open in place into the record plus related tickets via `toggleTicketRow`; a record's families go above its fields: `showRelated(container, numbers, conversation, before)`, with `familyRoleLine` saying where the ticket sits and the anchor first. Ticket numbers in fields and answer cells are links via `ticketValueHtml`. Ticket results / Starred tickets have checkboxes (`selections`, `selectBarHtml`): ask the AI about the ticked ones (`askAboutTicked`), remove, unstar, or both (`unstarAndRemove`)), ticket results (a clicked ticket's record) and starred tickets; Dashboards is the other tab. Delete chat resets the server conversation and bumps `chatEpoch` so a late answer is dropped. `customize.js` (colors panel, Customize Home, My dashboards and their filter row, hiding team dashboards, the chart builder, the drill-down list, sharing, the tours of Home and of the Dashboards page (`TOURS`, `startTour(name)`, `maybeStartTour(name)`), saving preferences) and `charts.js` (SVG charts incl. several series, tooltips, table view, click-through via a box's `_pick`, pictures for downloads via `chartPicture` / `picturePng`) load before `app.js`; their start-up work (`buildThemePanel`, `buildBuilder`, `buildBoardFilters`) is called from `app.js` because they use its helpers. Every color in `style.css` is a variable (`:root`, `[data-theme="dark"]`, `[data-header=...]`); never hard-code one |
 | `db/` | `init-auth.sh`, `init-reporting.sh`, `reporting-views.sql` (typed `reporting.*` views for Metabase), `accounts.json` |
 | `scripts/users.mjs` | Account admin CLI (add, import CSV, export, sync, ...) |
 | `scripts/signin-links.mjs` | Prints a sign-in link per person (`…/#user=…&pass=…`, which `readSignInLink` in app.js fills into the form) from the import CSV plus the test accounts and warmup in `.env`. Its output holds passwords: the person running it reads it in their terminal; don't print it from an agent session |

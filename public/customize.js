@@ -12,7 +12,7 @@
 // ---------------------------------------------------------------------
 
 const THEME_DEFAULTS = { mode: 'light', accent: '#10a37f', header: 'dark' };
-const defaultHome = () => ({ blocks: [{ type: 'assistant' }, { type: 'tickets' }] });
+const defaultHome = () => ({ blocks: [{ type: 'tickets' }] });
 const defaultDashboards = () => ({ boards: [], hidden: [], last: '' });
 
 // tour: which tours have been seen (done: Home's; dashboards: the Dashboards page's)
@@ -39,7 +39,9 @@ function loadPreferences() {
             if (token !== sessionTokenValue) return; // signed out meanwhile
             const saved = data.preferences || {};
             prefs.theme = { ...THEME_DEFAULTS, ...saved.theme };
-            prefs.home = Array.isArray(saved.home?.blocks) ? saved.home : defaultHome();
+            // A section Home no longer has (the AI assistant's card, now the header's Ask bar) is left out
+            prefs.home = Array.isArray(saved.home?.blocks)
+                ? { ...saved.home, blocks: saved.home.blocks.filter(b => b?.type === 'chart' || HOME_SECTIONS[b?.type]) } : defaultHome();
             prefs.dashboards = { ...defaultDashboards(), ...saved.dashboards };
             prefs.tour = { done: saved.tour?.done === true, dashboards: saved.tour?.dashboards === true };
         } catch (err) {
@@ -467,12 +469,12 @@ document.addEventListener('click', e => {
 });
 
 // ---------------------------------------------------------------------
-// HOME LAYOUT: the AI assistant, your tickets, dashboard shortcuts and
-// your own charts, in the order you choose; "Customize Home" edits it
+// HOME LAYOUT: your tickets, dashboard shortcuts and your own charts, in the
+// order you choose; "Customize Home" edits it. (The AI assistant is the Ask
+// bar in the header, on every page.)
 // ---------------------------------------------------------------------
 
 const HOME_SECTIONS = {
-    assistant: '💬 AI assistant',
     tickets: '🎫 Your tickets',
     shortcuts: '📊 Your dashboards',
 };
@@ -1565,10 +1567,10 @@ window.addEventListener('hashchange', () => {
 const TOUR_STEPS = [
     { target: '.tab-navigation', title: 'Home and Dashboards',
         text: 'OneTouch has two pages. The one you are on lights up. The OneTouch logo also brings you back Home from anywhere.' },
-    { target: '[data-block="assistant"] .guide-card', title: 'Ask anything about the data',
-        text: 'Type a question in plain English, like "How many open incidents are there by priority?". Answers come back as tables you can switch to a chart, download (also as a picture), or save to a dashboard.' },
+    { target: '#nav-ask', title: 'Ask anything about the data',
+        text: 'Type a question in plain English here, on any page, like "How many open incidents are there by priority?", and press Enter. Claude answers in a chat over the page, with tables you can switch to a chart, download (also as a picture), or save to a dashboard. With nothing typed, the button opens your chat; a click anywhere outside the chat closes it. Press / to jump here.' },
     { target: '[data-block="tickets"]', title: 'Your tickets',
-        text: 'Every ticket the AI assistant shows you lands in Ticket results. Click ☆ to star one. Both are saved to your account.' },
+        text: 'The tickets assigned to you, as a list and in charts (📊 My charts), and every ticket the AI assistant shows you in Ticket results. Click ☆ to star one. Every list has a 🔍 box to look up its tickets by any of its columns.' },
     { target: '#customize-home-btn', title: 'Make Home yours',
         text: 'Move or hide these sections, and add charts of your own.' },
     { target: '.tab-btn[data-tab="dashboard"]', title: 'Dashboards: the team\'s and yours',
