@@ -1296,6 +1296,23 @@ person's account (a test's wrong password would count toward locking that person
 `warmup`, whose Ticket results the warm-up fills. Both accounts have the Home and Dashboards
 tours marked as seen; a test that needs a first visit resets that itself.
 
+**Demo tickets for presentations.** `db/demo-tickets.sql` adds 11 made-up tickets in 5
+families (a P2 packaging-line outage with 3 child incidents, a change with the incident it
+fixes, a laptop request with 2 catalog tasks, and 2 incidents on their own), on no team and
+assigned to nobody, ready to move to the Milwaukee Brewers test team during a demo (Team
+tab → **Move tickets to another team**, then pick Milwaukee Brewers) and hand out to its
+players. Their numbers (`INC9900001`…, `CHG9900001`, `RITM9900001`, `SCTASK9900001`…) are
+outside the export's range and every summary starts with "[Demo]". Running the script
+again resets the demo: the tickets go back on no team, unassigned, and their
+notifications, reports, stars and ticket results are cleared.
+`db/demo-tickets-remove.sql` takes them out for good. Both are piped to Postgres and need
+a restart, so OneTouch reads the tickets' KPIs:
+
+    Get-Content db\demo-tickets.sql | docker exec -i analytics_postgres psql -U admin -d analytics_db
+    docker restart analytics_node_app
+
+Remove them before seeding the teams again, or the seeding would put them on a real team.
+
 **How the accounts file merges.** Missing accounts are added. An existing account is
 overwritten only if the file's copy changed more recently, so an old file can't undo a
 newer password reset or deactivation. Accounts not in the file are left alone. A newer

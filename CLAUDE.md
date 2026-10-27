@@ -55,7 +55,10 @@ replacing that.
   Their passwords are random; set one with
   `docker exec -it analytics_node_app npm run users -- reset-password test.cyelich`.
   It starts with no tickets: an admin moves families to it with "Move tickets
-  to another team".
+  to another team". For presentations, `db/demo-tickets.sql` adds 11 made-up
+  "[Demo]" tickets in 5 families (numbers `…99000xx`, outside the export) on no
+  team, ready to move to the Brewers live; running it again resets them, and
+  `db/demo-tickets-remove.sql` removes them (restart the app after either).
 
 **Assigned to me** (Home's first tab, `GET /api/my-tickets`): everyone's
 OneTouch tickets, most urgent first, then oldest (`ticketsByPriority` in
