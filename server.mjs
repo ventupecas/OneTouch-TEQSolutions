@@ -16,7 +16,7 @@ import { buildExport, validateExport, ExportUnavailableError } from './export.mj
 import * as auth from './auth.mjs';
 import * as stars from './stars.mjs';
 import * as seen from './seen.mjs';
-import { findTickets, ticketRecord, ticketSummaries, ticketNumbersIn, ticketsByPriority, isOpen, priorityRank, STARRABLE, loadTicketIndex, TICKET_SORTS, sortRows, parseLookup, lookupMatches, openedText, blankText } from './tickets.mjs';
+import { findTickets, ticketRecord, ticketSummaries, ticketNumbersIn, ticketsByPriority, isOpen, priorityRank, STARRABLE, loadTicketIndex, TICKET_SORTS, sortRows, parseLookup, lookupMatches, openedText, blankText, inTheData, parseTicketNumbers } from './tickets.mjs';
 import { relatedFamilies, describeFamilies, ticketLinks, FAMILY_KINDS, LINK_KIND, familyList, familySummary, familyOf, familyRow, FAMILY_CHILD_NOUNS } from './relations.mjs';
 import * as prefs from './prefs.mjs';
 import { chartData, chartValues, chartCatalog, chartTickets, chartFromQuery, teamValues, ChartError } from './charts.mjs';
@@ -292,7 +292,7 @@ function scopedRunner(scope) {
   return run;
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families', '/api/notifications', '/api/my-tickets', '/api/kpis'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families', '/api/notifications', '/api/my-tickets', '/api/kpis', '/api/ticket-statuses', '/api/demo-tickets'], requireLogin);
 
 // Who is signed in (the page shows their display name), and what they may do
 app.get('/api/me', async (req, res) => {
@@ -667,6 +667,17 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
   try {
     console.log(`\n💬 Processing prompt: "${userPrompt}" (turn ${conversation.turns + 1})`);
 
+    // A question naming only tickets they don't have permission to see isn't
+    // answered, and isn't sent to Claude
+    const asked = await namedTickets(scope, ticketsNamedIn(userPrompt));
+    if (asked.forbidden.length && !asked.theirs.length) {
+      console.log(`🔒 Not answered: ${user.username} may not see ${asked.forbidden.join(', ')}`);
+      return reply.send(200, {
+        intent: 'denied', message: permissionDenied(asked.forbidden), assumptions: [], sections: [], results: [],
+        elapsedMs: Date.now() - started, fromCache: false,
+      });
+    }
+
     let parsed, memoryReset = false, fresh = null;
     if (cached) {
       // The conversation gets the original question and Claude's original reply,
@@ -712,27 +723,46 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
       });
     }
 
-    // One Cube query per ticket type, run side by side
+    // The tickets the question names, or its queries look for by number (a
+    // follow-up's "its parent"): none theirs and some in the data -> not answered
+    const named = await namedTickets(scope, [...asked.theirs, ...asked.forbidden, ...ticketsFilteredOn(verdict.queries)]);
+    if (named.forbidden.length && !named.theirs.length) {
+      console.log(`🔒 Not run: ${user.username} may not see ${named.forbidden.join(', ')}`);
+      conversation.pendingNote = `nothing was run: the user doesn't have permission to see ${listOf(named.forbidden)}, and was told so`;
+      if (fresh && cacheKey) rememberAnswer(cacheKey, fresh);
+      return reply.send(200, { intent: 'denied', message: permissionDenied(named.forbidden), assumptions: [], memoryReset, sections: [], results: [], ...timing() });
+    }
+
+    // One Cube query per ticket type, run side by side. Meanwhile: would they
+    // also find tickets the person can't see? (Named ones they can't are left out anyway.)
     reply.progress('querying');
     for (const q of verdict.queries) console.log(`🤖 Cube query [${q.entity}]:`, JSON.stringify(q.cubeQuery));
-    const sections = await Promise.all(verdict.queries.map(async q => ({
-      entity: q.entity,
-      rows: await runQuery(q.cubeQuery),
-    })));
+    const [sections, hiddenEach] = await Promise.all([
+      Promise.all(verdict.queries.map(async q => ({ entity: q.entity, rows: await runQuery(q.cubeQuery) }))),
+      named.forbidden.length ? verdict.queries.map(() => true) : hiddenTicketsMatch(verdict.queries, scope),
+    ]);
+    // true / false, or null when it couldn't be checked
+    const hidden = hiddenEach && hiddenEach.some(Boolean);
     // Nothing found: work out why (which filter emptied it, what dates the data
     // covers) and have Claude say so plainly, instead of a bare "no records".
     // A repeated question reuses the explanation it got the first time, for
     // the same set of visible tickets only (the reasons differ between people).
+    // A query that only found nothing because what matches isn't theirs needs no
+    // explaining: the permission notice says so (permissionNote).
     const emptyQueries = verdict.queries.filter((_, i) => isEmptyResult(sections[i].rows));
+    const toExplain = emptyQueries.filter(q => hiddenEach?.[verdict.queries.indexOf(q)] !== true);
     let explanation = cached?.explanations?.[scope.key] ?? null;
-    if (emptyQueries.length && !explanation && !scope.all && !scope.count) {
+    if (toExplain.length && !explanation && !scope.all && !scope.count) {
       // No tickets at all: nothing to diagnose, and no reason to ask Claude
       explanation = teams.scopeNote(scope);
-    } else if (emptyQueries.length && !explanation) {
+    } else if (toExplain.length && !explanation) {
       reply.progress('explaining');
       try {
-        const facts = (await Promise.all(emptyQueries.map(q => diagnoseEmpty(q.entity, q.cubeQuery, runQuery)))).flat();
-        if (!scope.all) facts.push(`This person only sees some tickets: ${teams.scopeNote(scope)}`);
+        const facts = (await Promise.all(toExplain.map(q => diagnoseEmpty(q.entity, q.cubeQuery, runQuery)))).flat();
+        // Checked: no ticket anywhere matches, so it isn't about permissions.
+        // Not checked: all that's known is that they only see some tickets.
+        if (!scope.all && hiddenEach) facts.push('No ticket in the whole data matches either, not even one this person cannot see: say plainly that the data has none, without mentioning permissions.');
+        else if (!scope.all) facts.push(`This person only sees some tickets: ${teams.scopeNote(scope)}`);
         console.log('🔎 Empty result facts:\n   ' + facts.join('\n   '));
         explanation = await explainEmpty({ anthropic, model: CLAUDE_MODEL, question: userPrompt, searchedFor: verdict.message, facts });
         console.log(`🔎 Explained: ${explanation}`);
@@ -741,8 +771,11 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
         console.error('🔎 Could not diagnose the empty result:', error.message);
       }
     }
-    if (!emptyQueries.length) explanation = null;
-    conversation.pendingNote = describeResults(sections) + (explanation ? ` What the user was told about the empty result: ${explanation}` : '');
+    if (!toExplain.length) explanation = null;
+    // Not the full report: matching tickets that aren't theirs were left out
+    const restricted = permissionNote({ forbidden: named.forbidden, hidden, empty: emptyQueries.length === verdict.queries.length, scope });
+    conversation.pendingNote = describeResults(sections) + (explanation ? ` What the user was told about the empty result: ${explanation}` : '') +
+      (restricted ? ` The user was also told: ${restricted}` : '');
 
     // Counts across several ticket types become one table with a total column
     const combined = verdict.merge ? combineResults(verdict.merge, verdict.queries, sections) : null;
@@ -781,8 +814,11 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
       shownTickets,
       // { chart, dropped }: the answer as a saveable chart (charts.mjs), or null
       chartable,
-      // Which tickets it covered, for anyone who isn't an admin (teams.mjs)
-      visibility: teams.scopeNote(scope),
+      // Not the full report: tickets they don't have permission to see match too
+      restricted,
+      // Which tickets it covered, for anyone who isn't an admin (teams.mjs),
+      // unless the notice above says it, or nothing that isn't theirs matched
+      visibility: restricted || hidden === false ? null : teams.scopeNote(scope),
       ...timing(),
     });
 
@@ -811,6 +847,7 @@ app.post('/api/tickets/search', async (req, res) => {
 
   try {
     const result = await findTickets(text, req.runQuery);
+    result.noAccess = await noAccessTo(req.scope, result.notFound);
     if (record && result.found.length === 1) {
       // Without the full record the page still shows the ticket's summary row
       result.record = await ticketRecord(result.found[0].number, req.runQuery, {
@@ -828,6 +865,88 @@ app.post('/api/tickets/search', async (req, res) => {
     res.status(502).json({ error: `Could not search the tickets right now: ${error.message}` });
   }
 });
+
+// Of the numbers someone couldn't open, the ones in the data all the same: other
+// people's or other teams' tickets. The page says they don't have permission to
+// see those, and nothing else about them. An admin sees every ticket, so none.
+const FULL_NUMBER = /^(INC|CHG|RITM|SCTASK|REQ)\d{7}$/;
+async function noAccessTo(scope, numbers) {
+  const full = numbers.filter(n => FULL_NUMBER.test(n));
+  if (scope.all || !full.length) return [];
+  try {
+    return [...inTheData(await loadTicketIndex(runCubeQuery), full)];
+  } catch (error) {
+    console.error('🔒 Could not check which tickets are someone else\'s:', error.message);
+    return []; // the page says "not in the data", as before
+  }
+}
+
+// ---------------------------------------------------------------------
+// THE AI ASSISTANT AND PERMISSIONS: its queries only ever see the person's
+// tickets (req.runQuery). On top of that, a question about tickets they don't
+// have permission to see isn't answered, and an answer that leaves out
+// matching tickets that aren't theirs says so.
+// ---------------------------------------------------------------------
+
+// "A", "A and B", "A, B and C"
+const listOf = items => items.length < 3 ? items.join(' and ') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+
+// The full ticket numbers a question names ("INC1814467", "inc 1814467"; bare
+// digits are left to Claude) and that its queries filter on
+const ticketsNamedIn = text => parseTicketNumbers(text).wanted.filter(w => w.candidates.length === 1).map(w => w.input);
+const ticketsFilteredOn = queries => queries.flatMap(q => (q.cubeQuery.filters || [])
+  .flatMap(f => (f.values || []).flatMap(v => String(v).toUpperCase().match(/\b(INC|CHG|RITM|SCTASK|REQ)\d{7}\b/g) || [])));
+
+// Ticket numbers someone asked about -> { theirs, forbidden }: the ones they
+// may see (an order: one of its requests), and the ones in the data they don't
+// have permission to see. A number in neither isn't in the data.
+async function namedTickets(scope, numbers) {
+  const unique = [...new Set(numbers)];
+  if (scope.all || !unique.length) return { theirs: unique, forbidden: [] };
+  const theirs = unique.filter(n => teams.canSeeTicket(scope, n));
+  try {
+    const index = await loadTicketIndex(runCubeQuery);
+    const orders = unique.filter(n => n.startsWith('REQ'));
+    for (const t of orders.length ? index.values() : []) {
+      if (t.kind === 'RITM' && orders.includes(t.parent) && !theirs.includes(t.parent) && teams.canSeeTicket(scope, t.number)) theirs.push(t.parent);
+    }
+    return { theirs, forbidden: [...inTheData(index, unique.filter(n => !theirs.includes(n)))] };
+  } catch (error) {
+    // Can't tell: the question goes ahead, and its queries still only see their tickets
+    console.error('🔒 Could not check the tickets a question names:', error.message);
+    return { theirs, forbidden: [] };
+  }
+}
+
+// What the person is told when a question is only about tickets they can't see
+function permissionDenied(numbers) {
+  const one = numbers.length === 1;
+  return `You don't have permission to see ${listOf(numbers)}, so I can't answer questions about ${one ? 'it' : 'them'}. ` +
+    `Only whoever ${one ? 'it\'s' : 'they\'re'} assigned to, ${one ? 'its' : 'their'} team's project manager and admins can see ${one ? 'it' : 'them'}.`;
+}
+
+// Would each of these queries also find tickets the person can't see?
+// -> [true / false per query], or null when it couldn't be checked (the
+// answer then just says whose tickets it covers, as before)
+async function hiddenTicketsMatch(queries, scope) {
+  if (scope.all) return queries.map(() => false);
+  try {
+    return await Promise.all(queries.map(q => teams.findsHiddenTickets(q.cubeQuery, scope, runCubeQuery)));
+  } catch (error) {
+    console.error('🔒 Could not check for tickets left out of the answer:', error.message);
+    return null;
+  }
+}
+
+// The answer's notice when it isn't the full report, or null
+function permissionNote({ forbidden, hidden, empty, scope }) {
+  if (forbidden.length) {
+    return `You can't see the full report: you don't have permission to see ${listOf(forbidden)}, so ${forbidden.length === 1 ? 'it is' : 'they are'} left out. Only tickets you can see are shown.`;
+  }
+  if (!hidden) return null;
+  if (empty) return 'None of the tickets you can see match this question. Other tickets do, but you don\'t have permission to see them.' + (scope.count ? '' : ` ${teams.scopeNote(scope)}`);
+  return `You can't see the full report: some of the tickets that match aren't yours, and you don't have permission to see them. ${teams.scopeNote(scope)}`;
+}
 
 // { numbers, conversation } -> { families }: the parent/child, order, task,
 // change and problem families those tickets belong to (relations.mjs), with
@@ -917,7 +1036,8 @@ app.get('/api/families/find', async (req, res) => {
       const entry = (await familyList(kind, req.runQuery)).find(e => e.anchor === f.anchor);
       if (entry) rows.push({ kind, ...entry, row: rowOf(kind, entry) });
     }
-    res.json({ number, known: found.has(number), families: rows });
+    const known = found.has(number);
+    res.json({ number, known, noAccess: known ? [] : await noAccessTo(req.scope, [number]), families: rows });
   } catch (error) {
     familiesFailed(res, error);
   }
@@ -1125,17 +1245,21 @@ app.get('/api/kpis/families/:id', async (req, res) => {
 });
 
 // ?details=1: also each starred ticket's summary, parent and families (for the
-// Starred tickets list), and the stars that aren't in the data
+// Starred tickets list), and the stars that can't be shown: not in the data, or
+// (noAccess) no longer this person's to see
 app.get('/api/stars', async (req, res) => {
   try {
     const list = await stars.listStars(req.user.id);
     if (!req.query.details) return res.json({ stars: list });
     const numbers = list.map(s => s.number);
     const [summaries, links] = await Promise.all([ticketSummaries(numbers, req.runQuery), linksOrNone(numbers, req.runQuery)]);
+    const missing = numbers.filter(n => !summaries.has(n));
+    const noAccess = await noAccessTo(req.scope, missing);
     res.json({
       stars: list,
       tickets: list.filter(s => summaries.has(s.number)).map(s => ({ ...summaries.get(s.number), ...links.get(s.number), starredAt: s.starredAt })),
-      notFound: numbers.filter(n => !summaries.has(n)),
+      notFound: missing.filter(n => !noAccess.includes(n)),
+      noAccess,
     });
   } catch (error) {
     console.error('⭐ Could not list stars:', error.message);
@@ -1356,8 +1480,60 @@ app.get('/api/teams', async (req, res) => {
   }
 });
 
+// A Team tab list's ?sort=&dir= and ?q=&col=, over what each ticket's summary
+// says (teams.mjs checks the numbers before it sorts or looks them up).
+// sorts: the ?sort= values it takes (teams.mjs orders 'family', 'assignee'
+// and 'team' itself). textsOf(row, summary): what each column shows.
+// -> { sort, matches } for teams.teamTickets / teams.unassignedTickets
+async function teamListOptions(query, columns, sorts, textsOf) {
+  const lookup = parseLookup(query, columns);
+  const index = lookup || ['type', 'summary', 'state'].includes(query.sort) ? await loadTicketIndex(runCubeQuery) : null;
+  let sort = null;
+  if (sorts.includes(query.sort)) {
+    const by = query.sort;
+    sort = {
+      by, dir: query.dir === 'desc' ? 'desc' : 'asc',
+      valueOf: number => (by === 'number' ? number : index.has(number) ? TICKET_SORTS[by](index.get(number)) : null),
+    };
+  }
+  const matches = lookup && (r => lookupMatches(textsOf(r, index.get(r.number) || {}), lookup));
+  return { sort, matches };
+}
+
 // The Team tab's ticket columns, for looking tickets up
 const TEAM_TICKET_LOOKUP_COLUMNS = ['Ticket', 'Type', 'Summary', 'State', 'Family', 'Assigned to'];
+const UNASSIGNED_LOOKUP_COLUMNS = ['Ticket', 'Type', 'Summary', 'State', 'Family', 'Team'];
+
+// Admins: every ticket nobody has yet, on any team or on none, family by family
+// (the Team tab's "Not assigned yet"). ?team=<team id>|none&kind=INC&q=&col=&offset&limit
+// &sort=number|type|summary|state|family|team&dir=asc|desc -> { total, before, tickets,
+// families }: one page of tickets with each one's summary and team, and the page's
+// families, each with what its first ticket is about
+const UNASSIGNED_SORTS = ['number', 'type', 'summary', 'state', 'family', 'team'];
+app.get('/api/teams/unassigned/tickets', async (req, res) => {
+  try {
+    const { sort, matches } = await teamListOptions(req.query, UNASSIGNED_LOOKUP_COLUMNS, UNASSIGNED_SORTS, (r, t) => ({
+      Ticket: r.number, Type: t.type, Summary: t.summary || blankText('Summary', t), State: t.state || blankText('State', t),
+      Family: r.familySize > 1 ? `${r.familyId} · ${r.familySize.toLocaleString()} linked tickets` : 'On its own',
+      Team: r.team || 'No team',
+    }));
+    const page = await teams.unassignedTickets(req.scope, {
+      team: req.query.team || null, kind: req.query.kind || null, matches,
+      offset: req.query.offset, limit: req.query.limit, sort,
+    });
+    // An admin's: every number may be seen, so the summaries come straight from Cube
+    const families = Object.values(page.families);
+    const summaries = await ticketSummaries([...page.tickets.map(t => t.number), ...families.map(f => f.id)], runCubeQuery)
+      .catch(error => { console.error('👥 Could not load ticket summaries:', error.message); return new Map(); });
+    res.json({
+      total: page.total, before: page.before,
+      tickets: page.tickets.map(t => ({ ...summaries.get(t.number), ...t })),
+      families: families.map(f => ({ ...f, summary: summaries.get(f.id)?.summary || null })),
+    });
+  } catch (error) {
+    teamsFailed(res, error, 'Loading the tickets nobody has');
+  }
+});
 
 // ?assignee=<user id>|none&kind=INC&q=<words>&col=<column>&offset&limit -> { total, before, tickets }:
 // one page of a team's tickets with who has each one, and each one's summary
@@ -1365,25 +1541,11 @@ const TEAM_TICKET_LOOKUP_COLUMNS = ['Ticket', 'Type', 'Summary', 'State', 'Famil
 const TEAM_TICKET_SORTS = ['number', 'type', 'summary', 'state', 'family', 'assignee'];
 app.get('/api/teams/:id/tickets', async (req, res) => {
   try {
-    const lookup = parseLookup(req.query, TEAM_TICKET_LOOKUP_COLUMNS);
-    let sort = null;
-    // What each ticket's summary says (these numbers are checked by teamTickets before they're sorted or looked up)
-    const index = lookup || ['type', 'summary', 'state'].includes(req.query.sort) ? await loadTicketIndex(runCubeQuery) : null;
-    if (TEAM_TICKET_SORTS.includes(req.query.sort)) {
-      const by = req.query.sort;
-      sort = {
-        by, dir: req.query.dir === 'desc' ? 'desc' : 'asc',
-        valueOf: number => (by === 'number' ? number : index.has(number) ? TICKET_SORTS[by](index.get(number)) : null),
-      };
-    }
-    const matches = lookup && (r => {
-      const t = index.get(r.number) || {};
-      return lookupMatches({
-        Ticket: r.number, Type: t.type, Summary: t.summary || blankText('Summary', t), State: t.state || blankText('State', t),
-        Family: r.familySize > 1 ? `${r.familySize.toLocaleString()} linked tickets` : 'On its own',
-        'Assigned to': r.assignee || 'Not assigned',
-      }, lookup);
-    });
+    const { sort, matches } = await teamListOptions(req.query, TEAM_TICKET_LOOKUP_COLUMNS, TEAM_TICKET_SORTS, (r, t) => ({
+      Ticket: r.number, Type: t.type, Summary: t.summary || blankText('Summary', t), State: t.state || blankText('State', t),
+      Family: r.familySize > 1 ? `${r.familySize.toLocaleString()} linked tickets` : 'On its own',
+      'Assigned to': r.assignee || 'Not assigned',
+    }));
     const page = await teams.teamTickets(req.scope, Number(req.params.id), {
       assignee: req.query.assignee || null, kind: req.query.kind || null, matches,
       offset: req.query.offset, limit: req.query.limit, sort,
@@ -1471,6 +1633,56 @@ app.post('/api/tickets/report', async (req, res) => {
   }
 });
 
+// Resolved or closed (teams.mjs): every team's for admins, a project manager's
+// own team's -> { tickets: [{ number, status, by, at, note, team, assignee, type, summary, state }] }
+app.get('/api/ticket-statuses', async (req, res) => {
+  try {
+    const list = await teams.ticketStatuses(req.scope);
+    const summaries = await ticketSummaries(list.map(t => t.number), req.runQuery);
+    res.json({
+      tickets: list.map(t => {
+        const s = summaries.get(t.number);
+        return { ...t, type: s?.type ?? null, summary: s?.summary ?? null, state: s?.state ?? null };
+      }),
+    });
+  } catch (error) {
+    teamsFailed(res, error, 'Loading the resolved and closed tickets');
+  }
+});
+
+// An admin or the ticket's team's project manager: { status: resolved|closed|open } -> { number, status }
+app.put('/api/ticket-statuses/:number', async (req, res) => {
+  try {
+    const done = await teams.setTicketStatus(req.scope, req.params.number, req.body?.status);
+    console.log(`✅ ${req.user.username} set ${done.number} to ${done.status}`);
+    res.json(done);
+  } catch (error) {
+    teamsFailed(res, error, 'Changing the status');
+  }
+});
+
+// Admins, before a presentation: every status undone -> { tickets, notifications }
+app.post('/api/ticket-statuses/undo-all', async (req, res) => {
+  try {
+    const done = await teams.undoAllStatuses(req.scope);
+    console.log(`✅ ${req.user.username} undid every status: ${done.tickets} tickets, ${done.notifications} notifications`);
+    res.json(done);
+  } catch (error) {
+    teamsFailed(res, error, 'Undoing the statuses');
+  }
+});
+
+// Admins, before a presentation: the demo tickets back on no team, nobody's -> { tickets, families }
+app.post('/api/demo-tickets/reset', async (req, res) => {
+  try {
+    const done = await teams.resetDemoTickets(req.scope);
+    console.log(`🎬 ${req.user.username} put the ${done.tickets} demo tickets back`);
+    res.json(done);
+  } catch (error) {
+    teamsFailed(res, error, 'Putting the demo tickets back');
+  }
+});
+
 // =====================================================================
 // NOTIFICATIONS (notifications.mjs): the 🔔 in the header
 // =====================================================================
@@ -1492,6 +1704,19 @@ app.post('/api/notifications/read', async (req, res) => {
   } catch (error) {
     console.error('🔔 Marking notifications read failed:', error.message);
     res.status(503).json({ error: 'That could not be saved right now.' });
+  }
+});
+
+// { ids } (some of them) or { upTo } (all of them up to that one) -> { cleared }
+app.post('/api/notifications/clear', async (req, res) => {
+  const { ids, upTo } = req.body || {};
+  const some = Array.isArray(ids) && ids.length > 0;
+  if (!some && !Number.isInteger(upTo)) return res.status(400).json({ error: 'Say which notifications to clear.' });
+  try {
+    res.json({ cleared: await notifications.clearNotifications(req.user.id, some ? { ids } : { upTo }) });
+  } catch (error) {
+    console.error('🔔 Clearing notifications failed:', error.message);
+    res.status(503).json({ error: 'Your notifications could not be cleared right now.' });
   }
 });
 

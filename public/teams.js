@@ -1,9 +1,13 @@
 // =====================================================================
 // TEAMS: the Team tab (teams.mjs on the server). Admins see every team -
 // who's on it and in what role, its tickets and who has each one - and can
-// put people on teams and move families between teams. A project manager
+// put people on teams and move families between teams; "Not assigned yet"
+// shows them every ticket nobody has, on a team or on none. A project manager
 // sees their own team the same way and hands out its tickets. Everyone
 // else sees who's on their team and the tickets assigned to them.
+// "Resolved or closed" lists the tickets someone said they resolved or
+// closed (admins: every team's; project managers: their team's), whose
+// status they can change; admins also put things back before a presentation.
 // Loaded before app.js, whose helpers these functions use when they run.
 // =====================================================================
 
@@ -11,11 +15,18 @@ const TEAM_PAGE_SIZE = 50;
 // The ticket list's headings, and what the server sorts every ticket by for each
 const TEAM_TICKET_SORT_KEYS = { Ticket: 'number', Type: 'type', Summary: 'summary', State: 'state', Family: 'family', 'Assigned to': 'assignee' };
 const TEAM_KINDS = [['INC', 'Incidents'], ['CHG', 'Changes'], ['RITM', 'Requests'], ['SCTASK', 'Catalog tasks']];
+// Admins' "Not assigned yet" (in place of a team's id), and its list's headings, as above
+const UNASSIGNED_VIEW = 'unassigned';
+const UNASSIGNED_SORT_KEYS = { Ticket: 'number', Type: 'type', Summary: 'summary', State: 'state', Family: 'family', Team: 'team' };
+// The Team tab's menus over a list, and what each sets in teamsView.filter
+const TEAM_FILTERS = { 'team-filter-assignee': 'assignee', 'team-filter-kind': 'kind', 'team-filter-team': 'team' };
 
 const teamsView = {
-    data: null,     // GET /api/teams: { teams, roles, people? }
-    teamId: null,   // the team showing
-    filter: { assignee: '', kind: '' }, // what's typed in the 🔍 box is the 'team-tickets' lookup (lookup.js)
+    data: null,     // GET /api/teams: { teams, roles, people?, unassigned? }
+    teamId: null,   // the team showing, or UNASSIGNED_VIEW
+    // assignee: a team's; team: "Not assigned yet"'s (a team's id, 'none' or '').
+    // What's typed in the 🔍 box is the 'team-tickets' or 'unassigned-tickets' lookup (lookup.js)
+    filter: { assignee: '', kind: '', team: '' },
     offset: 0,
     run: 0,         // bumped on every load, so an answer for an older view is dropped
 };
@@ -24,7 +35,7 @@ const teamsView = {
 function resetTeams() {
     teamsView.data = null;
     teamsView.teamId = null;
-    teamsView.filter = { assignee: '', kind: '' };
+    teamsView.filter = { assignee: '', kind: '', team: '' };
     teamsView.offset = 0;
     teamsView.run += 1;
     pickerPeople.clear();
@@ -44,6 +55,8 @@ async function teamsFetch(path, options = {}) {
 }
 
 const currentTeam = () => teamsView.data?.teams.find(t => t.id === teamsView.teamId) || null;
+const showingUnassigned = () => teamsView.teamId === UNASSIGNED_VIEW;
+const howMany = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
 // Each team's people, for the boxes where their names are typed (picker.js)
 function rememberPickerPeople(data) {
@@ -59,7 +72,7 @@ async function loadTeams() {
         if (!data) return;
         teamsView.data = data;
         rememberPickerPeople(data);
-        if (!currentTeam()) {
+        if (showingUnassigned() ? !data.unassigned : !currentTeam()) {
             const mine = data.teams.find(t => t.id === currentAccess.team?.id) || data.teams[0];
             teamsView.teamId = mine ? mine.id : null;
         }
@@ -82,15 +95,20 @@ async function refreshTeamCounts() {
             summary.innerHTML = teamSummaryHtml(currentTeam());
             restoreSorts(summary);
         }
+        const nobody = document.getElementById('unassigned-summary');
+        if (nobody && data.unassigned) nobody.innerHTML = unassignedSummaryHtml();
         const picker = document.getElementById('team-picker');
         if (picker) picker.innerHTML = teamPickerHtml();
+        const presentation = document.getElementById('presentation-card');
+        if (presentation) presentation.innerHTML = presentationHtml();
     } catch (err) {
         console.error('Could not refresh the team counts:', err);
     }
 }
 
 function youLine(team) {
-    if (currentAccess.admin) return 'You\'re an admin: you see every team and every ticket, put people on teams, and move families between them.';
+    if (currentAccess.admin) return 'You\'re an admin: you see every team and every ticket, put people on teams, and move families between them. ' +
+        '📥 Not assigned yet shows every ticket nobody has, on a team or on none.';
     if (!team) return 'You\'re not on a team yet, so no tickets are assigned to you. An admin can add you to one.';
     if (currentAccess.role === 'project_manager') return `You're the project manager of ${team.name}: you see all of its tickets, hand them out, and see who's working on what.`;
     return `You're on ${team.name} as ${roleName(currentAccess.role).toLowerCase()}. You see the tickets assigned to you, ` +
@@ -103,17 +121,18 @@ function renderTeams() {
     const box = document.getElementById('teams');
     let html = `<div class="home-head"><h2 class="home-welcome">👥 ${currentAccess.admin ? 'Teams' : escapeHtml(team?.name || 'Your team')}</h2></div>` +
         `<p class="home-status">${escapeHtml(youLine(team))}</p>`;
+    if (canSeeStatuses()) html += '<section class="team-card" id="ticket-statuses"><h3>✅ Resolved or closed</h3><p class="home-status">Loading…</p></section>';
     if (currentAccess.admin) html += `<div class="team-picker" id="team-picker">${teamPickerHtml()}</div>`;
-    if (team) {
+    if (showingUnassigned()) {
+        html += unassignedCardHtml();
+    } else if (team) {
         const manage = team.canManage;
         html += `<section class="team-card" id="team-summary">${teamSummaryHtml(team)}</section>` +
             `<section class="team-card">` +
             `<h3>${manage ? `${escapeHtml(team.name)}'s tickets` : 'My tickets'}</h3>` +
             `<div class="team-filters">` +
             (manage ? `<label>Who has it <select id="team-filter-assignee">${assigneeFilterOptions(team)}</select></label>` : '') +
-            `<label>Type <select id="team-filter-kind"><option value="">All types</option>` +
-            TEAM_KINDS.map(([k, label]) => `<option value="${k}"${teamsView.filter.kind === k ? ' selected' : ''}>${label}</option>`).join('') +
-            `</select></label>` +
+            kindFilterHtml() +
             `</div>` +
             // Any of the list's columns; the server looks through all of the team's tickets
             lookupBarHtml('team-tickets', Object.keys(TEAM_TICKET_SORT_KEYS), { mode: 'list' }) +
@@ -122,14 +141,29 @@ function renderTeams() {
                 `<button type="button" class="home-action" data-team-bulk>Assign</button></div>` : '') +
             `<div id="team-tickets"></div></section>`;
     }
-    if (currentAccess.admin) html += familyCardHtml() + peopleCardHtml(data.people || []);
+    if (currentAccess.admin) html += familyCardHtml() + peopleCardHtml(data.people || []) + `<section class="team-card" id="presentation-card">${presentationHtml()}</section>`;
     box.innerHTML = html;
     restoreSorts(box);
-    if (team) loadTeamTickets();
+    if (team || showingUnassigned()) loadTeamTickets();
+    if (canSeeStatuses()) loadTicketStatuses();
 }
 
+function kindFilterHtml() {
+    return `<label>Type <select id="team-filter-kind"><option value="">All types</option>` +
+        TEAM_KINDS.map(([k, label]) => `<option value="${k}"${teamsView.filter.kind === k ? ' selected' : ''}>${label}</option>`).join('') +
+        `</select></label>`;
+}
+
+// Admins first get "Not assigned yet", then every team
 function teamPickerHtml() {
-    return teamsView.data.teams.map(t =>
+    const u = teamsView.data.unassigned;
+    const nobody = u
+        ? `<button type="button" class="team-pick team-pick-nobody${showingUnassigned() ? ' active' : ''}${u.tickets ? ' waiting' : ''}" data-team-pick="${UNASSIGNED_VIEW}">` +
+          `<span class="team-pick-name">📥 Not assigned yet</span>` +
+          `<span class="team-pick-meta">${howMany(u.tickets, 'ticket', 'tickets')} · ${howMany(u.families, 'family', 'families')}` +
+          `${u.noTeam.families ? ` · ${u.noTeam.families.toLocaleString()} on no team` : ''}</span></button>`
+        : '';
+    return nobody + teamsView.data.teams.map(t =>
         `<button type="button" class="team-pick${t.id === teamsView.teamId ? ' active' : ''}" data-team-pick="${t.id}">` +
         `<span class="team-pick-name">${escapeHtml(t.name)}${t.test ? ' <span class="team-test-tag">Test team</span>' : ''}</span>` +
         `<span class="team-pick-meta">${t.tickets.toLocaleString()} tickets · ${t.members.length} people</span></button>`).join('');
@@ -188,20 +222,24 @@ function assigneeFilterOptions(team) {
         team.members.map(m => `<option value="${m.id}"${String(m.id) === f ? ' selected' : ''}>${escapeHtml(m.name)}</option>`).join('');
 }
 
+// The team's tickets, or (admins) "Not assigned yet"'s.
 // quiet: keep the list showing until the new one is ready (a heading was clicked)
 async function loadTeamTickets(quiet = false) {
     const team = currentTeam();
+    const nobody = showingUnassigned();
     const out = document.getElementById('team-tickets');
-    if (!team || !out) return;
+    if ((!team && !nobody) || !out) return;
+    const list = nobody ? 'unassigned-tickets' : 'team-tickets';
     const run = ++teamsView.run;
     if (!quiet) out.innerHTML = '<p class="home-status">Loading tickets…</p>';
-    const q = new URLSearchParams({ offset: teamsView.offset, limit: TEAM_PAGE_SIZE, ...sortQuery('team-tickets', TEAM_TICKET_SORT_KEYS), ...lookupQuery('team-tickets') });
+    const q = new URLSearchParams({ offset: teamsView.offset, limit: TEAM_PAGE_SIZE,
+        ...sortQuery(list, nobody ? UNASSIGNED_SORT_KEYS : TEAM_TICKET_SORT_KEYS), ...lookupQuery(list) });
     for (const [key, value] of Object.entries(teamsView.filter)) if (value) q.set(key, value);
     try {
-        const data = await teamsFetch(`/api/teams/${team.id}/tickets?${q}`);
+        const data = await teamsFetch(nobody ? `/api/teams/unassigned/tickets?${q}` : `/api/teams/${team.id}/tickets?${q}`);
         if (!data || run !== teamsView.run) return;
-        out.innerHTML = teamTicketsHtml(team, data);
-        setLookupCount('team-tickets', data.total, data.before ?? data.total);
+        out.innerHTML = nobody ? unassignedTicketsHtml(data) : teamTicketsHtml(team, data);
+        setLookupCount(list, data.total, data.before ?? data.total);
         const all = document.querySelector('#teams .team-select-all');
         if (all) all.checked = false;
     } catch (err) {
@@ -216,6 +254,26 @@ pagedSorts['team-tickets'] = () => {
     return loadTeamTickets(true);
 };
 pagedLookups['team-tickets'] = pagedSorts['team-tickets'];
+pagedSorts['unassigned-tickets'] = pagedSorts['team-tickets'];
+pagedLookups['unassigned-tickets'] = pagedSorts['team-tickets'];
+
+// A ticket's number, type, summary and state (with what its project manager was told)
+function ticketCellsHtml(t) {
+    const n = escapeHtml(t.number);
+    const summary = String(t.summary || '');
+    return `<td class="ticket-cell"><button type="button" class="ticket-link" data-ticket="${n}" title="Open ${n}">${n}</button>${starButtonHtml(t.number)}</td>` +
+        `<td>${t.type ? escapeHtml(t.type) : blankHtml('Type', t)}</td>` +
+        `<td${summary.length > 100 ? ` title="${escapeHtml(summary)}"` : ''}>${summary ? escapeHtml(summary.length > 100 ? `${summary.slice(0, 97)}…` : summary) : blankHtml('Summary', t)}</td>` +
+        `<td>${t.state ? escapeHtml(t.state) : blankHtml('State', t)}${reportLineHtml(t.report)}</td>`;
+}
+
+function teamPagerHtml(data) {
+    const first = teamsView.offset + 1;
+    const last = teamsView.offset + data.tickets.length;
+    return `<div class="team-pager"><span>${first.toLocaleString()}–${last.toLocaleString()} of ${data.total.toLocaleString()}</span>` +
+        `<button type="button" class="home-action" data-team-page="-1"${teamsView.offset ? '' : ' disabled'}>← Previous</button>` +
+        `<button type="button" class="home-action" data-team-page="1"${last < data.total ? '' : ' disabled'}>Next →</button></div>`;
+}
 
 function teamTicketsHtml(team, data) {
     if (!data.total) {
@@ -228,7 +286,6 @@ function teamTicketsHtml(team, data) {
     const tell = !manage && canTellManager();
     const rows = data.tickets.map(t => {
         const n = escapeHtml(t.number);
-        const summary = String(t.summary || '');
         const family = t.family.size > 1
             ? `${t.family.size.toLocaleString()} linked tickets` +
               (manage ? ` <button type="button" class="link-btn" data-family-give="${escapeHtml(t.family.id)}" data-family-size="${t.family.size}" title="Give all ${t.family.size.toLocaleString()} of them to one person">Give all…</button>` : '') +
@@ -236,10 +293,7 @@ function teamTicketsHtml(team, data) {
             : 'On its own' + (admin ? ` <button type="button" class="link-btn" data-family-find="${n}" title="Move this ticket to another team">Move…</button>` : '');
         return '<tr>' +
             (manage ? `<td class="select-cell"><input type="checkbox" class="team-select" value="${n}" aria-label="Tick ${n}"></td>` : '') +
-            `<td class="ticket-cell"><button type="button" class="ticket-link" data-ticket="${n}" title="Open ${n}">${n}</button>${starButtonHtml(t.number)}</td>` +
-            `<td>${t.type ? escapeHtml(t.type) : blankHtml('Type', t)}</td>` +
-            `<td${summary.length > 100 ? ` title="${escapeHtml(summary)}"` : ''}>${summary ? escapeHtml(summary.length > 100 ? `${summary.slice(0, 97)}…` : summary) : blankHtml('Summary', t)}</td>` +
-            `<td>${t.state ? escapeHtml(t.state) : blankHtml('State', t)}${reportLineHtml(t.report)}</td>` +
+            ticketCellsHtml(t) +
             `<td>${family}</td>` +
             `<td>${manage
                 ? personPickerHtml(team.id, t.assignee?.id ?? null, `Who has ${t.number}`, { attrs: `data-number="${n}"` })
@@ -247,16 +301,11 @@ function teamTicketsHtml(team, data) {
             (tell ? `<td>${reportButtonHtml(t.number, t.report?.mine ? 'Tell them again…' : 'Resolved or closed?…')}</td>` : '') +
             '</tr>';
     }).join('');
-    const first = teamsView.offset + 1;
-    const last = teamsView.offset + data.tickets.length;
     return `<div class="table-wrap"><table class="result-table" data-sort-list="team-tickets"><thead><tr>` +
         (manage ? '<th class="select-cell"></th>' : '') +
         Object.keys(TEAM_TICKET_SORT_KEYS).map(label => sortHeadHtml('team-tickets', label)).join('') +
         (tell ? '<th>Tell your project manager</th>' : '') +
-        `</tr></thead><tbody>${rows}</tbody></table></div>` +
-        `<div class="team-pager"><span>${first.toLocaleString()}–${last.toLocaleString()} of ${data.total.toLocaleString()}</span>` +
-        `<button type="button" class="home-action" data-team-page="-1"${teamsView.offset ? '' : ' disabled'}>← Previous</button>` +
-        `<button type="button" class="home-action" data-team-page="1"${last < data.total ? '' : ' disabled'}>Next →</button></div>`;
+        `</tr></thead><tbody>${rows}</tbody></table></div>` + teamPagerHtml(data);
 }
 
 // Under a ticket's state: the latest time someone told the project manager
@@ -265,17 +314,19 @@ function reportLineHtml(report) {
     if (!report) return '';
     const note = String(report.note || '');
     return `<div class="team-report"${note ? ` title="${escapeHtml(note)}"` : ''}>✅ ` +
-        (report.mine ? `You told your project manager you ${escapeHtml(report.status)} it` : `${escapeHtml(report.by || 'Someone')} says it's ${escapeHtml(report.status)}`) +
+        // An admin or project manager who set the status themselves (Resolved or closed)
+        (report.mine ? (canSeeStatuses() ? `You set it to ${escapeHtml(report.status)}` : `You told your project manager you ${escapeHtml(report.status)} it`)
+            : `${escapeHtml(report.by || 'Someone')} says it's ${escapeHtml(report.status)}`) +
         ` · ${escapeHtml(formatShownAt(report.at))}` +
         (note ? `<span class="team-report-note">“${escapeHtml(note.length > 80 ? `${note.slice(0, 77)}…` : note)}”</span>` : '') +
         '</div>';
 }
 
-async function assign(numbers, assigneeId) {
+// name: who they go to, when the team showing isn't theirs ("Not assigned yet")
+async function assign(numbers, assigneeId, name = null) {
     const data = await teamsFetch('/api/assignments', { method: 'PUT', body: JSON.stringify({ numbers, assigneeId }) });
     if (!data) return false;
-    const team = currentTeam();
-    const who = assigneeId ? team?.members.find(m => m.id === assigneeId)?.name : null;
+    const who = assigneeId ? name || currentTeam()?.members.find(m => m.id === assigneeId)?.name : null;
     showToast(numbers.length === 1
         ? `${numbers[0]} ${who ? `is now ${who}'s` : 'is not assigned now'}`
         : `${data.changed.toLocaleString()} tickets ${who ? `given to ${who}` : 'unassigned'}`);
@@ -344,20 +395,108 @@ async function findFamily(number) {
     }
 }
 
-async function moveFamily(familyId) {
-    const teamId = Number(document.getElementById('family-move-to').value);
+// done(text): says what happened (in the card, or a toast)
+async function moveFamily(familyId, teamId, done) {
     const team = teamsView.data.teams.find(t => t.id === teamId);
+    if (!team) { showToast('Choose the team to move it to first'); return; }
     try {
         const data = await teamsFetch(`/api/ticket-families/${encodeURIComponent(familyId)}/team`, { method: 'PUT', body: JSON.stringify({ teamId }) });
         if (!data) return;
-        document.getElementById('family-found').innerHTML = data.moved
-            ? `<p class="home-status">✓ Moved ${data.moved.toLocaleString()} ${data.moved === 1 ? 'ticket' : 'tickets'} to ${escapeHtml(team.name)}. ${escapeHtml(team.name)}'s project manager can now hand them out.</p>`
-            : `<p class="home-status">That family is already ${escapeHtml(team.name)}'s.</p>`;
+        done(data.moved
+            ? `✓ Moved ${data.moved.toLocaleString()} ${data.moved === 1 ? 'ticket' : 'tickets'} to ${team.name}. ${team.name}'s project manager can now hand them out.`
+            : `That family is already ${team.name}'s.`);
         await refreshTeamCounts();
-        loadTeamTickets();
+        loadTeamTickets(showingUnassigned());
     } catch (err) {
         showToast(err.message);
     }
+}
+
+// ---------------------------------------------------------------------
+// Admins: "Not assigned yet": every ticket nobody has, on a team or on none,
+// under a row for its family, where the family is moved or given out
+// ---------------------------------------------------------------------
+
+function unassignedSummaryHtml() {
+    const u = teamsView.data.unassigned;
+    if (!u.tickets) return 'Every ticket has someone. Nothing is waiting to be handed out.';
+    const onTeams = u.tickets - u.noTeam.tickets;
+    return `<strong>${howMany(u.tickets, 'ticket', 'tickets')} in ${howMany(u.families, 'family', 'families')}</strong> ${u.tickets === 1 ? 'has' : 'have'} nobody yet.` +
+        (u.noTeam.tickets ? ` On no team: ${howMany(u.noTeam.tickets, 'ticket', 'tickets')} in ${howMany(u.noTeam.families, 'family', 'families')}. ` +
+            'Move a family to a team, then give its tickets to someone on it.' : '') +
+        (onTeams ? ` On a team: ${howMany(onTeams, 'ticket', 'tickets')}, for you or the team's project manager to hand out.` : '');
+}
+
+function unassignedCardHtml() {
+    const f = teamsView.filter.team;
+    const teamOptions = `<option value=""${f ? '' : ' selected'}>Any team, or none</option><option value="none"${f === 'none' ? ' selected' : ''}>No team</option>` +
+        teamsView.data.teams.map(t => `<option value="${t.id}"${String(t.id) === f ? ' selected' : ''}>${escapeHtml(t.name)}</option>`).join('');
+    return `<section class="team-card"><h3>📥 Not assigned yet</h3>` +
+        `<p class="home-status" id="unassigned-summary">${unassignedSummaryHtml()}</p>` +
+        `<div class="team-filters"><label>Team <select id="team-filter-team">${teamOptions}</select></label>${kindFilterHtml()}</div>` +
+        // Any of the list's columns; the server looks through every ticket nobody has
+        lookupBarHtml('unassigned-tickets', Object.keys(UNASSIGNED_SORT_KEYS), { mode: 'list' }) +
+        `<div id="team-tickets"></div></section>`;
+}
+
+// "3 incidents, 1 change"
+function familyKindsText(kinds) {
+    return TEAM_KINDS.filter(([k]) => kinds[k]).map(([k]) => howMany(kinds[k], ...KIND_NOUNS[k])).join(', ');
+}
+
+// The row over a family's tickets: what it is, its team, and moving it or
+// (on a team) giving all of it to one person
+function familyGroupHtml(f) {
+    const id = escapeHtml(f.id);
+    const whole = f.size === 1 ? 'it' : `all ${f.size.toLocaleString()}`;
+    const what = f.size > 1 ? `${howMany(f.size, 'linked ticket', 'linked tickets')}: ${familyKindsText(f.kinds)}` : 'On its own';
+    const nobody = f.unassigned === f.size ? (f.size === 1 ? 'nobody has it' : 'nobody has any') : `${f.unassigned.toLocaleString()} not assigned`;
+    const give = f.team && f.size > 1
+        ? `<span>Give ${whole} to</span>` + personPickerHtml(f.team.id, undefined, `Give ${f.id}'s family to someone on ${f.team.name}`,
+            { placeholder: 'Type a name…', attrs: `data-family="${id}" data-family-size="${f.size}"` })
+        : '';
+    const move = `<label>${give ? 'or move it to' : `Move ${whole} to`} <select data-group-move-to aria-label="Move ${id}'s family to">` +
+        '<option value="">Choose a team…</option>' +
+        teamsView.data.teams.filter(t => t.id !== f.team?.id)
+            .map(t => `<option value="${t.id}">${escapeHtml(t.name)}${t.test ? ' (test team)' : ''}</option>`).join('') +
+        `</select></label><button type="button" class="home-action" data-group-move="${id}" data-family-size="${f.size}" data-family-unassigned="${f.unassigned}">Move</button>`;
+    return `<tr class="family-group"><td colspan="7"><div class="family-group-head">` +
+        `<div class="family-group-what"><span>👪 <button type="button" class="ticket-link" data-ticket="${id}" title="Open ${id}: its record and family">${id}</button>` +
+        (f.size > 1 && f.summary ? ` <span class="family-group-summary">${escapeHtml(f.summary.length > 90 ? `${f.summary.slice(0, 87)}…` : f.summary)}</span>` : '') + '</span>' +
+        `<span class="family-group-meta">${what} · ${nobody} · ${f.team ? `on ${escapeHtml(f.team.name)}` : '<strong>on no team</strong>'}</span></div>` +
+        `<div class="family-group-do">${give}${move}</div></div></td></tr>`;
+}
+
+function unassignedTicketsHtml(data) {
+    if (!data.total) {
+        return `<p class="home-status">${teamsView.filter.team || teamsView.filter.kind || lookupActive('unassigned-tickets')
+            ? 'No tickets match.' : '✓ Every ticket has someone.'}</p>`;
+    }
+    // In the list's own order a family's tickets come together, under its row;
+    // sorted by a heading, each ticket says which family it's in and how to move it
+    const grouped = !listSorts.get('unassigned-tickets');
+    const families = new Map(data.families.map(f => [f.id, f]));
+    let last = null;
+    const rows = data.tickets.map(t => {
+        const n = escapeHtml(t.number);
+        const fid = escapeHtml(t.family.id);
+        const head = grouped && t.family.id !== last ? familyGroupHtml(families.get(t.family.id)) : '';
+        last = t.family.id;
+        const family = (t.family.size > 1 ? `${fid} · ${t.family.size.toLocaleString()} linked tickets` : 'On its own') +
+            (grouped ? '' : (t.team && t.family.size > 1
+                ? ` <button type="button" class="link-btn" data-family-give="${fid}" data-family-size="${t.family.size}" data-family-team="${t.team.id}" title="Give all ${t.family.size.toLocaleString()} of them to one person">Give all…</button>`
+                : '') + ` <button type="button" class="link-btn" data-family-find="${n}" title="Move this family to another team">Move…</button>`);
+        return head + '<tr>' + ticketCellsHtml(t) +
+            `<td>${family}</td>` +
+            `<td>${t.team ? escapeHtml(t.team.name) : '<span class="blank" title="This ticket\'s family isn\'t on any team yet">No team</span>'}</td>` +
+            `<td>${t.team
+                ? personPickerHtml(t.team.id, null, `Who has ${t.number}`, { attrs: `data-number="${n}"` })
+                : '<span class="blank" title="Only someone on its family\'s team can have it">Move its family to a team first</span>'}</td>` +
+            '</tr>';
+    }).join('');
+    return `<div class="table-wrap"><table class="result-table" data-sort-list="unassigned-tickets"><thead><tr>` +
+        Object.keys(UNASSIGNED_SORT_KEYS).map(label => sortHeadHtml('unassigned-tickets', label)).join('') +
+        `<th>Give it to</th></tr></thead><tbody>${rows}</tbody></table></div>` + teamPagerHtml(data);
 }
 
 // ---------------------------------------------------------------------
@@ -391,15 +530,151 @@ async function setMembership(userId, teamId, role, done = () => 'Saved') {
 }
 
 // ---------------------------------------------------------------------
+// ✅ RESOLVED OR CLOSED: the tickets someone said they resolved or closed
+// (admins: every team's; project managers: their team's). Each one's menu
+// changes its status; "Open" takes the status away. Only OneTouch's record
+// changes: the ticket's data never does.
+// ---------------------------------------------------------------------
+
+const STATUS_NAMES = { resolved: 'Resolved', closed: 'Closed', open: 'Open (takes the status away)' };
+const STATUS_HEADS = ['Ticket', 'Type', 'Summary', 'State in the data', 'Status', 'Changed by', 'When', 'Team', 'Assigned to'];
+const canSeeStatuses = () => currentAccess.admin || currentAccess.role === 'project_manager';
+
+async function loadTicketStatuses() {
+    const box = document.getElementById('ticket-statuses');
+    if (!box) return;
+    try {
+        const data = await teamsFetch('/api/ticket-statuses');
+        if (!data || !box.isConnected) return;
+        box.innerHTML = ticketStatusesHtml(data.tickets);
+        restoreSorts(box);
+        applyLookups(box);
+    } catch (err) {
+        if (box.isConnected) box.innerHTML = `<h3>✅ Resolved or closed</h3><p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+    }
+}
+
+function ticketStatusesHtml(tickets) {
+    const admin = currentAccess.admin;
+    const heads = STATUS_HEADS.filter(h => admin || h !== 'Team');
+    const where = admin ? 'on every team' : `on ${escapeHtml(currentAccess.team?.name || 'your team')}`;
+    let html = '<h3>✅ Resolved or closed</h3><p class="home-status">' + (tickets.length
+        ? `${howMany(tickets.length, 'ticket', 'tickets')} ${where} that someone said they resolved or closed, newest first. Change one's status with its menu; ` +
+          '"Open" takes the status away. Only OneTouch\'s record changes, never the ticket\'s data.'
+        : `Nobody has said they resolved or closed a ticket ${where} yet. When someone does, it shows here.`) + '</p>';
+    if (!tickets.length) return html;
+    if (tickets.length >= 2) html += lookupBarHtml('ticket-statuses', heads);
+    const rows = tickets.map(t => {
+        const n = escapeHtml(t.number);
+        const blank = { kind: kindOf(t.number) };
+        return '<tr>' +
+            `<td class="ticket-cell"><button type="button" class="ticket-link" data-ticket="${n}" title="Open ${n}">${n}</button>${starButtonHtml(t.number)}</td>` +
+            `<td>${escapeHtml(t.type || capitalize(KIND_NOUNS[blank.kind]?.[0] || 'ticket'))}</td>` +
+            `<td>${t.summary ? escapeHtml(t.summary) : blankHtml('Summary', blank)}</td>` +
+            `<td>${t.state ? escapeHtml(t.state) : blankHtml('State', blank)}</td>` +
+            `<td><span class="status-tag">✅ ${STATUS_NAMES[t.status]}</span>` +
+            (t.note ? `<span class="team-report-note">“${escapeHtml(t.note)}”</span>` : '') + '</td>' +
+            `<td>${escapeHtml(t.by || 'Someone')}</td>` +
+            `<td data-sort="${escapeHtml(t.at)}">${escapeHtml(formatShownAt(t.at))}</td>` +
+            (admin ? `<td>${t.team ? escapeHtml(t.team.name) : '<span class="blank">No team</span>'}</td>` : '') +
+            `<td>${t.assignee ? escapeHtml(t.assignee.name) : '<span class="blank">Not assigned</span>'}</td>` +
+            `<td><select data-status-change="${n}" aria-label="Change ${n}'s status">` +
+            Object.entries(STATUS_NAMES).map(([s, name]) => `<option value="${s}"${s === t.status ? ' selected' : ''}>${name}</option>`).join('') +
+            '</select></td></tr>';
+    }).join('');
+    return html + '<div class="table-wrap"><table class="result-table status-table" data-sort-list="ticket-statuses"><thead><tr>' +
+        heads.map(h => sortHeadHtml('ticket-statuses', h)).join('') + `<th>Change it to</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+// A ticket's menu changed: asks first before "Open" takes its status away
+async function changeTicketStatus(select) {
+    const number = select.dataset.statusChange;
+    const status = select.value;
+    const before = select.querySelector('option[selected]')?.value;
+    if (status === before) return;
+    if (status === 'open' && !confirm(`Set ${number} open again? Its status (${STATUS_NAMES[before]}) is taken away, as if nobody had said they ${before} it.`)) {
+        select.value = before;
+        return;
+    }
+    select.disabled = true;
+    try {
+        const data = await teamsFetch(`/api/ticket-statuses/${encodeURIComponent(number)}`, { method: 'PUT', body: JSON.stringify({ status }) });
+        if (!data) return;
+        showToast(status === 'open' ? `↩ ${number} is open again` : `✅ ${number} is ${STATUS_NAMES[status].toLowerCase()} now`);
+        afterStatusChange();
+    } catch (err) {
+        select.value = before;
+        select.disabled = false;
+        showToast(`❌ ${err.message}`);
+    }
+}
+
+// The list again, the team's tickets (they show a status under their state), and the counts
+function afterStatusChange() {
+    loadTicketStatuses();
+    if (document.getElementById('team-tickets')) loadTeamTickets(true);
+    if (currentAccess.admin) refreshTeamCounts();
+}
+
+// ---------------------------------------------------------------------
+// 🎬 BEFORE A PRESENTATION (admins): every status undone, and the [Demo]
+// tickets (db/demo-tickets.sql) back on no team with nobody, ready to move
+// to a team and hand out live. The real tickets stay on their teams.
+// ---------------------------------------------------------------------
+
+function presentationHtml() {
+    const p = teamsView.data?.presentation;
+    if (!p) return '';
+    const d = p.demo;
+    const demo = !d.tickets ? 'There are no [Demo] tickets; db/demo-tickets.sql adds them.'
+        : d.onTeam || d.assigned ? `${howMany(d.tickets, '[Demo] ticket', '[Demo] tickets')}: ${d.onTeam.toLocaleString()} on a team, ${d.assigned.toLocaleString()} assigned to someone.`
+            : `The ${howMany(d.tickets, '[Demo] ticket is', '[Demo] tickets are')} on no team and assigned to nobody, ready to hand out.`;
+    const statuses = p.statuses ? `${howMany(p.statuses, 'ticket has', 'tickets have')} a status (someone said they resolved or closed it).` : 'No ticket has a status.';
+    return '<h3>🎬 Before a presentation</h3>' +
+        '<p class="home-status">Puts things back the way a presentation starts. Every real ticket stays on its team, by family, as it is now.</p>' +
+        '<ul class="presentation-steps">' +
+        `<li><span>${escapeHtml(statuses)}</span><button type="button" class="home-action danger" data-undo-statuses="${p.statuses}"${p.statuses ? '' : ' disabled'}>↩ Undo every status</button></li>` +
+        `<li><span>${escapeHtml(demo)}</span><button type="button" class="home-action danger" data-reset-demo="${d.tickets}"${d.tickets ? '' : ' disabled'}>🧹 Put the demo tickets back</button></li>` +
+        '</ul>';
+}
+
+async function undoAllStatuses(count) {
+    if (!confirm(`Undo every status? The ${howMany(count, 'ticket', 'tickets')} someone said they resolved or closed go back to having no status, ` +
+        'and the 🔔 notifications that told project managers about them go too. This can\'t be undone.')) return;
+    try {
+        const data = await teamsFetch('/api/ticket-statuses/undo-all', { method: 'POST', body: '{}' });
+        if (!data) return;
+        showToast(`↩ Undid the status of ${howMany(data.tickets, 'ticket', 'tickets')}`);
+        afterStatusChange();
+    } catch (err) {
+        showToast(`❌ ${err.message}`);
+    }
+}
+
+async function resetDemoTickets(count) {
+    if (!confirm(`Put the ${howMany(count, '[Demo] ticket', '[Demo] tickets')} back? Their families go back on no team, nobody has them, ` +
+        'and their statuses, notifications, stars and ticket results go. The real tickets aren\'t touched.')) return;
+    try {
+        const data = await teamsFetch('/api/demo-tickets/reset', { method: 'POST', body: '{}' });
+        if (!data) return;
+        showToast(`🧹 The ${howMany(data.tickets, '[Demo] ticket is', '[Demo] tickets are')} back on no team, assigned to nobody`);
+        loadTeams();
+    } catch (err) {
+        showToast(`❌ ${err.message}`);
+    }
+}
+
+// ---------------------------------------------------------------------
 // Clicks and changes anywhere in the Team tab
 // ---------------------------------------------------------------------
 
 document.getElementById('teams-view').addEventListener('click', e => {
     const pick = e.target.closest('[data-team-pick]');
     if (pick) {
-        teamsView.teamId = Number(pick.dataset.teamPick);
-        teamsView.filter = { assignee: '', kind: '' };
+        teamsView.teamId = pick.dataset.teamPick === UNASSIGNED_VIEW ? UNASSIGNED_VIEW : Number(pick.dataset.teamPick);
+        teamsView.filter = { assignee: '', kind: '', team: '' };
         listLookups.delete('team-tickets');
+        listLookups.delete('unassigned-tickets');
         teamsView.offset = 0;
         renderTeams();
         return;
@@ -431,7 +706,7 @@ document.getElementById('teams-view').addEventListener('click', e => {
     // "Give all…": a box to type who gets the whole family, in place of the link
     const give = e.target.closest('[data-family-give]');
     if (give) {
-        give.outerHTML = personPickerHtml(teamsView.teamId, undefined, `Give all ${give.dataset.familySize} tickets in this family to`,
+        give.outerHTML = personPickerHtml(Number(give.dataset.familyTeam) || teamsView.teamId, undefined, `Give all ${give.dataset.familySize} tickets in this family to`,
             { placeholder: 'Give all to…', attrs: `data-family="${escapeHtml(give.dataset.familyGive)}" data-family-size="${give.dataset.familySize}"` });
         return;
     }
@@ -439,7 +714,26 @@ document.getElementById('teams-view').addEventListener('click', e => {
     if (find) { findFamily(find.dataset.familyFind); return; }
     if (e.target.closest('[data-family-lookup]')) { findFamily(); return; }
     const move = e.target.closest('[data-family-move]');
-    if (move) { moveFamily(move.dataset.familyMove); return; }
+    if (move) {
+        moveFamily(move.dataset.familyMove, Number(document.getElementById('family-move-to').value), text => {
+            document.getElementById('family-found').innerHTML = `<p class="home-status">${escapeHtml(text)}</p>`;
+        });
+        return;
+    }
+    // A family's row in "Not assigned yet": the team picked beside it. Asks first
+    // when some of its tickets are people's now, since they'd lose them.
+    const groupMove = e.target.closest('[data-group-move]');
+    if (groupMove) {
+        const select = groupMove.closest('.family-group-do').querySelector('[data-group-move-to]');
+        const team = teamsView.data.teams.find(t => t.id === Number(select.value));
+        if (!team) { showToast('Choose the team to move it to first'); select.focus(); return; }
+        const size = Number(groupMove.dataset.familySize);
+        const held = size - Number(groupMove.dataset.familyUnassigned);
+        if (held && !confirm(`Move all ${size.toLocaleString()} tickets in this family to ${team.name}? ` +
+            `The ${held.toLocaleString()} that people have now become unassigned too, for ${team.name}'s project manager to hand out.`)) return;
+        moveFamily(groupMove.dataset.groupMove, team.id, showToast);
+        return;
+    }
     const remove = e.target.closest('[data-member-remove]');
     if (remove) {
         const team = currentTeam();
@@ -457,7 +751,12 @@ document.getElementById('teams-view').addEventListener('click', e => {
         const id = add.dataset.personAdd;
         const row = add.closest('tr');
         setMembership(Number(id), Number(row.querySelector('[data-person-team]').value), row.querySelector('[data-person-role]').value);
+        return;
     }
+    const undo = e.target.closest('[data-undo-statuses]');
+    if (undo) { undoAllStatuses(Number(undo.dataset.undoStatuses)); return; }
+    const demo = e.target.closest('[data-reset-demo]');
+    if (demo) resetDemoTickets(Number(demo.dataset.resetDemo));
 });
 
 // A name picked in a ticket's box gives it to them; in a family's, the whole family
@@ -465,8 +764,9 @@ document.getElementById('teams-view').addEventListener('personpick', e => {
     const picker = e.target;
     const { id, previous, name } = e.detail;
     if (picker.dataset.number) {
-        assign([picker.dataset.number], id)
-            .then(ok => { if (!ok) setPickerValue(picker, previous); })
+        assign([picker.dataset.number], id, name)
+            // "Not assigned yet" lists only tickets nobody has, so it goes from there
+            .then(ok => { if (!ok) setPickerValue(picker, previous); else if (showingUnassigned()) loadTeamTickets(true); })
             .catch(err => { setPickerValue(picker, previous); showToast(err.message); });
     } else if (picker.dataset.family) {
         giveFamily(picker.dataset.family, Number(picker.dataset.familySize), id, name).then(done => {
@@ -478,10 +778,12 @@ document.getElementById('teams-view').addEventListener('personpick', e => {
 
 document.getElementById('teams-view').addEventListener('change', e => {
     const t = e.target;
-    if (t.id === 'team-filter-assignee' || t.id === 'team-filter-kind') {
-        teamsView.filter[t.id === 'team-filter-kind' ? 'kind' : 'assignee'] = t.value;
+    if (TEAM_FILTERS[t.id]) {
+        teamsView.filter[TEAM_FILTERS[t.id]] = t.value;
         teamsView.offset = 0;
         loadTeamTickets();
+    } else if (t.dataset.statusChange) {
+        changeTicketStatus(t);
     } else if (t.classList.contains('team-select-all')) {
         for (const box of document.querySelectorAll('#team-tickets .team-select')) box.checked = t.checked;
     } else if (t.dataset.memberRole) {

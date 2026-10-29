@@ -31,8 +31,8 @@ import { sortRows } from './tickets.mjs';
 
 // They see absolutely everything
 export const ADMIN_USERNAMES = ['vperez', 'lvang', 'lbell'];
-// Named after Molson Coors' best-known beers
-export const TEAM_NAMES = ['Coors Light', 'Miller Lite', 'Coors Banquet', 'Blue Moon', 'Molson Canadian', 'Miller High Life'];
+// Neutral names, so no product brand appears on a team
+export const TEAM_NAMES = ['Example Team 1', 'Example Team 2', 'Example Team 3', 'Example Team 4', 'Example Team 5', 'Example Team 6'];
 export const ROLES = {
   project_manager: 'Project manager',
   process_excellence: 'Process excellence',
@@ -354,10 +354,8 @@ export function scopeNote(scope) {
     : 'No tickets are assigned to you yet, so there is nothing to show. Your project manager or an admin can assign you some.';
 }
 
-// A Cube query -> the same query limited to the scope's tickets. A cube with
-// no rule here is refused rather than run unfiltered.
-export function restrictQuery(query, scope) {
-  if (scope.all) return query;
+// The tables (cubes) a Cube query reads
+function cubesOf(query) {
   const cubes = new Set();
   const note = member => { if (typeof member === 'string' && member.includes('.')) cubes.add(member.split('.')[0]); };
   const walk = f => {
@@ -374,7 +372,14 @@ export function restrictQuery(query, scope) {
   if (Array.isArray(query.order)) query.order.forEach(o => note(Array.isArray(o) ? o[0] : o?.id));
   else if (query.order && typeof query.order === 'object') Object.keys(query.order).forEach(note);
   if (!cubes.size) throw new AccessError('That query names no ticket type.');
+  return cubes;
+}
 
+// A Cube query -> the same query limited to the scope's tickets. A cube with
+// no rule here is refused rather than run unfiltered.
+export function restrictQuery(query, scope) {
+  if (scope.all) return query;
+  const cubes = cubesOf(query);
   const filters = [...(query.filters || [])];
   for (const cube of cubes) {
     const rule = SCOPED_CUBES[cube];
@@ -383,6 +388,27 @@ export function restrictQuery(query, scope) {
     filters.push({ member: `${cube}.${rule[1]}`, operator: 'equals', values: values.length ? values : [NO_TICKET] });
   }
   return { ...query, filters };
+}
+
+// Would this query (an AI answer's, already validated) also find tickets the
+// person can't see? Its filters plus "not one of theirs", counted over every
+// ticket by runUnscoped (runCubeQuery). This is the one place a person's query
+// runs on tickets that aren't theirs, so only true or false ever leaves here,
+// never a count or a row: it lets the chat say "this isn't the full report".
+// Filters on the count itself ("more than 5") are left out, since the
+// question is only whether other people's tickets match.
+export async function findsHiddenTickets(query, scope, runUnscoped) {
+  if (scope.all) return false;
+  for (const cube of cubesOf(query)) {
+    const rule = SCOPED_CUBES[cube];
+    if (!rule) throw new AccessError(`${cube} has no access rule, so it can't be shown.`);
+    const theirs = scope.byKind[rule[0]];
+    const filters = (query.filters || []).filter(f => !String(f.member).endsWith('.count'));
+    if (theirs.length) filters.push({ member: `${cube}.${rule[1]}`, operator: 'notEquals', values: theirs });
+    const rows = await runUnscoped({ measures: [`${cube}.count`], filters });
+    if (Number(rows[0]?.[`${cube}.count`]) > 0) return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------
@@ -459,6 +485,24 @@ export async function listTeams(scope) {
         ORDER BY username ~ $2, lower(coalesce(display_name, username))`,
       [[...ADMIN_USERNAMES, ...SERVICE_ACCOUNTS], TEST_ACCOUNT]);
     result.people = rows.map(r => ({ id: r.id, username: r.username, name: personName(r), test: r.test }));
+    // Every ticket nobody has yet, on a team or on none (the Team tab's "Not assigned yet")
+    const { rows: [u] } = await pool.query(
+      `SELECT count(*)::int AS tickets, count(DISTINCT a.family_id)::int AS families,
+              count(*) FILTER (WHERE f.team_id IS NULL)::int AS no_team_tickets,
+              count(DISTINCT a.family_id) FILTER (WHERE f.team_id IS NULL)::int AS no_team_families
+         FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id
+        WHERE a.assignee_id IS NULL`);
+    result.unassigned = {
+      tickets: u.tickets, families: u.families,
+      noTeam: { tickets: u.no_team_tickets, families: u.no_team_families },
+    };
+    // For the "Before a presentation" card: the demo tickets, and how many tickets have a status
+    const { rows: [d] } = await pool.query(
+      `SELECT count(*)::int AS tickets, count(*) FILTER (WHERE a.assignee_id IS NOT NULL)::int AS assigned,
+              count(*) FILTER (WHERE f.team_id IS NOT NULL)::int AS on_team
+         FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id WHERE a.number ~ $1`, [DEMO_TICKET]);
+    const { rows: [s] } = await pool.query('SELECT count(DISTINCT number)::int AS tickets FROM ticket_reports');
+    result.presentation = { demo: { tickets: d.tickets, assigned: d.assigned, onTeam: d.on_team }, statuses: s.tickets };
   }
   return result;
 }
@@ -575,6 +619,73 @@ export async function teamTickets(scope, teamId, { assignee = null, kind = null,
   };
 }
 
+// Admins: one page of every ticket nobody has yet, on any team or on none,
+// family by family (families on no team first, then each team's, biggest
+// first). team: a team id, 'none' (on no team) or null (any). kind, matches,
+// offset, limit and sort as for teamTickets, except that sort.by may be 'team'
+// (its name) and not 'assignee', and matches gets { number, familyId,
+// familySize, team } (team: a name or null). -> { total, before, tickets: one
+// page, families: { id -> { id, size, kinds, unassigned, team } } for the
+// families on that page }
+export async function unassignedTickets(scope, { team = null, kind = null, matches = null, offset = 0, limit = 50, sort = null } = {}) {
+  requireAdmin(scope);
+  const params = [];
+  const where = ['a.assignee_id IS NULL'];
+  if (team === 'none') where.push('f.team_id IS NULL');
+  else if (team) {
+    const teamId = Number(team);
+    if (!Number.isInteger(teamId)) throw new AccessError('There is no such team.');
+    params.push(teamId);
+    where.push(`f.team_id = $${params.length}`);
+  }
+  if (PREFIXES.includes(kind)) { params.push(`${kind}%`); where.push(`a.number LIKE $${params.length}`); }
+
+  const { rows: all } = await pool.query(
+    `SELECT a.number, a.family_id, f.size, f.team_id, t.name AS team
+       FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id LEFT JOIN teams t ON t.id = f.team_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY f.team_id NULLS FIRST, f.size DESC, a.family_id, a.number`,
+    params);
+  let list = matches
+    ? all.filter(r => matches({ number: r.number, familyId: r.family_id, familySize: r.size, team: r.team }))
+    : all;
+  if (sort) {
+    const valueOf = sort.by === 'family' ? r => r.size
+      : sort.by === 'team' ? r => r.team
+        : r => sort.valueOf(r.number);
+    list = sortRows(list, valueOf, sort.dir);
+  }
+  const start = Math.max(Number(offset) || 0, 0);
+  const rows = list.slice(start, start + Math.min(Math.max(Number(limit) || 50, 1), 200));
+
+  // The page's families: how many of each type they hold, and how many nobody has
+  const families = {};
+  for (const r of rows) {
+    families[r.family_id] ??= {
+      id: r.family_id, size: r.size, kinds: {}, unassigned: 0,
+      team: r.team_id ? { id: r.team_id, name: r.team } : null,
+    };
+  }
+  const { rows: kinds } = await pool.query(
+    `SELECT family_id, substring(number from '^[A-Z]+') AS kind, count(*)::int AS n,
+            count(*) FILTER (WHERE assignee_id IS NULL)::int AS unassigned
+       FROM ticket_assignments WHERE family_id = ANY($1::text[]) GROUP BY 1, 2`,
+    [Object.keys(families)]);
+  for (const k of kinds) {
+    families[k.family_id].kinds[k.kind] = k.n;
+    families[k.family_id].unassigned += k.unassigned;
+  }
+  return {
+    total: list.length,
+    before: all.length,
+    tickets: rows.map(r => ({
+      number: r.number, family: { id: r.family_id, size: r.size },
+      team: r.team_id ? { id: r.team_id, name: r.team } : null,
+    })),
+    families,
+  };
+}
+
 // Gives tickets of one team to one of its members (null: nobody). Admins can
 // for any team, a project manager for their own. The person they go to gets
 // a notification (unless they gave them to themselves). -> how many changed
@@ -585,8 +696,9 @@ export async function assignTickets(scope, numbers, assigneeId) {
   const { rows } = await pool.query(
     'SELECT a.number, f.team_id FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id WHERE a.number = ANY($1::text[])', [wanted]);
   if (rows.length !== wanted.length) throw new AccessError('Some of those tickets aren\'t on any team.');
+  if (rows.some(r => r.team_id === null)) throw new AccessError('Those tickets\' family isn\'t on a team yet. Move it to one first.');
   const teamIds = new Set(rows.map(r => r.team_id));
-  if (teamIds.size !== 1 || rows[0].team_id === null) throw new AccessError('Assign one team\'s tickets at a time.');
+  if (teamIds.size !== 1) throw new AccessError('Assign one team\'s tickets at a time.');
   return giveTickets(scope, rows[0].team_id, wanted, assigneeId);
 }
 
@@ -791,4 +903,110 @@ export async function reportTicket(scope, number, status, note) {
     client.release();
   }
   return { told: managers.map(personName) };
+}
+
+// ---------------------------------------------------------------------
+// RESOLVED OR CLOSED: the tickets whose latest report says resolved or
+// closed, for admins (every team) and project managers (their team's
+// tickets). They can change that status, or set the ticket open again,
+// which takes its reports away. Only OneTouch's record changes: the
+// ticket's data never does. Admins can also undo every status at once, and
+// put the demo tickets back as they were made, before a presentation.
+// ---------------------------------------------------------------------
+
+// db/demo-tickets.sql's made-up tickets
+const DEMO_TICKET = '^(INC|CHG|RITM|SCTASK)99000[0-9]{2}$';
+export const STATUS_CHOICES = ['resolved', 'closed', 'open'];
+
+function requireManager(scope) {
+  if (!scope.access.admin && scope.access.role !== 'project_manager') throw new AccessError('Only an admin or a project manager can see those.');
+}
+
+// -> [{ number, status, note, at, by, family, team, assignee }], newest first
+export async function ticketStatuses(scope) {
+  requireManager(scope);
+  const { rows } = await pool.query(
+    `SELECT r.number, r.status, r.note, r.created_at, r.by, a.family_id, f.size, f.team_id, t.name AS team,
+            a.assignee_id, p.username, p.display_name
+       FROM (SELECT DISTINCT ON (r.number) r.number, r.status, r.note, r.created_at, coalesce(u.display_name, u.username) AS by
+               FROM ticket_reports r LEFT JOIN users u ON u.id = r.user_id
+              ORDER BY r.number, r.created_at DESC, r.id DESC) r
+       JOIN ticket_assignments a ON a.number = r.number
+       JOIN ticket_families f ON f.id = a.family_id
+       LEFT JOIN teams t ON t.id = f.team_id
+       LEFT JOIN users p ON p.id = a.assignee_id
+      WHERE r.status IN ('resolved', 'closed') AND ($1::int IS NULL OR f.team_id = $1)
+      ORDER BY r.created_at DESC, r.number`,
+    [scope.access.admin ? null : scope.access.team.id]);
+  return rows.map(r => ({
+    number: r.number, status: r.status, note: r.note, at: r.created_at, by: r.by,
+    family: { id: r.family_id, size: r.size },
+    team: r.team_id ? { id: r.team_id, name: r.team } : null,
+    assignee: r.assignee_id ? { id: r.assignee_id, name: personName(r) } : null,
+  }));
+}
+
+// One ticket's status, set by an admin or its team's project manager: resolved
+// or closed (a report in their name), or open again (its reports go, as if
+// nobody had said so) -> { number, status }
+export async function setTicketStatus(scope, number, status) {
+  const n = String(number || '').toUpperCase().trim();
+  if (!TICKET.test(n)) throw new AccessError('That isn\'t a ticket number.');
+  if (!STATUS_CHOICES.includes(status)) throw new AccessError('Pick resolved, closed or open.');
+  const { rows: [t] } = await pool.query(
+    'SELECT f.team_id FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id WHERE a.number = $1', [n]);
+  if (!t || !canManage(scope, t.team_id)) throw new AccessError(`Only an admin or ${n}'s team's project manager can change its status.`);
+  if (status === 'open') await pool.query('DELETE FROM ticket_reports WHERE number = $1', [n]);
+  else {
+    await pool.query('INSERT INTO ticket_reports (number, user_id, team_id, status) VALUES ($1, $2, $3, $4)',
+      [n, scope.access.userId, t.team_id, status]);
+  }
+  return { number: n, status };
+}
+
+// Every status anyone set, undone (admins): the reports go, and so do the 🔔
+// notifications that told project managers about them -> { tickets, notifications }
+export async function undoAllStatuses(scope) {
+  requireAdmin(scope);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query('DELETE FROM ticket_reports RETURNING number');
+    const { rowCount } = await client.query('DELETE FROM notifications WHERE kind = \'report\'');
+    await client.query('COMMIT');
+    return { tickets: new Set(rows.map(r => r.number)).size, notifications: rowCount };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// The demo tickets as db/demo-tickets.sql made them (admins): their families
+// on no team, nobody assigned, and nothing OneTouch kept about them since
+// (statuses, notifications, stars, ticket results) -> { tickets, families }
+export async function resetDemoTickets(scope) {
+  requireAdmin(scope);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      'UPDATE ticket_assignments SET assignee_id = NULL, assigned_at = NULL, assigned_by = NULL WHERE number ~ $1 RETURNING family_id', [DEMO_TICKET]);
+    const families = [...new Set(rows.map(r => r.family_id))];
+    // Only families of nothing but demo tickets (as the script makes them)
+    await client.query(
+      `UPDATE ticket_families f SET team_id = NULL WHERE f.id = ANY($1::text[])
+          AND NOT EXISTS (SELECT 1 FROM ticket_assignments a WHERE a.family_id = f.id AND a.number !~ $2)`, [families, DEMO_TICKET]);
+    await client.query('DELETE FROM notifications WHERE EXISTS (SELECT 1 FROM unnest(numbers) n WHERE n ~ $1)', [DEMO_TICKET]);
+    for (const table of ['ticket_reports', 'starred_tickets', 'seen_tickets']) await client.query(`DELETE FROM ${table} WHERE number ~ $1`, [DEMO_TICKET]);
+    await client.query('COMMIT');
+    changed();
+    return { tickets: rows.length, families: families.length };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }

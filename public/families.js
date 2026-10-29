@@ -237,7 +237,7 @@ async function findFamilies(number) {
         const back = '<button type="button" class="home-action" data-families-back>← All families</button>';
         const open = data.known ? ` <button type="button" class="home-action" data-ticket="${escapeHtml(data.number)}">Open ${escapeHtml(data.number)}</button>` : '';
         if (!data.known) {
-            list.innerHTML = `<p class="families-about">${escapeHtml(data.number)} is not in the data. ${back}</p>`;
+            list.innerHTML = `<p class="families-about">${escapeHtml(notOpenedText(data.number, data.noAccess))} ${back}</p>`;
         } else if (!data.families.length) {
             list.innerHTML = `<p class="families-about">${escapeHtml(data.number)} has no parent, children or other linked tickets.${open} ${back}</p>`;
         } else {
@@ -320,7 +320,7 @@ async function openTicketDialog(number, { back = false } = {}) {
         const data = await searchTickets(number, true);
         if (!data || run !== ticketDialogRun) return;
         if (!data.found.length) {
-            body.innerHTML = `<p class="home-status">${escapeHtml(number)} is not in the data.</p>`;
+            body.innerHTML = `<p class="home-status">${escapeHtml(notOpenedText(number, data.noAccess))}</p>`;
         } else if (data.found.length === 1) {
             document.getElementById('ticket-dialog-title').textContent = `${data.found[0].type} ${number}`;
             body.innerHTML = ticketCardHtml(data.found[0], data.record);

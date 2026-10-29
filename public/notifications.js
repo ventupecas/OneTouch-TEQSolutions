@@ -3,8 +3,9 @@
 // tickets someone gave you, a family moved to the team you're the project
 // manager of, and someone on your team saying they resolved or closed a
 // ticket. Checked every minute while signed in; opening the list marks
-// them read. Also the box for telling your project manager you resolved or
-// closed a ticket, from a ticket's record and the Team tab.
+// them read. Each can be cleared off the list, or all of them at once.
+// Also the box for telling your project manager you resolved or closed a
+// ticket, from a ticket's record and the Team tab.
 // Loaded before app.js, whose helpers these functions use when they run.
 // =====================================================================
 
@@ -20,12 +21,14 @@ const notifyState = {
     newestId: null, // the newest one seen so far (null: not checked yet), so only later ones pop up
     timer: null,
     run: 0,         // bumped on sign-out, so a check still on its way is dropped
+    cleared: new Set(), // ids cleared here, kept off the list even if a check started before the server heard
+    clearedUpTo: 0,     // "Clear all": every id up to this one, likewise
 };
 
 // Signing out: nothing of this person's stays on the page
 function resetNotifications() {
     clearInterval(notifyState.timer);
-    Object.assign(notifyState, { items: [], unread: 0, newestId: null, timer: null, run: notifyState.run + 1 });
+    Object.assign(notifyState, { items: [], unread: 0, newestId: null, timer: null, run: notifyState.run + 1, cleared: new Set(), clearedUpTo: 0 });
     toggleNotifications(false);
     paintNotifyCount();
     document.getElementById('notify-list').innerHTML = '';
@@ -46,11 +49,12 @@ async function checkNotifications() {
         if (handleUnauthorized(response) || !response.ok || run !== notifyState.run) return;
         const data = await response.json();
         if (run !== notifyState.run) return;
+        const listed = data.notifications.filter(n => n.id > notifyState.clearedUpTo && !notifyState.cleared.has(n.id));
         // New since the last check (none on the first one: the count says enough)
-        const fresh = notifyState.newestId === null ? [] : data.notifications.filter(n => n.id > notifyState.newestId && !n.read);
-        notifyState.items = data.notifications;
+        const fresh = notifyState.newestId === null ? [] : listed.filter(n => n.id > notifyState.newestId && !n.read);
+        notifyState.items = listed;
         notifyState.unread = data.unread;
-        notifyState.newestId = Math.max(notifyState.newestId ?? 0, ...data.notifications.map(n => n.id));
+        notifyState.newestId = Math.max(notifyState.newestId ?? 0, ...listed.map(n => n.id));
         paintNotifyCount();
         if (notificationsOpen()) {
             renderNotifications();
@@ -175,8 +179,9 @@ function notificationText(n, html = false) {
 
 function renderNotifications() {
     const list = document.getElementById('notify-list');
+    document.getElementById('notify-clear-all').hidden = !notifyState.items.length;
     if (!notifyState.items.length) {
-        list.innerHTML = '<p class="home-status">Nothing yet. You\'ll hear here when someone gives you tickets. Project managers also hear when a family ' +
+        list.innerHTML = '<p class="home-status">No notifications. You\'ll hear here when someone gives you tickets. Project managers also hear when a family ' +
             'of tickets is moved to their team, and when someone on it says they resolved or closed a ticket.</p>';
         return;
     }
@@ -185,19 +190,63 @@ function renderNotifications() {
         const count = d.count || n.numbers.length;
         const shown = count > 1 ? n.numbers.slice(0, NOTIFY_SHOWN_NUMBERS) : [];
         const more = count - shown.length;
-        return `<li class="notify-item${n.read ? '' : ' unread'}">` +
+        return `<li class="notify-item${n.read ? '' : ' unread'}" data-notify-id="${n.id}">` +
             `<div class="notify-text">${notificationText(n, true)}</div>` +
             (d.note ? `<blockquote class="notify-note">${escapeHtml(d.note)}</blockquote>` : '') +
             (shown.length ? `<div class="notify-tickets">${shown.map(number =>
                 `<button type="button" class="link-btn" data-ticket="${escapeHtml(number)}">${escapeHtml(number)}</button>`).join(', ')}` +
                 (more > 0 ? ` and ${more.toLocaleString()} more` : '') + '</div>' : '') +
-            `<div class="notify-foot"><span>${escapeHtml(formatShownAt(n.at))}</span>` +
+            `<div class="notify-foot"><span>${escapeHtml(formatShownAt(n.at))}</span><span class="notify-foot-actions">` +
             (n.kind === 'report' ? '' : '<button type="button" class="link-btn" data-notify-team>Open the Team tab</button>') +
-            '</div></li>';
+            `<button type="button" class="notify-clear" data-notify-clear="${n.id}" aria-label="Clear this notification">Clear</button>` +
+            '</span></div></li>';
     }).join('') + '</ul>';
 }
 
+// Takes notifications off the list at once, and off the server's; they come
+// back if that fails. ids: some of them, or null: all of them, up to the
+// newest showing (one that arrives meanwhile isn't cleared unseen)
+async function clearNotifications(ids) {
+    const upTo = ids ? null : Math.max(...notifyState.items.map(n => n.id));
+    const gone = new Set(ids || notifyState.items.map(n => n.id));
+    const before = { cleared: new Set(notifyState.cleared), clearedUpTo: notifyState.clearedUpTo };
+    if (ids) ids.forEach(id => notifyState.cleared.add(id));
+    else notifyState.clearedUpTo = Math.max(notifyState.clearedUpTo, upTo);
+    notifyState.items = notifyState.items.filter(n => !gone.has(n.id));
+    renderNotifications();
+    try {
+        const response = await fetch(`${API_BASE}/api/notifications/clear`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify(ids ? { ids } : { upTo }),
+        });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+    } catch (err) {
+        Object.assign(notifyState, before);
+        showToast(`❌ ${err.message}`);
+        checkNotifications(); // the list as the server has it
+    }
+}
+
+function clearAllNotifications() {
+    if (!notifyState.items.length) return;
+    if (!confirm('Clear all your notifications? They leave this list for good.')) return;
+    clearNotifications(null);
+    document.querySelector('#notify-panel .drawer-close').focus();
+}
+
 document.getElementById('notify-panel').addEventListener('click', e => {
+    // One notification's Clear: the keys go to the next one's, or the one before
+    const clear = e.target.closest('[data-notify-clear]');
+    if (clear) {
+        const item = clear.closest('.notify-item');
+        const next = item.nextElementSibling?.dataset.notifyId || item.previousElementSibling?.dataset.notifyId;
+        clearNotifications([Number(clear.dataset.notifyClear)]);
+        (document.querySelector(`#notify-list [data-notify-clear="${next}"]`) || document.querySelector('#notify-panel .drawer-close')).focus();
+        return;
+    }
     // A ticket number: app.js's click listener opens it; the list gets out of the way
     if (e.target.closest('[data-ticket]')) { toggleNotifications(false); return; }
     if (e.target.closest('[data-notify-team]')) {

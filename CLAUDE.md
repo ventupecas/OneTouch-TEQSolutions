@@ -9,7 +9,10 @@ replacing that.
 
 - **Admins** (`ADMIN_USERNAMES` in `teams.mjs`: vperez, lvang, lbell) see every
   ticket. They put people on teams, set roles, move families between teams,
-  and assign any ticket.
+  and assign any ticket. The Team tab's **📥 Not assigned yet**
+  (`GET /api/teams/unassigned/tickets`, `teams.unassignedTickets`; admins only)
+  lists every ticket nobody has, on a team or on none, under a row for its
+  family, where the family is moved to a team or given whole to one person.
 - **Everyone gets the Metabase dashboards, each showing only their own
   tickets.** The server signs a Metabase embed link per person
   (`signedDashboardPath` in `server.mjs`) with a locked `viewer` filter
@@ -42,9 +45,8 @@ replacing that.
 - An admin takes someone off a team with **Remove from team** in the Team tab
   (or by picking "No team"). They lose their role and stop seeing the team's
   tickets, and their tickets go back to the team, unassigned.
-- There are six real teams, named after Molson Coors beers: Coors Light, Miller
-  Lite, Coors Banquet, Blue Moon, Molson Canadian and Miller High Life. Each has
-  one project manager, one process excellence member, and 2–4 project team
+- There are six real teams, Example Team 1 to Example Team 6. Each has one
+  project manager, one process excellence member, and 2–4 project team
   members (the first members were placed at random).
 - One test team, the **Milwaukee Brewers**, for trying out the project manager's
   side: `vperez` (an admin, who still sees everything) is its project manager.
@@ -54,11 +56,17 @@ replacing that.
   (`test.jchourio`) and Brice Turang (`test.bturang`) as project team members.
   Their passwords are random; set one with
   `docker exec -it analytics_node_app npm run users -- reset-password test.cyelich`.
-  It starts with no tickets: an admin moves families to it with "Move tickets
-  to another team". For presentations, `db/demo-tickets.sql` adds 11 made-up
+  It starts with no tickets: an admin moves families to it from 📥 Not assigned
+  yet or with "Move tickets to another team". For presentations, `db/demo-tickets.sql` adds 11 made-up
   "[Demo]" tickets in 5 families (numbers `…99000xx`, outside the export) on no
   team, ready to move to the Brewers live; running it again resets them, and
   `db/demo-tickets-remove.sql` removes them (restart the app after either).
+  Without a restart, an admin's **🎬 Before a presentation** card (Team tab)
+  puts them back (`POST /api/demo-tickets/reset`, `teams.resetDemoTickets`: no
+  team, nobody, and their statuses, notifications, stars and ticket results
+  gone) and undoes every status (`POST /api/ticket-statuses/undo-all`,
+  `teams.undoAllStatuses`: all of `ticket_reports` and the 'report'
+  notifications). Real tickets keep their teams and people.
 
 **Assigned to me** (Home's first tab, `GET /api/my-tickets`): everyone's
 OneTouch tickets, most urgent first, then oldest (`ticketsByPriority` in
@@ -116,6 +124,8 @@ a parent that isn't the person's own gets its row from the family's tickets they
 KPIs, week opened and ServiceNow team, from the same list as "Assigned to me"; a click on a
 bar shows those tickets in "Assigned to me". **The AI assistant** is the Ask bar in the
 header (right of 👥 Team) on every page; a click anywhere outside the chat closes it.
+Every full ticket number in the chat (typed questions, answers, answer tables, family notes
+under an answer) is a button that opens that ticket (`linkTicketsHtml` in `app.js`).
 
 **Notifications** (`notifications.mjs`, the 🔔 in the header, checked every
 minute). Each one is saved in the same transaction as the change it reports:
@@ -127,7 +137,17 @@ minute). Each one is saved in the same transaction as the change it reports:
 - A member says they resolved or closed one of their tickets (a button on the
   ticket's record and on its row in the Team tab): their project manager is
   told, and the Team tab shows it under the ticket's state. This is only a
-  message (`ticket_reports`): the ticket's data never changes.
+  message (`ticket_reports`): the ticket's data never changes. The Team tab's
+  **✅ Resolved or closed** (`GET /api/ticket-statuses`, `teams.ticketStatuses`)
+  lists each ticket whose latest report is resolved or closed: every team's for
+  admins, a project manager's own team's. They change it
+  (`PUT /api/ticket-statuses/:number`, `teams.setTicketStatus`): resolved or
+  closed adds a report in their name; open deletes the ticket's reports.
+
+Each one can be cleared off the person's list ("Clear" on it, or "Clear all"
+up to the newest shown; `POST /api/notifications/clear`,
+`notifications.clearNotifications`). Clearing sets `cleared_at` and keeps the
+row, so the email outbox is unaffected; only the person's own can be cleared.
 
 **Each notification is also emailed** (`mail.mjs`, through Brevo's API, from
 `notifications@onetouch.fyi`): an outbox on the `notifications` table, sent after the
@@ -152,8 +172,24 @@ number is one of theirs" to every Cube query made for anyone who isn't an
 admin. That covers the AI assistant, ticket search, records, families, charts
 and their own dashboards. Approval records follow the ticket they approve.
 Never add a route that calls `runCubeQuery` directly with input from a person:
-use `req.runQuery`. The only direct calls are the first-start seeding and
-summaries for numbers that were already checked.
+use `req.runQuery`. The only direct calls are the first-start seeding,
+summaries for numbers that were already checked, and `teams.findsHiddenTickets`,
+which counts an AI answer's validated query over tickets that aren't the
+person's and only ever returns true or false (never a count or a row).
+
+**The AI assistant and permissions** (`answerQuestion` in `server.mjs`). A
+question naming only tickets the person can't see is refused before Claude
+(`intent: 'denied'`); one whose generated query filters only on such tickets is
+refused before anything runs. Otherwise the answer shows only their tickets, and
+`restricted` ("You can't see the full report…") says when matching tickets that
+aren't theirs were left out (`findsHiddenTickets`, per query). A query that is
+empty only because of permissions gets no Claude explanation; one where nothing
+anywhere matches is explained as "the data has none". A full ticket number someone
+can't open but that is in the data comes back in `noAccess` (ticket search,
+Families page find, starred list; `noAccessTo` in `server.mjs`, `inTheData` in
+`tickets.mjs`, from the ticket index): the page says "You don't have permission
+to see …". Only the number is sent, never anything in the ticket; admins never
+get one.
 
 **Two kinds of "assigned".** `assigned_to` and `assignment_group` in the
 ServiceNow export are who worked a ticket in ServiceNow. They have nothing to

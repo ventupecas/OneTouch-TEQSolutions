@@ -331,7 +331,7 @@ async function openSavedChat(id, { quiet = false } = {}) {
         if (!response.ok) throw new Error(data.error || 'Could not open that chat.');
         clearChat();
         for (const entry of data.transcript) {
-            appendMessage('user-msg', escapeHtml(entry.question));
+            appendMessage('user-msg', linkTicketsHtml(entry.question));
             const reply = entry.reply || {};
             showAnswer(entry.question, reply, reply.elapsedMs ? reply.elapsedMs / 1000 : null, { replay: true });
         }
@@ -824,8 +824,8 @@ async function sendPrompt() {
 
     if (!userPromptText) return;
 
-    // Append User message node to DOM bubble UI
-    appendMessage('user-msg', escapeHtml(userPromptText));
+    // Append User message node to DOM bubble UI (its ticket numbers open those tickets)
+    appendMessage('user-msg', linkTicketsHtml(userPromptText));
     inputField.value = '';
 
     // Shows each step while the answer is worked out, with a running clock
@@ -867,7 +867,13 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
     }
 
     if (data.error) {
-        appendMessage('ai-msg', `❌ Error: ${escapeHtml(data.error)}`);
+        appendMessage('ai-msg', `❌ Error: ${linkTicketsHtml(data.error)}`);
+        return;
+    }
+
+    // About tickets they don't have permission to see: not answered (server.mjs)
+    if (data.intent === 'denied') {
+        appendMessage('ai-msg', `<div class="result-restricted">🔒 ${linkTicketsHtml(data.message)}</div>` + answerTimingHtml(seconds, data.fromCache));
         return;
     }
 
@@ -875,16 +881,18 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
     if (data.intent === 'clarify' || data.intent === 'unsupported') {
         const message = data.message || 'I need a little more detail to run that.';
         const download = downloadBarHtml(registerExport({ title: 'OneTouch answer', question: userPromptText, tables: buildExportTables(data, message) }));
-        appendMessage('ai-msg', `🙋 ${escapeHtml(message)}` + download + answerTimingHtml(seconds, data.fromCache));
+        appendMessage('ai-msg', `🙋 ${linkTicketsHtml(message)}` + download + answerTimingHtml(seconds, data.fromCache));
         return;
     }
 
     // Normal query: restate what was fetched, show the rows as a table,
     // and tuck the assumptions into a collapsible note underneath
-    let html = `<div class="result-title">${escapeHtml(data.message || 'Here is what I found:')}</div>`;
+    let html = `<div class="result-title">${linkTicketsHtml(data.message || 'Here is what I found:')}</div>`;
+    // Not the full report: tickets they don't have permission to see match too
+    if (data.restricted) html += `<div class="result-restricted">🔒 ${linkTicketsHtml(data.restricted)}</div>`;
     // Nothing found anywhere: the server's explanation replaces the empty tables
     const explanationHtml = data.explanation
-        ? `<div class="result-explanation">${escapeHtml(data.explanation)}</div>` : '';
+        ? `<div class="result-explanation">${linkTicketsHtml(data.explanation)}</div>` : '';
     let tablesHtml = '';
     if (data.rowsDropped) {
         // A long saved chat keeps only its newer answers' tables (chats.mjs)
@@ -911,7 +919,7 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
 
     if (data.assumptions && data.assumptions.length > 0) {
         html += `<details class="assumptions"><summary>How I read your question</summary><ul>` +
-            data.assumptions.map(a => `<li>${escapeHtml(a)}</li>`).join('') +
+            data.assumptions.map(a => `<li>${linkTicketsHtml(a)}</li>`).join('') +
             `</ul></details>`;
     }
 
@@ -1178,11 +1186,11 @@ function cellHtml(member, raw, truncate) {
     const isNumber = column === 'count';
     const cls = isNumber ? ' class="num"' : '';
     if (truncate && LONG_TEXT.has(column) && text.length > 120) {
-        return `<td${cls} title="${escapeHtml(text)}">${escapeHtml(text.slice(0, 117))}…</td>`;
+        return `<td${cls} title="${escapeHtml(text)}">${linkTicketsHtml(text.slice(0, 117))}…</td>`;
     }
     const sortAttr = raw !== null && raw !== undefined && String(raw) !== text ? ` data-sort="${escapeHtml(String(raw))}"` : '';
     // A ticket number opens that ticket (its record and family), with a star next to it
-    return `<td${cls}${sortAttr}>${ticketValueHtml(raw, text)}</td>`;
+    return `<td${cls}${sortAttr}>${answerValueHtml(raw, text)}</td>`;
 }
 
 // A value that is a ticket number (a parent, a request, a change…): a link that
@@ -1193,6 +1201,22 @@ function ticketValueHtml(raw, text, self = null) {
         return `<button type="button" class="ticket-link" data-ticket="${escapeHtml(value)}" title="Open ${escapeHtml(value)}: its record and family">${escapeHtml(text)}</button>${starFor(raw)}`;
     }
     return `${escapeHtml(text)}${starFor(raw)}`;
+}
+
+// Text in the chat (a question someone typed, or Claude's answer), with every full
+// ticket number in it, in any case ("inc0012345"), a button that opens that ticket
+const TICKET_IN_TEXT = /\b(INC|CHG|RITM|SCTASK|REQ)\d{7}\b/gi;
+function linkTicketsHtml(text) {
+    return escapeHtml(text).replace(TICKET_IN_TEXT, typed => {
+        const number = typed.toUpperCase();
+        return `<button type="button" class="ticket-link in-text" data-ticket="${number}" title="Open ${number}: its record and family">${typed}</button>`;
+    });
+}
+
+// A cell of an answer's table: a ticket number links (with its star) as above;
+// text that mentions ticket numbers ("Duplicate of INC0012345") links each of them
+function answerValueHtml(raw, text) {
+    return OPENABLE.test(String(raw ?? '')) ? ticketValueHtml(raw, text) : linkTicketsHtml(text);
 }
 
 function renderResults(rows, entity) {
@@ -1214,7 +1238,7 @@ function renderResults(rows, entity) {
             const { column } = splitMember(c);
             const text = formatValue(c, rows[0][c]);
             const cls = LONG_TEXT.has(column) ? ' class="long"' : '';
-            return `<tr><th>${escapeHtml(columnLabel(c))}</th><td${cls}>${ticketValueHtml(rows[0][c], text)}</td></tr>`;
+            return `<tr><th>${escapeHtml(columnLabel(c))}</th><td${cls}>${answerValueHtml(rows[0][c], text)}</td></tr>`;
         }).join('');
         return `<div class="table-wrap"><table class="result-table detail"><tbody>${body}</tbody></table></div>`;
     }
@@ -1553,6 +1577,7 @@ function buildExportTables(data, textAnswer = null) {
         tables = [exportTableFromRows(data.results || [], null)];
     }
     tables = tables.filter(Boolean);
+    if (data.restricted) tables.push(noteTable('Not the full report', 'Permissions', [data.restricted]));
     if (data.explanation) {
         tables.push(noteTable(data.allEmpty ? 'Why nothing was found' : 'Why some of it is empty', 'Explanation', [data.explanation]));
     }
@@ -1993,7 +2018,8 @@ function resetHome() {
     forgetRemovedExports();
 }
 
-// -> { found, notFound, ignored, tooMany, record? }, or null if the session ended
+// -> { found, notFound, noAccess (the not-found ones that are someone else's),
+// ignored, tooMany, record? }, or null if the session ended
 async function searchTickets(text, record = false) {
     const response = await fetch(`${API_BASE}/api/tickets/search`, {
         method: 'POST',
@@ -2827,6 +2853,14 @@ function showTicketResults(quiet = false) {
     }, quiet).then(() => paintSelection('results'));
 }
 
+// Why a ticket number didn't open: someone else's ticket (the server lists it in
+// noAccess: in the data, but not one this person may see), or not in the data
+function notOpenedText(number, noAccess) {
+    return (noAccess || []).includes(number)
+        ? `🔒 You don't have permission to see ${number}. Only whoever it's assigned to, its team's project manager and admins can open it.`
+        : `${number} is not in the data.`;
+}
+
 // A ticket number someone clicked: its full record, with the way back to the list.
 // Opening it counts as being shown, so it joins the list.
 function openTicketRecord(number) {
@@ -2849,7 +2883,7 @@ async function showOpenedRecord(number) {
         const data = await searchTickets(number, true);
         if (!data) return null;
         const back = '<div class="home-actions"><button type="button" class="home-action" onclick="closeTicketRecord()">← All ticket results</button></div>';
-        if (!data.found.length) return back + `<p class="home-status">${escapeHtml(number)} is not in the data.</p>`;
+        if (!data.found.length) return back + `<p class="home-status">${escapeHtml(notOpenedText(number, data.noAccess))}</p>`;
         if (data.found.length === 1) return back + ticketCardHtml(data.found[0], data.record);
         return back + ticketTableHtml(data.found);
     });
@@ -2918,8 +2952,10 @@ function relatedToLabel(focus) {
     return `Related to ${list.slice(0, 3).join(', ')}${list.length > 3 ? ` and ${list.length - 3} more` : ''}`;
 }
 
-// `focus`: the tickets the question or record was about, marked in each family
-function relatedHtml(families, focus) {
+// `focus`: the tickets the question or record was about, marked in each family.
+// inChat: under an answer, where every ticket number in the notes opens that ticket
+function relatedHtml(families, focus, inChat = false) {
+    const text = inChat ? linkTicketsHtml : escapeHtml;
     const about = relatedToLabel(focus);
     // Several families: one file with all of them, besides each family's own
     const all = families.length > 1
@@ -2928,8 +2964,8 @@ function relatedHtml(families, focus) {
         : '';
     const single = focus.size === 1 ? [...focus][0] : null;
     const heading = single ? `👪 ${single}'s family: parent, children and other linked tickets` : '🔗 Related tickets';
-    return `<div class="related"><div class="related-title">${escapeHtml(heading)}</div>` + all + families.map(f => {
-        const facts = list => list.map(fact => `<span class="fact"><b>${escapeHtml(fact.field)}:</b> ${escapeHtml(familyFact(fact))}</span>`).join('');
+    return `<div class="related"><div class="related-title">${text(heading)}</div>` + all + families.map(f => {
+        const facts = list => list.map(fact => `<span class="fact"><b>${escapeHtml(fact.field)}:</b> ${text(familyFact(fact))}</span>`).join('');
         const same = f.same.length
             ? `<div class="family-line"><span class="same-label">Same in all ${f.total.toLocaleString()}</span>${facts(f.same)}</div>` : '';
         const differ = f.differ.length
@@ -2941,9 +2977,9 @@ function relatedHtml(families, focus) {
             ? `<button type="button" class="home-action family-show-all" data-show-all>Show all ${members.length.toLocaleString()}</button>` : '';
         const where = single ? familyRoleLine(f, single) : '';
         const download = downloadBarHtml(registerExport({ title: f.title, question: about, tables: familyExportTables(f) }), 'Download this family as');
-        return `<section class="family${extra > 0 ? ' collapsed' : ''}"><div class="family-title">${escapeHtml(f.title)}</div>` +
-            (where ? `<p class="family-where">${escapeHtml(where)}</p>` : '') +
-            `<p class="family-why">${escapeHtml(f.why)}</p>${same}${differ}` +
+        return `<section class="family${extra > 0 ? ' collapsed' : ''}"><div class="family-title">${text(f.title)}</div>` +
+            (where ? `<p class="family-where">${text(where)}</p>` : '') +
+            `<p class="family-why">${text(f.why)}</p>${same}${differ}` +
             ticketTableHtml(members, FAMILY_COLUMNS, focus, 'focus', { rowClass: (t, i) => i >= FAMILY_MEMBERS_SHOWN ? 'more-member' : '' }) +
             more + download + '</section>';
     }).join('') + '</div>';
@@ -3008,9 +3044,9 @@ async function showRelated(container, numbers, conversation, before = null) {
             else slot.remove();
             return;
         }
-        slot.innerHTML = relatedHtml(data.families, new Set(numbers));
-        // Keep the newest answer in view, as the chat does for new messages
         const chatLog = document.getElementById('chat-log');
+        slot.innerHTML = relatedHtml(data.families, new Set(numbers), chatLog.contains(slot));
+        // Keep the newest answer in view, as the chat does for new messages
         if (chatLog.contains(slot) && chatLog.lastElementChild === container) chatLog.scrollTop = chatLog.scrollHeight;
     } catch (err) {
         slot.remove();
@@ -3069,8 +3105,9 @@ function showStarred(quiet = false) {
                 'Your stars are saved to your account, so they are here on any computer you sign in from.</p>';
         }
         const columns = withLinks([STARRED_COLUMN]);
-        const missing = data.notFound.length
-            ? `<p class="home-status">Not in the data any more: ${escapeHtml(data.notFound.join(', '))}</p>` : '';
+        const missing = (data.noAccess?.length
+            ? `<p class="home-status">🔒 You don't have permission to see these any more (they're no longer yours): ${escapeHtml(data.noAccess.join(', '))}</p>` : '') +
+            (data.notFound.length ? `<p class="home-status">Not in the data any more: ${escapeHtml(data.notFound.join(', '))}</p>` : '');
         return '<div class="results-head">' +
             `<p class="home-status">${numbers.length.toLocaleString()} starred ${numbers.length === 1 ? 'ticket' : 'tickets'}, newest first. ` +
             'Tick tickets to unstar several at once.</p>' +
@@ -3434,7 +3471,7 @@ async function loadTicketDetail(box, number) {
         const data = await searchTickets(number, true);
         if (!data || !box.isConnected) return;
         if (!data.found.length) {
-            box.innerHTML = `<p class="home-status">${escapeHtml(number)} is not in the data.</p>`;
+            box.innerHTML = `<p class="home-status">${escapeHtml(notOpenedText(number, data.noAccess))}</p>`;
             return;
         }
         box.innerHTML = ticketCardHtml(data.found[0], data.record);

@@ -11,6 +11,8 @@
 // few details; the page words them. Each is also emailed (mail.mjs): its
 // email_state starts 'pending', and the sender marks it 'sent', 'skipped'
 // (with why) or 'failed'. Those made before email existed are 'before'.
+// Someone can clear one, or all of them, off their list: cleared_at is set
+// and the row stays, so an email still on its way goes out all the same.
 // =====================================================================
 
 import { pool } from './auth.mjs';
@@ -44,6 +46,9 @@ export async function ensureNotificationsSchema() {
     ALTER TABLE notifications ADD COLUMN IF NOT EXISTS emailed_at timestamptz;
     ALTER TABLE notifications ADD COLUMN IF NOT EXISTS email_note text;
     CREATE INDEX IF NOT EXISTS notifications_email_idx ON notifications (id) WHERE email_state = 'pending';
+
+    -- Cleared off the person's list (clearNotifications)
+    ALTER TABLE notifications ADD COLUMN IF NOT EXISTS cleared_at timestamptz;
   `);
 }
 
@@ -62,10 +67,10 @@ export async function listNotifications(userId) {
   const { rows } = await pool.query(
     `SELECT n.id, n.kind, n.numbers, n.detail, n.created_at, n.read_at, coalesce(u.display_name, u.username) AS actor
        FROM notifications n LEFT JOIN users u ON u.id = n.actor_id
-      WHERE n.user_id = $1 ORDER BY n.id DESC LIMIT ${LIST_LIMIT}`,
+      WHERE n.user_id = $1 AND n.cleared_at IS NULL ORDER BY n.id DESC LIMIT ${LIST_LIMIT}`,
     [userId]);
   const { rows: [{ unread }] } = await pool.query(
-    'SELECT count(*)::int AS unread FROM notifications WHERE user_id = $1 AND read_at IS NULL', [userId]);
+    'SELECT count(*)::int AS unread FROM notifications WHERE user_id = $1 AND read_at IS NULL AND cleared_at IS NULL', [userId]);
   return {
     unread,
     notifications: rows.map(r => ({
@@ -82,5 +87,18 @@ export async function markRead(userId, ids = null) {
     `UPDATE notifications SET read_at = now()
       WHERE user_id = $1 AND read_at IS NULL AND ($2::int[] IS NULL OR id = ANY($2::int[]))`,
     [userId, wanted]);
+  return rowCount;
+}
+
+// Clears some of this person's notifications (ids) off their list, or all of
+// them up to and including upTo: the newest their list showed, so one that
+// arrived since isn't cleared before they've seen it -> how many
+export async function clearNotifications(userId, { ids = null, upTo = null } = {}) {
+  const wanted = Array.isArray(ids) ? ids.map(Number).filter(Number.isInteger).slice(0, LIST_LIMIT) : null;
+  if (wanted ? !wanted.length : !Number.isInteger(upTo)) return 0;
+  const { rowCount } = await pool.query(
+    `UPDATE notifications SET cleared_at = now(), read_at = coalesce(read_at, now())
+      WHERE user_id = $1 AND cleared_at IS NULL AND ($2::int[] IS NULL OR id = ANY($2::int[])) AND ($3::int IS NULL OR id <= $3)`,
+    [userId, wanted, wanted ? null : upTo]);
   return rowCount;
 }

@@ -415,6 +415,33 @@ body {
 @media (max-width: 900px) {
     .app-header { padding: 10px 16px; }
 }
+/* A phone or a narrow window: the header stacks, so nothing slides under 🔔,
+   🎨 and Sign out. On top the logo and those buttons (the name between them
+   while there's room), then the page buttons, then the Ask bar across the
+   whole width. The left side's pieces join the header's own rows. */
+@media (max-width: 700px) {
+    .app-header { flex-wrap: wrap; gap: 8px; padding: 8px 16px; }
+    .header-left { display: contents; }
+    .app-title { order: 1; }
+    .user-name { order: 2; flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .header-right { order: 3; margin-left: auto; }
+    .tab-navigation { order: 4; flex: 1 1 100%; flex-wrap: wrap; }
+    .nav-ask { order: 5; flex: 1 1 100%; }
+    .nav-ask input { width: auto; flex: 1 1 auto; }
+}
+/* A phone: no room for the name on top, and 🎨 without its word */
+@media (max-width: 480px) {
+    .user-name { display: none; }
+    .header-btn-text { display: none; }
+    .tab-navigation .tab-btn, .header-btn, .sign-out-btn { padding: 5px 9px; }
+}
+/* The smallest phones (320 px): a little tighter, so it's still three rows */
+@media (max-width: 359px) {
+    .app-header { padding: 8px 12px; }
+    .app-header h1 { font-size: 1.1rem; }
+    .tab-navigation, .header-right { gap: 6px; }
+    .tab-navigation .tab-btn, .header-btn, .sign-out-btn { padding: 5px 7px; }
+}
 
 /* HOME PAGE: the welcome sits in the page's top-left corner */
 #home-view { overflow-y: auto; }
@@ -459,7 +486,7 @@ body {
 .team-member-team .home-action { white-space: nowrap; }
 .team-filters, .team-bulk, .team-pager { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 8px 0; }
 .team-filters label { display: flex; align-items: center; gap: 6px; font-size: 0.87rem; }
-.team-filters input, .team-filters select, .team-bulk select, .team-table select, .person-input {
+.team-filters input, .team-filters select, .team-bulk select, .team-table select, .family-group-do select, .person-input {
     padding: 5px 8px;
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -499,6 +526,19 @@ body {
 .person-empty { padding: 6px 10px; color: var(--text-2); font-style: italic; }
 .team-bulk { font-size: 0.87rem; }
 .team-pager { justify-content: flex-end; font-size: 0.87rem; color: var(--text-2); }
+/* Admins' "Not assigned yet" (teams.js): its button says when tickets are
+   waiting, and a row for each family heads that family's tickets */
+.team-pick-nobody.waiting .team-pick-meta { color: var(--warn-ink); font-weight: 600; }
+.result-table tbody tr.family-group,
+.result-table tbody tr.family-group:nth-child(even),
+.result-table tbody tr.family-group:hover { background: var(--surface-2); }
+.family-group td { border-top: 2px solid var(--border); }
+.family-group-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.family-group-what { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.family-group-meta { font-size: 0.8rem; color: var(--text-2); }
+.family-group-do { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 0.87rem; }
+.family-group-do label { display: flex; align-items: center; gap: 6px; }
+.family-group-do select { max-width: 100%; }
 .home-action:disabled { opacity: 0.5; cursor: default; }
 .link-btn { background: none; border: none; padding: 0; color: var(--link); cursor: pointer; font: inherit; text-decoration: underline; }
 .result-visibility { margin-top: 8px; font-size: 0.82rem; color: var(--text-2); }
@@ -683,6 +723,23 @@ td.kpi-cell { min-width: 260px; }
     cursor: pointer;
 }
 .ticket-link:hover { text-decoration: underline; }
+/* A ticket number in the chat's text (a question or an answer): a small button */
+.ticket-link.in-text {
+    padding: 0 5px;
+    border: 1px solid color-mix(in srgb, var(--link) 45%, transparent);
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--link) 10%, transparent);
+    white-space: nowrap;
+}
+.ticket-link.in-text:hover { background: color-mix(in srgb, var(--link) 20%, transparent); }
+/* On the accent-colored bubble of the person's own question */
+.user-msg .ticket-link.in-text {
+    color: var(--on-accent);
+    border-color: color-mix(in srgb, var(--on-accent) 60%, transparent);
+    background: color-mix(in srgb, var(--on-accent) 16%, transparent);
+}
+.user-msg .ticket-link.in-text:hover { background: color-mix(in srgb, var(--on-accent) 28%, transparent); }
+.user-msg .ticket-link.in-text:focus-visible { outline: 2px solid var(--on-accent); outline-offset: 1px; }
 
 /* STARS: next to any ticket number, wherever it shows */
 .star-btn {
@@ -1010,6 +1067,17 @@ tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
 .result-timing { margin-top: 8px; color: var(--faint); font-size: 0.78rem; }
 
 .result-title { font-weight: 600; margin-bottom: 8px; }
+/* Not the full report, or not answered: tickets they don't have permission to see */
+.result-restricted {
+    margin: 0 0 8px;
+    padding: 10px 14px;
+    background: var(--info-soft);
+    border-left: 3px solid var(--link);
+    border-radius: 4px;
+    color: var(--text);
+    line-height: 1.5;
+}
+.ai-msg > .result-restricted:first-child { margin: 0; }
 .result-caption { font-size: 0.8rem; color: var(--muted); margin-bottom: 4px; }
 .result-empty { margin: 4px 0; color: var(--text-2); }
 /* Why a question found nothing (dates covered, which condition emptied it) */
@@ -1233,6 +1301,23 @@ tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
 .notify-note { margin: 6px 0 0; padding: 4px 10px; border-left: 3px solid var(--border); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
 .notify-tickets { margin-top: 4px; font-size: 0.82rem; color: var(--text-2); }
 .notify-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: 6px; font-size: 0.78rem; color: var(--muted); }
+/* Clearing: "Clear all" by the ✕ at the top, and "Clear" on each one */
+.notify-head-actions { display: flex; align-items: center; gap: 6px; }
+.notify-clear-all,
+.notify-clear {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-2);
+    font: inherit;
+    cursor: pointer;
+}
+.notify-clear-all { padding: 3px 10px; font-size: 0.8rem; font-weight: 600; }
+.notify-clear { padding: 1px 8px; font-size: 0.76rem; }
+.notify-clear-all:hover,
+.notify-clear:hover { color: var(--danger); border-color: var(--danger); }
+.notify-clear-all[hidden] { display: none; }
+.notify-foot-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 
 /* Telling your project manager you resolved or closed a ticket */
 .report-ticket { margin: 0 0 4px; font-size: 0.9rem; color: var(--text-2); }
@@ -1253,6 +1338,13 @@ tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
 .report-dialog .home-status.error { margin: 8px 0 0; }
 .team-report { margin-top: 4px; font-size: 0.8rem; color: var(--text-2); }
 .team-report-note { display: block; font-style: italic; color: var(--muted); }
+/* ✅ Resolved or closed, and 🎬 Before a presentation (Team tab) */
+.status-tag { font-weight: 600; white-space: nowrap; color: var(--accent-ink); }
+.status-table td .team-report-note { font-size: 0.8rem; }
+.presentation-steps { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 10px; }
+.presentation-steps li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px;
+    padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.presentation-steps span { flex: 1 1 260px; }
 
 /* Radio buttons drawn as pills and color swatches (the real input stays, for keyboards) */
 .choice-row { display: flex; flex-wrap: wrap; gap: 6px; }

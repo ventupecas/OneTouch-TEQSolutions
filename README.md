@@ -287,6 +287,15 @@ dashboard shortcuts with **✏️ Customize Home**.
 - **A click anywhere outside the chat closes it**, the header included (a click on
   Dashboards, 🔔 or Colors closes the chat and does its own job at once). The conversation
   is kept. Windows opened from the chat (a ticket, a chart's tickets) don't close it.
+- **Every full ticket number in the chat is a button** (INC, CHG, RITM, SCTASK or REQ and
+  7 digits, in any case): in the questions you type yourself, in Claude's answers, in the
+  text of an answer's tables and in the family notes under an answer. A click (or Enter)
+  opens that ticket's record and family on Home, like a ticket number in a table.
+- **A ticket that isn't yours** (another person's or another team's), clicked anywhere
+  (the chat, a table, the ticket window, the Families page), says "🔒 You don't have
+  permission to see …" and who can open it; nothing else about it shows. A number that
+  isn't in the data at all still says "… is not in the data". Starred tickets you can no
+  longer see are listed under the Starred list the same way.
 - **🗑 Delete chat**, at the top of the chat, deletes the conversation. It
   asks first, then the questions and answers disappear, the assistant forgets the
   conversation, it leaves **Chat History**, and the chat closes ("Chat deleted"). An
@@ -678,8 +687,7 @@ project manager their team's, anyone else their own. There are no public links.
 
 ### Teams and who sees which tickets
 
-Every ticket belongs to one of six teams, named after Molson Coors beers: Coors Light,
-Miller Lite, Coors Banquet, Blue Moon, Molson Canadian and Miller High Life. Within its
+Every ticket belongs to one of six teams, Example Team 1 to Example Team 6. Within its
 team, each ticket is assigned to one person. What you see depends on your role:
 
 | Role | Sees | Can |
@@ -707,6 +715,37 @@ them to one person (after asking, since some may be someone else's), and so does
 by the 🔔. An admin picks any team at the top, changes anyone's role or team in the people
 table, adds people who are on no team, and can **Move tickets to another team** or give a
 family to someone on its team.
+
+**📥 Not assigned yet** (admins; first in the row of teams, with how many are waiting) lists
+every ticket nobody has, whether its family is on a team or on no team yet (like the demo
+tickets). Each family gets a row over its tickets: its first ticket's number and summary, how
+many tickets of each type it holds, how many nobody has, and its team. From that row a family
+on no team is moved to a team (it stays in the list, now with that team, until it's handed
+out), and a family on a team is given whole to one of its people by typing a name; each ticket
+also has its own name box. Families on no team come first. The Team and Type menus, the 🔍 box
+and the column headings work as on a team's list (sorted by a heading, the family rows give way
+to a **Move…** and **Give all…** link on each ticket).
+
+**✅ Resolved or closed** (first on the Team tab, for admins and project managers) lists the
+tickets someone said they resolved or closed, newest first: an admin sees every team's (with a
+Team column), a project manager their own team's. Each row has the ticket, its type, summary
+and state in the data, the status (with the member's note), who set it and when, who has the
+ticket, and a **Change it to** menu: Resolved, Closed, or Open, which takes the status away
+(after asking). The 🔍 box and the headings work as on every list. Only OneTouch's record
+changes; the ticket's data never does.
+
+**🎬 Before a presentation** (admins, at the bottom of the Team tab) puts things back the way
+a presentation starts, each after asking: **↩ Undo every status** takes away every status
+anyone set (and the 🔔 notifications that told project managers about them), and **🧹 Put the
+demo tickets back** puts the 11 [Demo] tickets back on no team, assigned to nobody, with their
+statuses, notifications, stars and ticket results gone, ready to move to a team and hand out
+live. Every real ticket stays on its team, by family, with whoever has it. No restart needed.
+
+**Clearing notifications.** Each notification in the 🔔 panel has a **Clear** button that
+takes it off the list, and **Clear all** (next to the ✕ at the top) clears every one after
+asking. Clear all only clears what the list was showing, so one that arrives at that moment
+stays to be seen. Cleared notifications don't come back and no longer count on the bell; an
+email already on its way for one still goes out.
 
 **Notifications by email.** Everything the 🔔 shows is also emailed (`mail.mjs`), from
 `notifications@onetouch.fyi` through Brevo: someone gets tickets (one email per hand-out,
@@ -890,6 +929,21 @@ closes it and keeps the conversation; **💬 Ask** with nothing typed reopens it
 and Claude forgets it too. If you send
 another question before the first answer arrives, it waits its turn: questions in one
 session always run in order.
+
+**Only your own tickets.** Every answer counts and lists only the tickets you have
+permission to see (an admin's answers cover everything):
+
+- **A question about tickets that aren't yours isn't answered.** "What is the state of
+  CHG1099789?" gets "🔒 You don't have permission to see CHG1099789, so I can't answer
+  questions about it", with no data. A question that names only such tickets isn't even
+  sent to Claude; a follow-up that reaches one ("the second one") is caught once Claude
+  has turned it into a query, and nothing is run.
+- **An answer that leaves tickets out says so.** When tickets you can't see also match,
+  a 🔒 note under the answer's first line says "You can't see the full report…" and what
+  it covers ("Only the 153 tickets assigned to you are included"), or names the ticket you
+  asked about that was left out. When nothing of yours matches but other tickets do, it
+  says that instead. Downloads of the answer carry the same note ("Not the full report").
+  When every matching ticket is yours, the answer is the full report and has no note.
 
 **While it works**, a bubble shows each step as the server reaches it, with a running
 clock: "📨 Sending your question…", "🧠 Understanding your question…" (Claude), "📊 Getting
@@ -14751,7 +14805,7 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 | `export.mjs` | Tables -> pdf/docx/xlsx/csv/txt/rtf, and zip/7z bundles (7-Zip). An optional `chart` (a PNG data URL the browser drew) goes above the tables in pdf/docx/xlsx/rtf and into archives; tables marked `note` stay out of CSV |
 | `auth.mjs` | Accounts and sessions in the `onetouch_auth` Postgres DB (its own role `onetouch_app`); scrypt hashes; `db/accounts.json` export/sync |
 | `remote.mjs` | "Remote mode" for clones: serves `public/` on localhost and forwards `/api`, `/public`, `/app` to a OneTouch server |
-| `public/` | The single-page UI (`index.html`, `app.js`, `style.css`); no build step. The AI assistant is the header's Ask bar (`#nav-ask`, `askFromHeader`: a question is asked in the chat, nothing typed opens it; "/" focuses it; a capturing `pointerdown` on the document closes the chat on any click outside it, header included, except inside a `<dialog>` or the tour; the chat opens as a panel over the page; ticket rows in its answers open in place into the record plus related tickets via `toggleTicketRow`; a record's families go above its fields: `showRelated(container, numbers, conversation, before)`, with `familyRoleLine` saying where the ticket sits and the anchor first. Ticket numbers in fields and answer cells are links via `ticketValueHtml`. Ticket results / Starred tickets have checkboxes (`selections`, `selectBarHtml`): ask the AI about the ticked ones (`askAboutTicked`), remove, unstar, or both (`unstarAndRemove`)), ticket results (a clicked ticket's record) and starred tickets; Dashboards is the other tab. Delete chat resets the server conversation and bumps `chatEpoch` so a late answer is dropped. `customize.js` (colors panel, Customize Home, My dashboards and their filter row, hiding team dashboards, the chart builder, the drill-down list, sharing, the tours of Home and of the Dashboards page (`TOURS`, `startTour(name)`, `maybeStartTour(name)`), saving preferences) and `charts.js` (SVG charts incl. several series, tooltips, table view, click-through via a box's `_pick`, pictures for downloads via `chartPicture` / `picturePng`) load before `app.js`; their start-up work (`buildThemePanel`, `buildBuilder`, `buildBoardFilters`) is called from `app.js` because they use its helpers. Every color in `style.css` is a variable (`:root`, `[data-theme="dark"]`, `[data-header=...]`); never hard-code one |
+| `public/` | The single-page UI (`index.html`, `app.js`, `style.css`); no build step. The AI assistant is the header's Ask bar (`#nav-ask`, `askFromHeader`: a question is asked in the chat, nothing typed opens it; "/" focuses it; a capturing `pointerdown` on the document closes the chat on any click outside it, header included, except inside a `<dialog>` or the tour; the chat opens as a panel over the page; ticket rows in its answers open in place into the record plus related tickets via `toggleTicketRow`; a record's families go above its fields: `showRelated(container, numbers, conversation, before)`, with `familyRoleLine` saying where the ticket sits and the anchor first. Ticket numbers in fields and answer cells are links via `ticketValueHtml`; in the chat's text (typed questions, answers, text in answer cells via `answerValueHtml`, and `relatedHtml(…, inChat)`) every full number is a `.ticket-link.in-text` button via `linkTicketsHtml`. Ticket results / Starred tickets have checkboxes (`selections`, `selectBarHtml`): ask the AI about the ticked ones (`askAboutTicked`), remove, unstar, or both (`unstarAndRemove`)), ticket results (a clicked ticket's record) and starred tickets; Dashboards is the other tab. Delete chat resets the server conversation and bumps `chatEpoch` so a late answer is dropped. `customize.js` (colors panel, Customize Home, My dashboards and their filter row, hiding team dashboards, the chart builder, the drill-down list, sharing, the tours of Home and of the Dashboards page (`TOURS`, `startTour(name)`, `maybeStartTour(name)`), saving preferences) and `charts.js` (SVG charts incl. several series, tooltips, table view, click-through via a box's `_pick`, pictures for downloads via `chartPicture` / `picturePng`) load before `app.js`; their start-up work (`buildThemePanel`, `buildBuilder`, `buildBoardFilters`) is called from `app.js` because they use its helpers. Every color in `style.css` is a variable (`:root`, `[data-theme="dark"]`, `[data-header=...]`); never hard-code one |
 | `db/` | `init-auth.sh`, `init-reporting.sh`, `reporting-views.sql` (typed `reporting.*` views for Metabase), `accounts.json` |
 | `scripts/users.mjs` | Account admin CLI (add, import CSV, export, sync, ...) |
 | `scripts/signin-links.mjs` | Prints a sign-in link per person (`…/#user=…&pass=…`, which `readSignInLink` in app.js fills into the form) from the import CSV plus the test accounts and warmup in `.env`. Its output holds passwords: the person running it reads it in their terminal; don't print it from an agent session |
@@ -20276,8 +20330,8 @@ import { pool } from './auth.mjs';
 
 // They see absolutely everything
 export const ADMIN_USERNAMES = ['vperez', 'lvang', 'lbell'];
-// Named after Molson Coors' best-known beers
-export const TEAM_NAMES = ['Coors Light', 'Miller Lite', 'Coors Banquet', 'Blue Moon', 'Molson Canadian', 'Miller High Life'];
+// Neutral names, so no product brand appears on a team
+export const TEAM_NAMES = ['Example Team 1', 'Example Team 2', 'Example Team 3', 'Example Team 4', 'Example Team 5', 'Example Team 6'];
 export const ROLES = {
   project_manager: 'Project manager',
   process_excellence: 'Process excellence',
@@ -21226,8 +21280,7 @@ replacing that.
 - **Process excellence** and **project team member**: see only the tickets
   assigned to them.
 - People on no team, and the `warmup` service account, see no tickets.
-- There are six teams, named after Molson Coors beers: Coors Light, Miller Lite,
-  Coors Banquet, Blue Moon, Molson Canadian and Miller High Life. Each has one
+- There are six teams, Example Team 1 to Example Team 6. Each has one
   project manager, one process excellence member, and 3–4 project team members
   (the first members were placed at random).
 

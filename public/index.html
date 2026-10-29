@@ -84,7 +84,7 @@
             <button type="button" class="header-btn notify-btn" id="notify-btn" onclick="toggleNotifications()"
                     aria-controls="notify-panel" aria-expanded="false" aria-label="Notifications">🔔<span class="notify-count" id="notify-count" hidden></span></button>
             <button type="button" class="header-btn" id="theme-btn" onclick="toggleThemePanel()"
-                    aria-controls="theme-panel" aria-expanded="false">🎨 Colors</button>
+                    aria-controls="theme-panel" aria-expanded="false" aria-label="Colors">🎨<span class="header-btn-text"> Colors</span></button>
             <button class="sign-out-btn" type="button" onclick="signOut()">Sign out</button>
         </div>
     </header>
@@ -93,7 +93,10 @@
     <section class="theme-panel notify-panel" id="notify-panel" role="dialog" aria-label="Notifications" hidden>
         <div class="theme-panel-head">
             <span>🔔 Notifications</span>
-            <button type="button" class="drawer-close" onclick="toggleNotifications(false)" aria-label="Close">✕</button>
+            <span class="notify-head-actions">
+                <button type="button" class="notify-clear-all" id="notify-clear-all" onclick="clearAllNotifications()" hidden>Clear all</button>
+                <button type="button" class="drawer-close" onclick="toggleNotifications(false)" aria-label="Close">✕</button>
+            </span>
         </div>
         <!-- ✉️ These by email too (mail.mjs), for anyone with an address on file -->
         <div class="notify-email" id="notify-email" hidden>

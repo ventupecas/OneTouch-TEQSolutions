@@ -143,6 +143,16 @@ export async function findTickets(text, runQuery) {
   return { found, notFound, ignored: parsed.ignored, tooMany: parsed.wanted.length > MAX_SEARCH_NUMBERS };
 }
 
+// Which of these full numbers (tickets, or orders) are in the data, from the
+// index. Only used to tell someone that a number they couldn't open is someone
+// else's ticket ("you don't have permission"); nothing in it is ever sent.
+export function inTheData(index, numbers) {
+  const known = new Set(numbers.filter(n => index.has(n)));
+  const orders = new Set(numbers.filter(n => prefixOf(n) === ORDER_PREFIX));
+  if (orders.size) for (const t of index.values()) if (t.kind === 'RITM' && orders.has(t.parent)) known.add(t.parent);
+  return known;
+}
+
 // Summaries for a list of exact ticket numbers (e.g. everything someone has
 // been shown), without the search's 200-number limit -> Map(number -> ticket)
 export async function ticketSummaries(numbers, runQuery) {
