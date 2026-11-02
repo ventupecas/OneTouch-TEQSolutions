@@ -848,7 +848,12 @@ with a pull request. Before each commit:
 ```
 npm run docs     # refresh this file's appendices from the code
 npm run check    # syntax, shell scripts, docker-compose.yml, and this file (about 1 second)
+npm test         # Assigned to me's order, checked against made-up tickets
 ```
+
+GitHub runs the same on every push and pull request (`.github/workflows/ci.yml`,
+[B.79](#b79)), then checks that https://onetouch.fyi answers with OneTouch's sign-in page.
+That last check fails whenever the computer running the tunnel is off.
 
 ---
 
@@ -1431,6 +1436,10 @@ inside the data. Leave it empty to use the real date.
 - **`npm run docs`** (`scripts/build-docs.mjs`): rewrites this file's appendices from the
   current files. A new file it doesn't know about makes the check fail until it's added
   to its lists.
+- **`npm test`** (`checks/ticket-order.mjs`, [B.78](#b78)): the order of Assigned to me
+  and its open count, from made-up tickets through a stand-in for Cube (no database).
+- **`npm run build`**: the same as `npm run check`; GitHub's CI runs it, then `npm test`,
+  then a check that the live site is up (`.github/workflows/ci.yml`, [B.79](#b79)).
 - **Claude Code agents:** `onetouch-developer` and `onetouch-reviewer` (see Part 1).
 
 ---
@@ -2173,6 +2182,31 @@ Create each file at the path shown, with exactly this content. Files are in the 
 - [B.52 `teams.mjs`](#b52)
 - [B.53 `public/teams.js`](#b53)
 - [B.54 `CLAUDE.md`](#b54)
+- [B.55 `notifications.mjs`](#b55)
+- [B.56 `public/notifications.js`](#b56)
+- [B.57 `kpis.mjs`](#b57)
+- [B.58 `public/sorting.js`](#b58)
+- [B.59 `public/picker.js`](#b59)
+- [B.60 `public/lookup.js`](#b60)
+- [B.61 `mail.mjs`](#b61)
+- [B.62 `scripts/mail-test.mjs`](#b62)
+- [B.63 `db/demo-tickets.sql`](#b63)
+- [B.64 `db/demo-tickets-remove.sql`](#b64)
+- [B.65 `servicenow-sync/package.json`](#b65)
+- [B.66 `servicenow-sync/.env.example`](#b66)
+- [B.67 `servicenow-sync/db/schema.sql`](#b67)
+- [B.68 `servicenow-sync/src/app.js`](#b68)
+- [B.69 `servicenow-sync/src/config/db.js`](#b69)
+- [B.70 `servicenow-sync/src/config/schema.js`](#b70)
+- [B.71 `servicenow-sync/src/middleware/verifyToken.js`](#b71)
+- [B.72 `servicenow-sync/src/routes/webhook.js`](#b72)
+- [B.73 `servicenow-sync/src/processRecord.js`](#b73)
+- [B.74 `servicenow-sync/src/db/upsertRecord.js`](#b74)
+- [B.75 `servicenow-sync/src/db/pending.js`](#b75)
+- [B.76 `servicenow-sync/src/families.js`](#b76)
+- [B.77 `servicenow-sync/servicenow-blueprint.md`](#b77)
+- [B.78 `checks/ticket-order.mjs`](#b78)
+- [B.79 `.github/workflows/ci.yml`](#b79)
 
 <a id="b1"></a>
 ### B.1 `.gitignore`
@@ -2202,6 +2236,8 @@ csv_data/
 !load_csv.sql
 # ...and the reporting views Metabase uses
 !db/*.sql
+# ...and the ServiceNow sync's table (servicenow-sync/)
+!servicenow-sync/db/*.sql
 
 # Metabase dashboard links differ per machine (scripts/metabase-setup.mjs writes them)
 metabase-dashboards.json
@@ -2215,6 +2251,9 @@ mbdata/
 Thumbs.db
 .DS_Store
 desktop.ini
+
+# 📝 Personal Claude Code notes: our chats and progress (CLAUDE.local.md), never shared
+CLAUDE.local.md
 ```
 
 <a id="b2"></a>
@@ -2321,14 +2360,16 @@ desktop.ini
     "wrappy": "^1.0.2"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node checks/ticket-order.mjs",
+    "build": "node scripts/check.mjs",
     "check": "node scripts/check.mjs",
     "docs": "node scripts/build-docs.mjs",
     "start": "node server.mjs",
     "users": "node scripts/users.mjs",
     "remote": "node remote.mjs",
     "share": "node scripts/share.mjs",
-    "warmup": "node scripts/warmup.mjs"
+    "warmup": "node scripts/warmup.mjs",
+    "mail-test": "node scripts/mail-test.mjs"
   },
   "repository": {
     "type": "git",
@@ -2374,6 +2415,9 @@ AUTH_DB_PASSWORD=change_me_long_random_string
 METABASE_DB_PASSWORD=change_me_long_random_string
 METABASE_ADMIN_EMAIL=you@example.com
 METABASE_ADMIN_PASSWORD=change_me_8plus_chars
+# Signs each person's dashboard links, so Metabase shows them only their tickets
+# (64 hex characters): node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+METABASE_EMBEDDING_SECRET=change_me_64_hex_characters
 
 # Optional: permanent Cloudflare link. The token from the tunnel you create in the
 # Cloudflare dashboard (route it to http://app:8000), and the address you gave it, which
@@ -2682,6 +2726,58 @@ GRANT SELECT ON ALL TABLES IN SCHEMA reporting TO metabase_reader;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA reporting TO metabase_reader;
 EOSQL
 echo "init-reporting: metabase_reader can read the reporting views"
+
+# What each person may see on the dashboards. Metabase reads the ticket views
+# through reporting.visible_tickets(viewer), which looks up OneTouch's live
+# assignments in onetouch_auth through postgres_fdw. It connects as
+# access_reader, a role with no password that can only log in from inside the
+# Postgres container (pg_hba trusts local connections) and can only read
+# onetouch_auth's ticket_access view (ticket number, team id, assignee id),
+# which the app creates and grants it on start (teams.mjs).
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres -q <<'EOSQL'
+SELECT 'CREATE ROLE access_reader LOGIN'
+ WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'access_reader') \gexec
+ALTER ROLE access_reader WITH LOGIN PASSWORD NULL;
+SELECT 'GRANT CONNECT ON DATABASE onetouch_auth TO access_reader'
+ WHERE EXISTS (SELECT FROM pg_database WHERE datname = 'onetouch_auth') \gexec
+EOSQL
+
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname onetouch_auth -q <<'EOSQL'
+SELECT 'GRANT SELECT ON public.ticket_access TO access_reader'
+ WHERE to_regclass('public.ticket_access') IS NOT NULL \gexec
+EOSQL
+
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname analytics_db -q <<'EOSQL'
+CREATE EXTENSION IF NOT EXISTS postgres_fdw;
+SELECT 'CREATE SERVER onetouch_auth FOREIGN DATA WRAPPER postgres_fdw OPTIONS (dbname ''onetouch_auth'')'
+ WHERE NOT EXISTS (SELECT FROM pg_foreign_server WHERE srvname = 'onetouch_auth') \gexec
+-- No host: the connection is made over the Postgres container's own socket,
+-- which needs no password (only a superuser may allow that)
+DROP USER MAPPING IF EXISTS FOR metabase_reader SERVER onetouch_auth;
+CREATE USER MAPPING FOR metabase_reader SERVER onetouch_auth OPTIONS (user 'access_reader', password_required 'false');
+DROP USER MAPPING IF EXISTS FOR CURRENT_USER SERVER onetouch_auth;
+CREATE USER MAPPING FOR CURRENT_USER SERVER onetouch_auth OPTIONS (user 'access_reader');
+
+CREATE SCHEMA IF NOT EXISTS onetouch_access;
+REVOKE ALL ON SCHEMA onetouch_access FROM PUBLIC;
+CREATE FOREIGN TABLE IF NOT EXISTS onetouch_access.ticket_access (number text, team_id integer, assignee_id integer)
+  SERVER onetouch_auth OPTIONS (schema_name 'public', table_name 'ticket_access');
+GRANT USAGE ON SCHEMA onetouch_access TO metabase_reader;
+GRANT SELECT ON onetouch_access.ticket_access TO metabase_reader;
+
+-- The ticket numbers one viewer may see. viewer (from the person's signed
+-- dashboard link, see dashboardViewer in teams.mjs): "team:<id>:<key>" for a
+-- project manager, "person:<user id>:<key>" for anyone else. "all" (admins)
+-- is handled by the dashboards' SQL without calling this.
+CREATE OR REPLACE FUNCTION reporting.visible_tickets(viewer text)
+RETURNS TABLE (number text) LANGUAGE sql STABLE AS $$
+  SELECT t.number FROM onetouch_access.ticket_access t
+   WHERE t.team_id = CASE WHEN split_part(viewer, ':', 1) = 'team' THEN nullif(split_part(viewer, ':', 2), '')::int END
+      OR t.assignee_id = CASE WHEN split_part(viewer, ':', 1) = 'person' THEN nullif(split_part(viewer, ':', 2), '')::int END
+$$;
+GRANT EXECUTE ON FUNCTION reporting.visible_tickets(text) TO metabase_reader;
+EOSQL
+echo "init-reporting: dashboards read who may see which ticket from onetouch_auth"
 ```
 
 <a id="b8"></a>
@@ -3886,6 +3982,8 @@ services:
       METABASE_DB_PASSWORD: ${METABASE_DB_PASSWORD:-}
       METABASE_ADMIN_EMAIL: ${METABASE_ADMIN_EMAIL:-}
       METABASE_ADMIN_PASSWORD: ${METABASE_ADMIN_PASSWORD:-}
+      # Signs each person's dashboard links (server.mjs, scripts/metabase-setup.mjs)
+      METABASE_EMBEDDING_SECRET: ${METABASE_EMBEDDING_SECRET:-}
     depends_on:
       cube:
         condition: service_started
@@ -5619,6 +5717,11 @@ export async function ensureSchema() {
     -- so it round-trips exactly through the accounts file; see syncAccounts)
     ALTER TABLE users ADD COLUMN IF NOT EXISTS
       updated_at timestamptz NOT NULL DEFAULT date_trunc('milliseconds', now());
+
+    -- Where OneTouch emails this person about their notifications (mail.mjs), and
+    -- whether they want it. Never in the accounts file, so addresses stay off GitHub.
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS email text;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS email_notifications boolean NOT NULL DEFAULT true;
   `);
 }
 
@@ -5768,9 +5871,37 @@ export async function setActive(username, active) {
 
 export async function listUsers() {
   const { rows } = await pool.query(
-    `SELECT username, display_name, is_active, locked_until > now() AS locked, created_at, last_login_at
+    `SELECT username, display_name, email, email_notifications, is_active, locked_until > now() AS locked, created_at, last_login_at
        FROM users ORDER BY username`);
   return rows;
+}
+
+// ---------------------------------------------------------------------
+// Email addresses (mail.mjs sends the notifications): set by an admin with
+// the users command; each person turns the emails on or off in the 🔔 panel
+// ---------------------------------------------------------------------
+
+const EMAIL_ADDRESS = /^[^\s@<>()",;:]+@[^\s@<>()",;:]+\.[a-z]{2,}$/i;
+
+// address: '' or null takes it away -> the username
+export async function setEmail(username, address) {
+  const name = normalizeUsername(username);
+  const email = String(address ?? '').trim().toLowerCase() || null;
+  if (email && !EMAIL_ADDRESS.test(email)) throw new Error(`"${address}" isn't an email address.`);
+  const { rows } = await pool.query('UPDATE users SET email = $2 WHERE username = $1 RETURNING username', [name, email]);
+  if (!rows.length) throw new Error(`No user named "${name}".`);
+  return name;
+}
+
+// -> { address (or null), on }
+export async function emailSettings(userId) {
+  const { rows: [u] } = await pool.query('SELECT email, email_notifications FROM users WHERE id = $1', [userId]);
+  return { address: u?.email || null, on: Boolean(u?.email_notifications) };
+}
+
+export async function setEmailNotifications(userId, on) {
+  await pool.query('UPDATE users SET email_notifications = $2 WHERE id = $1', [userId, Boolean(on)]);
+  return emailSettings(userId);
 }
 
 // ---------------------------------------------------------------------
@@ -5855,12 +5986,18 @@ export const DEFAULT_ACCOUNTS_FILE = 'db/accounts.json';
 //   docker exec -it analytics_node_app npm run users -- reset-password jsmith
 //   docker exec -it analytics_node_app npm run users -- deactivate jsmith
 //   docker exec -it analytics_node_app npm run users -- activate jsmith
+//   docker exec -it analytics_node_app npm run users -- email jsmith jane.smith@example.com
 //
 // Many at once, from a CSV with a header row: Username, Display Name, Password
 // (Display Name is optional). The file is piped in, so it never has to be
 // copied into the project folder. From PowerShell:
 //   Get-Content $HOME\Downloads\people.csv | docker exec -i analytics_node_app node scripts/users.mjs import -
 // Existing usernames are skipped, never overwritten.
+//
+// Email addresses for the notification emails (mail.mjs), many at once, from a
+// CSV with a header row: Username, Email (also piped in, never saved here):
+//   Get-Content $HOME\Downloads\emails.csv | docker exec -i analytics_node_app node scripts/users.mjs emails -
+// Addresses stay in the database only; `export` never writes them.
 //
 // Sharing accounts with clones of the repo:
 //   docker exec analytics_node_app node scripts/users.mjs export
@@ -5882,6 +6019,8 @@ const USAGE = `Usage: npm run users -- <command> [args]
   reset-password <username>         Set a new password (signs them out everywhere)
   deactivate <username>             Block sign-in (signs them out everywhere)
   activate <username>               Allow sign-in again
+  email <username> <address|none>   Where their notifications are emailed ("none" takes it away)
+  emails <file.csv | ->             Set many addresses from a CSV (columns: Username, Email)
   import <file.csv | ->             Add everyone in a CSV (columns: Username, Display Name, Password);
                                     "-" reads the CSV from stdin. Existing usernames are skipped.
   export [file]                     Write every account to db/accounts.json (or [file]) for clones;
@@ -5953,6 +6092,31 @@ function parseCsv(text) {
   return rows.filter(r => r.some(v => v.trim() !== ''));
 }
 
+// Many email addresses at once: a CSV with Username and Email columns
+async function importEmails(source) {
+  const fs = await import('node:fs/promises');
+  const text = (source === '-' ? await readStdin() : await fs.readFile(source, 'utf8')).replace(/^﻿/, '');
+  const [header, ...rows] = parseCsv(text);
+  if (!header) throw new Error('The CSV is empty.');
+  const col = name => header.findIndex(h => h.trim().toLowerCase().replace(/[\s_-]+/g, '') === name);
+  const iUser = col('username'), iEmail = col('email');
+  if (iUser < 0 || iEmail < 0) throw new Error(`The header row needs "Username" and "Email" columns (found: ${header.join(', ')}).`);
+  const set = [], failed = [];
+  for (const [index, row] of rows.entries()) {
+    try {
+      set.push(await auth.setEmail((row[iUser] || '').trim(), (row[iEmail] || '').trim() || null));
+    } catch (err) {
+      failed.push(`line ${index + 2}: ${err.message}`);
+    }
+  }
+  console.log(`Set ${set.length} of ${rows.length} email ${rows.length === 1 ? 'address' : 'addresses'}.`);
+  if (failed.length) {
+    console.log('  Not set:');
+    for (const f of failed) console.log(`    ${f}`);
+    process.exitCode = 1;
+  }
+}
+
 async function importCsv(source) {
   const fs = await import('node:fs/promises');
   const text = (source === '-' ? await readStdin() : await fs.readFile(source, 'utf8')).replace(/^﻿/, '');
@@ -6013,6 +6177,7 @@ async function main() {
         username: u.username,
         name: u.display_name || '',
         status: !u.is_active ? 'deactivated' : u.locked ? 'locked (too many tries)' : 'active',
+        email: u.email ? `${u.email}${u.email_notifications ? '' : ' (turned off)'}` : '',
         created: u.created_at.toISOString().slice(0, 10),
         'last sign-in': u.last_login_at ? u.last_login_at.toISOString().replace('T', ' ').slice(0, 16) : 'never',
       })));
@@ -6033,6 +6198,16 @@ async function main() {
       if (!username) throw new Error(`Give a username: ${command} <username>`);
       const name = await auth.setActive(username, command === 'activate');
       return console.log(command === 'activate' ? `${name} can sign in again.` : `${name} can no longer sign in and was signed out.`);
+    }
+    case 'email': {
+      const address = displayName;
+      if (!username || !address) throw new Error('Give a username and an address: email <username> <address|none>');
+      const name = await auth.setEmail(username, address.toLowerCase() === 'none' ? null : address);
+      return console.log(address.toLowerCase() === 'none' ? `${name} has no email address now.` : `${name}'s notifications go to ${address.toLowerCase()}.`);
+    }
+    case 'emails': {
+      if (!username) throw new Error('Give a CSV file, or "-" to read it from stdin: emails <file.csv | ->');
+      return importEmails(username);
     }
     case 'export': {
       const fs = await import('node:fs/promises');
@@ -6076,7 +6251,7 @@ try {
 
 ```js
 import dns from 'node:dns/promises';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import express from 'express';
 import cors from 'cors';
@@ -6093,13 +6268,16 @@ import { buildExport, validateExport, ExportUnavailableError } from './export.mj
 import * as auth from './auth.mjs';
 import * as stars from './stars.mjs';
 import * as seen from './seen.mjs';
-import { findTickets, ticketRecord, ticketSummaries, ticketNumbersIn, STARRABLE } from './tickets.mjs';
-import { relatedFamilies, describeFamilies, ticketLinks, FAMILY_KINDS, LINK_KIND, familyList, familySummary, familyOf } from './relations.mjs';
+import { findTickets, ticketRecord, ticketSummaries, ticketNumbersIn, ticketsByPriority, isOpen, priorityRank, STARRABLE, loadTicketIndex, reloadTicketIndex, TICKET_SORTS, sortRows, parseLookup, lookupMatches, openedText, blankText, inTheData, parseTicketNumbers } from './tickets.mjs';
+import { relatedFamilies, describeFamilies, ticketLinks, FAMILY_KINDS, LINK_KIND, familyList, familySummary, familyOf, familyRow, FAMILY_CHILD_NOUNS, forgetLinks } from './relations.mjs';
 import * as prefs from './prefs.mjs';
-import { chartData, chartValues, chartCatalog, chartTickets, chartFromQuery, teamValues, ChartError } from './charts.mjs';
+import { chartData, chartValues, chartCatalog, chartTickets, chartFromQuery, teamValues, ChartError, forgetResults } from './charts.mjs';
 import * as shares from './shares.mjs';
 import * as chats from './chats.mjs';
 import * as teams from './teams.mjs';
+import * as notifications from './notifications.mjs';
+import { startMail, mailEnabled } from './mail.mjs';
+import * as kpis from './kpis.mjs';
 import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
 
 dotenv.config();
@@ -6112,16 +6290,21 @@ app.use(cors({ origin: '*', exposedHeaders: ['Content-Disposition'] }));
 
 // =====================================================================
 // METABASE DASHBOARDS: Metabase only listens on this computer, so its
-// public-dashboard pages (and the scripts and data they load) are passed
+// embedded-dashboard pages (and the scripts and data they load) are passed
 // through this server. That way the Dashboards tab works wherever OneTouch
 // does: localhost, the network address, the tunnel and remote mode.
+// Each person opens them through links signed for them (/api/dashboards),
+// which show only the tickets they may see.
 // =====================================================================
 
 const METABASE_URL = (process.env.METABASE_URL || 'http://localhost:3000').replace(/\/+$/, '');
 const METABASE_DASHBOARDS_FILE = 'metabase-dashboards.json';
-// What a public dashboard page needs from Metabase, and nothing else
-// (no admin pages, no signed-in API)
-const METABASE_PATHS = /^\/(public\/|app\/|api\/public\/|api\/session\/properties$|api\/geojson)/;
+// What a signed dashboard page needs from Metabase, and nothing else (no
+// admin pages, no signed-in API, no public links). Each of its requests
+// carries the signed link, which Metabase checks.
+const METABASE_PATHS = /^\/(embed\/|app\/|api\/embed\/|api\/session\/properties$|api\/geojson)/;
+// How long a signed link works: a sign-in's length, after which the page asks again
+const EMBED_TTL_S = 12 * 60 * 60;
 // Headers passed back to the browser; fetch already undid any compression
 const METABASE_RESPONSE_HEADERS = ['content-type', 'cache-control', 'etag', 'last-modified',
   'content-security-policy', 'x-frame-options', 'location'];
@@ -6146,6 +6329,15 @@ app.use(async (req, res, next) => {
     res.status(502).send('Metabase is not reachable right now.');
   }
 });
+// A click inside a dashboard that opens another page lands here
+// (/onetouch/dashboard/<page>?filters): the link can't hold each person's
+// signed address, so the page around the frame swaps it in (app.js,
+// followDashboardFrame). Until then, a blank page.
+app.get('/onetouch/dashboard/:key', (req, res) => {
+  res.set('Cache-Control', 'no-store').type('html')
+    .send('<!doctype html><meta charset="utf-8"><title>Opening…</title><body style="margin:0;background:transparent"></body>');
+});
+
 // Exports carry whole result tables back up, so that route gets a bigger limit
 app.use('/api/export', express.json({ limit: '25mb' }));
 // A whole set of dashboards is saved (or a dashboard shared) at once
@@ -6352,30 +6544,66 @@ function scopedRunner(scope) {
   return run;
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families', '/api/notifications', '/api/my-tickets', '/api/kpis', '/api/ticket-statuses', '/api/demo-tickets'], requireLogin);
 
 // Who is signed in (the page shows their display name), and what they may do
-app.get('/api/me', (req, res) => {
+app.get('/api/me', async (req, res) => {
   const { admin, role, team } = req.scope.access;
+  // Their own email address and whether their notifications are emailed (mail.mjs)
+  const email = await auth.emailSettings(req.user.id).catch(() => ({ address: null, on: false }));
   res.json({
     username: req.user.username, displayName: req.user.displayName,
     access: { admin, role, roleName: teams.ROLES[role] || null, team, tickets: req.scope.count, note: teams.scopeNote(req.scope) },
+    email: { ...email, enabled: mailEnabled() },
   });
 });
 
-// The dashboards built by scripts/metabase-setup.mjs, for the Dashboards tab.
-// Metabase shows every ticket and can't be limited per person, so only admins get them.
+// { on } -> their notifications are emailed to them, or not (the 🔔 panel's switch)
+app.put('/api/me/email', async (req, res) => {
+  if (typeof req.body?.on !== 'boolean') return res.status(400).json({ error: 'Say whether to email you: { "on": true } or { "on": false }.' });
+  try {
+    const email = await auth.setEmailNotifications(req.user.id, req.body.on);
+    console.log(`✉️  ${req.user.username} turned email ${req.body.on ? 'on' : 'off'}`);
+    res.json({ email: { ...email, enabled: mailEnabled() } });
+  } catch (error) {
+    console.error('✉️  Saving the email setting failed:', error.message);
+    res.status(503).json({ error: 'That could not be saved right now.' });
+  }
+});
+
+// A Metabase signed-embedding link to one dashboard, its "viewer" filter
+// locked to this person (teams.dashboardViewer): Metabase checks the
+// signature and shows only the tickets that viewer may see
+const base64url = value => Buffer.from(typeof value === 'string' ? value : JSON.stringify(value)).toString('base64url');
+function signedDashboardPath(dashboardId, viewer) {
+  const body = `${base64url({ alg: 'HS256', typ: 'JWT' })}.${base64url({
+    resource: { dashboard: dashboardId },
+    params: { viewer },
+    exp: Math.floor(Date.now() / 1000) + EMBED_TTL_S,
+  })}`;
+  const signature = createHmac('sha256', process.env.METABASE_EMBEDDING_SECRET).update(body).digest('base64url');
+  return `/embed/dashboard/${body}.${signature}`;
+}
+
+// The dashboards built by scripts/metabase-setup.mjs, for the Dashboards tab,
+// each as a link signed for this person: everyone gets them, and each sees
+// only their own tickets in them
 app.get('/api/dashboards', (req, res) => {
-  if (!req.scope.all) return res.json({ dashboards: [], details: [], restricted: true });
   try {
     const { dashboards, details = [] } = JSON.parse(readFileSync(METABASE_DASHBOARDS_FILE, 'utf8'));
+    // A file from before signed links (public links only), or no secret to sign with
+    if (!/^[0-9a-f]{64}$/.test(process.env.METABASE_EMBEDDING_SECRET || '') || dashboards.some(d => !d.id)) {
+      console.error('📊 The dashboards need METABASE_EMBEDDING_SECRET and a run of scripts/metabase-setup.mjs');
+      return res.json({ dashboards: [], details: [] });
+    }
+    const viewer = teams.dashboardViewer(req.scope);
     res.json({
       // `group` is the drawer heading; files from before groups existed get one heading
       dashboards: dashboards.map(d => ({
-        key: d.key, group: d.group || 'Dashboards', name: d.name, description: d.description, path: `/public/dashboard/${d.uuid}`,
+        key: d.key, group: d.group || 'Dashboards', name: d.name, description: d.description, path: signedDashboardPath(d.id, viewer),
       })),
       // The pages a click on a chart opens (not in the drawer); their filters name the page
-      details: details.map(d => ({ key: d.key, name: d.name, path: `/public/dashboard/${d.uuid}`, params: d.params })),
+      details: details.map(d => ({ key: d.key, name: d.name, path: signedDashboardPath(d.id, viewer), params: d.params })),
     });
   } catch {
     res.json({ dashboards: [], details: [] });
@@ -6691,6 +6919,17 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
   try {
     console.log(`\n💬 Processing prompt: "${userPrompt}" (turn ${conversation.turns + 1})`);
 
+    // A question naming only tickets they don't have permission to see isn't
+    // answered, and isn't sent to Claude
+    const asked = await namedTickets(scope, ticketsNamedIn(userPrompt));
+    if (asked.forbidden.length && !asked.theirs.length) {
+      console.log(`🔒 Not answered: ${user.username} may not see ${asked.forbidden.join(', ')}`);
+      return reply.send(200, {
+        intent: 'denied', message: permissionDenied(asked.forbidden), assumptions: [], sections: [], results: [],
+        elapsedMs: Date.now() - started, fromCache: false,
+      });
+    }
+
     let parsed, memoryReset = false, fresh = null;
     if (cached) {
       // The conversation gets the original question and Claude's original reply,
@@ -6736,27 +6975,46 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
       });
     }
 
-    // One Cube query per ticket type, run side by side
+    // The tickets the question names, or its queries look for by number (a
+    // follow-up's "its parent"): none theirs and some in the data -> not answered
+    const named = await namedTickets(scope, [...asked.theirs, ...asked.forbidden, ...ticketsFilteredOn(verdict.queries)]);
+    if (named.forbidden.length && !named.theirs.length) {
+      console.log(`🔒 Not run: ${user.username} may not see ${named.forbidden.join(', ')}`);
+      conversation.pendingNote = `nothing was run: the user doesn't have permission to see ${listOf(named.forbidden)}, and was told so`;
+      if (fresh && cacheKey) rememberAnswer(cacheKey, fresh);
+      return reply.send(200, { intent: 'denied', message: permissionDenied(named.forbidden), assumptions: [], memoryReset, sections: [], results: [], ...timing() });
+    }
+
+    // One Cube query per ticket type, run side by side. Meanwhile: would they
+    // also find tickets the person can't see? (Named ones they can't are left out anyway.)
     reply.progress('querying');
     for (const q of verdict.queries) console.log(`🤖 Cube query [${q.entity}]:`, JSON.stringify(q.cubeQuery));
-    const sections = await Promise.all(verdict.queries.map(async q => ({
-      entity: q.entity,
-      rows: await runQuery(q.cubeQuery),
-    })));
+    const [sections, hiddenEach] = await Promise.all([
+      Promise.all(verdict.queries.map(async q => ({ entity: q.entity, rows: await runQuery(q.cubeQuery) }))),
+      named.forbidden.length ? verdict.queries.map(() => true) : hiddenTicketsMatch(verdict.queries, scope),
+    ]);
+    // true / false, or null when it couldn't be checked
+    const hidden = hiddenEach && hiddenEach.some(Boolean);
     // Nothing found: work out why (which filter emptied it, what dates the data
     // covers) and have Claude say so plainly, instead of a bare "no records".
     // A repeated question reuses the explanation it got the first time, for
     // the same set of visible tickets only (the reasons differ between people).
+    // A query that only found nothing because what matches isn't theirs needs no
+    // explaining: the permission notice says so (permissionNote).
     const emptyQueries = verdict.queries.filter((_, i) => isEmptyResult(sections[i].rows));
+    const toExplain = emptyQueries.filter(q => hiddenEach?.[verdict.queries.indexOf(q)] !== true);
     let explanation = cached?.explanations?.[scope.key] ?? null;
-    if (emptyQueries.length && !explanation && !scope.all && !scope.count) {
+    if (toExplain.length && !explanation && !scope.all && !scope.count) {
       // No tickets at all: nothing to diagnose, and no reason to ask Claude
       explanation = teams.scopeNote(scope);
-    } else if (emptyQueries.length && !explanation) {
+    } else if (toExplain.length && !explanation) {
       reply.progress('explaining');
       try {
-        const facts = (await Promise.all(emptyQueries.map(q => diagnoseEmpty(q.entity, q.cubeQuery, runQuery)))).flat();
-        if (!scope.all) facts.push(`This person only sees some tickets: ${teams.scopeNote(scope)}`);
+        const facts = (await Promise.all(toExplain.map(q => diagnoseEmpty(q.entity, q.cubeQuery, runQuery)))).flat();
+        // Checked: no ticket anywhere matches, so it isn't about permissions.
+        // Not checked: all that's known is that they only see some tickets.
+        if (!scope.all && hiddenEach) facts.push('No ticket in the whole data matches either, not even one this person cannot see: say plainly that the data has none, without mentioning permissions.');
+        else if (!scope.all) facts.push(`This person only sees some tickets: ${teams.scopeNote(scope)}`);
         console.log('🔎 Empty result facts:\n   ' + facts.join('\n   '));
         explanation = await explainEmpty({ anthropic, model: CLAUDE_MODEL, question: userPrompt, searchedFor: verdict.message, facts });
         console.log(`🔎 Explained: ${explanation}`);
@@ -6765,8 +7023,11 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
         console.error('🔎 Could not diagnose the empty result:', error.message);
       }
     }
-    if (!emptyQueries.length) explanation = null;
-    conversation.pendingNote = describeResults(sections) + (explanation ? ` What the user was told about the empty result: ${explanation}` : '');
+    if (!toExplain.length) explanation = null;
+    // Not the full report: matching tickets that aren't theirs were left out
+    const restricted = permissionNote({ forbidden: named.forbidden, hidden, empty: emptyQueries.length === verdict.queries.length, scope });
+    conversation.pendingNote = describeResults(sections) + (explanation ? ` What the user was told about the empty result: ${explanation}` : '') +
+      (restricted ? ` The user was also told: ${restricted}` : '');
 
     // Counts across several ticket types become one table with a total column
     const combined = verdict.merge ? combineResults(verdict.merge, verdict.queries, sections) : null;
@@ -6805,8 +7066,11 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
       shownTickets,
       // { chart, dropped }: the answer as a saveable chart (charts.mjs), or null
       chartable,
-      // Which tickets it covered, for anyone who isn't an admin (teams.mjs)
-      visibility: teams.scopeNote(scope),
+      // Not the full report: tickets they don't have permission to see match too
+      restricted,
+      // Which tickets it covered, for anyone who isn't an admin (teams.mjs),
+      // unless the notice above says it, or nothing that isn't theirs matched
+      visibility: restricted || hidden === false ? null : teams.scopeNote(scope),
       ...timing(),
     });
 
@@ -6835,6 +7099,7 @@ app.post('/api/tickets/search', async (req, res) => {
 
   try {
     const result = await findTickets(text, req.runQuery);
+    result.noAccess = await noAccessTo(req.scope, result.notFound);
     if (record && result.found.length === 1) {
       // Without the full record the page still shows the ticket's summary row
       result.record = await ticketRecord(result.found[0].number, req.runQuery, {
@@ -6852,6 +7117,88 @@ app.post('/api/tickets/search', async (req, res) => {
     res.status(502).json({ error: `Could not search the tickets right now: ${error.message}` });
   }
 });
+
+// Of the numbers someone couldn't open, the ones in the data all the same: other
+// people's or other teams' tickets. The page says they don't have permission to
+// see those, and nothing else about them. An admin sees every ticket, so none.
+const FULL_NUMBER = /^(INC|CHG|RITM|SCTASK|REQ)\d{7}$/;
+async function noAccessTo(scope, numbers) {
+  const full = numbers.filter(n => FULL_NUMBER.test(n));
+  if (scope.all || !full.length) return [];
+  try {
+    return [...inTheData(await loadTicketIndex(runCubeQuery), full)];
+  } catch (error) {
+    console.error('🔒 Could not check which tickets are someone else\'s:', error.message);
+    return []; // the page says "not in the data", as before
+  }
+}
+
+// ---------------------------------------------------------------------
+// THE AI ASSISTANT AND PERMISSIONS: its queries only ever see the person's
+// tickets (req.runQuery). On top of that, a question about tickets they don't
+// have permission to see isn't answered, and an answer that leaves out
+// matching tickets that aren't theirs says so.
+// ---------------------------------------------------------------------
+
+// "A", "A and B", "A, B and C"
+const listOf = items => items.length < 3 ? items.join(' and ') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+
+// The full ticket numbers a question names ("INC1814467", "inc 1814467"; bare
+// digits are left to Claude) and that its queries filter on
+const ticketsNamedIn = text => parseTicketNumbers(text).wanted.filter(w => w.candidates.length === 1).map(w => w.input);
+const ticketsFilteredOn = queries => queries.flatMap(q => (q.cubeQuery.filters || [])
+  .flatMap(f => (f.values || []).flatMap(v => String(v).toUpperCase().match(/\b(INC|CHG|RITM|SCTASK|REQ)\d{7}\b/g) || [])));
+
+// Ticket numbers someone asked about -> { theirs, forbidden }: the ones they
+// may see (an order: one of its requests), and the ones in the data they don't
+// have permission to see. A number in neither isn't in the data.
+async function namedTickets(scope, numbers) {
+  const unique = [...new Set(numbers)];
+  if (scope.all || !unique.length) return { theirs: unique, forbidden: [] };
+  const theirs = unique.filter(n => teams.canSeeTicket(scope, n));
+  try {
+    const index = await loadTicketIndex(runCubeQuery);
+    const orders = unique.filter(n => n.startsWith('REQ'));
+    for (const t of orders.length ? index.values() : []) {
+      if (t.kind === 'RITM' && orders.includes(t.parent) && !theirs.includes(t.parent) && teams.canSeeTicket(scope, t.number)) theirs.push(t.parent);
+    }
+    return { theirs, forbidden: [...inTheData(index, unique.filter(n => !theirs.includes(n)))] };
+  } catch (error) {
+    // Can't tell: the question goes ahead, and its queries still only see their tickets
+    console.error('🔒 Could not check the tickets a question names:', error.message);
+    return { theirs, forbidden: [] };
+  }
+}
+
+// What the person is told when a question is only about tickets they can't see
+function permissionDenied(numbers) {
+  const one = numbers.length === 1;
+  return `You don't have permission to see ${listOf(numbers)}, so I can't answer questions about ${one ? 'it' : 'them'}. ` +
+    `Only whoever ${one ? 'it\'s' : 'they\'re'} assigned to, ${one ? 'its' : 'their'} team's project manager and admins can see ${one ? 'it' : 'them'}.`;
+}
+
+// Would each of these queries also find tickets the person can't see?
+// -> [true / false per query], or null when it couldn't be checked (the
+// answer then just says whose tickets it covers, as before)
+async function hiddenTicketsMatch(queries, scope) {
+  if (scope.all) return queries.map(() => false);
+  try {
+    return await Promise.all(queries.map(q => teams.findsHiddenTickets(q.cubeQuery, scope, runCubeQuery)));
+  } catch (error) {
+    console.error('🔒 Could not check for tickets left out of the answer:', error.message);
+    return null;
+  }
+}
+
+// The answer's notice when it isn't the full report, or null
+function permissionNote({ forbidden, hidden, empty, scope }) {
+  if (forbidden.length) {
+    return `You can't see the full report: you don't have permission to see ${listOf(forbidden)}, so ${forbidden.length === 1 ? 'it is' : 'they are'} left out. Only tickets you can see are shown.`;
+  }
+  if (!hidden) return null;
+  if (empty) return 'None of the tickets you can see match this question. Other tickets do, but you don\'t have permission to see them.' + (scope.count ? '' : ` ${teams.scopeNote(scope)}`);
+  return `You can't see the full report: some of the tickets that match aren't yours, and you don't have permission to see them. ${teams.scopeNote(scope)}`;
+}
 
 // { numbers, conversation } -> { families }: the parent/child, order, task,
 // change and problem families those tickets belong to (relations.mjs), with
@@ -6886,10 +7233,33 @@ app.post('/api/tickets/related', async (req, res) => {
 // one family with all its members, and the families a ticket is in
 // =====================================================================
 
-// Each family row with its anchor's summary (null for an order or a problem record)
-async function withAnchors(rows, runQuery) {
-  const summaries = await ticketSummaries(rows.map(r => r.anchor), runQuery);
-  return rows.map(r => ({ ...r, ticket: summaries.get(r.anchor) || null }));
+// What each family's row shows (relations.mjs familyRow): its anchor ticket's own
+// summary, state, priority, team and opening date when this person may see it,
+// or else those of the family's tickets they may see. -> function(kind, family row)
+async function familyRows(req) {
+  const index = await loadTicketIndex(runCubeQuery);
+  const canSee = number => teams.canSeeTicket(req.scope, number);
+  const made = new Map();
+  return (kind, f) => {
+    const key = `${kind}|${f.anchor}`;
+    if (!made.has(key)) made.set(key, familyRow(kind, f.anchor, index, canSee));
+    return made.get(key);
+  };
+}
+
+// The Families page's columns, as the page shows them, for looking a family up
+const FAMILY_LOOKUP_COLUMNS = ['Parent', 'Summary', 'State', 'Priority / Risk', 'Team', 'Opened', 'Family'];
+function familyLookupTexts(kind, f, row) {
+  const [one, many] = FAMILY_CHILD_NOUNS[kind];
+  return {
+    Parent: f.anchor,
+    Summary: row.summary || blankText('Summary', row),
+    State: row.state || blankText('State', row),
+    'Priority / Risk': row.level || blankText('Priority / Risk', row),
+    Team: row.team || blankText('Team', row),
+    Opened: row.opened ? openedText(row.opened) : blankText('Opened', row),
+    Family: `${f.children.toLocaleString()} ${f.children === 1 ? one : many}`,
+  };
 }
 
 function familiesFailed(res, error) {
@@ -6911,31 +7281,40 @@ app.get('/api/families/find', async (req, res) => {
   const number = String(req.query.number || '').trim().toUpperCase();
   if (!STARRABLE.test(number)) return res.status(400).json({ error: 'Type a ticket number, like INC1813970, CHG1100098, RITM0440458 or SCTASK0595823.' });
   try {
-    const [links, found] = await Promise.all([ticketLinks([number], req.runQuery), ticketSummaries([number], req.runQuery)]);
+    const [links, found, rowOf] = await Promise.all([ticketLinks([number], req.runQuery), ticketSummaries([number], req.runQuery), familyRows(req)]);
     const rows = [];
     for (const f of links.get(number)?.families || []) {
       const kind = LINK_KIND[f.kind];
       const entry = (await familyList(kind, req.runQuery)).find(e => e.anchor === f.anchor);
-      if (entry) rows.push({ kind, ...entry });
+      if (entry) rows.push({ kind, ...entry, row: rowOf(kind, entry) });
     }
-    res.json({ number, known: found.has(number), families: await withAnchors(rows, req.runQuery) });
+    const known = found.has(number);
+    res.json({ number, known, noAccess: known ? [] : await noAccessTo(req.scope, [number]), families: rows });
   } catch (error) {
     familiesFailed(res, error);
   }
 });
 
-// ?sort=size|newest|oldest&offset&limit -> { total, families: one page of rows }
+// ?sort=parent|summary|state|level|team|opened|size&dir=asc|desc&offset&limit
+// &q=<words>&col=<column>: only the families whose row shows those words
+// -> { total, before (the total before that lookup), families: one page of rows,
+// each with what it shows } (no sort: the biggest families first)
 app.get('/api/families/:kind', async (req, res) => {
   const kind = req.params.kind;
   if (!FAMILY_KINDS.includes(kind)) return res.status(400).json({ error: 'Unknown kind of family.' });
   const offset = Math.max(0, Number.parseInt(req.query.offset, 10) || 0);
   const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 50));
+  const by = req.query.sort;
+  const dir = req.query.dir === 'desc' ? 'desc' : 'asc';
+  const lookup = parseLookup(req.query, FAMILY_LOOKUP_COLUMNS);
   try {
-    let list = await familyList(kind, req.runQuery);
-    // Ticket numbers go up over time, so the newest parent has the highest number
-    if (req.query.sort === 'newest') list = [...list].sort((a, b) => b.anchor.localeCompare(a.anchor));
-    if (req.query.sort === 'oldest') list = [...list].sort((a, b) => a.anchor.localeCompare(b.anchor));
-    res.json({ kind, total: list.length, families: await withAnchors(list.slice(offset, offset + limit), req.runQuery) });
+    const [all, rowOf] = await Promise.all([familyList(kind, req.runQuery), familyRows(req)]);
+    let list = lookup ? all.filter(f => lookupMatches(familyLookupTexts(kind, f, rowOf(kind, f)), lookup)) : all;
+    if (by === 'parent') list = sortRows(list, f => f.anchor, dir);
+    else if (by === 'size') list = sortRows(list, f => f.children, dir);
+    else if (by === 'level') list = sortRows(list, f => rowOf(kind, f).rank, dir);
+    else if (['summary', 'state', 'team', 'opened'].includes(by)) list = sortRows(list, f => rowOf(kind, f)[by], dir);
+    res.json({ kind, total: list.length, before: all.length, families: list.slice(offset, offset + limit).map(f => ({ ...f, row: rowOf(kind, f) })) });
   } catch (error) {
     familiesFailed(res, error);
   }
@@ -7016,18 +7395,123 @@ app.post('/api/seen-tickets', async (req, res) => {
   }
 });
 
+// Home's "Assigned to me": every ticket assigned to this person in OneTouch,
+// most urgent first, then oldest (tickets.mjs ticketsByPriority), each marked
+// open or not; the page shows open, closed or all of them
+app.get('/api/my-tickets', async (req, res) => {
+  try {
+    const numbers = await teams.assignedNumbers(req.user.id);
+    const tickets = numbers.length ? await ticketsByPriority(numbers, req.runQuery) : [];
+    // How much each one's KPIs need attention, so the list sorts by them across every
+    // page, and what they say, so it can be looked up by them (the page draws them itself)
+    const found = await kpis.ticketKpis(tickets.map(t => t.number), runCubeQuery)
+      .catch(error => { console.error('📏 Could not work out the KPIs for sorting:', error.message); return { kpis: {} }; });
+    res.json({
+      tickets: tickets.map(t => {
+        const list = found.kpis[t.number];
+        return { ...t, attention: list ? kpis.attention(list) : null, kpiText: list ? list.map(k => `${k.label} ${k.value}`).join(' · ') : '' };
+      }),
+    });
+  } catch (error) {
+    console.error('🎫 Could not load the tickets assigned to someone:', error.message);
+    res.status(502).json({ error: 'Your tickets could not be loaded right now. Please try again.' });
+  }
+});
+
+// =====================================================================
+// KPIs (kpis.mjs): a ticket's for anyone who may see that ticket (so, for
+// most people, only the tickets assigned to them); a family's only for its
+// team's project manager or an admin. The KPIs come from every ticket read
+// once with a fixed query, and only checked numbers are answered for.
+// =====================================================================
+
+// { numbers } (up to 200) -> { asOf, kpis: { number: [kpi] } }, leaving out any this person may not see
+app.post('/api/kpis/tickets', async (req, res) => {
+  const numbers = [...new Set((Array.isArray(req.body?.numbers) ? req.body.numbers : []).map(n => String(n).toUpperCase()))]
+    .filter(n => STARRABLE.test(n) && teams.canSeeTicket(req.scope, n)).slice(0, 200);
+  try {
+    res.json(await kpis.ticketKpis(numbers, runCubeQuery));
+  } catch (error) {
+    console.error('📏 Ticket KPIs failed:', error.message);
+    res.status(502).json({ error: 'The KPIs could not be worked out right now. Please try again.' });
+  }
+});
+
+// The columns of Team families on Home, for looking a family up
+const TEAM_FAMILY_LOOKUP_COLUMNS = ['Family', 'Tickets', 'KPIs'];
+
+// ?team=<id> (admins; a project manager gets their own)&status=open|all&linked=0|1&offset&limit
+// &sort=family|size|kpis&dir=asc|desc&q=<words>&col=<column> -> one page of the team's
+// families, most in need of attention first (or in that sort), each with its KPIs
+app.get('/api/kpis/families', async (req, res) => {
+  try {
+    const teamId = Number(req.query.team) || req.scope.access.team?.id;
+    if (!teamId) return res.status(403).json({ error: 'You\'re not on a team, so there are no families to show.' });
+    const families = await teams.teamFamilies(req.scope, teamId);
+    const lookup = parseLookup(req.query, TEAM_FAMILY_LOOKUP_COLUMNS);
+    // A family is named after its first ticket and that ticket's summary (the numbers were just checked)
+    const index = lookup ? await loadTicketIndex(runCubeQuery) : null;
+    const matches = lookup && (f => lookupMatches({
+      Family: `${f.id} ${index.get(f.id)?.summary || ''}`,
+      Tickets: `${f.size.toLocaleString()} ${f.size === 1 ? 'ticket' : 'tickets'} ${kpis.kindsText(f.kinds)}`,
+      KPIs: f.kpis.map(k => `${k.label} ${k.value}`).join(' · '),
+    }, lookup));
+    const page = await kpis.teamFamilyKpis(families, {
+      status: req.query.status === 'all' ? 'all' : 'open',
+      linked: req.query.linked !== '0',
+      offset: Math.max(Number(req.query.offset) || 0, 0),
+      limit: Math.min(Math.max(Number(req.query.limit) || 25, 1), 100),
+      sort: ['family', 'size', 'kpis'].includes(req.query.sort) ? req.query.sort : null,
+      dir: req.query.dir === 'desc' ? 'desc' : 'asc',
+      matches,
+    }, runCubeQuery);
+    // Each family is named after its first ticket (the numbers were just checked)
+    const summaries = await ticketSummaries(page.families.map(f => f.id), runCubeQuery)
+      .catch(error => { console.error('📏 Could not load family summaries:', error.message); return new Map(); });
+    res.json({ ...page, teamId, families: page.families.map(f => ({ ...f, ticket: summaries.get(f.id) || null })) });
+  } catch (error) {
+    teamsFailed(res, error, 'Loading the families\' KPIs');
+  }
+});
+
+// One family: its KPIs, and each of its tickets with who has it and its KPIs
+app.get('/api/kpis/families/:id', async (req, res) => {
+  try {
+    const family = await teams.familyMembers(req.scope, String(req.params.id).toUpperCase());
+    const numbers = family.members.map(m => m.number);
+    const [found, summaries] = await Promise.all([
+      kpis.oneFamilyKpis(family.members, runCubeQuery),
+      ticketSummaries(numbers, runCubeQuery).catch(() => new Map()),
+    ]);
+    // Open ones first, then the most urgent, then the oldest (as Assigned to me)
+    const tickets = family.members
+      .map(m => {
+        const t = { ...summaries.get(m.number), number: m.number, assignee: m.assignee, kpis: found.tickets[m.number] || [] };
+        return { ...t, open: t.kind ? isOpen(t) : false, rank: t.kind ? priorityRank(t) : 5 };
+      })
+      .sort((a, b) => (b.open - a.open) || a.rank - b.rank || String(a.opened || '~').localeCompare(String(b.opened || '~')));
+    res.json({ id: family.id, size: family.size, team: family.team, asOf: found.asOf, kpis: found.kpis, tickets });
+  } catch (error) {
+    teamsFailed(res, error, 'Loading that family\'s KPIs');
+  }
+});
+
 // ?details=1: also each starred ticket's summary, parent and families (for the
-// Starred tickets list), and the stars that aren't in the data
+// Starred tickets list), and the stars that can't be shown: not in the data, or
+// (noAccess) no longer this person's to see
 app.get('/api/stars', async (req, res) => {
   try {
     const list = await stars.listStars(req.user.id);
     if (!req.query.details) return res.json({ stars: list });
     const numbers = list.map(s => s.number);
     const [summaries, links] = await Promise.all([ticketSummaries(numbers, req.runQuery), linksOrNone(numbers, req.runQuery)]);
+    const missing = numbers.filter(n => !summaries.has(n));
+    const noAccess = await noAccessTo(req.scope, missing);
     res.json({
       stars: list,
       tickets: list.filter(s => summaries.has(s.number)).map(s => ({ ...summaries.get(s.number), ...links.get(s.number), starredAt: s.starredAt })),
-      notFound: numbers.filter(n => !summaries.has(n)),
+      notFound: missing.filter(n => !noAccess.includes(n)),
+      noAccess,
     });
   } catch (error) {
     console.error('⭐ Could not list stars:', error.message);
@@ -7248,18 +7732,80 @@ app.get('/api/teams', async (req, res) => {
   }
 });
 
-// ?assignee=<user id>|none&kind=INC&search=&offset&limit -> { total, tickets }:
+// A Team tab list's ?sort=&dir= and ?q=&col=, over what each ticket's summary
+// says (teams.mjs checks the numbers before it sorts or looks them up).
+// sorts: the ?sort= values it takes (teams.mjs orders 'family', 'assignee'
+// and 'team' itself). textsOf(row, summary): what each column shows.
+// -> { sort, matches } for teams.teamTickets / teams.unassignedTickets
+async function teamListOptions(query, columns, sorts, textsOf) {
+  const lookup = parseLookup(query, columns);
+  const index = lookup || ['type', 'summary', 'state'].includes(query.sort) ? await loadTicketIndex(runCubeQuery) : null;
+  let sort = null;
+  if (sorts.includes(query.sort)) {
+    const by = query.sort;
+    sort = {
+      by, dir: query.dir === 'desc' ? 'desc' : 'asc',
+      valueOf: number => (by === 'number' ? number : index.has(number) ? TICKET_SORTS[by](index.get(number)) : null),
+    };
+  }
+  const matches = lookup && (r => lookupMatches(textsOf(r, index.get(r.number) || {}), lookup));
+  return { sort, matches };
+}
+
+// The Team tab's ticket columns, for looking tickets up
+const TEAM_TICKET_LOOKUP_COLUMNS = ['Ticket', 'Type', 'Summary', 'State', 'Family', 'Assigned to'];
+const UNASSIGNED_LOOKUP_COLUMNS = ['Ticket', 'Type', 'Summary', 'State', 'Family', 'Team'];
+
+// Admins: every ticket nobody has yet, on any team or on none, family by family
+// (the Team tab's "Not assigned yet"). ?team=<team id>|none&kind=INC&q=&col=&offset&limit
+// &sort=number|type|summary|state|family|team&dir=asc|desc -> { total, before, tickets,
+// families }: one page of tickets with each one's summary and team, and the page's
+// families, each with what its first ticket is about
+const UNASSIGNED_SORTS = ['number', 'type', 'summary', 'state', 'family', 'team'];
+app.get('/api/teams/unassigned/tickets', async (req, res) => {
+  try {
+    const { sort, matches } = await teamListOptions(req.query, UNASSIGNED_LOOKUP_COLUMNS, UNASSIGNED_SORTS, (r, t) => ({
+      Ticket: r.number, Type: t.type, Summary: t.summary || blankText('Summary', t), State: t.state || blankText('State', t),
+      Family: r.familySize > 1 ? `${r.familyId} · ${r.familySize.toLocaleString()} linked tickets` : 'On its own',
+      Team: r.team || 'No team',
+    }));
+    const page = await teams.unassignedTickets(req.scope, {
+      team: req.query.team || null, kind: req.query.kind || null, matches,
+      offset: req.query.offset, limit: req.query.limit, sort,
+    });
+    // An admin's: every number may be seen, so the summaries come straight from Cube
+    const families = Object.values(page.families);
+    const summaries = await ticketSummaries([...page.tickets.map(t => t.number), ...families.map(f => f.id)], runCubeQuery)
+      .catch(error => { console.error('👥 Could not load ticket summaries:', error.message); return new Map(); });
+    res.json({
+      total: page.total, before: page.before,
+      tickets: page.tickets.map(t => ({ ...summaries.get(t.number), ...t })),
+      families: families.map(f => ({ ...f, summary: summaries.get(f.id)?.summary || null })),
+    });
+  } catch (error) {
+    teamsFailed(res, error, 'Loading the tickets nobody has');
+  }
+});
+
+// ?assignee=<user id>|none&kind=INC&q=<words>&col=<column>&offset&limit -> { total, before, tickets }:
 // one page of a team's tickets with who has each one, and each one's summary
+// ...&sort=number|type|summary|state|family|assignee&dir=asc|desc: every match in that order, then the page
+const TEAM_TICKET_SORTS = ['number', 'type', 'summary', 'state', 'family', 'assignee'];
 app.get('/api/teams/:id/tickets', async (req, res) => {
   try {
+    const { sort, matches } = await teamListOptions(req.query, TEAM_TICKET_LOOKUP_COLUMNS, TEAM_TICKET_SORTS, (r, t) => ({
+      Ticket: r.number, Type: t.type, Summary: t.summary || blankText('Summary', t), State: t.state || blankText('State', t),
+      Family: r.familySize > 1 ? `${r.familySize.toLocaleString()} linked tickets` : 'On its own',
+      'Assigned to': r.assignee || 'Not assigned',
+    }));
     const page = await teams.teamTickets(req.scope, Number(req.params.id), {
-      assignee: req.query.assignee || null, kind: req.query.kind || null, search: req.query.search || '',
-      offset: req.query.offset, limit: req.query.limit,
+      assignee: req.query.assignee || null, kind: req.query.kind || null, matches,
+      offset: req.query.offset, limit: req.query.limit, sort,
     });
     // The numbers are already this person's to see, so their summaries come straight from Cube
     const summaries = await ticketSummaries(page.tickets.map(t => t.number), runCubeQuery)
       .catch(error => { console.error('👥 Could not load ticket summaries:', error.message); return new Map(); });
-    res.json({ total: page.total, tickets: page.tickets.map(t => ({ ...summaries.get(t.number), ...t })) });
+    res.json({ total: page.total, before: page.before, tickets: page.tickets.map(t => ({ ...summaries.get(t.number), ...t })) });
   } catch (error) {
     teamsFailed(res, error, 'Loading the team\'s tickets');
   }
@@ -7277,13 +7823,16 @@ app.put('/api/assignments', async (req, res) => {
   }
 });
 
-// Admins: { teamId (null: no team), role } for one person
+// Admins: { teamId (null: off their team, and no role), role } for one person
+// -> { unassigned }: how many of their tickets went back to the team
 app.put('/api/teams/members/:userId', async (req, res) => {
   try {
     const teamId = req.body?.teamId == null ? null : Number(req.body.teamId);
-    await teams.setMembership(req.scope, Number(req.params.userId), teamId, req.body?.role);
-    console.log(`👥 ${req.user.username} put user ${req.params.userId} on team ${teamId ?? '(none)'} as ${req.body?.role ?? '-'}`);
-    res.json({ ok: true });
+    const { unassigned } = await teams.setMembership(req.scope, Number(req.params.userId), teamId, req.body?.role);
+    console.log(teamId === null
+      ? `👥 ${req.user.username} took user ${req.params.userId} off their team (${unassigned} tickets unassigned)`
+      : `👥 ${req.user.username} put user ${req.params.userId} on team ${teamId} as ${req.body?.role}`);
+    res.json({ ok: true, unassigned });
   } catch (error) {
     teamsFailed(res, error, 'Changing that person\'s team');
   }
@@ -7301,6 +7850,19 @@ app.get('/api/ticket-families', async (req, res) => {
 });
 
 // Admins: { teamId } -> the whole family moves to that team -> { moved }
+// A project manager (their team's families) or an admin: { assigneeId } (null:
+// nobody) gets every ticket in the family -> { changed }
+app.put('/api/ticket-families/:id/assignee', async (req, res) => {
+  try {
+    const assigneeId = req.body?.assigneeId ?? null;
+    const changed = await teams.assignFamily(req.scope, String(req.params.id).toUpperCase(), assigneeId);
+    console.log(`👥 ${req.user.username} gave family ${req.params.id} (${changed} tickets changed) to user ${assigneeId ?? '(nobody)'}`);
+    res.json({ changed });
+  } catch (error) {
+    teamsFailed(res, error, 'Assigning that family');
+  }
+});
+
 app.put('/api/ticket-families/:id/team', async (req, res) => {
   try {
     const moved = await teams.moveFamily(req.scope, String(req.params.id).toUpperCase(), Number(req.body?.teamId));
@@ -7308,6 +7870,105 @@ app.put('/api/ticket-families/:id/team', async (req, res) => {
     res.json({ moved });
   } catch (error) {
     teamsFailed(res, error, 'Moving that family');
+  }
+});
+
+// Anyone on a team: { number, status: resolved|closed, note } tells their
+// project manager. Only a notification: the ticket itself doesn't change. -> { told }
+app.post('/api/tickets/report', async (req, res) => {
+  try {
+    const { told } = await teams.reportTicket(req.scope, req.body?.number, req.body?.status, req.body?.note);
+    console.log(`👥 ${req.user.username} told ${told.length} project manager(s) they ${req.body?.status} ${req.body?.number}`);
+    res.json({ told });
+  } catch (error) {
+    teamsFailed(res, error, 'Telling your project manager');
+  }
+});
+
+// Resolved or closed (teams.mjs): every team's for admins, a project manager's
+// own team's -> { tickets: [{ number, status, by, at, note, team, assignee, type, summary, state }] }
+app.get('/api/ticket-statuses', async (req, res) => {
+  try {
+    const list = await teams.ticketStatuses(req.scope);
+    const summaries = await ticketSummaries(list.map(t => t.number), req.runQuery);
+    res.json({
+      tickets: list.map(t => {
+        const s = summaries.get(t.number);
+        return { ...t, type: s?.type ?? null, summary: s?.summary ?? null, state: s?.state ?? null };
+      }),
+    });
+  } catch (error) {
+    teamsFailed(res, error, 'Loading the resolved and closed tickets');
+  }
+});
+
+// An admin or the ticket's team's project manager: { status: resolved|closed|open } -> { number, status }
+app.put('/api/ticket-statuses/:number', async (req, res) => {
+  try {
+    const done = await teams.setTicketStatus(req.scope, req.params.number, req.body?.status);
+    console.log(`✅ ${req.user.username} set ${done.number} to ${done.status}`);
+    res.json(done);
+  } catch (error) {
+    teamsFailed(res, error, 'Changing the status');
+  }
+});
+
+// Admins, before a presentation: every status undone -> { tickets, notifications }
+app.post('/api/ticket-statuses/undo-all', async (req, res) => {
+  try {
+    const done = await teams.undoAllStatuses(req.scope);
+    console.log(`✅ ${req.user.username} undid every status: ${done.tickets} tickets, ${done.notifications} notifications`);
+    res.json(done);
+  } catch (error) {
+    teamsFailed(res, error, 'Undoing the statuses');
+  }
+});
+
+// Admins, before a presentation: the demo tickets back on no team, nobody's -> { tickets, families }
+app.post('/api/demo-tickets/reset', async (req, res) => {
+  try {
+    const done = await teams.resetDemoTickets(req.scope);
+    console.log(`🎬 ${req.user.username} put the ${done.tickets} demo tickets back`);
+    res.json(done);
+  } catch (error) {
+    teamsFailed(res, error, 'Putting the demo tickets back');
+  }
+});
+
+// =====================================================================
+// NOTIFICATIONS (notifications.mjs): the 🔔 in the header
+// =====================================================================
+
+// -> { unread, notifications: newest first }
+app.get('/api/notifications', async (req, res) => {
+  try {
+    res.json(await notifications.listNotifications(req.user.id));
+  } catch (error) {
+    console.error('🔔 Loading notifications failed:', error.message);
+    res.status(503).json({ error: 'Your notifications could not be loaded right now.' });
+  }
+});
+
+// { ids } (none: all of them) -> { read }
+app.post('/api/notifications/read', async (req, res) => {
+  try {
+    res.json({ read: await notifications.markRead(req.user.id, req.body?.ids ?? null) });
+  } catch (error) {
+    console.error('🔔 Marking notifications read failed:', error.message);
+    res.status(503).json({ error: 'That could not be saved right now.' });
+  }
+});
+
+// { ids } (some of them) or { upTo } (all of them up to that one) -> { cleared }
+app.post('/api/notifications/clear', async (req, res) => {
+  const { ids, upTo } = req.body || {};
+  const some = Array.isArray(ids) && ids.length > 0;
+  if (!some && !Number.isInteger(upTo)) return res.status(400).json({ error: 'Say which notifications to clear.' });
+  try {
+    res.json({ cleared: await notifications.clearNotifications(req.user.id, some ? { ids } : { upTo }) });
+  } catch (error) {
+    console.error('🔔 Clearing notifications failed:', error.message);
+    res.status(503).json({ error: 'Your notifications could not be cleared right now.' });
   }
 });
 
@@ -7347,11 +8008,20 @@ async function prepareAccounts(attempt = 1) {
     await shares.ensureSharesSchema();
     await chats.ensureChatsSchema();
     await teams.ensureTeamsSchema();
+    await notifications.ensureNotificationsSchema();
   } catch (error) {
     const wait = Math.min(attempt * 2, 15);
     console.error(`🔐 Account database not reachable yet (${error.message}); retrying in ${wait}s`);
     setTimeout(() => prepareAccounts(attempt + 1), wait * 1000).unref();
     return;
+  }
+  // Notifications go out by email too, once the tables are there (off without a Brevo key)
+  startMail();
+  try {
+    const off = await teams.takeTestAccountsOffTeams();
+    if (off) console.log(`👥 Took the test accounts off their teams (${off.people.join(', ')}); ${off.tickets.toLocaleString()} of their tickets are now unassigned`);
+  } catch (error) {
+    console.error('👥 Could not take the test accounts off their teams:', error.message);
   }
 
   const file = process.env.ACCOUNTS_FILE ?? auth.DEFAULT_ACCOUNTS_FILE;
@@ -7381,12 +8051,67 @@ async function seedTeamsWhenReady(attempt = 1) {
   try {
     const seeded = await teams.seedTeams(runCubeQuery);
     if (seeded) console.log(`👥 Set up ${seeded.teams} teams: ${seeded.people} people, ${seeded.families.toLocaleString()} families, ${seeded.tickets.toLocaleString()} tickets`);
+    // Cube answers: read every ticket's KPI fields now, so the first Home page doesn't wait
+    const t0 = Date.now();
+    kpis.load(runCubeQuery)
+      .then(d => console.log(`📏 KPIs ready: ${d.tickets.size.toLocaleString()} tickets in ${((Date.now() - t0) / 1000).toFixed(1)}s`))
+      .catch(error => console.error(`📏 Could not read the tickets for KPIs yet (${error.message}); the first page that needs them tries again`));
+    // And their summaries, for sorting long lists by any column
+    loadTicketIndex(runCubeQuery)
+      .then(index => console.log(`↕️  Sorting ready: ${index.size.toLocaleString()} tickets in ${((Date.now() - t0) / 1000).toFixed(1)}s`))
+      .catch(error => console.error(`↕️  Could not read the tickets for sorting yet (${error.message}); the first sorted list tries again`));
   } catch (error) {
     const wait = Math.min(attempt * 5, 60);
     console.error(`👥 Could not set up the teams yet (${error.message}); retrying in ${wait}s`);
     setTimeout(() => seedTeamsWhenReady(attempt + 1), wait * 1000).unref();
   }
 }
+
+// ---------------------------------------------------------------------
+// NEW TICKETS FROM SERVICENOW: servicenow-sync/ saves each one in the data,
+// puts it in a family (teams.placeTicket) and says so on a Postgres channel.
+// Who sees what is read again at once; what was read once at start (KPIs,
+// the sorting index, families, charts) a little later, once Cube's own
+// cache (10 s) has the new rows. Many arrivals together refresh once.
+// ---------------------------------------------------------------------
+
+const REFRESH_AFTER_MS = 15 * 1000;
+let refreshTimer = null;
+
+function ticketsChanged() {
+  teams.dataChanged();
+  if (refreshTimer) return;
+  refreshTimer = setTimeout(async () => {
+    refreshTimer = null;
+    const t0 = Date.now();
+    forgetLinks();
+    forgetResults();
+    const done = await Promise.allSettled([kpis.reload(runCubeQuery), reloadTicketIndex(runCubeQuery)]);
+    const failed = done.filter(d => d.status === 'rejected').map(d => d.reason.message);
+    console.log(failed.length ? `🔄 Tickets changed; could not read them all again: ${failed.join('; ')}`
+      : `🔄 Tickets changed: KPIs and sorting read again in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+  }, REFRESH_AFTER_MS);
+}
+
+async function listenForTicketChanges() {
+  let client;
+  try {
+    client = await auth.pool.connect();
+    client.on('notification', ticketsChanged);
+    // A dropped connection: listen again
+    client.on('error', error => {
+      console.error('🔄 Lost the ticket-change channel:', error.message);
+      client.release(true);
+      setTimeout(listenForTicketChanges, 10 * 1000).unref();
+    });
+    await client.query(`LISTEN ${teams.TICKETS_CHANGED}`);
+  } catch (error) {
+    client?.release(true);
+    console.error(`🔄 Could not listen for ticket changes yet (${error.message}); retrying in 10s`);
+    setTimeout(listenForTicketChanges, 10 * 1000).unref();
+  }
+}
+listenForTicketChanges();
 ```
 
 <a id="b25"></a>
@@ -7466,13 +8191,40 @@ async function seedTeamsWhenReady(attempt = 1) {
                 <!-- Admins and anyone on a team (teams.js) -->
                 <button class="tab-btn" data-tab="teams" id="teams-tab" onclick="switchTab('teams')" hidden>👥 Team</button>
             </nav>
+            <!-- The AI assistant: a question typed here is asked in the chat; with nothing typed, the chat opens (app.js) -->
+            <form class="nav-ask" id="nav-ask" role="search" aria-label="Ask Claude about the data" onsubmit="event.preventDefault(); askFromHeader();">
+                <input type="search" id="nav-ask-input" placeholder="Ask Claude about the data…" autocomplete="off" enterkeyhint="send"
+                       aria-label="Ask Claude a question about the data" aria-controls="assistant-panel" aria-expanded="false" maxlength="2000">
+                <button type="submit" class="nav-ask-btn" id="nav-ask-btn" title="Ask Claude. With nothing typed, this opens the chat">
+                    💬 Ask<span class="nav-ask-count" id="nav-ask-count" hidden></span>
+                </button>
+            </form>
         </div>
         <div class="header-right">
+            <button type="button" class="header-btn notify-btn" id="notify-btn" onclick="toggleNotifications()"
+                    aria-controls="notify-panel" aria-expanded="false" aria-label="Notifications">🔔<span class="notify-count" id="notify-count" hidden></span></button>
             <button type="button" class="header-btn" id="theme-btn" onclick="toggleThemePanel()"
-                    aria-controls="theme-panel" aria-expanded="false">🎨 Colors</button>
+                    aria-controls="theme-panel" aria-expanded="false" aria-label="Colors">🎨<span class="header-btn-text"> Colors</span></button>
             <button class="sign-out-btn" type="button" onclick="signOut()">Sign out</button>
         </div>
     </header>
+
+    <!-- 🔔 Notifications: tickets given to you, families moved to your team, members' reports (notifications.js) -->
+    <section class="theme-panel notify-panel" id="notify-panel" role="dialog" aria-label="Notifications" hidden>
+        <div class="theme-panel-head">
+            <span>🔔 Notifications</span>
+            <span class="notify-head-actions">
+                <button type="button" class="notify-clear-all" id="notify-clear-all" onclick="clearAllNotifications()" hidden>Clear all</button>
+                <button type="button" class="drawer-close" onclick="toggleNotifications(false)" aria-label="Close">✕</button>
+            </span>
+        </div>
+        <!-- ✉️ These by email too (mail.mjs), for anyone with an address on file -->
+        <div class="notify-email" id="notify-email" hidden>
+            <label><input type="checkbox" id="notify-email-on"> ✉️ Email me these too</label>
+            <span class="notify-email-to" id="notify-email-to"></span>
+        </div>
+        <div id="notify-list"></div>
+    </section>
 
     <!-- 🎨 Colors: each person's color scheme, saved to their account (customize.js) -->
     <section class="theme-panel" id="theme-panel" role="dialog" aria-label="Your colors" hidden>
@@ -7529,26 +8281,23 @@ async function seedTeamsWhenReady(attempt = 1) {
                 <p class="home-status home-empty" id="home-empty" hidden>Your Home page is empty. Click <b>Customize Home</b> to add sections or charts.</p>
 
                 <div class="home-blocks waiting" id="home-blocks">
-                    <!-- The AI assistant: an example question, and the open / delete chat buttons -->
-                    <section class="home-block" data-block="assistant">
-                        <div class="search-guide">
-                            <div class="guide-card">
-                                <span class="guide-title">💬 Any question about the data</span>
-                                <span class="guide-text">In plain English. The AI assistant answers with a table you can download, and remembers the conversation for follow-ups.</span>
-                                <button type="button" class="guide-example" data-example="How many open incidents are there by priority?">How many open incidents are there by priority?</button>
-                                <div class="chat-controls">
-                                    <button type="button" class="home-action" id="open-chat-btn" onclick="toggleAssistant(true)"
-                                            aria-controls="assistant-panel" aria-expanded="false">💬 Open chat</button>
-                                    <button type="button" class="home-action danger" id="delete-chat-btn" hidden onclick="deleteChat()">🗑 Delete chat</button>
-                                </div>
-                            </div>
-                        </div>
-                    </section>
-
-                    <!-- Your tickets: Ticket results and starred tickets -->
+                    <!-- Your tickets: the ones assigned to you (as a list and in charts), Ticket results and starred tickets -->
                     <section class="home-block" data-block="tickets">
                         <div class="home-modes" role="tablist" aria-label="Your tickets">
-                            <button type="button" role="tab" class="home-mode active" data-mode="results" aria-selected="true" aria-controls="home-results" onclick="setHomeMode('results')">
+                            <button type="button" role="tab" class="home-mode active" data-mode="assigned" aria-selected="true" aria-controls="home-assigned" onclick="setHomeMode('assigned')">
+                                <span class="home-mode-name">📋 Assigned to me <span class="star-count" id="assigned-count" hidden>0</span></span>
+                                <span class="home-mode-desc">Highest priority first, then oldest</span>
+                            </button>
+                            <button type="button" role="tab" class="home-mode" data-mode="charts" aria-selected="false" aria-controls="home-charts" onclick="setHomeMode('charts')">
+                                <span class="home-mode-name">📊 My charts</span>
+                                <span class="home-mode-desc">The tickets assigned to you, in charts</span>
+                            </button>
+                            <!-- Project managers and admins: their team's families and each one's KPIs -->
+                            <button type="button" role="tab" class="home-mode" data-mode="families" id="kpi-families-tab" aria-selected="false" aria-controls="home-families" onclick="setHomeMode('families')" hidden>
+                                <span class="home-mode-name">👪 Team families <span class="star-count" id="kpi-families-count" hidden>0</span></span>
+                                <span class="home-mode-desc">Each family's KPIs, the most urgent first</span>
+                            </button>
+                            <button type="button" role="tab" class="home-mode" data-mode="results" aria-selected="false" aria-controls="home-results" onclick="setHomeMode('results')">
                                 <span class="home-mode-name">🎫 Ticket results</span>
                                 <span class="home-mode-desc">Every ticket the AI assistant has shown you</span>
                             </button>
@@ -7558,7 +8307,19 @@ async function seedTeamsWhenReady(attempt = 1) {
                             </button>
                         </div>
 
-                        <div class="home-panel" id="home-results" role="tabpanel">
+                        <div class="home-panel" id="home-assigned" role="tabpanel">
+                            <div class="home-result" id="assigned-result" aria-live="polite"></div>
+                        </div>
+
+                        <div class="home-panel" id="home-charts" role="tabpanel" hidden>
+                            <div class="home-result" id="my-charts-result"></div>
+                        </div>
+
+                        <div class="home-panel" id="home-families" role="tabpanel" hidden>
+                            <div class="home-result" id="kpi-families-result" aria-live="polite"></div>
+                        </div>
+
+                        <div class="home-panel" id="home-results" role="tabpanel" hidden>
                             <div class="home-result" id="ticket-results" aria-live="polite"></div>
                         </div>
 
@@ -7651,13 +8412,6 @@ async function seedTeamsWhenReady(attempt = 1) {
                                 <input type="search" id="families-q" placeholder="Find a ticket's families: INC1813970, RITM0440458…" aria-label="Ticket number">
                                 <button type="submit" class="primary-btn">Find</button>
                             </form>
-                            <label class="families-sort">Order
-                                <select id="families-sort">
-                                    <option value="size">Biggest families first</option>
-                                    <option value="newest">Newest parent first</option>
-                                    <option value="oldest">Oldest parent first</option>
-                                </select>
-                            </label>
                         </div>
                         <div id="families-list"></div>
                     </div>
@@ -7696,7 +8450,7 @@ async function seedTeamsWhenReady(attempt = 1) {
             </div>
         </section>
 
-        <!-- AI ASSISTANT, opened from the bar in the header; floats over any page -->
+        <!-- AI ASSISTANT, opened from the Ask bar in the header; floats over any page, and a click outside it closes it -->
         <div class="assistant-backdrop" id="assistant-backdrop" onclick="toggleAssistant(false)"></div>
         <section class="assistant-panel" id="assistant-panel" aria-label="AI Assistant">
             <div class="assistant-head">
@@ -7704,7 +8458,7 @@ async function seedTeamsWhenReady(attempt = 1) {
                 <div class="assistant-head-actions">
                     <button type="button" class="assistant-minimize" id="chat-history-btn" onclick="toggleChatHistory()" aria-expanded="false" aria-controls="chat-history" title="Your saved chats: open one to see it again and carry on where you left off">Chat History</button>
                     <button type="button" class="assistant-delete" onclick="deleteChat()" title="Delete this conversation: its questions and answers disappear, it leaves Chat History, and the assistant forgets it">🗑 Delete chat</button>
-                    <button type="button" class="assistant-minimize" onclick="toggleAssistant(false)" title="Close the chat (the conversation is kept; Open chat on Home brings it back)">Minimize ▴</button>
+                    <button type="button" class="assistant-minimize" onclick="toggleAssistant(false)" title="Close the chat (the conversation is kept; the Ask bar at the top brings it back)">Minimize ▴</button>
                 </div>
             </div>
             <div class="chat-container">
@@ -7766,14 +8520,12 @@ async function seedTeamsWhenReady(attempt = 1) {
                         <div class="display-picker" id="b-display" role="radiogroup" aria-label="Chart type"></div>
                         <p class="field-note" id="b-display-note"></p>
                         <div class="builder-row" id="b-cut">
-                            <label class="field-label">Show
+                            <label class="field-label" id="b-limit-wrap">Show
                                 <select id="b-limit"></select>
                             </label>
+                            <!-- Ascending or descending, by count or by the groups (customize.js paintDisplay) -->
                             <label class="field-label">Order
-                                <select id="b-sort">
-                                    <option value="count">Biggest first</option>
-                                    <option value="label">In order (A to Z, P1 first)</option>
-                                </select>
+                                <select id="b-sort"></select>
                             </label>
                         </div>
                         <div class="builder-row" id="b-color-row">
@@ -7814,6 +8566,29 @@ async function seedTeamsWhenReady(attempt = 1) {
             <div class="builder-foot">
                 <button type="button" class="home-action" onclick="this.closest('dialog').close('cancel')">Cancel</button>
                 <button type="submit" class="primary-btn" id="ask-ok" value="ok">Save</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Telling your project manager you resolved or closed a ticket (notifications.js) -->
+    <dialog class="ask-dialog report-dialog" id="report-dialog" aria-labelledby="report-title">
+        <form method="dialog">
+            <h2 id="report-title">Tell your project manager</h2>
+            <p class="report-ticket" id="report-ticket"></p>
+            <label class="field-label">What did you do?
+                <select id="report-status">
+                    <option value="resolved">I resolved it</option>
+                    <option value="closed">I closed it</option>
+                </select>
+            </label>
+            <label class="field-label">Note (optional)
+                <textarea id="report-note" rows="3" maxlength="500" placeholder="e.g. Restarted the service; the user confirmed it works"></textarea>
+            </label>
+            <p class="theme-note report-hint">This only sends your project manager a notification. The ticket itself doesn't change in OneTouch.</p>
+            <p class="home-status error" id="report-error" role="alert" hidden></p>
+            <div class="builder-foot">
+                <button type="button" class="home-action" onclick="this.closest('dialog').close('cancel')">Cancel</button>
+                <button type="submit" class="primary-btn" id="report-send" value="ok">Send</button>
             </div>
         </form>
     </dialog>
@@ -7887,10 +8662,14 @@ async function seedTeamsWhenReady(attempt = 1) {
         </div>
     </div>
 
+    <script src="sorting.js"></script>
+    <script src="lookup.js"></script>
+    <script src="picker.js"></script>
     <script src="charts.js"></script>
     <script src="customize.js"></script>
     <script src="families.js"></script>
     <script src="teams.js"></script>
+    <script src="notifications.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
@@ -8111,6 +8890,56 @@ body {
 .sign-out-btn:hover { color: var(--header-strong); border-color: var(--header-line-hover); }
 .sign-out-btn { flex-shrink: 0; }
 .header-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+/* The Ask bar, right of the page buttons: a question for the AI assistant from any page */
+.nav-ask { display: flex; align-items: stretch; min-width: 0; }
+.nav-ask input {
+    width: clamp(170px, 24vw, 360px);
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 5px 10px;
+    border: 1px solid var(--header-line);
+    border-right: none;
+    border-radius: 6px 0 0 6px;
+    background: color-mix(in srgb, var(--header-strong) 7%, transparent);
+    color: var(--header-strong);
+    font: inherit;
+    font-size: 0.9rem;
+}
+.nav-ask input::placeholder { color: var(--header-text); }
+.nav-ask input:hover { border-color: var(--header-line-hover); }
+.nav-ask input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
+.nav-ask-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border: 1px solid var(--accent);
+    border-radius: 0 6px 6px 0;
+    background: var(--accent);
+    color: var(--on-accent);
+    font-size: 0.9rem;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.nav-ask-btn:hover { filter: brightness(1.08); }
+.nav-ask-btn:focus-visible { outline: 2px solid var(--header-strong); outline-offset: 2px; }
+/* How many questions the open chat has */
+.nav-ask-count {
+    min-width: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--on-accent) 25%, transparent);
+    font-size: 0.75rem;
+    line-height: 18px;
+    text-align: center;
+}
+.nav-ask-count[hidden] { display: none; }
+/* On a header that is itself the accent color: a white button, and a white focus ring */
+:root[data-header="accent"] .nav-ask-btn { background: #ffffff; border-color: #ffffff; color: color-mix(in srgb, var(--accent) 70%, #000); }
+:root[data-header="accent"] .nav-ask-count { background: color-mix(in srgb, var(--accent) 18%, #fff); }
+:root[data-header="accent"] .nav-ask input:focus { outline-color: #ffffff; border-color: #ffffff; }
 .header-btn[aria-expanded="true"] { color: var(--header-strong); border-color: var(--header-line-hover); }
 
 /* The page that's showing (Home or Dashboards) lights up in the accent color */
@@ -8267,6 +9096,33 @@ body {
 @media (max-width: 900px) {
     .app-header { padding: 10px 16px; }
 }
+/* A phone or a narrow window: the header stacks, so nothing slides under 🔔,
+   🎨 and Sign out. On top the logo and those buttons (the name between them
+   while there's room), then the page buttons, then the Ask bar across the
+   whole width. The left side's pieces join the header's own rows. */
+@media (max-width: 700px) {
+    .app-header { flex-wrap: wrap; gap: 8px; padding: 8px 16px; }
+    .header-left { display: contents; }
+    .app-title { order: 1; }
+    .user-name { order: 2; flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .header-right { order: 3; margin-left: auto; }
+    .tab-navigation { order: 4; flex: 1 1 100%; flex-wrap: wrap; }
+    .nav-ask { order: 5; flex: 1 1 100%; }
+    .nav-ask input { width: auto; flex: 1 1 auto; }
+}
+/* A phone: no room for the name on top, and 🎨 without its word */
+@media (max-width: 480px) {
+    .user-name { display: none; }
+    .header-btn-text { display: none; }
+    .tab-navigation .tab-btn, .header-btn, .sign-out-btn { padding: 5px 9px; }
+}
+/* The smallest phones (320 px): a little tighter, so it's still three rows */
+@media (max-width: 359px) {
+    .app-header { padding: 8px 12px; }
+    .app-header h1 { font-size: 1.1rem; }
+    .tab-navigation, .header-right { gap: 6px; }
+    .tab-navigation .tab-btn, .header-btn, .sign-out-btn { padding: 5px 7px; }
+}
 
 /* HOME PAGE: the welcome sits in the page's top-left corner */
 #home-view { overflow-y: auto; }
@@ -8306,9 +9162,12 @@ body {
 .team-you td { font-weight: 600; }
 .team-you-tag { font-size: 0.72rem; font-weight: 600; color: var(--accent-ink); background: var(--accent-soft); border-radius: 4px; padding: 1px 6px; }
 .team-unassigned td { color: var(--text-2); font-style: italic; }
+.team-test-tag { font-size: 0.72rem; font-weight: 600; color: var(--warn-ink); background: var(--warn-soft); border: 1px solid var(--warn-line); border-radius: 4px; padding: 0 6px; vertical-align: middle; }
+.team-member-team { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.team-member-team .home-action { white-space: nowrap; }
 .team-filters, .team-bulk, .team-pager { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 8px 0; }
 .team-filters label { display: flex; align-items: center; gap: 6px; font-size: 0.87rem; }
-.team-filters input, .team-filters select, .team-bulk select, .team-table select, .result-table select.team-assign {
+.team-filters input, .team-filters select, .team-bulk select, .team-table select, .family-group-do select, .person-input {
     padding: 5px 8px;
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -8317,8 +9176,50 @@ body {
     font: inherit;
     font-size: 0.87rem;
 }
+
+/* A name typed to give tickets or a family (picker.js). The list of matches
+   floats over the page (fixed, placed by the script), so table scroll boxes
+   don't cut it off. */
+.person-picker { display: inline-block; min-width: 190px; max-width: 100%; }
+.person-input { width: 100%; box-sizing: border-box; }
+.person-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
+.person-input::placeholder { color: var(--muted); }
+.person-options {
+    position: fixed;
+    z-index: 60;
+    max-height: 280px;
+    overflow-y: auto;
+    margin: 0;
+    padding: 4px;
+    list-style: none;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px var(--shadow-strong);
+    font-size: 0.87rem;
+}
+.person-option { display: flex; flex-direction: column; gap: 1px; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+.person-option:hover { background: var(--surface-2); }
+.person-option[aria-selected="true"] { background: var(--accent-soft); }
+.person-name { color: var(--text); font-weight: 600; }
+.person-name mark { background: none; color: var(--accent-ink); text-decoration: underline; text-underline-offset: 2px; }
+.person-meta { color: var(--text-2); font-size: 0.78rem; }
+.person-empty { padding: 6px 10px; color: var(--text-2); font-style: italic; }
 .team-bulk { font-size: 0.87rem; }
 .team-pager { justify-content: flex-end; font-size: 0.87rem; color: var(--text-2); }
+/* Admins' "Not assigned yet" (teams.js): its button says when tickets are
+   waiting, and a row for each family heads that family's tickets */
+.team-pick-nobody.waiting .team-pick-meta { color: var(--warn-ink); font-weight: 600; }
+.result-table tbody tr.family-group,
+.result-table tbody tr.family-group:nth-child(even),
+.result-table tbody tr.family-group:hover { background: var(--surface-2); }
+.family-group td { border-top: 2px solid var(--border); }
+.family-group-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.family-group-what { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.family-group-meta { font-size: 0.8rem; color: var(--text-2); }
+.family-group-do { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 0.87rem; }
+.family-group-do label { display: flex; align-items: center; gap: 6px; }
+.family-group-do select { max-width: 100%; }
 .home-action:disabled { opacity: 0.5; cursor: default; }
 .link-btn { background: none; border: none; padding: 0; color: var(--link); cursor: pointer; font: inherit; text-decoration: underline; }
 .result-visibility { margin-top: 8px; font-size: 0.82rem; color: var(--text-2); }
@@ -8330,14 +9231,7 @@ body {
 }
 .home-welcome { margin: 0 0 12px; font-size: 1.6rem; }
 
-/* The AI assistant's card: what it does, an example question, open / delete chat */
-.search-guide {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 12px;
-    margin-bottom: 20px;
-    max-width: 720px;
-}
+/* A card on Home (Your dashboards) */
 .guide-card {
     display: flex;
     flex-direction: column;
@@ -8348,35 +9242,87 @@ body {
     padding: 14px 16px;
 }
 .guide-title { font-weight: 700; }
-.guide-text { font-size: 0.87rem; color: var(--text-2); line-height: 1.45; }
-.guide-example {
-    align-self: flex-start;
-    max-width: 100%;
-    margin-top: 2px;
-    background: var(--accent-softer);
-    border: 1px dashed var(--accent);
-    border-radius: 6px;
-    padding: 6px 10px;
-    color: var(--accent-ink);
-    font: inherit;
-    font-size: 0.85rem;
-    text-align: left;
-    cursor: pointer;
-    overflow-wrap: anywhere;
-}
-.guide-example::before { content: 'Try: '; color: var(--muted); }
-.guide-example:hover { background: var(--accent-soft); border-style: solid; }
-.chat-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
 .home-action.danger { color: var(--danger); }
+
+/* 🔍 Looking up a list's tickets by any of its columns (lookup.js) */
+.lookup-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 8px 0; font-size: 0.87rem; color: var(--text-2); }
+.lookup-icon { font-size: 0.9rem; }
+.lookup-input {
+    flex: 0 1 320px;
+    min-width: 160px;
+    box-sizing: border-box;
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel-bg);
+    color: var(--text);
+    font: inherit;
+}
+.lookup-input:focus, .lookup-col:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
+.lookup-input::placeholder { color: var(--muted); }
+.lookup-in { display: inline-flex; align-items: center; gap: 6px; }
+.lookup-col { max-width: 220px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-bg); color: var(--text); font: inherit; }
+.lookup-count { color: var(--muted); font-size: 0.82rem; }
+/* A row the lookup hides (a long family's hidden rows show while something is typed) */
+tr.lookup-miss { display: none !important; }
+.family.collapsed table.looking tr.more-member { display: table-row; }
+
+/* A cell with nothing in the data says so (and why, on hover) */
+.blank { color: var(--muted); font-style: italic; }
+
+/* Assigned to me, showing only the tickets of a bar clicked in My charts */
+.drill-chip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 8px 0;
+    padding: 6px 10px;
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    background: var(--accent-softer);
+    font-size: 0.87rem;
+}
+.my-charts { margin-top: 12px; }
 .home-action.danger:hover { background: var(--danger-soft); border-color: var(--danger-line); }
 
 .home-modes {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 12px;
     margin-bottom: 16px;
-    max-width: 720px;
+    max-width: 1360px;
 }
+/* KPIs (kpis.mjs): green on track, amber to keep an eye on, red needs attention */
+.kpi-list { display: flex; flex-wrap: wrap; gap: 4px; }
+td.kpi-cell { min-width: 260px; }
+.kpi {
+    font-size: 0.75rem;
+    line-height: 1.5;
+    padding: 0 7px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-primary);
+    color: var(--text-2);
+    white-space: nowrap;
+    cursor: default;
+}
+.kpi b { font-weight: 600; color: inherit; }
+.kpi-good { background: var(--accent-softer); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); color: var(--accent-ink); }
+.kpi-warn { background: var(--warn-softer); border-color: var(--warn-line); color: var(--warn-ink); }
+.kpi-bad { background: var(--danger-soft); border-color: var(--danger-line); color: var(--danger); }
+.kpi-none { font-size: 0.8rem; color: var(--muted); }
+.kpi-legend { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; font-size: 0.8rem; color: var(--muted); }
+.family-sub { font-size: 0.8rem; color: var(--text-2); white-space: normal; max-width: 280px; margin-top: 2px; }
+.family-kinds { font-size: 0.8rem; color: var(--muted); }
+.family-tickets { padding: 12px 14px; }
+.family-tickets h4 { margin: 0 0 6px; font-size: 0.92rem; }
+.families-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.families-controls label { display: inline-flex; align-items: center; gap: 6px; font-size: 0.87rem; }
+.families-controls select { padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-bg); color: var(--text); font: inherit; font-size: 0.87rem; }
+/* Assigned to me: open / closed / all */
+.assigned-filter { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.assigned-filter .home-action[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-softer); color: var(--accent-ink); font-weight: 600; }
 .home-mode {
     display: flex;
     flex-direction: column;
@@ -8458,6 +9404,23 @@ body {
     cursor: pointer;
 }
 .ticket-link:hover { text-decoration: underline; }
+/* A ticket number in the chat's text (a question or an answer): a small button */
+.ticket-link.in-text {
+    padding: 0 5px;
+    border: 1px solid color-mix(in srgb, var(--link) 45%, transparent);
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--link) 10%, transparent);
+    white-space: nowrap;
+}
+.ticket-link.in-text:hover { background: color-mix(in srgb, var(--link) 20%, transparent); }
+/* On the accent-colored bubble of the person's own question */
+.user-msg .ticket-link.in-text {
+    color: var(--on-accent);
+    border-color: color-mix(in srgb, var(--on-accent) 60%, transparent);
+    background: color-mix(in srgb, var(--on-accent) 16%, transparent);
+}
+.user-msg .ticket-link.in-text:hover { background: color-mix(in srgb, var(--on-accent) 28%, transparent); }
+.user-msg .ticket-link.in-text:focus-visible { outline: 2px solid var(--on-accent); outline-offset: 1px; }
 
 /* STARS: next to any ticket number, wherever it shows */
 .star-btn {
@@ -8785,6 +9748,17 @@ tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
 .result-timing { margin-top: 8px; color: var(--faint); font-size: 0.78rem; }
 
 .result-title { font-weight: 600; margin-bottom: 8px; }
+/* Not the full report, or not answered: tickets they don't have permission to see */
+.result-restricted {
+    margin: 0 0 8px;
+    padding: 10px 14px;
+    background: var(--info-soft);
+    border-left: 3px solid var(--link);
+    border-radius: 4px;
+    color: var(--text);
+    line-height: 1.5;
+}
+.ai-msg > .result-restricted:first-child { margin: 0; }
 .result-caption { font-size: 0.8rem; color: var(--muted); margin-bottom: 4px; }
 .result-empty { margin: 4px 0; color: var(--text-2); }
 /* Why a question found nothing (dates covered, which condition emptied it) */
@@ -8830,6 +9804,36 @@ tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
 .result-table td { min-width: 90px; }
 .result-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .result-table td[title] { cursor: help; }
+
+/* Headings that sort the table (sorting.js): the whole heading is the button.
+   ▲ ascending, ▼ descending; ↕ on hover where it isn't sorted yet. */
+.result-table th.sortable { padding: 0; }
+.sort-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    padding: 8px 12px;
+    background: none;
+    border: 0;
+    font: inherit;
+    font-weight: 600;
+    color: inherit;
+    text-align: inherit;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.result-table th.sortable.num .sort-btn { justify-content: flex-end; }
+.sort-btn:hover { color: var(--accent-ink); }
+.sort-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.sort-arrow { display: inline-block; min-width: 0.9em; font-size: 0.75em; color: var(--muted); opacity: 0; }
+.sort-arrow::after { content: '↕'; }
+.sort-btn:hover .sort-arrow,
+.sort-btn:focus-visible .sort-arrow { opacity: 1; }
+.result-table th[aria-sort="ascending"] .sort-arrow,
+.result-table th[aria-sort="descending"] .sort-arrow { opacity: 1; color: var(--accent-ink); }
+.result-table th[aria-sort="ascending"] .sort-arrow::after { content: '▲'; }
+.result-table th[aria-sort="descending"] .sort-arrow::after { content: '▼'; }
 
 /* Single-ticket lookups: label on the left, value on the right */
 .result-table.detail th { width: 200px; background: var(--surface-2); white-space: nowrap; }
@@ -8939,6 +9943,90 @@ tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
 }
 .theme-note { font-size: 0.78rem; color: var(--muted); flex: 1 1 180px; line-height: 1.4; }
 
+/* 🔔 Notifications: the count on the bell, and the list (drops down like 🎨 Colors) */
+.notify-count {
+    display: inline-block;
+    min-width: 18px;
+    margin-left: 4px;
+    padding: 0 5px;
+    box-sizing: border-box;
+    border-radius: 9px;
+    background: var(--accent);
+    color: var(--on-accent);
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 18px;
+    text-align: center;
+}
+.notify-count[hidden] { display: none; }
+/* ✉️ Email me these too (notifications.js paintEmailSetting) */
+.notify-email {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-bottom: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-2);
+    font-size: 0.86rem;
+}
+.notify-email[hidden] { display: none; }
+.notify-email label { display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; }
+.notify-email label:has(input:disabled) { cursor: default; opacity: 0.7; }
+.notify-email-to { padding-left: 24px; color: var(--text-2); font-size: 0.8rem; overflow-wrap: anywhere; }
+.notify-items { list-style: none; margin: 0; padding: 0; }
+.notify-item { padding: 10px 10px; border-bottom: 1px solid var(--border); border-radius: 6px; font-size: 0.88rem; line-height: 1.45; }
+.notify-item:last-child { border-bottom: none; }
+.notify-item.unread { background: var(--accent-softer); box-shadow: inset 3px 0 0 var(--accent); }
+.notify-note { margin: 6px 0 0; padding: 4px 10px; border-left: 3px solid var(--border); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.notify-tickets { margin-top: 4px; font-size: 0.82rem; color: var(--text-2); }
+.notify-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: 6px; font-size: 0.78rem; color: var(--muted); }
+/* Clearing: "Clear all" by the ✕ at the top, and "Clear" on each one */
+.notify-head-actions { display: flex; align-items: center; gap: 6px; }
+.notify-clear-all,
+.notify-clear {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-2);
+    font: inherit;
+    cursor: pointer;
+}
+.notify-clear-all { padding: 3px 10px; font-size: 0.8rem; font-weight: 600; }
+.notify-clear { padding: 1px 8px; font-size: 0.76rem; }
+.notify-clear-all:hover,
+.notify-clear:hover { color: var(--danger); border-color: var(--danger); }
+.notify-clear-all[hidden] { display: none; }
+.notify-foot-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+
+/* Telling your project manager you resolved or closed a ticket */
+.report-ticket { margin: 0 0 4px; font-size: 0.9rem; color: var(--text-2); }
+.report-dialog select,
+.report-dialog textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel-bg);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.9rem;
+}
+.report-dialog textarea { resize: vertical; }
+.report-hint { margin: 10px 0 0; }
+.report-dialog .home-status.error { margin: 8px 0 0; }
+.team-report { margin-top: 4px; font-size: 0.8rem; color: var(--text-2); }
+.team-report-note { display: block; font-style: italic; color: var(--muted); }
+/* ✅ Resolved or closed, and 🎬 Before a presentation (Team tab) */
+.status-tag { font-weight: 600; white-space: nowrap; color: var(--accent-ink); }
+.status-table td .team-report-note { font-size: 0.8rem; }
+.presentation-steps { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 10px; }
+.presentation-steps li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px;
+    padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.presentation-steps span { flex: 1 1 260px; }
+
 /* Radio buttons drawn as pills and color swatches (the real input stays, for keyboards) */
 .choice-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .choice-pill, .display-choice, .swatch { position: relative; }
@@ -9020,7 +10108,6 @@ tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
 /* Until this person's layout has loaded (no flash of the default one) */
 .home-blocks.waiting { visibility: hidden; }
 .home-block[data-block] { grid-column: 1 / -1; min-width: 0; }
-.home-block > .search-guide { margin-bottom: 0; }
 .home-block .home-modes { margin-bottom: 12px; }
 /* While customizing, each section is outlined and has its own buttons */
 .home.editing .home-block[data-block] { outline: 2px dashed var(--border); outline-offset: 6px; border-radius: 8px; }
@@ -9174,6 +10261,10 @@ tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
 .tile-btn:hover { background: var(--surface-2); border-color: var(--border); color: var(--text); }
 .tile-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .tile-btn[aria-pressed="true"] { color: var(--accent-ink); background: var(--accent-soft); }
+/* ⇅: the chart's order. The menu lies, invisible, over the icon, so a click opens it. */
+.tile-sort { position: relative; display: inline-flex; align-items: center; }
+.tile-sort select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.tile-sort:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
 .tile-body { position: relative; min-width: 0; transition: opacity 0.15s; }
 /* New numbers loading: the old drawing stays, dimmed (no jump to "Loading…") */
 .tile-body.refreshing { opacity: 0.45; }
@@ -9369,6 +10460,16 @@ dialog.ask-dialog {
 /* "Show as": the answer's table or one of its charts */
 .answer-views { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 8px; }
 .answer-views-label { font-size: 0.8rem; color: var(--muted); margin-right: 2px; }
+.answer-order { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-size: 0.8rem; color: var(--muted); }
+.answer-order select {
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--panel-bg);
+    color: var(--text-2);
+    font: inherit;
+    font-size: 0.8rem;
+}
 .view-btn {
     display: inline-flex;
     align-items: center;
@@ -9671,8 +10772,7 @@ span.family-chip { color: var(--text-2); background: var(--surface-3); }
 .family-kind.active .family-kind-count { background: rgba(255, 255, 255, 0.25); color: var(--on-accent); }
 .families-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 12px; }
 .families-find { display: flex; gap: 8px; flex: 1 1 360px; max-width: 560px; }
-.families-find input,
-.families-sort select {
+.families-find input {
     padding: 7px 10px;
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -9682,7 +10782,6 @@ span.family-chip { color: var(--text-2); background: var(--surface-3); }
     font-size: 0.9rem;
 }
 .families-find input { flex: 1; min-width: 0; }
-.families-sort { display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--text-2); }
 .families-about { margin: 0 0 10px; color: var(--text-2); line-height: 1.5; font-size: 0.9rem; }
 .families-about .home-action { margin-left: 6px; }
 .families-table { max-height: none; }
@@ -10037,13 +11136,15 @@ function showLoginError(message) {
     document.getElementById('login-error').textContent = message || '';
 }
 
-// Signed in: the home page, with this person's starred tickets, layout and colors
+// Signed in: the home page, with this person's starred tickets, layout, colors
+// and notifications
 function showApp(signedIn) {
     document.body.classList.toggle('signed-out', !signedIn);
     if (signedIn) {
         switchTab('home');
         loadStars();
         loadPreferences();
+        startNotifications();
     } else if (!fillSignInLink()) {
         document.getElementById('login-email').focus();
     }
@@ -10105,6 +11206,10 @@ function setCurrentUser(user) {
     else if (user.access) currentAccess = user.access;
     // The Team tab: admins, and anyone on a team
     document.getElementById('teams-tab').hidden = !(currentAccess.admin || currentAccess.team);
+    // Home's "Team families": project managers and admins
+    document.getElementById('kpi-families-tab').hidden = !canSeeFamilies();
+    // The 🔔 panel's "Email me these too" (notifications.js)
+    paintEmailSetting(user ? user.email : null);
     renderGreetings();
     // Each person's home page opens on the search they used last
     if (currentUsername) setHomeMode(rememberedHomeMode());
@@ -10185,6 +11290,7 @@ function signOut(message) {
     setCurrentUser(null);
     resetHome();
     resetTeams();
+    resetNotifications();
     resetCustomizing();
     showLoginError(typeof message === 'string' ? message : '');
     showApp(false);
@@ -10331,7 +11437,7 @@ async function openSavedChat(id, { quiet = false } = {}) {
         if (!response.ok) throw new Error(data.error || 'Could not open that chat.');
         clearChat();
         for (const entry of data.transcript) {
-            appendMessage('user-msg', escapeHtml(entry.question));
+            appendMessage('user-msg', linkTicketsHtml(entry.question));
             const reply = entry.reply || {};
             showAnswer(entry.question, reply, reply.elapsedMs ? reply.elapsedMs / 1000 : null, { replay: true });
         }
@@ -10384,36 +11490,36 @@ function switchTab(viewName) {
     if (viewName === 'dashboard') loadDashboards().then(() => maybeStartTour('dashboards'));
     // The Team tab, fresh each time (assignments change)
     if (viewName === 'teams') loadTeams();
-    // Stars may have changed elsewhere (the chat, a dashboard, another computer)
-    if (viewName === 'home') {
-        if (homeMode === 'starred') showStarred();
-        else showTicketResults(true);
-    }
+    // Stars and assignments may have changed elsewhere (the chat, a dashboard, another computer)
+    if (viewName === 'home') showHomeMode(homeMode !== 'starred');
 }
 
 // =====================================================================
-// AI ASSISTANT: the chat opens over the page from Home's "Any question about
-// the data" card (Open chat, or its example question). Minimize closes it and
-// keeps the conversation; Delete chat removes it.
+// AI ASSISTANT: the chat opens over the page from the "Ask Claude" bar in
+// the header: a question typed there is asked in the chat, and with nothing
+// typed the chat opens as it was. A click anywhere outside the chat (the
+// header too) or Minimize closes it and keeps the conversation; Delete chat
+// removes it.
 // =====================================================================
 
 function assistantOpen() {
     return document.getElementById('assistant-panel').classList.contains('open');
 }
 
-// Opens or closes the conversation (no argument: the opposite of now)
-function toggleAssistant(open) {
+// Opens or closes the conversation (no argument: the opposite of now).
+// refocus: closing from inside the chat puts the keys back in the header's bar
+function toggleAssistant(open, { refocus = true } = {}) {
     const panel = document.getElementById('assistant-panel');
     const willOpen = typeof open === 'boolean' ? open : !assistantOpen();
     panel.classList.toggle('open', willOpen);
     document.getElementById('assistant-backdrop').classList.toggle('open', willOpen);
-    document.getElementById('open-chat-btn').setAttribute('aria-expanded', String(willOpen));
+    document.getElementById('nav-ask-input').setAttribute('aria-expanded', String(willOpen));
     if (willOpen) {
         const chatLog = document.getElementById('chat-log');
         chatLog.scrollTop = chatLog.scrollHeight;
         document.getElementById('user-prompt').focus();
-    } else if (panel.contains(document.activeElement)) {
-        document.getElementById('open-chat-btn').focus();
+    } else if (refocus && panel.contains(document.activeElement)) {
+        document.getElementById('nav-ask-input').focus();
     }
     updateChatControls();
 }
@@ -10425,13 +11531,44 @@ function askAssistant(question) {
     sendPrompt();
 }
 
-// Home's chat buttons: Open chat says how many questions the conversation has,
-// and Delete chat appears once there is something to delete
+// The header's bar: a question is asked in the chat; nothing typed opens the chat as it was
+function askFromHeader() {
+    const input = document.getElementById('nav-ask-input');
+    const question = input.value.trim();
+    if (!question) {
+        toggleAssistant(true);
+        return;
+    }
+    input.value = '';
+    askAssistant(question);
+}
+
+// The header's bar says how many questions the open conversation has
 function updateChatControls() {
     const asked = document.querySelectorAll('#chat-log .user-msg').length;
-    document.getElementById('open-chat-btn').textContent = asked ? `💬 Open chat (${asked})` : '💬 Open chat';
-    document.getElementById('delete-chat-btn').hidden = !asked;
+    const count = document.getElementById('nav-ask-count');
+    count.hidden = !asked;
+    count.textContent = asked.toLocaleString();
+    document.getElementById('nav-ask-btn').title = asked
+        ? `Ask Claude. With nothing typed, this opens your chat (${asked.toLocaleString()} ${asked === 1 ? 'question' : 'questions'} so far)`
+        : 'Ask Claude. With nothing typed, this opens the chat';
 }
+
+// A click anywhere outside the open chat closes it, the header included (its
+// buttons still do their job in the same click). A window opened over the chat
+// (a ticket, a chart's tickets) and the tour don't count as outside.
+document.addEventListener('pointerdown', e => {
+    if (!assistantOpen() || e.target.closest?.('#assistant-panel, dialog, #tour')) return;
+    toggleAssistant(false, { refocus: false });
+}, true);
+
+// "/" anywhere but in a box being typed in: to the header's Ask bar
+document.addEventListener('keydown', e => {
+    if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || document.body.classList.contains('signed-out')) return;
+    if (e.target.closest?.('input, textarea, select, [contenteditable="true"]') || document.querySelector('dialog[open]') || tourState) return;
+    e.preventDefault();
+    document.getElementById('nav-ask-input').focus();
+});
 
 // =====================================================================
 // DASHBOARDS TAB: the Metabase dashboards made by scripts/metabase-setup.mjs,
@@ -10442,7 +11579,12 @@ function updateChatControls() {
 // and the detail pages a click on a chart opens
 const dashboardPages = { main: new Map(), details: new Map() };
 let currentMainDashboard = null;
-const pageId = path => (String(path).match(/\/public\/dashboard\/([0-9a-f-]{36})/) || [])[1];
+// A page is known by its signed address (/embed/dashboard/<token>), made for
+// this person by the server; a click link names the page it opens instead
+// (/onetouch/dashboard/<key>), and followDashboardFrame swaps in the address
+const pageId = path => (String(path).match(/\/embed\/dashboard\/([\w-]+\.[\w-]+\.[\w-]+)/) || [])[1];
+const linkedPageKey = path => (String(path).match(/^\/onetouch\/dashboard\/([\w-]+)$/) || [])[1];
+const DASHBOARD_HINT = 'Click a bar, slice, number or blue value for details';
 
 // The dashboard each person had open last ("my:<id>" for one of their own),
 // saved to their account so it opens there next time, on any computer
@@ -10500,22 +11642,15 @@ async function buildDashboards() {
     try {
         const response = await fetch(`${API_BASE}/api/dashboards`, { headers: authHeaders() });
         if (handleUnauthorized(response)) return false;
-        const { dashboards, details = [], restricted = false } = await response.json();
+        const { dashboards, details = [] } = await response.json();
         for (const d of dashboards) dashboardPages.main.set(pageId(d.path), d);
         for (const d of details) dashboardPages.details.set(pageId(d.path), d);
+        // Each link is signed for this person and shows only their tickets: say which
+        const whose = currentAccess.admin ? '' : currentAccess.role === 'project_manager' && currentAccess.team
+            ? `Only ${currentAccess.team.name}'s tickets` : 'Only your tickets';
+        document.getElementById('dashboard-hint').textContent = whose ? `${DASHBOARD_HINT} · ${whose}` : DASHBOARD_HINT;
         // Which team dashboards this person hid, and which one they had open
         await prefsReady;
-        if (restricted) {
-            // Metabase shows every ticket, so only admins get those dashboards;
-            // Ticket families and their own dashboards show only their tickets
-            document.getElementById('drawer-customize').hidden = true;
-            const last = rememberedDashboard();
-            if (last === 'families') { showFamilies(); return true; }
-            if (last.startsWith('my:') && showBoard(last.slice(3))) return true;
-            message.textContent = 'The Metabase team dashboards show every ticket, so only admins can open them. ' +
-                'Under ☰ Dashboards, Ticket families and your own dashboards show the tickets you can see.';
-            return true;
-        }
         if (!dashboards.length) {
             message.textContent = 'No team dashboards yet. Whoever runs this OneTouch server can create them with: ' +
                 'docker exec analytics_node_app node scripts/metabase-setup.mjs. You can still build your own under ☰ Dashboards.';
@@ -10683,6 +11818,15 @@ function followDashboardFrame() {
     let where;
     try { where = frame.contentWindow.location; } catch { return; } // not ours (yet)
     if (!where) return;
+    // A click opened another page by name: swap in this person's signed address
+    // for it, with the click's filters and OneTouch's look. replace(), so ← Back
+    // returns to the page that was clicked.
+    const linked = linkedPageKey(where.pathname);
+    if (linked) {
+        const target = [...dashboardPages.main.values(), ...dashboardPages.details.values()].find(d => d.key === linked);
+        if (target) where.replace(`${API_BASE}${target.path}${where.search}${themedFrameHash(where.hash)}`);
+        return;
+    }
     // A click's link can't know OneTouch is dark, so its page opens light: put the
     // look back in place (no reload, and ← Back still returns to the page before)
     const id = pageId(where.pathname);
@@ -10786,8 +11930,8 @@ async function sendPrompt() {
 
     if (!userPromptText) return;
 
-    // Append User message node to DOM bubble UI
-    appendMessage('user-msg', escapeHtml(userPromptText));
+    // Append User message node to DOM bubble UI (its ticket numbers open those tickets)
+    appendMessage('user-msg', linkTicketsHtml(userPromptText));
     inputField.value = '';
 
     // Shows each step while the answer is worked out, with a running clock
@@ -10829,7 +11973,13 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
     }
 
     if (data.error) {
-        appendMessage('ai-msg', `❌ Error: ${escapeHtml(data.error)}`);
+        appendMessage('ai-msg', `❌ Error: ${linkTicketsHtml(data.error)}`);
+        return;
+    }
+
+    // About tickets they don't have permission to see: not answered (server.mjs)
+    if (data.intent === 'denied') {
+        appendMessage('ai-msg', `<div class="result-restricted">🔒 ${linkTicketsHtml(data.message)}</div>` + answerTimingHtml(seconds, data.fromCache));
         return;
     }
 
@@ -10837,16 +11987,18 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
     if (data.intent === 'clarify' || data.intent === 'unsupported') {
         const message = data.message || 'I need a little more detail to run that.';
         const download = downloadBarHtml(registerExport({ title: 'OneTouch answer', question: userPromptText, tables: buildExportTables(data, message) }));
-        appendMessage('ai-msg', `🙋 ${escapeHtml(message)}` + download + answerTimingHtml(seconds, data.fromCache));
+        appendMessage('ai-msg', `🙋 ${linkTicketsHtml(message)}` + download + answerTimingHtml(seconds, data.fromCache));
         return;
     }
 
     // Normal query: restate what was fetched, show the rows as a table,
     // and tuck the assumptions into a collapsible note underneath
-    let html = `<div class="result-title">${escapeHtml(data.message || 'Here is what I found:')}</div>`;
+    let html = `<div class="result-title">${linkTicketsHtml(data.message || 'Here is what I found:')}</div>`;
+    // Not the full report: tickets they don't have permission to see match too
+    if (data.restricted) html += `<div class="result-restricted">🔒 ${linkTicketsHtml(data.restricted)}</div>`;
     // Nothing found anywhere: the server's explanation replaces the empty tables
     const explanationHtml = data.explanation
-        ? `<div class="result-explanation">${escapeHtml(data.explanation)}</div>` : '';
+        ? `<div class="result-explanation">${linkTicketsHtml(data.explanation)}</div>` : '';
     let tablesHtml = '';
     if (data.rowsDropped) {
         // A long saved chat keeps only its newer answers' tables (chats.mjs)
@@ -10873,7 +12025,7 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
 
     if (data.assumptions && data.assumptions.length > 0) {
         html += `<details class="assumptions"><summary>How I read your question</summary><ul>` +
-            data.assumptions.map(a => `<li>${escapeHtml(a)}</li>`).join('') +
+            data.assumptions.map(a => `<li>${linkTicketsHtml(a)}</li>`).join('') +
             `</ul></details>`;
     }
 
@@ -11132,17 +12284,19 @@ function formatValue(member, raw) {
     return v;
 }
 
-// One table cell; long text is cut short with the full value on hover
+// One table cell; long text is cut short with the full value on hover.
+// A value shown differently from the data's (a date, a count) sorts by the data's.
 function cellHtml(member, raw, truncate) {
     const { column } = splitMember(member);
     const text = formatValue(member, raw);
     const isNumber = column === 'count';
     const cls = isNumber ? ' class="num"' : '';
     if (truncate && LONG_TEXT.has(column) && text.length > 120) {
-        return `<td${cls} title="${escapeHtml(text)}">${escapeHtml(text.slice(0, 117))}…</td>`;
+        return `<td${cls} title="${escapeHtml(text)}">${linkTicketsHtml(text.slice(0, 117))}…</td>`;
     }
+    const sortAttr = raw !== null && raw !== undefined && String(raw) !== text ? ` data-sort="${escapeHtml(String(raw))}"` : '';
     // A ticket number opens that ticket (its record and family), with a star next to it
-    return `<td${cls}>${ticketValueHtml(raw, text)}</td>`;
+    return `<td${cls}${sortAttr}>${answerValueHtml(raw, text)}</td>`;
 }
 
 // A value that is a ticket number (a parent, a request, a change…): a link that
@@ -11153,6 +12307,22 @@ function ticketValueHtml(raw, text, self = null) {
         return `<button type="button" class="ticket-link" data-ticket="${escapeHtml(value)}" title="Open ${escapeHtml(value)}: its record and family">${escapeHtml(text)}</button>${starFor(raw)}`;
     }
     return `${escapeHtml(text)}${starFor(raw)}`;
+}
+
+// Text in the chat (a question someone typed, or Claude's answer), with every full
+// ticket number in it, in any case ("inc0012345"), a button that opens that ticket
+const TICKET_IN_TEXT = /\b(INC|CHG|RITM|SCTASK|REQ)\d{7}\b/gi;
+function linkTicketsHtml(text) {
+    return escapeHtml(text).replace(TICKET_IN_TEXT, typed => {
+        const number = typed.toUpperCase();
+        return `<button type="button" class="ticket-link in-text" data-ticket="${number}" title="Open ${number}: its record and family">${typed}</button>`;
+    });
+}
+
+// A cell of an answer's table: a ticket number links (with its star) as above;
+// text that mentions ticket numbers ("Duplicate of INC0012345") links each of them
+function answerValueHtml(raw, text) {
+    return OPENABLE.test(String(raw ?? '')) ? ticketValueHtml(raw, text) : linkTicketsHtml(text);
 }
 
 function renderResults(rows, entity) {
@@ -11174,31 +12344,31 @@ function renderResults(rows, entity) {
             const { column } = splitMember(c);
             const text = formatValue(c, rows[0][c]);
             const cls = LONG_TEXT.has(column) ? ' class="long"' : '';
-            return `<tr><th>${escapeHtml(columnLabel(c))}</th><td${cls}>${ticketValueHtml(rows[0][c], text)}</td></tr>`;
+            return `<tr><th>${escapeHtml(columnLabel(c))}</th><td${cls}>${answerValueHtml(rows[0][c], text)}</td></tr>`;
         }).join('');
         return `<div class="table-wrap"><table class="result-table detail"><tbody>${body}</tbody></table></div>`;
     }
 
-    // Everything else: a normal table with a header row. A row with a ticket number
-    // opens, on click, into that ticket's full record and related tickets.
-    const head = columns.map(c => {
-        const cls = c.endsWith('.count') ? ' class="num"' : '';
-        return `<th${cls}>${escapeHtml(columnLabel(c))}</th>`;
-    }).join('');
+    // Everything else: a normal table with a header row, sorted by a click on a
+    // heading. A row with a ticket number opens, on click, into that ticket's
+    // full record and related tickets.
+    const head = columns.map(c => sortHeadHtml('', c, columnLabel(c), c.endsWith('.count') ? 'num' : '')).join('');
     const numberColumn = columns.find(c => c.endsWith('.number'));
     const body = rows.map(r => {
         const number = numberColumn && STARRABLE.test(String(r[numberColumn])) ? String(r[numberColumn]) : null;
         if (!number) return `<tr>${columns.map(c => cellHtml(c, r[c], true)).join('')}</tr>`;
         const cells = columns.map(c => c === numberColumn
-            ? `<td class="ticket-cell"><span class="expand-caret" aria-hidden="true">▸</span>${escapeHtml(number)}${starButtonHtml(number)}</td>`
+            ? `<td class="ticket-cell" data-sort="${escapeHtml(number)}"><span class="expand-caret" aria-hidden="true">▸</span>${escapeHtml(number)}${starButtonHtml(number)}</td>`
             : cellHtml(c, r[c], true)).join('');
         return `<tr class="expandable" data-expand="${escapeHtml(number)}" tabindex="0" aria-expanded="false"` +
             ` title="Click to see ${escapeHtml(number)}'s full record and related tickets">${cells}</tr>`;
     }).join('');
     const caption = `${rows.length.toLocaleString()} ${rows.length === 1 ? 'row' : 'rows'}`;
+    // A list of tickets can be looked up by any of its columns (lookup.js)
+    const bar = numberColumn && rows.length >= 2 ? lookupBarHtml('', columns.map(columnLabel)) : '';
 
-    return `<div class="result-caption">${caption}</div>` +
-        `<div class="table-wrap"><table class="result-table"><thead><tr>${head}</tr></thead>` +
+    return `<div class="result-caption">${caption}</div>` + bar +
+        `<div class="table-wrap"><table class="result-table" data-sort-list=""><thead><tr>${head}</tr></thead>` +
         `<tbody>${body}</tbody></table></div>`;
 }
 
@@ -11275,6 +12445,7 @@ function answerChartModel(data, question) {
             const ordered = time ? [...combined.rows].sort((a, b) => String(a.key).localeCompare(String(b.key))) : combined.rows;
             return {
                 kind: 'series',
+                time,
                 chart: { ...base, groupLabel: columnLabel(dimension) },
                 series: {
                     categories: ordered.map(r => ({ value: r.key, label: time ? periodLabel(dimension, r.key) : formatValue(dimension, r.key) })),
@@ -11297,7 +12468,32 @@ function answerViewsHtml(model, chartable) {
         `${icon(v)}<span>${ANSWER_VIEW_NAMES[v]}</span></button>`).join('');
     const save = model.kind === 'single' && chartable
         ? '<button type="button" class="view-btn save" data-answer-save title="Put this on Home or one of your dashboards, as a chart that stays">📌 Save as a chart</button>' : '';
-    return `<div class="answer-views" role="group" aria-label="Show this answer as"><span class="answer-views-label">Show as</span>${buttons}${save}</div>`;
+    // While a chart shows: its order (the table sorts by its own headings)
+    const order = `<label class="answer-order" hidden>Order <select data-answer-order>` +
+        answerOrderChoices(model).map(([value, label]) => `<option value="${value}">${escapeHtml(label)}</option>`).join('') + '</select></label>';
+    return `<div class="answer-views" role="group" aria-label="Show this answer as"><span class="answer-views-label">Show as</span>${buttons}${save}${order}</div>`;
+}
+
+// The orders an answer's chart offers: as the answer had it, or ascending /
+// descending by count (or a total, or one ticket type's) or by its groups
+function answerOrderChoices(model) {
+    const asAnswered = ['', 'As answered'];
+    if (model.kind === 'single') return [asAnswered, ...chartOrderChoices(model.chart)];
+    const group = model.chart.groupLabel;
+    return [
+        asAnswered,
+        ['total:desc', 'Biggest total first'], ['total:asc', 'Smallest total first'],
+        ...(model.time ? [['label:asc', 'Oldest first'], ['label:desc', 'Newest first']] : [['label:asc', `${group}, A to Z`], ['label:desc', `${group}, Z to A`]]),
+        ...model.series.series.flatMap((x, k) => [[`s${k}:desc`, `Most ${x.name.toLowerCase()} first`], [`s${k}:asc`, `Fewest ${x.name.toLowerCase()} first`]]),
+    ];
+}
+
+// The answer's numbers in the order picked for its chart -> { data } or { series }
+function orderedAnswer(answer) {
+    const model = answer.model;
+    const [by, direction] = (answer.order || '').split(':');
+    if (model.kind === 'series') return { series: by ? orderSeries(model.series, by, direction) : model.series };
+    return { data: by ? { ...model.data, rows: orderChartRows(model.data.rows, by, direction) } : model.data };
 }
 
 function setAnswerView(el, view) {
@@ -11313,6 +12509,7 @@ function setAnswerView(el, view) {
     resizeWatcher.unobserve(box);
     box._drawn = null;
     box._pick = null;
+    el.querySelector('.answer-order').hidden = view === 'table';
     if (view === 'table') {
         box.className = 'answer-view';
         box.innerHTML = answer.tablesHtml;
@@ -11320,8 +12517,9 @@ function setAnswerView(el, view) {
     } else {
         box.className = 'answer-view tile-body answer-chart';
         const model = answer.model;
-        if (model.kind === 'series') drawSeriesChart(box, model.chart, model.series, view);
-        else drawChart(box, { ...model.chart, display: view }, model.data, false);
+        const ordered = orderedAnswer(answer);
+        if (model.kind === 'series') drawSeriesChart(box, model.chart, ordered.series, view);
+        else drawChart(box, { ...model.chart, display: view }, ordered.data, false);
         // An answer that is exactly a chart: a click lists the tickets behind a mark
         if (model.drill) box._pick = row => openDrill({ chart: model.drill, value: row ? row.value : null, label: row ? groupLabel(model.drill, row.value, true) : '' });
         box.classList.toggle('drillable', Boolean(box._pick));
@@ -11337,9 +12535,10 @@ function answerPicture(answer) {
     if (!answer.model || answer.view === 'table') return null;
     const model = answer.model;
     const subtitle = `Question: ${answer.question}`;
+    const ordered = orderedAnswer(answer);
     return model.kind === 'series'
-        ? { chart: model.chart, series: model.series, display: answer.view, title: model.chart.title, subtitle }
-        : { chart: { ...model.chart, display: answer.view }, data: model.data, title: model.chart.title, subtitle };
+        ? { chart: model.chart, series: ordered.series, display: answer.view, title: model.chart.title, subtitle }
+        : { chart: { ...model.chart, display: answer.view }, data: ordered.data, title: model.chart.title, subtitle };
 }
 
 // "📌 Save as a chart": the chart builder, filled in from the answer, saving to Home or a dashboard
@@ -11372,22 +12571,22 @@ function renderCombined(combined) {
             `<tr><td>${escapeHtml(capitalize(nounFor(e, 2)))}</td><td class="num">${(totals.counts[e] || 0).toLocaleString()}</td></tr>`
         ).join('');
         return `<div class="result-big">${totals.total.toLocaleString()} <span>${totals.total === 1 ? 'ticket' : 'tickets'}</span></div>` +
-            `<div class="table-wrap"><table class="result-table"><thead><tr><th>Ticket Type</th><th class="num">Number of Tickets</th></tr></thead>` +
+            `<div class="table-wrap"><table class="result-table" data-sort-list=""><thead><tr>${sortHeadHtml('', 'Ticket Type')}${sortHeadHtml('', 'Number of Tickets', 'Number of Tickets', 'num')}</tr></thead>` +
             `<tbody>${body}</tbody><tfoot><tr><td>Total</td><td class="num">${totals.total.toLocaleString()}</td></tr></tfoot></table></div>`;
     }
 
     // Grouped: the grouping column, one column per ticket type, and a total
-    const typeHeads = entities.map(e => `<th class="num">${escapeHtml(capitalize(nounFor(e, 2)))}</th>`).join('');
-    const head = `<th>${escapeHtml(columnLabel(dimension))}</th>${typeHeads}<th class="num">Total</th>`;
+    const typeHeads = entities.map(e => sortHeadHtml('', e, capitalize(nounFor(e, 2)), 'num')).join('');
+    const head = `${sortHeadHtml('', dimension, columnLabel(dimension))}${typeHeads}${sortHeadHtml('', 'Total', 'Total', 'num')}`;
     const cell = n => `<td class="num">${n ? n.toLocaleString() : '—'}</td>`;
     const body = rows.map(r =>
-        `<tr><td>${escapeHtml(formatValue(dimension, r.key))}</td>${entities.map(e => cell(r.counts[e])).join('')}` +
+        `<tr><td data-sort="${escapeHtml(String(r.key ?? ''))}">${escapeHtml(formatValue(dimension, r.key))}</td>${entities.map(e => cell(r.counts[e])).join('')}` +
         `<td class="num total">${r.total.toLocaleString()}</td></tr>`
     ).join('');
     const foot = `<tr><td>Total</td>${entities.map(e => cell(totals.counts[e])).join('')}<td class="num">${totals.total.toLocaleString()}</td></tr>`;
 
     return `<div class="result-caption">${rows.length.toLocaleString()} ${rows.length === 1 ? 'row' : 'rows'}</div>` +
-        `<div class="table-wrap"><table class="result-table"><thead><tr>${head}</tr></thead>` +
+        `<div class="table-wrap"><table class="result-table" data-sort-list=""><thead><tr>${head}</tr></thead>` +
         `<tbody>${body}</tbody><tfoot>${foot}</tfoot></table></div>`;
 }
 
@@ -11484,6 +12683,7 @@ function buildExportTables(data, textAnswer = null) {
         tables = [exportTableFromRows(data.results || [], null)];
     }
     tables = tables.filter(Boolean);
+    if (data.restricted) tables.push(noteTable('Not the full report', 'Permissions', [data.restricted]));
     if (data.explanation) {
         tables.push(noteTable(data.allEmpty ? 'Why nothing was found' : 'Why some of it is empty', 'Explanation', [data.explanation]));
     }
@@ -11852,22 +13052,38 @@ function showToast(message) {
 // starred tickets
 // =====================================================================
 
-const HOME_MODES = ['results', 'starred'];
-let homeMode = 'results';
+const HOME_MODES = ['assigned', 'charts', 'families', 'results', 'starred'];
+let homeMode = 'assigned';
 // Each search bumps its counter, so an older, slower answer can't replace a newer one
-const homeRuns = { results: 0, starred: 0 };
+const homeRuns = { assigned: 0, charts: 0, families: 0, results: 0, starred: 0 };
+// "Team families" (family KPIs) is for project managers and admins
+const canSeeFamilies = () => Boolean(currentAccess.admin || currentAccess.role === 'project_manager');
 
-// The list each person had open last, remembered in this browser
+// The list each person had open last, remembered in this browser. (A new
+// name when "Assigned to me" arrived, so everyone opens on it once.)
 function homeModeKey() {
-    return `onetouch-home-mode:${currentUsername}`;
+    return `onetouch-home-tab:${currentUsername}`;
 }
 function rememberedHomeMode() {
-    try { return localStorage.getItem(homeModeKey()) || 'results'; } catch { return 'results'; }
+    try { return localStorage.getItem(homeModeKey()) || 'assigned'; } catch { return 'assigned'; }
 }
 
-// Shows one of Home's lists and loads it (quiet: refresh it without a "Loading…")
-function setHomeMode(mode, quiet = false) {
-    if (!HOME_MODES.includes(mode)) mode = 'results';
+// Loads the list that's showing (quiet: without a "Loading…")
+function showHomeMode(quiet = false) {
+    if (homeMode === 'starred') return showStarred(quiet);
+    if (homeMode === 'assigned') return showAssigned(quiet);
+    if (homeMode === 'charts') return showMyCharts(quiet);
+    if (homeMode === 'families') return showFamilyKpis(quiet);
+    return showTicketResults(quiet);
+}
+
+// Shows one of Home's lists and loads it (quiet: refresh it without a "Loading…").
+// keepDrill: a bar of My charts was clicked, so Assigned to me shows only its tickets
+// (until Home's lists are switched again)
+function setHomeMode(mode, quiet = false, { keepDrill = false } = {}) {
+    const wanted = mode;
+    if (!HOME_MODES.includes(mode) || (mode === 'families' && !canSeeFamilies())) mode = 'assigned';
+    if (!keepDrill) assignedView.drill = null;
     homeMode = mode;
     document.querySelectorAll('.home-mode').forEach(b => {
         const on = b.dataset.mode === mode;
@@ -11875,11 +13091,12 @@ function setHomeMode(mode, quiet = false) {
         b.setAttribute('aria-selected', String(on));
     });
     for (const m of HOME_MODES) document.getElementById(`home-${m}`).hidden = m !== mode;
-    if (currentUsername) {
+    // Not remembered when it fell back: a project manager's "Team families" is
+    // asked for again once their access has loaded
+    if (currentUsername && mode === wanted) {
         try { localStorage.setItem(homeModeKey(), mode); } catch { /* not remembered; that's fine */ }
     }
-    if (mode === 'starred') showStarred();
-    else showTicketResults(quiet);
+    showHomeMode(quiet);
 }
 
 // Signing out leaves nothing of this person's on the page
@@ -11889,15 +13106,26 @@ function resetHome() {
     selections.starred.clear();
     latestShown = new Set();
     openedRecord = null;
+    resetSorts();
+    resetLookups();
+    Object.assign(assignedView, { tickets: null, status: 'open', page: 0, drill: null });
+    paintAssignedCount();
+    document.getElementById('assigned-result').innerHTML = '';
+    myChartsView.status = null;
+    document.getElementById('my-charts-result').innerHTML = '';
+    Object.assign(teamFamiliesView, { teamId: null, teams: null, status: 'open', linked: true, offset: 0, data: null });
+    document.getElementById('kpi-families-count').hidden = true;
+    document.getElementById('kpi-families-result').innerHTML = '';
     document.getElementById('ticket-results').innerHTML = NO_TICKET_RESULTS_HTML;
     document.getElementById('starred-result').innerHTML = '';
     starredTickets.clear();
     refreshStarButtons();
-    setHomeMode('results');
+    setHomeMode('assigned');
     forgetRemovedExports();
 }
 
-// -> { found, notFound, ignored, tooMany, record? }, or null if the session ended
+// -> { found, notFound, noAccess (the not-found ones that are someone else's),
+// ignored, tooMany, record? }, or null if the session ended
 async function searchTickets(text, record = false) {
     const response = await fetch(`${API_BASE}/api/tickets/search`, {
         method: 'POST',
@@ -11923,15 +13151,82 @@ const TICKET_COLUMNS = [
 ];
 const STARRED_COLUMN = ['Starred', t => formatStarredAt(starredTickets.get(t.number))];
 
+// What a column sorts by where that isn't the text people read (sorting.js):
+// dates as the data writes them, Priority / Risk by how urgent, a family by
+// its size, KPIs by how much needs attention
+const TICKET_SORT_VALUES = {
+    Ticket: t => t.number,
+    Parent: t => t.parent || '',
+    'Priority / Risk': t => (t.level ? levelRank(t) : ''),
+    Opened: t => t.opened || '',
+    Shown: t => t.shownAt || '',
+    Starred: t => starredTickets.get(t.number) || '',
+    Family: t => Math.max(0, ...(t.families || []).map(f => f.size)) || '',
+    'Assigned to': t => t.assignee || '',
+    KPIs: t => (t.kpis ? kpiAttention(t.kpis.map(k => k.tone)) : t.attention ?? ''),
+};
+const ticketSortValue = ([label, get]) => TICKET_SORT_VALUES[label] || get;
+// Columns of buttons, with nothing to sort by or look up
+const UNSORTED_COLUMNS = new Set(['Tell your project manager']);
+
+// What a list shows where a ticket has nothing, so no cell is left blank, and
+// (on hover) why. tickets.mjs blankText gives the server the same words.
+const BLANK_WHY = {
+    'No priority': 'Requests and catalog tasks have no priority or risk in ServiceNow',
+    'No team (no catalog tasks)': 'A request\'s team is the team doing its catalog tasks, and this request has none',
+    'Not assigned': 'Nobody was assigned this ticket in ServiceNow',
+    'No parent': 'This ticket has no parent ticket',
+    'Not linked': 'This ticket isn\'t linked to any other ticket',
+    'No summary': 'The export has no summary for this ticket',
+    'No KPIs': 'None of the KPIs apply to this ticket',
+    'Not recorded': 'The export has nothing here for this ticket',
+};
+function blankText(label, t) {
+    if (t.missing) return '';
+    const requestOrTask = t.kind === 'RITM' || t.kind === 'SCTASK';
+    if (label === 'Priority / Risk') return requestOrTask ? 'No priority' : 'Not recorded';
+    if (label === 'Team') return t.kind === 'RITM' ? 'No team (no catalog tasks)' : 'Not recorded';
+    if (label === 'Assigned To / Requested For') return t.kind === 'INC' || t.kind === 'SCTASK' ? 'Not assigned' : 'Not recorded';
+    if (label === 'Summary') return 'No summary';
+    if (label === 'Parent') return 'No parent';
+    if (label === 'Family') return 'Not linked';
+    if (label === 'KPIs') return 'No KPIs';
+    return 'Not recorded';
+}
+function blankHtml(label, t) {
+    const text = blankText(label, t);
+    return text ? `<span class="blank" title="${escapeHtml(BLANK_WHY[text] || '')}">${escapeHtml(text)}</span>` : '—';
+}
+
+// What a ticket's column shows, for looking it up (lookup.js): its text (or what
+// shows in its place), a date as the data writes it too, its KPIs' words
+function ticketLookupText([label, get], t) {
+    if (label === 'KPIs') return t.kpis ? t.kpis.map(k => `${k.label} ${k.value}`).join(' · ') : t.kpiText || blankText(label, t);
+    const text = String(get(t) || '') || blankText(label, t);
+    return label === 'Opened' && t.opened ? `${text} ${t.opened}` : text;
+}
+// The columns a list can be looked up by
+const lookupColumns = columns => columns.filter(([label]) => !UNSORTED_COLUMNS.has(label));
+
+// How urgent a ticket is, as Assigned to me is ordered (tickets.mjs priorityRank):
+// an incident's priority, a change's risk; 5 for requests and tasks
+function levelRank(t) {
+    const kind = t.kind || String(t.number).match(/^[A-Z]+/)?.[0];
+    if (kind === 'INC') return Number((/^P([1-4])\b/.exec(t.level) || [])[1]) || 5;
+    if (kind === 'CHG') return { High: 2, Medium: 3, Low: 4, Standard: 4 }[t.level] ?? 5;
+    return 5;
+}
+
 // Each ticket's parent and the families it is in (relations.mjs ticketLinks),
 // in Ticket results and Starred tickets. The third item draws the cell: the
 // parent and each family's anchor open that ticket's record, with its related tickets.
 const OPENABLE = /^(INC|CHG|RITM|SCTASK|REQ)\d{7}$/;
 const LINK_COLUMNS = [
-    ['Parent', t => t.parent || '', t => t.parent && OPENABLE.test(t.parent)
-        ? `<button type="button" class="ticket-link" data-ticket="${escapeHtml(t.parent)}" title="Open ${escapeHtml(t.parent)}">${escapeHtml(t.parent)}</button>` : '—'],
+    ['Parent', t => t.parent || '', t => (t.parent && OPENABLE.test(t.parent)
+        ? `<button type="button" class="ticket-link" data-ticket="${escapeHtml(t.parent)}" title="Open ${escapeHtml(t.parent)}">${escapeHtml(t.parent)}</button>`
+        : t.parent ? escapeHtml(t.parent) : blankHtml('Parent', t))],
     ['Family', t => (t.families || []).map(f => `${f.name} (${f.size} ${f.size === 1 ? 'ticket' : 'tickets'})`).join('; '),
-        t => (t.families || []).length ? t.families.map(familyChipHtml).join('') : '—'],
+        t => ((t.families || []).length ? t.families.map(familyChipHtml).join('') : blankHtml('Family', t))],
 ];
 
 // "Parent incident INC1813985 · 6": opens the anchor's record and its related tickets
@@ -11956,27 +13251,42 @@ function formatStarredAt(iso) {
 // in `highlight` (e.g. the latest answer's tickets) get `highlightClass`.
 // select: the list's name ('results', 'starred'): each row gets a checkbox,
 // and the header's ticks them all.
-function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set(), highlightClass = 'fresh', { select = null, rowClass = null } = {}) {
+// sort: the list's name, so a click on a heading sorts it and the sort stays
+// while the page is open (the tickets come in that sort); '': sorts, but
+// forgets it when drawn again; false: no sorting (sorting.js)
+// lookup: a 🔍 box over a list of two or more, keeping what's typed while the page
+// is open under that name ('': forgets it when drawn again); false: no box, for
+// a list that looks itself up (lookup.js)
+// Every cell shows something: where a ticket has nothing, it says why (blankText).
+function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set(), highlightClass = 'fresh', { select = null, rowClass = null, sort = '', lookup = '' } = {}) {
+    const sortable = sort !== false;
+    if (sort) tickets = sortedTickets(tickets, sort, columns, ticketSortValue);
+    const bar = lookup !== false && tickets.length >= 2 ? lookupBarHtml(lookup, lookupColumns(columns).map(([label]) => label)) : '';
     const head = (select ? `<th class="select-cell"><input type="checkbox" class="select-all" data-select-list="${select}" aria-label="Select all"></th>` : '') +
-        columns.map(([label]) => `<th>${escapeHtml(label)}</th>`).join('');
+        columns.map(([label]) => (sortable && !UNSORTED_COLUMNS.has(label) ? sortHeadHtml(sort, label) : `<th>${escapeHtml(label)}</th>`)).join('');
     const body = tickets.map((t, i) => {
         const cls = [highlight.has(t.number) ? highlightClass : '', rowClass ? rowClass(t, i) : ''].filter(Boolean).join(' ');
         return (cls ? `<tr class="${cls}">` : '<tr>') +
         (select ? `<td class="select-cell"><input type="checkbox" class="row-select" data-select-list="${select}" value="${escapeHtml(t.number)}" aria-label="Select ${escapeHtml(t.number)}"></td>` : '') +
         columns.map(([label, get, html], i) => {
+        const by = sortable && TICKET_SORT_VALUES[label];
+        const sortAttr = by ? ` data-sort="${escapeHtml(String(by(t) ?? ''))}"` : '';
         if (i === 0) {
-            return `<td class="ticket-cell"><button type="button" class="ticket-link" data-ticket="${escapeHtml(t.number)}"` +
+            return `<td class="ticket-cell"${sortAttr}><button type="button" class="ticket-link" data-ticket="${escapeHtml(t.number)}"` +
                 ` title="Open ${escapeHtml(t.number)}">${escapeHtml(t.number)}</button>${starButtonHtml(t.number)}</td>`;
         }
-        if (html) return `<td class="${label === 'Family' ? 'family-cell' : 'parent-cell'}">${html(t)}</td>`;
+        if (html) return `<td class="${label === 'Family' ? 'family-cell' : label === 'KPIs' ? 'kpi-cell' : 'parent-cell'}"${sortAttr}>${html(t)}</td>`;
         const text = String(get(t) || '');
+        // Empty sorts last, whatever it says in its place
+        if (!text) return `<td data-sort="">${blankHtml(label, t)}</td>`;
         if (label === 'Summary' && text.length > 120) {
             return `<td title="${escapeHtml(text)}">${escapeHtml(text.slice(0, 117))}…</td>`;
         }
-        return `<td>${escapeHtml(text || '—')}</td>`;
+        return `<td${sortAttr}>${escapeHtml(text)}</td>`;
     }).join('') + '</tr>';
     }).join('');
-    return `<div class="table-wrap"><table class="result-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+    return bar + `<div class="table-wrap"><table class="result-table"${sortable ? ` data-sort-list="${escapeHtml(sort)}"` : ''}>` +
+        `<thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 function ticketDownloadHtml(tickets, title, columns = TICKET_COLUMNS) {
@@ -11991,19 +13301,20 @@ function ticketDownloadHtml(tickets, title, columns = TICKET_COLUMNS) {
     }));
 }
 
-// One ticket: its heading, a star, a link to its dashboard record, and every field it has
+// One ticket: its heading, a star, a link to its dashboard record, telling
+// your project manager you're done with it (notifications.js), and every field it has
 function ticketCardHtml(t, record) {
-    // The Metabase record pages are for admins only (they show every ticket)
-    const dashboardButton = RECORD_PAGES[t.kind] && currentAccess.admin
+    // Its Metabase record page (signed for this person, so it shows only their tickets)
+    const dashboardButton = RECORD_PAGES[t.kind]
         ? `<button type="button" class="home-action" data-open-dashboard="${escapeHtml(t.number)}">Open in Dashboards ↗</button>` : '';
     let html = `<div class="ticket-head">` +
         `<span class="ticket-type">${escapeHtml(t.type)}</span>` +
         `<span class="ticket-number">${escapeHtml(t.number)}</span>` +
-        starButtonHtml(t.number, true) + dashboardButton +
+        starButtonHtml(t.number, true) + dashboardButton + reportButtonHtml(t.number) +
         `</div>` +
         (t.summary ? `<div class="ticket-summary">${escapeHtml(t.summary)}</div>` : '');
 
-    if (!record) return html + ticketTableHtml([t]) + ticketDownloadHtml([t], t.number);
+    if (!record) return html + ticketTableHtml([t], TICKET_COLUMNS, new Set(), 'fresh', { sort: false }) + ticketDownloadHtml([t], t.number);
 
     const fields = Object.entries(record.fields);
     const body = fields.map(([member, value]) => {
@@ -12036,6 +13347,7 @@ async function runHomeSearch(mode, outId, work, quiet = false) {
         const html = await work();
         if (run !== homeRuns[mode] || html === null) return;
         out.innerHTML = html;
+        applyLookups(out);
     } catch (err) {
         if (run !== homeRuns[mode]) return;
         out.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
@@ -12043,6 +13355,560 @@ async function runHomeSearch(mode, outId, work, quiet = false) {
     }
     forgetRemovedExports();
 }
+
+// =====================================================================
+// ASSIGNED TO ME: the tickets assigned to this person in OneTouch (by their
+// project manager or an admin), highest priority first, then oldest
+// (tickets.mjs ticketsByPriority). Open ones to start with; closed or all at
+// a click, 50 to a page.
+// =====================================================================
+
+const ASSIGNED_PAGE = 50;
+const ASSIGNED_STATUSES = [['open', 'Open'], ['closed', 'Closed'], ['all', 'All']];
+// drill: a bar or slice clicked in "My charts" ({ label, test }): only its tickets
+const assignedView = { tickets: null, status: 'open', page: 0, drill: null };
+const ASSIGNED_COLUMNS = [
+    ['Ticket', t => t.number],
+    ['Type', t => t.type],
+    ['Summary', t => t.summary],
+    ['State', t => t.state],
+    ['Priority / Risk', t => t.level],
+    ['Opened', t => t.opened ? formatValue('ticket.opened', t.opened) : ''],
+];
+
+// The tab's count: how many open tickets are waiting
+function paintAssignedCount() {
+    const count = document.getElementById('assigned-count');
+    const open = assignedView.tickets ? assignedView.tickets.filter(t => t.open).length : 0;
+    count.hidden = !assignedView.tickets;
+    count.textContent = open.toLocaleString();
+    count.title = `${open.toLocaleString()} open`;
+}
+
+// The tickets assigned to this person (also what "My charts" draws) -> true, or
+// false if the session ended
+async function loadAssignedTickets() {
+    const token = sessionTokenValue;
+    const response = await fetch(`${API_BASE}/api/my-tickets`, { headers: authHeaders() });
+    // Signed out (and maybe someone else in) meanwhile: these aren't theirs to show
+    if (token !== sessionTokenValue) return false;
+    if (handleUnauthorized(response)) return false;
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+    assignedView.tickets = data.tickets;
+    paintAssignedCount();
+    return true;
+}
+
+function showAssigned(quiet = false) {
+    if (!sessionTokenValue) return;
+    return runHomeSearch('assigned', 'assigned-result', async () => ((await loadAssignedTickets()) ? assignedHtml() : null), quiet)
+        .then(() => fillTicketKpis(document.getElementById('assigned-result')));
+}
+
+function assignedHtml() {
+    const all = assignedView.tickets || [];
+    if (!all.length) {
+        return `<p class="home-status">${currentAccess.team
+            ? 'No tickets are assigned to you yet. Your project manager hands them out on the Team tab, and 🔔 tells you when they do.'
+            : 'No tickets are assigned to you. You get some once you\'re on a team and your project manager or an admin assigns them to you.'}</p>`;
+    }
+    const counts = { open: all.filter(t => t.open).length, all: all.length };
+    counts.closed = counts.all - counts.open;
+    const { status } = assignedView;
+    // Each ticket's KPIs (filled in once the page is drawn, fillTicketKpis; sorted by
+    // the server's count of what needs attention); members can tell their project
+    // manager they've resolved or closed one (notifications.js)
+    const columns = [...ASSIGNED_COLUMNS, KPI_COLUMN,
+        ...(canTellManager() ? [['Tell your project manager', () => '', t => reportButtonHtml(t.number, 'Resolved or closed?…')]] : [])];
+    const { drill } = assignedView;
+    const inStatus = status === 'all' ? all : all.filter(t => t.open === (status === 'open'));
+    const listed = drill ? inStatus.filter(drill.test) : inStatus;
+    // Looked up and sorted by a heading: all of them, before they're cut into pages
+    const matched = lookedUpTickets(listed, 'assigned', lookupColumns(columns), ticketLookupText);
+    const shown = sortedTickets(matched, 'assigned', columns, ticketSortValue);
+    const pages = Math.max(1, Math.ceil(shown.length / ASSIGNED_PAGE));
+    assignedView.page = Math.min(Math.max(assignedView.page, 0), pages - 1);
+    const first = assignedView.page * ASSIGNED_PAGE;
+    const page = shown.slice(first, first + ASSIGNED_PAGE);
+
+    const filter = '<div class="assigned-filter" role="group" aria-label="Which tickets">' + ASSIGNED_STATUSES.map(([key, label]) =>
+        `<button type="button" class="home-action" data-assigned-status="${key}" aria-pressed="${status === key}">${label} (${counts[key].toLocaleString()})</button>`).join('') + '</div>';
+    const which = status === 'all' ? '' : `${status} `;
+    const sort = listSorts.get('assigned');
+    const order = sort
+        ? `sorted by ${sort.col}, ${sort.dir === 'asc' ? 'ascending' : 'descending'} (click its heading again to change that). `
+        : 'highest priority first, then oldest. Incidents go by priority and changes by risk. Requests and catalog tasks have no priority, so they come after those. ' +
+          'Click any heading to sort by it. ';
+    const head = '<div class="results-head">' +
+        `<p class="home-status">${listed.length.toLocaleString()} ${which}${listed.length === 1 ? 'ticket' : 'tickets'} assigned to you, ${order}</p>` + filter + '</div>' +
+        (drill ? `<div class="drill-chip" role="status">📊 Only the ones in <b>${escapeHtml(drill.label)}</b>, from My charts ` +
+            '<button type="button" class="home-action" data-assigned-drill-clear>✕ Show them all</button></div>' : '');
+    if (!listed.length) {
+        return head + `<p class="home-status">${drill ? `None ${which}in ${escapeHtml(drill.label)}.` : `None ${status === 'open' ? 'open: you\'re all caught up.' : 'closed yet.'}`}</p>`;
+    }
+    const bar = lookupBarHtml('assigned', lookupColumns(columns).map(([label]) => label),
+        { mode: 'list', count: { shown: shown.length, total: listed.length } });
+    if (!shown.length) return head + bar + '<p class="home-status">No tickets match what you typed. Change it, or press Escape in the box to see them all.</p>';
+
+    const pager = pages > 1
+        ? `<div class="team-pager"><span>${(first + 1).toLocaleString()}–${(first + page.length).toLocaleString()} of ${shown.length.toLocaleString()}</span>` +
+          `<button type="button" class="home-action" data-assigned-page="-1"${assignedView.page ? '' : ' disabled'}>← Previous</button>` +
+          `<button type="button" class="home-action" data-assigned-page="1"${assignedView.page < pages - 1 ? '' : ' disabled'}>Next →</button></div>`
+        : '';
+    return head + bar + KPI_LEGEND_HTML + ticketTableHtml(page, columns, new Set(), 'fresh', { sort: 'assigned', lookup: false }) + pager +
+        ticketDownloadHtml(shown, `Assigned to me (${status === 'all' ? 'all' : status})`, ASSIGNED_COLUMNS);
+}
+
+// Drawn again from what's loaded
+function redrawAssigned() {
+    const out = document.getElementById('assigned-result');
+    out.innerHTML = assignedHtml();
+    forgetRemovedExports();
+    fillTicketKpis(out);
+    return out;
+}
+
+// A heading, or a lookup: every ticket sorted or looked through, from the first page
+pagedSorts.assigned = () => {
+    assignedView.page = 0;
+    redrawAssigned();
+};
+pagedLookups.assigned = pagedSorts.assigned;
+
+// Open / closed / all, the pages, and back from a chart's bar to them all
+document.getElementById('assigned-result').addEventListener('click', e => {
+    if (e.target.closest('[data-assigned-drill-clear]')) {
+        assignedView.drill = null;
+        assignedView.page = 0;
+        redrawAssigned();
+        return;
+    }
+    const status = e.target.closest('[data-assigned-status]');
+    const page = e.target.closest('[data-assigned-page]');
+    if (!status && !page) return;
+    if (status) {
+        assignedView.status = status.dataset.assignedStatus;
+        assignedView.page = 0;
+    } else {
+        assignedView.page += Number(page.dataset.assignedPage);
+    }
+    const out = redrawAssigned();
+    if (page) out.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+
+// =====================================================================
+// MY CHARTS (Home): the tickets assigned to this person, drawn: by type,
+// state, priority or risk, how their KPIs look, when they were opened, and
+// the ServiceNow team that worked them. Open ones, closed ones or all, from
+// the same list as "Assigned to me" (charts.js draws them). A click on a bar
+// or slice shows those tickets there.
+// =====================================================================
+
+const myChartsView = { status: null }; // null: the open ones if there are any, else all
+
+const KPI_TONES = [['bad', 'Needs attention', 8], ['warn', 'Keep an eye on it', 4], ['good', 'On track', 3]];
+// How a ticket's KPIs look, as one word: its worst (kpis.mjs attention: each red counts 100, each amber 1)
+function kpiToneOf(t) {
+    if (t.attention === null || t.attention === undefined) return 'No KPIs';
+    return t.attention >= 100 ? 'Needs attention' : t.attention >= 1 ? 'Keep an eye on it' : 'On track';
+}
+
+// "2026-08-14 08:44:55" -> its ISO week, "2026-W33" (charts.js names it by its Monday)
+function isoWeekOf(raw) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(raw || ''));
+    if (!m) return '';
+    const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+    d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7)); // that week's Thursday decides its year
+    const week = Math.ceil(((d - Date.UTC(d.getUTCFullYear(), 0, 1)) / 86400000 + 1) / 7);
+    return `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+}
+
+// Every week (or month, for a long stretch) from the first ticket opened to the
+// last, so a quiet one shows as a gap -> { field, periods, of(ticket) }
+function openedPeriods(tickets) {
+    const days = tickets.map(t => String(t.opened || '').slice(0, 10)).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
+    if (!days.length) return { field: 'opened_week', periods: [], of: () => '' };
+    const [first, last] = [days[0], days.at(-1)];
+    const weeks = [];
+    const [, fy, fw] = isoWeekOf(first).match(/^(\d{4})-W(\d{2})$/);
+    const [, ly, lw] = isoWeekOf(last).match(/^(\d{4})-W(\d{2})$/);
+    const end = isoWeekMonday(Number(ly), Number(lw));
+    for (const d = isoWeekMonday(Number(fy), Number(fw)); d <= end; d.setUTCDate(d.getUTCDate() + 7)) weeks.push(isoWeekOf(d.toISOString()));
+    if (weeks.length <= 26) return { field: 'opened_week', periods: weeks, of: t => isoWeekOf(t.opened) };
+    const months = [];
+    for (let y = Number(first.slice(0, 4)), m = Number(first.slice(5, 7)); `${y}-${String(m).padStart(2, '0')}` <= last.slice(0, 7); m === 12 ? (y += 1, m = 1) : (m += 1)) {
+        months.push(`${y}-${String(m).padStart(2, '0')}`);
+    }
+    return { field: 'opened_month', periods: months, of: t => String(t.opened || '').slice(0, 7) };
+}
+
+// Each chart: what it groups the tickets by (value), how it's drawn, its order,
+// the colors of its groups, and how the list names its bar when one is clicked
+const MY_CHARTS = [
+    { key: 'type', title: 'By type', display: 'donut', value: t => t.type, slots: { Incident: 1, Change: 2, Request: 3, 'Catalog task': 4 }, drill: v => `Type: ${v}` },
+    { key: 'state', title: 'By state', display: 'hbar', value: t => t.state || 'Not recorded', drill: v => `State: ${v}` },
+    { key: 'level', title: 'By priority or risk', display: 'bar', value: t => t.level || blankText('Priority / Risk', t),
+        order: (a, b) => a.rank - b.rank || sortCollator.compare(a.value, b.value), drill: v => `Priority or risk: ${v}`,
+        sub: 'Incidents have a priority and changes a risk; requests and catalog tasks have neither.' },
+    { key: 'kpis', title: 'How their KPIs look', display: 'donut', value: kpiToneOf, drill: v => `KPIs: ${v}`,
+        slots: Object.fromEntries(KPI_TONES.map(([, label, slot]) => [label, slot])), order: (a, b) => a.rank - b.rank,
+        sub: 'By each ticket\'s worst KPI: red needs attention, amber keep an eye on it, green on track.' },
+    { key: 'opened', title: 'When they were opened', display: 'bar', time: true, drill: v => `Opened ${v}` },
+    { key: 'team', title: 'By ServiceNow team', display: 'hbar', value: t => t.team || blankText('Team', t), limit: 10, drill: v => `ServiceNow team: ${v}`,
+        sub: 'The assignment group that worked each ticket in ServiceNow (a request\'s is the team of its catalog tasks).' },
+];
+
+// One chart's numbers, as charts.js draws them: { rows: [{ value, count, slot }], total, other }
+function myChartData(def, tickets, periods) {
+    const valueOf = def.time ? periods.of : def.value;
+    const counts = new Map(def.time ? periods.periods.map(p => [p, 0]) : []);
+    const rank = new Map();
+    for (const t of tickets) {
+        const v = valueOf(t);
+        if (!v) continue;
+        counts.set(v, (counts.get(v) || 0) + 1);
+        if (def.key === 'level') rank.set(v, Math.min(rank.get(v) ?? 9, t.level ? levelRank(t) : 9));
+    }
+    if (def.key === 'kpis') KPI_TONES.forEach(([, label], i) => rank.set(label, i));
+    let rows = [...counts].map(([value, count]) => ({ value, count, rank: rank.get(value) ?? 9, ...(def.slots?.[value] ? { slot: def.slots[value] } : {}) }));
+    // Tickets without KPIs: a grey slice
+    if (def.key === 'kpis') rows.forEach(r => { if (r.value === 'No KPIs') r.other = true; });
+    if (!def.time) rows.sort(def.order || ((a, b) => b.count - a.count || sortCollator.compare(a.value, b.value)));
+    let other = null;
+    if (def.limit && rows.length > def.limit) {
+        const rest = rows.slice(def.limit);
+        other = { count: rest.reduce((n, r) => n + r.count, 0), groups: rest.length };
+        rows = rows.slice(0, def.limit);
+    }
+    return { rows, total: tickets.length, other };
+}
+
+function myChartsTickets() {
+    const all = assignedView.tickets || [];
+    if (!myChartsView.status) myChartsView.status = all.some(t => t.open) ? 'open' : 'all';
+    const { status } = myChartsView;
+    return status === 'all' ? all : all.filter(t => t.open === (status === 'open'));
+}
+
+function myChartsHtml() {
+    const all = assignedView.tickets || [];
+    if (!all.length) {
+        return `<p class="home-status">${currentAccess.team
+            ? 'No tickets are assigned to you yet, so there is nothing to draw. Your project manager hands them out on the Team tab.'
+            : 'No tickets are assigned to you, so there is nothing to draw. You get some once you\'re on a team and your project manager or an admin assigns them to you.'}</p>`;
+    }
+    const tickets = myChartsTickets();
+    const { status } = myChartsView;
+    const counts = { open: all.filter(t => t.open).length, all: all.length };
+    counts.closed = counts.all - counts.open;
+    const filter = '<div class="assigned-filter" role="group" aria-label="Which tickets to draw">' + ASSIGNED_STATUSES.map(([key, label]) =>
+        `<button type="button" class="home-action" data-mycharts-status="${key}" aria-pressed="${status === key}">${label} (${counts[key].toLocaleString()})</button>`).join('') + '</div>';
+    const which = status === 'all' ? '' : `${status} `;
+    const head = '<div class="results-head">' +
+        `<p class="home-status">The ${tickets.length.toLocaleString()} ${which}${tickets.length === 1 ? 'ticket' : 'tickets'} assigned to you, in charts. ` +
+        'Hover a bar or slice for its numbers, or click it to list those tickets in Assigned to me.</p>' + filter + '</div>';
+    if (!tickets.length) return head + `<p class="home-status">None ${status === 'open' ? 'open: you\'re all caught up.' : 'closed yet.'}</p>`;
+    return head + '<div class="tile-grid my-charts">' + MY_CHARTS.map(def =>
+        `<article class="chart-tile size-medium" data-my-chart="${def.key}">` +
+        `<div class="tile-head"><div class="tile-titles"><h3 class="tile-title">${escapeHtml(def.title)}</h3>` +
+        (def.sub ? `<p class="tile-sub">${escapeHtml(def.sub)}</p>` : '') + '</div>' +
+        '<div class="tile-actions"><button type="button" class="tile-btn" data-my-chart-table aria-pressed="false" title="Show as a table" aria-label="Show as a table">▦</button></div></div>' +
+        '<div class="tile-body drillable"></div><p class="chart-note" hidden></p></article>').join('') + '</div>';
+}
+
+// Draws each chart into its box (once the boxes are on the page, so they have a width)
+function drawMyCharts() {
+    const out = document.getElementById('my-charts-result');
+    const tickets = myChartsTickets();
+    const periods = openedPeriods(tickets);
+    for (const tile of out.querySelectorAll('[data-my-chart]')) {
+        const def = MY_CHARTS.find(d => d.key === tile.dataset.myChart);
+        const chart = { id: `my-${def.key}`, title: def.title, groupBy: def.time ? periods.field : def.key, display: def.display, size: 'medium', color: 'accent' };
+        const data = myChartData(def, tickets, periods);
+        const body = tile.querySelector('.tile-body');
+        drawChart(body, chart, data, tile._asTable || false);
+        body._pick = row => row && showMyChartTickets(def, row.value, groupLabel(chart, row.value, true), periods);
+        const note = tile.querySelector('.chart-note');
+        note.textContent = tile._asTable ? '' : chartNote(chart, data);
+        note.hidden = !note.textContent;
+    }
+}
+
+// A bar or slice: Assigned to me, showing only its tickets
+function showMyChartTickets(def, value, label, periods) {
+    const valueOf = def.time ? periods.of : def.value;
+    assignedView.drill = { label: def.drill(def.time ? `in ${label.replace(/^Week of/, 'the week of')}` : label), test: t => valueOf(t) === value };
+    assignedView.status = myChartsView.status;
+    assignedView.page = 0;
+    setHomeMode('assigned', false, { keepDrill: true });
+    document.getElementById('home-assigned').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function showMyCharts(quiet = false) {
+    if (!sessionTokenValue) return;
+    return runHomeSearch('charts', 'my-charts-result', async () => ((await loadAssignedTickets()) ? myChartsHtml() : null), quiet)
+        .then(() => { if (homeMode === 'charts') drawMyCharts(); });
+}
+
+document.getElementById('my-charts-result').addEventListener('click', e => {
+    const status = e.target.closest('[data-mycharts-status]');
+    if (status) {
+        myChartsView.status = status.dataset.mychartsStatus;
+        document.getElementById('my-charts-result').innerHTML = myChartsHtml();
+        drawMyCharts();
+        return;
+    }
+    const table = e.target.closest('[data-my-chart-table]');
+    if (table) {
+        const tile = table.closest('[data-my-chart]');
+        tile._asTable = !tile._asTable;
+        table.setAttribute('aria-pressed', String(tile._asTable));
+        table.title = tile._asTable ? 'Show the chart' : 'Show as a table';
+        table.setAttribute('aria-label', table.title);
+        drawMyCharts();
+    }
+});
+
+// =====================================================================
+// KPIs (kpis.mjs): each ticket's in "Assigned to me", each family's (and its
+// tickets') in a project manager's "Team families". Green: on track; amber:
+// keep an eye on it; red: needs attention. Hovering one says what it means.
+// =====================================================================
+
+const KPI_LEGEND_HTML = '<p class="kpi-legend">KPIs: <span class="kpi kpi-good">on track</span><span class="kpi kpi-warn">keep an eye on it</span>' +
+    '<span class="kpi kpi-bad">needs attention</span> · hover one for what it means. Ages count to the end of the data, not today.</p>';
+// A table column whose cells fillTicketKpis fills in
+const KPI_COLUMN = ['KPIs', () => '', t => `<div data-kpis="${escapeHtml(t.number)}"><span class="kpi-none">Loading…</span></div>`];
+
+function kpiChipsHtml(list) {
+    if (!list?.length) return `<span class="kpi-none" title="${escapeHtml(BLANK_WHY['No KPIs'])}">No KPIs</span>`;
+    return '<div class="kpi-list">' + list.map(k => `<span class="kpi kpi-${['good', 'warn', 'bad'].includes(k.tone) ? k.tone : 'info'}"` +
+        `${k.detail ? ` title="${escapeHtml(k.detail)}"` : ''}>${escapeHtml(k.label)} <b>${escapeHtml(k.value)}</b></span>`).join('') + '</div>';
+}
+
+// Fills the KPI cells in a container ([data-kpis="<number>"]) for the tickets showing
+async function fillTicketKpis(container) {
+    const cells = [...container.querySelectorAll('[data-kpis]')];
+    if (!cells.length) return;
+    try {
+        const response = await fetch(`${API_BASE}/api/kpis/tickets`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ numbers: cells.map(c => c.dataset.kpis) }),
+        });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        for (const cell of cells) if (cell.isConnected) cell.innerHTML = kpiChipsHtml(data.kpis[cell.dataset.kpis]);
+    } catch (err) {
+        console.error('Could not load the KPIs:', err);
+        for (const cell of cells) if (cell.isConnected) cell.innerHTML = '<span class="kpi-none">KPIs unavailable</span>';
+    }
+}
+
+// ---------------------------------------------------------------------
+// TEAM FAMILIES (project managers and admins): the team's families, those
+// with open tickets first, by their most urgent open ticket and then their
+// oldest; each with its KPIs, and its tickets' at a click
+// ---------------------------------------------------------------------
+
+const FAMILY_PAGE = 25;
+const FAMILY_TICKETS_SHOWN = 50;
+const KIND_LABELS = { INC: ['incident', 'incidents'], CHG: ['change', 'changes'], RITM: ['request', 'requests'], SCTASK: ['catalog task', 'catalog tasks'] };
+const teamFamiliesView = { teamId: null, teams: null, status: 'open', linked: true, offset: 0, data: null };
+// What the server sorts the families by for each heading (no sort: the most urgent first)
+const TEAM_FAMILY_SORT_KEYS = { Family: 'family', Tickets: 'size', KPIs: 'kpis' };
+// The columns the server can look the families up by (server.mjs)
+const TEAM_FAMILY_LOOKUP_COLUMNS = ['Family', 'Tickets', 'KPIs'];
+
+function showFamilyKpis(quiet = false) {
+    if (!sessionTokenValue || !canSeeFamilies()) return;
+    return runHomeSearch('families', 'kpi-families-result', async () => {
+        // Admins can look at any team; a project manager sees their own. Their
+        // people are the names that can be typed to give a family to (picker.js).
+        if (!teamFamiliesView.teams) {
+            const r = await fetch(`${API_BASE}/api/teams`, { headers: authHeaders() });
+            if (handleUnauthorized(r)) return null;
+            const t = await r.json().catch(() => ({}));
+            teamFamiliesView.teams = (t.teams || []).map(team => ({ id: team.id, name: team.name }));
+            if (t.teams) rememberPickerPeople(t);
+        }
+        const teamId = teamFamiliesView.teamId || currentAccess.team?.id || teamFamiliesView.teams?.[0]?.id;
+        if (!teamId) return '<p class="home-status">You\'re not on a team, so there are no families to show.</p>';
+        const q = new URLSearchParams({
+            team: teamId, status: teamFamiliesView.status, linked: teamFamiliesView.linked ? 1 : 0, offset: teamFamiliesView.offset, limit: FAMILY_PAGE,
+            ...sortQuery('team-families', TEAM_FAMILY_SORT_KEYS), ...lookupQuery('team-families'),
+        });
+        const token = sessionTokenValue;
+        const response = await fetch(`${API_BASE}/api/kpis/families?${q}`, { headers: authHeaders() });
+        if (token !== sessionTokenValue) return null; // signed out meanwhile: not for whoever is here now
+        if (handleUnauthorized(response)) return null;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        teamFamiliesView.data = data;
+        teamFamiliesView.teamId = data.teamId;
+        const count = document.getElementById('kpi-families-count');
+        count.textContent = data.counts.open.toLocaleString();
+        count.title = `${data.counts.open.toLocaleString()} with open tickets`;
+        count.hidden = false;
+        return familiesHtml();
+    }, quiet);
+}
+
+function familiesHtml() {
+    const { data, status, linked } = teamFamiliesView;
+    const teamName = teamFamiliesView.teams?.find(t => t.id === data.teamId)?.name || currentAccess.team?.name || 'Your team';
+    const which = status === 'open' ? 'with open tickets' : '';
+    const sized = linked ? 'linked ' : '';
+    const filter = '<div class="assigned-filter" role="group" aria-label="Which families">' +
+        [['open', 'Needs attention', data.counts.open], ['all', 'All', data.counts.all]].map(([key, label, n]) =>
+            `<button type="button" class="home-action" data-families-status="${key}" aria-pressed="${status === key}">${label} (${n.toLocaleString()})</button>`).join('') + '</div>';
+    const teamPick = currentAccess.admin && teamFamiliesView.teams?.length
+        ? `<label>Team <select data-families-team>${teamFamiliesView.teams.map(t => `<option value="${t.id}"${t.id === data.teamId ? ' selected' : ''}>${escapeHtml(t.name)}</option>`).join('')}</select></label>`
+        : '';
+    const sort = listSorts.get('team-families');
+    const order = sort
+        ? `sorted by ${sort.col === 'KPIs' ? 'how many KPIs need attention' : sort.col}, ${sort.dir === 'asc' ? 'ascending' : 'descending'}`
+        : 'the most urgent first (the highest-priority open ticket, then the oldest)';
+    const all = data.before ?? data.total;
+    const head = '<div class="results-head">' +
+        `<p class="home-status">${escapeHtml(teamName)}: ${all.toLocaleString()} ${sized}${all === 1 ? 'family' : 'families'} ${which}, ` +
+        `${order}. A family is tickets linked to each other, which always stay with one team. ` +
+        'Open one to see each of its tickets\' KPIs and who has it, or type a name to give someone all of its tickets.</p>' +
+        `<div class="families-controls">${filter}<label><input type="checkbox" data-families-linked${linked ? ' checked' : ''}> Only linked families (2 or more tickets)</label>${teamPick}</div>` +
+        '</div>';
+    if (!all) return head + `<p class="home-status">${status === 'open' ? 'No families with open tickets: all caught up.' : 'No families.'}</p>`;
+    const bar = lookupBarHtml('team-families', TEAM_FAMILY_LOOKUP_COLUMNS, { mode: 'list', noun: 'families', count: { shown: data.total, total: all } });
+    if (!data.families.length) return head + bar + '<p class="home-status">No families match what you typed. Change it, or press Escape in the box to see them all.</p>';
+    const rows = data.families.map(f => {
+        const id = escapeHtml(f.id);
+        const summary = String(f.ticket?.summary || '');
+        const kinds = Object.entries(f.kinds).map(([k, n]) => `${n} ${KIND_LABELS[k][n === 1 ? 0 : 1]}`).join(', ');
+        return `<tr data-family-row="${id}">` +
+            `<td class="ticket-cell" data-sort="${id}"><button type="button" class="ticket-link" data-ticket="${id}" title="Open ${id}">${id}</button>${starButtonHtml(f.id)}` +
+            (summary ? `<div class="family-sub"${summary.length > 90 ? ` title="${escapeHtml(summary)}"` : ''}>${escapeHtml(summary.length > 90 ? `${summary.slice(0, 87)}…` : summary)}</div>` : '') + '</td>' +
+            `<td><strong>${f.size.toLocaleString()}</strong> ${f.size === 1 ? 'ticket' : 'tickets'}<div class="family-kinds">${escapeHtml(kinds)}</div></td>` +
+            `<td class="kpi-cell">${kpiChipsHtml(f.kpis)}</td>` +
+            `<td>${personPickerHtml(data.teamId, undefined, `Give all ${f.size.toLocaleString()} tickets of family ${f.id} to`,
+                { placeholder: 'Type a name…', attrs: `data-family="${id}" data-family-size="${f.size}"` })}</td>` +
+            `<td><button type="button" class="home-action" data-family-open="${id}" aria-expanded="false">Its tickets</button></td></tr>`;
+    }).join('');
+    const first = teamFamiliesView.offset + 1;
+    const last = teamFamiliesView.offset + data.families.length;
+    const pager = data.total > FAMILY_PAGE
+        ? `<div class="team-pager"><span>${first.toLocaleString()}–${last.toLocaleString()} of ${data.total.toLocaleString()}</span>` +
+          `<button type="button" class="home-action" data-families-page="-1"${teamFamiliesView.offset ? '' : ' disabled'}>← Previous</button>` +
+          `<button type="button" class="home-action" data-families-page="1"${last < data.total ? '' : ' disabled'}>Next →</button></div>`
+        : '';
+    return head + bar + KPI_LEGEND_HTML + '<div class="table-wrap"><table class="result-table" data-sort-list="team-families"><thead><tr>' +
+        sortHeadHtml('team-families', 'Family', 'Family (its first ticket)') + sortHeadHtml('team-families', 'Tickets') + sortHeadHtml('team-families', 'KPIs') +
+        '<th>Give it all to</th><th></th></tr></thead>' + `<tbody>${rows}</tbody></table></div>` + pager;
+}
+
+// A heading, or a lookup: every family of the team sorted or looked through by the server, from the first page
+pagedSorts['team-families'] = () => {
+    teamFamiliesView.offset = 0;
+    return showFamilyKpis(true);
+};
+pagedLookups['team-families'] = pagedSorts['team-families'];
+
+const FAMILY_TICKET_COLUMNS = [
+    ['Ticket', t => t.number],
+    ['Type', t => t.type],
+    ['Summary', t => t.summary],
+    ['State', t => t.state],
+    ['Priority / Risk', t => t.level],
+    ['Assigned to', t => t.assignee || 'Not assigned yet'],
+    ['KPIs', () => '', t => kpiChipsHtml(t.kpis)],
+];
+
+// A family's tickets, each with who has it and its KPIs, in a row under the family
+async function toggleFamilyTickets(button) {
+    const row = button.closest('tr');
+    const open = row.nextElementSibling?.classList.contains('row-detail');
+    if (open) {
+        row.nextElementSibling.remove();
+        button.setAttribute('aria-expanded', 'false');
+        button.textContent = 'Its tickets';
+        return;
+    }
+    button.setAttribute('aria-expanded', 'true');
+    button.textContent = 'Hide its tickets';
+    row.insertAdjacentHTML('afterend', `<tr class="row-detail"><td colspan="5"><div class="family-tickets"><p class="home-status">Loading its tickets…</p></div></td></tr>`);
+    const box = row.nextElementSibling.querySelector('.family-tickets');
+    try {
+        const response = await fetch(`${API_BASE}/api/kpis/families/${encodeURIComponent(button.dataset.familyOpen)}`, { headers: authHeaders() });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        if (!box.isConnected) return;
+        // In the server's order: open ones first, then the most urgent, then the oldest
+        Object.assign(box, { familyId: data.id, familyTickets: data.tickets, showAll: false });
+        drawFamilyTickets(box);
+    } catch (err) {
+        if (box.isConnected) box.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+    }
+}
+
+// A family's tickets, the first FAMILY_TICKETS_SHOWN (or all of them), in the
+// sort of its own headings and looked up by its own box; each family keeps both
+function drawFamilyTickets(box) {
+    const list = `family:${box.familyId}`;
+    const all = box.familyTickets;
+    const tickets = sortedTickets(lookedUpTickets(all, list, FAMILY_TICKET_COLUMNS, ticketLookupText), list, FAMILY_TICKET_COLUMNS, ticketSortValue);
+    const drawn = box.showAll ? tickets : tickets.slice(0, FAMILY_TICKETS_SHOWN);
+    const bar = all.length >= 2
+        ? lookupBarHtml(list, FAMILY_TICKET_COLUMNS.map(([label]) => label), { mode: 'list', count: { shown: tickets.length, total: all.length } }) : '';
+    box.innerHTML = `<h4>${all.length.toLocaleString()} ${all.length === 1 ? 'ticket' : 'tickets'} in this family</h4>` + bar +
+        (tickets.length
+            ? ticketTableHtml(drawn, FAMILY_TICKET_COLUMNS, new Set(), 'fresh', { sort: list, lookup: false }) +
+              (drawn.length < tickets.length ? `<p class="home-status">Showing ${drawn.length} of ${tickets.length.toLocaleString()}. ` +
+                  `<button type="button" class="link-btn" data-family-all>Show all ${tickets.length.toLocaleString()}</button></p>` : '')
+            : '<p class="home-status">None of its tickets match what you typed.</p>');
+}
+pagedSorts.family = table => drawFamilyTickets(table.closest('.family-tickets'));
+pagedLookups.family = list => {
+    const box = document.querySelector(`.lookup-bar[data-lookup="${CSS.escape(list)}"]`)?.closest('.family-tickets');
+    if (box) drawFamilyTickets(box);
+};
+
+document.getElementById('kpi-families-result').addEventListener('click', e => {
+    const status = e.target.closest('[data-families-status]');
+    const page = e.target.closest('[data-families-page]');
+    const open = e.target.closest('[data-family-open]');
+    const all = e.target.closest('[data-family-all]');
+    if (open) { toggleFamilyTickets(open); return; }
+    if (all) {
+        const box = all.closest('.family-tickets');
+        box.showAll = true;
+        drawFamilyTickets(box);
+        return;
+    }
+    if (!status && !page) return;
+    if (status) {
+        teamFamiliesView.status = status.dataset.familiesStatus;
+        teamFamiliesView.offset = 0;
+    } else {
+        teamFamiliesView.offset = Math.max(0, teamFamiliesView.offset + Number(page.dataset.familiesPage) * FAMILY_PAGE);
+    }
+    showFamilyKpis(true).then(() => { if (page) document.getElementById('kpi-families-result').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+});
+
+// A name typed for a family: all of its tickets go to them (teams.js giveFamily), then the KPIs again
+document.getElementById('kpi-families-result').addEventListener('personpick', e => {
+    const picker = e.target;
+    giveFamily(picker.dataset.family, Number(picker.dataset.familySize), e.detail.id, e.detail.name)
+        .then(done => (done ? showFamilyKpis(true) : setPickerValue(picker, undefined)));
+});
+
+document.getElementById('kpi-families-result').addEventListener('change', e => {
+    if (e.target.matches('[data-families-linked]')) teamFamiliesView.linked = e.target.checked;
+    else if (e.target.matches('[data-families-team]')) teamFamiliesView.teamId = Number(e.target.value);
+    else return;
+    teamFamiliesView.offset = 0;
+    showFamilyKpis(true);
+});
 
 // =====================================================================
 // TICKET RESULTS: every ticket the person has been shown, newest first: the
@@ -12089,8 +13955,16 @@ function showTicketResults(quiet = false) {
             'Click a ticket number to see its full record, or its parent or family to see those.</p>' +
             `<button type="button" class="home-action danger" onclick="clearTicketResults(${tickets.length})">🧹 Clear ticket results</button></div>` +
             starAllHtml(tickets.map(t => t.number)) + selectBarHtml('results') +
-            ticketTableHtml(tickets, columns, latestShown, 'fresh', { select: 'results' }) + ticketDownloadHtml(tickets, 'Ticket results', columns);
+            ticketTableHtml(tickets, columns, latestShown, 'fresh', { select: 'results', sort: 'results', lookup: 'results' }) + ticketDownloadHtml(tickets, 'Ticket results', columns);
     }, quiet).then(() => paintSelection('results'));
+}
+
+// Why a ticket number didn't open: someone else's ticket (the server lists it in
+// noAccess: in the data, but not one this person may see), or not in the data
+function notOpenedText(number, noAccess) {
+    return (noAccess || []).includes(number)
+        ? `🔒 You don't have permission to see ${number}. Only whoever it's assigned to, its team's project manager and admins can open it.`
+        : `${number} is not in the data.`;
 }
 
 // A ticket number someone clicked: its full record, with the way back to the list.
@@ -12115,7 +13989,7 @@ async function showOpenedRecord(number) {
         const data = await searchTickets(number, true);
         if (!data) return null;
         const back = '<div class="home-actions"><button type="button" class="home-action" onclick="closeTicketRecord()">← All ticket results</button></div>';
-        if (!data.found.length) return back + `<p class="home-status">${escapeHtml(number)} is not in the data.</p>`;
+        if (!data.found.length) return back + `<p class="home-status">${escapeHtml(notOpenedText(number, data.noAccess))}</p>`;
         if (data.found.length === 1) return back + ticketCardHtml(data.found[0], data.record);
         return back + ticketTableHtml(data.found);
     });
@@ -12184,8 +14058,10 @@ function relatedToLabel(focus) {
     return `Related to ${list.slice(0, 3).join(', ')}${list.length > 3 ? ` and ${list.length - 3} more` : ''}`;
 }
 
-// `focus`: the tickets the question or record was about, marked in each family
-function relatedHtml(families, focus) {
+// `focus`: the tickets the question or record was about, marked in each family.
+// inChat: under an answer, where every ticket number in the notes opens that ticket
+function relatedHtml(families, focus, inChat = false) {
+    const text = inChat ? linkTicketsHtml : escapeHtml;
     const about = relatedToLabel(focus);
     // Several families: one file with all of them, besides each family's own
     const all = families.length > 1
@@ -12194,8 +14070,8 @@ function relatedHtml(families, focus) {
         : '';
     const single = focus.size === 1 ? [...focus][0] : null;
     const heading = single ? `👪 ${single}'s family: parent, children and other linked tickets` : '🔗 Related tickets';
-    return `<div class="related"><div class="related-title">${escapeHtml(heading)}</div>` + all + families.map(f => {
-        const facts = list => list.map(fact => `<span class="fact"><b>${escapeHtml(fact.field)}:</b> ${escapeHtml(familyFact(fact))}</span>`).join('');
+    return `<div class="related"><div class="related-title">${text(heading)}</div>` + all + families.map(f => {
+        const facts = list => list.map(fact => `<span class="fact"><b>${escapeHtml(fact.field)}:</b> ${text(familyFact(fact))}</span>`).join('');
         const same = f.same.length
             ? `<div class="family-line"><span class="same-label">Same in all ${f.total.toLocaleString()}</span>${facts(f.same)}</div>` : '';
         const differ = f.differ.length
@@ -12207,9 +14083,9 @@ function relatedHtml(families, focus) {
             ? `<button type="button" class="home-action family-show-all" data-show-all>Show all ${members.length.toLocaleString()}</button>` : '';
         const where = single ? familyRoleLine(f, single) : '';
         const download = downloadBarHtml(registerExport({ title: f.title, question: about, tables: familyExportTables(f) }), 'Download this family as');
-        return `<section class="family${extra > 0 ? ' collapsed' : ''}"><div class="family-title">${escapeHtml(f.title)}</div>` +
-            (where ? `<p class="family-where">${escapeHtml(where)}</p>` : '') +
-            `<p class="family-why">${escapeHtml(f.why)}</p>${same}${differ}` +
+        return `<section class="family${extra > 0 ? ' collapsed' : ''}"><div class="family-title">${text(f.title)}</div>` +
+            (where ? `<p class="family-where">${text(where)}</p>` : '') +
+            `<p class="family-why">${text(f.why)}</p>${same}${differ}` +
             ticketTableHtml(members, FAMILY_COLUMNS, focus, 'focus', { rowClass: (t, i) => i >= FAMILY_MEMBERS_SHOWN ? 'more-member' : '' }) +
             more + download + '</section>';
     }).join('') + '</div>';
@@ -12274,9 +14150,9 @@ async function showRelated(container, numbers, conversation, before = null) {
             else slot.remove();
             return;
         }
-        slot.innerHTML = relatedHtml(data.families, new Set(numbers));
-        // Keep the newest answer in view, as the chat does for new messages
         const chatLog = document.getElementById('chat-log');
+        slot.innerHTML = relatedHtml(data.families, new Set(numbers), chatLog.contains(slot));
+        // Keep the newest answer in view, as the chat does for new messages
         if (chatLog.contains(slot) && chatLog.lastElementChild === container) chatLog.scrollTop = chatLog.scrollHeight;
     } catch (err) {
         slot.remove();
@@ -12335,14 +14211,15 @@ function showStarred(quiet = false) {
                 'Your stars are saved to your account, so they are here on any computer you sign in from.</p>';
         }
         const columns = withLinks([STARRED_COLUMN]);
-        const missing = data.notFound.length
-            ? `<p class="home-status">Not in the data any more: ${escapeHtml(data.notFound.join(', '))}</p>` : '';
+        const missing = (data.noAccess?.length
+            ? `<p class="home-status">🔒 You don't have permission to see these any more (they're no longer yours): ${escapeHtml(data.noAccess.join(', '))}</p>` : '') +
+            (data.notFound.length ? `<p class="home-status">Not in the data any more: ${escapeHtml(data.notFound.join(', '))}</p>` : '');
         return '<div class="results-head">' +
             `<p class="home-status">${numbers.length.toLocaleString()} starred ${numbers.length === 1 ? 'ticket' : 'tickets'}, newest first. ` +
             'Tick tickets to unstar several at once.</p>' +
             `<button type="button" class="home-action danger" onclick="unstarAll()">☆ Unstar all</button></div>` +
             unstarByIssueHtml(data.tickets) + selectBarHtml('starred') +
-            ticketTableHtml(data.tickets, columns, new Set(), 'fresh', { select: 'starred' }) + missing + ticketDownloadHtml(data.tickets, 'Starred tickets', columns);
+            ticketTableHtml(data.tickets, columns, new Set(), 'fresh', { select: 'starred', sort: 'starred', lookup: 'starred' }) + missing + ticketDownloadHtml(data.tickets, 'Starred tickets', columns);
     }, quiet).then(() => paintSelection('starred'));
 }
 
@@ -12433,8 +14310,11 @@ function paintSelection(list) {
     const n = selections[list].size;
     const all = out.querySelector('.select-all');
     if (all) {
-        all.checked = n > 0 && n === boxes.length;
-        all.indeterminate = n > 0 && n < boxes.length;
+        // Ticked "all": every ticket the lookup is showing
+        const showing = boxes.filter(b => lookupShows(b.closest('tr')));
+        const ticked = showing.filter(b => b.checked).length;
+        all.checked = ticked > 0 && ticked === showing.length;
+        all.indeterminate = n > 0 && !all.checked;
     }
     const bar = out.querySelector('.select-bar');
     if (!bar) return;
@@ -12461,7 +14341,8 @@ document.addEventListener('click', e => {
     const box = e.target.closest?.('.row-select, .select-all');
     if (box) {
         const list = box.dataset.selectList;
-        const boxes = [...document.getElementById(LIST_BOXES[list]).querySelectorAll('.row-select')];
+        // The rows the lookup is showing (all of them when nothing is typed)
+        const boxes = [...document.getElementById(LIST_BOXES[list]).querySelectorAll('.row-select')].filter(b => lookupShows(b.closest('tr')));
         if (box.classList.contains('select-all')) {
             for (const b of boxes) box.checked ? selections[list].add(b.value) : selections[list].delete(b.value);
         } else {
@@ -12517,6 +14398,11 @@ document.addEventListener('click', e => {
         const numbers = issue.dataset.unstarMany.split(',');
         unstarMany(numbers, `the ${numbers.length} in ${issue.dataset.what}`);
     }
+});
+
+// A lookup in Ticket results or Starred tickets: the header's tick box follows what shows
+document.addEventListener('lookedup', e => {
+    for (const [list, id] of Object.entries(LIST_BOXES)) if (e.target.closest(`#${id}`)) paintSelection(list);
 });
 
 // Enter in the question box asks
@@ -12631,10 +14517,6 @@ document.addEventListener('click', e => {
     const saveChart = e.target.closest('[data-answer-save]');
     if (saveChart) { saveAnswerChart(saveChart.closest('.msg')); return; }
 
-    // Home's example question is asked in the chat
-    const example = e.target.closest('[data-example]');
-    if (example) { askAssistant(example.dataset.example); return; }
-
     const record = e.target.closest('[data-open-dashboard]');
     if (record) { openInDashboards(record.dataset.openDashboard); return; }
 
@@ -12653,6 +14535,14 @@ document.addEventListener('keydown', e => {
         e.preventDefault();
         toggleTicketRow(e.target);
     }
+});
+
+// An answer's chart in another order
+document.addEventListener('change', e => {
+    if (!e.target.matches('[data-answer-order]')) return;
+    const el = e.target.closest('.msg');
+    el._answer.order = e.target.value;
+    setAnswerView(el, el._answer.view);
 });
 
 // =====================================================================
@@ -12687,7 +14577,7 @@ async function loadTicketDetail(box, number) {
         const data = await searchTickets(number, true);
         if (!data || !box.isConnected) return;
         if (!data.found.length) {
-            box.innerHTML = `<p class="home-status">${escapeHtml(number)} is not in the data.</p>`;
+            box.innerHTML = `<p class="home-status">${escapeHtml(notOpenedText(number, data.noAccess))}</p>`;
             return;
         }
         box.innerHTML = ticketCardHtml(data.found[0], data.record);
@@ -13256,8 +15146,16 @@ input[type="search"]:focus {
 //      desk, problems, monitoring, workload, change, change risk, requests,
 //      automation), rebuilt from scratch on every run inside the "OneTouch ITIL"
 //      collection
-//   4. public links for them, saved to metabase-dashboards.json, which the
-//      OneTouch Dashboards tab reads (its drawer groups them by `group`)
+//   4. signed embedding for them (no public links), and their ids saved to
+//      metabase-dashboards.json, which the OneTouch Dashboards tab reads (its
+//      drawer groups them by `group`)
+//
+// WHO SEES WHAT: every dashboard has a "viewer" filter that is locked in the
+// signed link the OneTouch server makes for each person (server.mjs,
+// teams.dashboardViewer), so nobody can change it. Every chart's SQL reads the
+// ticket views only through scopedSql, which keeps the tickets that viewer may
+// see (reporting.visible_tickets, db/init-reporting.sh): admins everything, a
+// project manager their team's, anyone else their own.
 //
 // Safe to re-run (e.g. after changing a chart below):
 //   docker exec analytics_node_app node scripts/metabase-setup.mjs
@@ -13271,6 +15169,8 @@ const MB = (process.env.METABASE_URL || 'http://metabase:3000').replace(/\/+$/, 
 const ADMIN_EMAIL = process.env.METABASE_ADMIN_EMAIL;
 const ADMIN_PASSWORD = process.env.METABASE_ADMIN_PASSWORD;
 const READER_PASSWORD = process.env.METABASE_DB_PASSWORD;
+// Signs each person's dashboard links (the server uses the same one)
+const EMBEDDING_SECRET = process.env.METABASE_EMBEDDING_SECRET;
 const DB_NAME = 'ServiceNow (OneTouch reporting)';
 const COLLECTION_NAME = 'OneTouch ITIL';
 const OUTPUT_FILE = 'metabase-dashboards.json';
@@ -14516,21 +16416,50 @@ async function freshCollection() {
   return (await api('POST', '/api/collection', { name: COLLECTION_NAME, color: '#10a37f', description: 'Dashboards built by OneTouch (scripts/metabase-setup.mjs). Re-running the script rebuilds them.' })).id;
 }
 
+// ---------------------------------------------------------------------
+// Who sees what: each ticket view, and the column holding the ticket number
+// whose access decides (an approval follows the ticket it approves). A view
+// with no rule here can't be used by a chart; data_as_of holds no tickets.
+// ---------------------------------------------------------------------
+
+const VIEWER = 'viewer';
+const SCOPED_VIEWS = {
+  incidents: 'number', changes: 'number', change_breweries: 'number',
+  requests: 'number', catalog_tasks: 'number', approvals: 'parent',
+};
+const UNSCOPED_VIEWS = ['data_as_of'];
+
+// A chart's SQL with every ticket view narrowed to what {{viewer}} may see.
+// Postgres 16 takes a subquery with or without an alias after it.
+function scopedSql(sql, where) {
+  for (const [, view] of sql.matchAll(/\breporting\.([a-z_]+)\b/g)) {
+    if (!SCOPED_VIEWS[view] && !UNSCOPED_VIEWS.includes(view)) throw new Error(`${where}: reporting.${view} has no access rule (SCOPED_VIEWS).`);
+  }
+  return sql.replace(/\breporting\.([a-z_]+)\b/g, (whole, view) => SCOPED_VIEWS[view]
+    ? `(SELECT * FROM reporting.${view} WHERE {{${VIEWER}}} = 'all' OR ${SCOPED_VIEWS[view]} IN (SELECT number FROM reporting.visible_tickets({{${VIEWER}}})))`
+    : whole);
+}
+
 // The {{name}} variables a card's SQL uses, as Metabase template tags. Each
-// must be one of the dashboard's filters (`params`), which fill it.
+// must be one of the dashboard's filters (`params`), which fill it, or the
+// viewer, which every dashboard has.
 function templateTags(sql, def) {
   const names = [...new Set([...sql.matchAll(/\{\{\s*([a-z_]+)\s*\}\}/g)].map(m => m[1]))];
   return Object.fromEntries(names.map(name => {
+    if (name === VIEWER) return [name, { id: randomUUID(), name, 'display-name': 'Viewer', type: 'text', required: true }];
     const param = (def.params || []).find(p => p.slug === name);
     if (!param) throw new Error(`"${def.name}": {{${name}}} is not one of its filters.`);
     return [name, { id: randomUUID(), name, 'display-name': param.name, type: 'text' }];
   }));
 }
 
-// A click (go(...)) as a Metabase click behaviour: a link to the target's
-// public page, its filters set from the clicked row (Metabase URL-encodes
-// {{Column}} values) or to fixed text. Filters the link doesn't set are
-// hidden, and the page title too: OneTouch's toolbar names the page.
+// A click (go(...)) as a Metabase click behaviour: a link to the target page,
+// its filters set from the clicked row (Metabase URL-encodes {{Column}} values)
+// or to fixed text. Each person's pages have their own signed address, which
+// a link can't know, so it names the page (/onetouch/dashboard/<key>) and
+// OneTouch swaps in the viewer's own address (followDashboardFrame in
+// app.js). Filters the link doesn't set are hidden, and the page title too:
+// OneTouch's toolbar names the page.
 function clickBehavior(link, shells) {
   const target = shells.get(link.to);
   if (!target) throw new Error(`Click target "${link.to}" is not a dashboard.`);
@@ -14541,7 +16470,7 @@ function clickBehavior(link, shells) {
   }).join('&');
   const unused = slugs.filter(s => !(s in link.params));
   const hash = ['titled=false', 'bordered=false', ...(unused.length ? [`hide_parameters=${unused.join(',')}`] : [])].join('&');
-  return { type: 'link', linkType: 'url', linkTemplate: `/public/dashboard/${target.uuid}?${query}#${hash}` };
+  return { type: 'link', linkType: 'url', linkTemplate: `/onetouch/dashboard/${target.def.key}?${query}#${hash}` };
 }
 
 // A card's click settings for its dashboard: whole-card `click`, per-column `links`
@@ -14561,24 +16490,25 @@ function checkDefinitions() {
   const keys = all.map(d => d.key);
   const dupe = keys.find((k, i) => keys.indexOf(k) !== i);
   if (dupe) throw new Error(`Two dashboards use the key "${dupe}".`);
-  const fake = new Map(all.map(def => [def.key, { def, uuid: 'check' }]));
+  const fake = new Map(all.map(def => [def.key, { def }]));
   for (const def of all) {
+    if ((def.params || []).some(p => p.slug === VIEWER)) throw new Error(`"${def.name}": "${VIEWER}" is kept for who's looking; name the filter something else.`);
     for (const p of def.params || []) {
       if (!p.values?.sql && !p.values?.list?.length) throw new Error(`"${def.name}": filter "${p.slug}" needs suggestions (distinct(...) or fixed(...)).`);
     }
     for (const c of def.cards) {
-      templateTags(c.sql, def);
+      const sql = scopedSql(c.sql, `"${def.name}" / "${c.name}"`);
+      if (/\breporting\.(?!data_as_of\b)/.test(c.sql) && !sql.includes(`{{${VIEWER}}}`)) throw new Error(`"${c.name}" reads tickets without the viewer.`);
+      templateTags(sql, def);
       clickSettings(c, fake);
     }
   }
 }
 
-// Step 1: an empty dashboard with its public link, so every page's address
-// is known before any link to it is written
+// Step 1: an empty dashboard, so every page exists before any link to it is written
 async function createShell(def, collectionId) {
   const dash = await api('POST', '/api/dashboard', { name: def.name, description: def.description || null, collection_id: collectionId });
-  const { uuid } = await api('POST', `/api/dashboard/${dash.id}/public_link`);
-  return { id: dash.id, uuid, def };
+  return { id: dash.id, def };
 }
 
 // A filter, with its suggestions: values read from the data become a small
@@ -14611,7 +16541,8 @@ async function fillDashboard(shell, databaseId, collectionId, shells) {
   const positions = layout(def.cards);
   const dashcards = [];
   for (const [i, c] of def.cards.entries()) {
-    const tags = templateTags(c.sql, def);
+    const sql = scopedSql(c.sql, `"${def.name}" / "${c.name}"`);
+    const tags = templateTags(sql, def);
     const card = await api('POST', '/api/card', {
       name: c.name,
       // Shown as the (i) tip on the chart: how to read it
@@ -14619,7 +16550,7 @@ async function fillDashboard(shell, databaseId, collectionId, shells) {
       collection_id: collectionId,
       display: c.display,
       visualization_settings: c.viz || {},
-      dataset_query: { type: 'native', native: { query: c.sql.trim(), 'template-tags': tags }, database: databaseId },
+      dataset_query: { type: 'native', native: { query: sql.trim(), 'template-tags': tags }, database: databaseId },
     });
     dashcards.push({
       id: -(i + 1), card_id: card.id, ...positions[i],
@@ -14629,9 +16560,15 @@ async function fillDashboard(shell, databaseId, collectionId, shells) {
       })),
     });
   }
-  const parameters = [];
+  // Who's looking: locked in each person's signed link, so it never shows as a filter
+  const parameters = [{ id: `p_${VIEWER}`, name: 'Viewer', slug: VIEWER, type: 'string/=', sectionId: 'string', isMultiSelect: false }];
   for (const p of def.params || []) parameters.push(await filterParameter(p, def, databaseId, collectionId));
   await api('PUT', `/api/dashboard/${shell.id}`, { parameters, dashcards });
+  // Signed links only: the viewer is locked, the page's own filters stay for people to change
+  await api('PUT', `/api/dashboard/${shell.id}`, {
+    enable_embedding: true,
+    embedding_params: Object.fromEntries([[VIEWER, 'locked'], ...(def.params || []).map(p => [p.slug, 'enabled'])]),
+  });
   console.log(`Built "${def.name}"${def.params ? ' (detail page)' : ''}: ${def.cards.length} charts.`);
 }
 
@@ -14651,8 +16588,9 @@ async function enableCaching() {
 // ---------------------------------------------------------------------
 
 async function main() {
-  if (!ADMIN_EMAIL || !ADMIN_PASSWORD || !READER_PASSWORD) {
-    throw new Error('Set METABASE_ADMIN_EMAIL, METABASE_ADMIN_PASSWORD and METABASE_DB_PASSWORD in .env, ' +
+  if (!ADMIN_EMAIL || !ADMIN_PASSWORD || !READER_PASSWORD || !/^[0-9a-f]{64}$/.test(EMBEDDING_SECRET || '')) {
+    throw new Error('Set METABASE_ADMIN_EMAIL, METABASE_ADMIN_PASSWORD, METABASE_DB_PASSWORD and METABASE_EMBEDDING_SECRET ' +
+      '(64 hex characters: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))") in .env, ' +
       'then run `docker compose up -d` so the app container sees them.');
   }
   // --cache-only: just switch result caching on, leaving the dashboards (and their links) as they are
@@ -14665,7 +16603,11 @@ async function main() {
   checkDefinitions();
   await waitForMetabase();
   await signIn();
-  await api('PUT', '/api/setting/enable-public-sharing', { value: true });
+  // Each person gets signed links (server.mjs); public links, which show every
+  // ticket to anyone holding one, are switched off
+  await api('PUT', '/api/setting/enable-embedding', { value: true });
+  await api('PUT', '/api/setting/embedding-secret-key', { value: EMBEDDING_SECRET });
+  await api('PUT', '/api/setting/enable-public-sharing', { value: false });
   await enableCaching();
   const databaseId = await connectDatabase();
   const collectionId = await freshCollection();
@@ -14676,10 +16618,10 @@ async function main() {
 
   // The drawer lists `dashboards`; `details` lets OneTouch name the page a click opened
   await writeFile(OUTPUT_FILE, JSON.stringify({
-    dashboards: DASHBOARDS.map(d => ({ key: d.key, group: d.group, name: d.name, description: d.description, uuid: shells.get(d.key).uuid })),
-    details: DETAILS.map(d => ({ key: d.key, name: d.name, uuid: shells.get(d.key).uuid, params: d.params })),
+    dashboards: DASHBOARDS.map(d => ({ key: d.key, group: d.group, name: d.name, description: d.description, id: shells.get(d.key).id })),
+    details: DETAILS.map(d => ({ key: d.key, name: d.name, id: shells.get(d.key).id, params: d.params })),
   }, null, 2) + '\n');
-  console.log(`Saved the public links to ${OUTPUT_FILE}; the OneTouch Dashboards tab shows them now.`);
+  console.log(`Saved the dashboards to ${OUTPUT_FILE}; the OneTouch Dashboards tab signs a link to each for whoever opens it.`);
 }
 
 try {
@@ -14801,14 +16743,19 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 
 | File | Role |
 |---|---|
-| `server.mjs` | Express app (port 8000): sign-in routes, `/api/query` (one-shot translator with per-session conversation memory), `/api/export`, `/api/tickets/search` and `/api/stars` (home page), dashboards list, and a pass-through of Metabase public-dashboard pages |
-| `tickets.mjs` | Home page ticket search: parses INC/CHG/RITM/SCTASK/REQ numbers and builds its own Cube queries from them (never from model output); full records use Cube's `/meta` column list |
+| `server.mjs` | Express app (port 8000): sign-in routes, `/api/query` (one-shot translator with per-session conversation memory), `/api/export`, `/api/tickets/search` and `/api/stars` (home page), dashboards list (a Metabase embed link signed per person, `signedDashboardPath`, with the `viewer` filter locked to them), and a pass-through of Metabase's embedded-dashboard pages (`/embed/`, `/api/embed/`; public links are off) |
+| `tickets.mjs` | `loadTicketIndex`: every ticket's summary row (plus its link columns, `t.links`) read from Cube once at start, only for ordering, looking up and family rows of numbers someone may already see; it also sets each request's team to its catalog tasks' teams (`requestTeams`, used by `toTicket`; a request with no "requested for" shows "<opened_by> (opened it)"). Server lookups: `parseLookup` / `lookupTerms` / `lookupMatches`, `openedText` (a date as shown and raw), `blankText` (what an empty column says, as app.js `blankText`) (`TICKET_SORTS`, `sortRows`: numbers as numbers, text with a numeric collator, empty last). Home's "Assigned to me" (`ticketsByPriority`: priority rank from an incident's P1-P4 or a change's risk, requests and tasks last, then oldest; cached per list of numbers; `GET /api/my-tickets`, drawn by `showAssigned` / `assignedHtml` in app.js). Home page ticket search: parses INC/CHG/RITM/SCTASK/REQ numbers and builds its own Cube queries from them (never from model output); full records use Cube's `/meta` column list |
 | `relations.mjs` | Related tickets: from the link columns only (incident.parent_incident, sc_req_item.parent / request, sc_task.request_item, change_request.incident, incident.caused_by_change, *.problem), the families a ticket is in, with `same` / `differ` comparisons and every member (the page lists 25 but downloads all, via `familyExportTables` in app.js); one ticket gets all its families, a list only families 2+ of its tickets share. `POST /api/tickets/related` (conversation: true adds `describeFamilies` to Claude's pendingNote). The family builders (`parentIncidentFamily`, `bundleFamily`, …) are shared with the Ticket families page: `familyList` / `familySummary` / `familyOf` (`/api/families…`). `familyRow(kind, anchor, index, canSee)`: a page row's columns, the anchor's own if this person may see it, else made from the family's visible tickets (from the index's links); the route sorts and looks up by them. `ticketLinks`: per ticket, its parent and families (`key` = kind:anchor, name, size) for the Ticket results / Starred lists, cached per ticket |
-| `public/lookup.js` | The 🔍 box over every ticket list (`lookupBarHtml(list, labels, { mode, count, noun })`): every word must appear, in the picked column or any; "quotes" keep a phrase; same rules as `tickets.mjs` `lookupTerms` / `lookupMatches` on the server. Mode `rows`: the box sits right before the list's `.table-wrap` and hides non-matching rows (`tr.lookup-miss`, a `.row-detail` follows its row; cell text = its `title` or text, plus a raw date from `data-sort`), fired as `lookedup` so Ticket results / Starred tick-all only what shows. Mode `list`: the list registers `pagedLookups[name]` and redraws (Assigned to me and a family's tickets filter their data with `lookedUpTickets` + app.js `ticketLookupText`; Team families, the Team tab and the Families page send `lookupQuery(list)` = `q`/`col` to the server), then `restoreLookupFocus` gives the new box the keys. Named lists keep what's typed in `listLookups` (cleared on sign-out); `ticketTableHtml(…, { lookup })` adds a rows box to any list of 2+ |
 | `public/families.js` | The 👪 Ticket families page in the Dashboards tab (built into OneTouch: `showFamilies` / `hideFamilies`, remembered as `last: 'families'`) and the ticket window (`openTicketDialog`, with a back trail); ticket numbers clicked on that page, in that window or in a chart's ticket list (`openDrill`) open there, not on Home. Also `showRecordFamily(number)`: the family band (`#record-family`) above a Metabase incident / change / request record, called by app.js's `followDashboardFrame`; a ticket in it with a record page opens that page (`openInDashboards`), others the ticket window |
 | `stars.mjs` | Each person's starred tickets, in `onetouch_auth` (`starred_tickets`, created on start); `addStars` stars many at once ("Star all", `PUT /api/stars`) up to `MAX_STARS`; `removeStars` unstars many (`POST /api/stars/remove`: ticked rows, "Unstar by issue", "Unstar all"). `GET /api/stars?details=1` adds summaries, parents and families |
 | `seen.mjs` | Each person's "Ticket results": every ticket shown to them (`seen_tickets`, created on start). `/api/query` records the ticket numbers in each answer (`ticketNumbersIn`) before replying and returns them as `shownTickets`; `GET /api/seen-tickets` returns the list with summaries (`ticketSummaries`); `DELETE /api/seen-tickets` empties it ("Clear ticket results"), `POST /api/seen-tickets/remove` removes ticked rows (`removeSeen`); the list carries each ticket's parent and families (`ticketLinks`) |
 | `prefs.mjs` | Each person's preferences in `onetouch_auth` (`user_preferences`: one JSONB per user, saved in parts `theme` / `home` / `dashboards` / `tour` via `PUT /api/preferences/:part`, reset with `DELETE`; `tour` is `{ done, dashboards }`: Home's tour and the Dashboards page's tour seen). `cleanPreference` drops unknown keys and caps sizes (20 dashboards x 30 charts, 30 Home sections); every chart goes through `sanitizeChart` |
+| `public/picker.js` | The box where a PM or admin types a team member's name to assign (ARIA combobox): `personPickerHtml(teamId, current, label, { nobody, placeholder, attrs })`, the team's names from `setPickerPeople` (teams.js `rememberPickerPeople`, from `/api/teams`; cleared at sign-out). A pick fires a bubbling `personpick` event (`{ id, previous, name }`, id null = nobody) that the list handles: a ticket's box (`data-number`) calls `assign`, a family's (`data-family`) calls teams.js `giveFamily` (asks first) -> `PUT /api/ticket-families/:id/assignee` -> `teams.assignFamily` (shares `giveTickets` with `assignTickets`: team check, one transaction, notification with `detail.family`). The list is `position: fixed` so table scroll boxes don't clip it. Tests in headless Edge need `Emulation.setFocusEmulationEnabled` or focus events don't fire |
+| `public/lookup.js` | The 🔍 box over every ticket list (`lookupBarHtml(list, labels, { mode, count, noun })`): every word must appear, in the picked column or any; "quotes" keep a phrase; same rules as `tickets.mjs` `lookupTerms` / `lookupMatches` on the server. Mode `rows`: the box sits right before the list's `.table-wrap` and hides non-matching rows (`tr.lookup-miss`, a `.row-detail` follows its row; cell text = its `title` or text, plus a raw date from `data-sort`), fired as `lookedup` so Ticket results / Starred tick-all only what shows. Mode `list`: the list registers `pagedLookups[name]` and redraws (Assigned to me and a family's tickets filter their data with `lookedUpTickets` + app.js `ticketLookupText`; Team families, the Team tab and the Families page send `lookupQuery(list)` = `q`/`col` to the server), then `restoreLookupFocus` gives the new box the keys. Named lists keep what's typed in `listLookups` (cleared on sign-out); `ticketTableHtml(…, { lookup })` adds a rows box to any list of 2+ |
+| `public/sorting.js` | Every ticket list and table sorts by any column: a heading (`sortHeadHtml(list, col, label, cls)` inside a `<table data-sort-list="…">`) cycles ascending → descending → the list's own order; empty cells last either way; values from a cell's `data-sort`, its KPI chips (`kpiAttention`, same weights as `kpis.attention`), its `<select>`, or its text. `ticketTableHtml(…, { sort })` does this for ticket lists (`TICKET_SORT_VALUES` in app.js: dates raw, Priority / Risk by `levelRank`). A named list keeps its sort while the page is open (`listSorts`, cleared on sign-out); `''` sorts in place only. Lists shown a page at a time must sort everything, not the page: they register `pagedSorts[name]` and redraw (Assigned to me, a family's tickets) or ask the server (`sortQuery`: Team tab tickets `sort=number…assignee`, Team families `family/size/kpis`, the Families page `parent…size`). Rows `.row-detail` move with their row, `.sort-pinned` stay last. Charts: `sort` `count`/`label` + `direction` `asc`/`desc` (`chartOrder`; charts saved without a direction keep their old order), the tile's ⇅ menu, the builder's Order, an answer's Order menu (`orderChartRows` / `orderSeries`) |
+| `kpis.mjs` | Ticket and family KPIs: every ticket's KPI fields read from Cube once at start (`load`, fixed query), "now" = newest timestamp in the data, "typical" = median of that kind; `ticketKpis`, `teamFamilyKpis` (families with open tickets first), `oneFamilyKpis`. A KPI is `{ key, label, value, tone: good/warn/bad/info, detail }`. Routes: `POST /api/kpis/tickets` (only numbers `teams.canSeeTicket` allows), `GET /api/kpis/families[/:id]` (team's PM or admin, `teams.teamFamilies` / `familyMembers`). app.js: `KPI_COLUMN` + `fillTicketKpis` in "Assigned to me", `showFamilyKpis` for Home's "Team families" tab. Page scripts share one global scope: a top-level `const` named like one in another script (e.g. `familiesView` in families.js) breaks the whole page |
+| `mail.mjs` | Every notification by email through Brevo's transactional API (`POST https://api.brevo.com/v3/smtp/email`, header `api-key`; no npm package). Outbox: `notifications.email_state` 'pending' (rows from before email existed are 'before'), `sendPending` every 30 s after the change has committed: 'sent' / 'skipped' + `email_note` (test or service account, deactivated, no `users.email`, `users.email_notifications` off, not on `MAIL_ONLY_TO`, older than an hour) / retried with doubling waits, 'failed' after 5. `emailFor` words it like public/notifications.js (numbers and a link only). Settings in `.env`: `BREVO_API_KEY` (none: off), `MAIL_FROM`, `MAIL_FROM_NAME`, `APP_URL`, `MAIL_ONLY_TO`; tests point `BREVO_API_URL` at a stand-in and shorten `MAIL_INTERVAL_MS` / `MAIL_RETRY_MS`. Addresses: `auth.setEmail` (`npm run users -- email|emails`), never exported to `db/accounts.json`; `GET /api/me` returns `email: { address, on, enabled }`, `PUT /api/me/email { on }` (the 🔔 panel's switch, `paintEmailSetting`). `npm run mail-test -- <address>` sends one test email. Never test with a real person's address |
+| `notifications.mjs` | The 🔔 in the header (`notifications` in `onetouch_auth`): kinds `assigned` (someone gave you tickets), `family` (a family moved to the team you're the project manager of) and `report` (a member says they resolved or closed a ticket). `teams.mjs` makes them in the same transaction as the change; `teams.reportTicket` also writes `ticket_reports`, which only tells the PM and never changes the ticket. Routes: `GET /api/notifications`, `POST /api/notifications/read`, `POST /api/tickets/report`. `public/notifications.js`: the list (checked every minute, opening it marks them read), and the "Tell my project manager" dialog (`reportButtonHtml`, on a ticket's record and the Team tab's rows) |
 | `charts.mjs` | The charts people build: `CHART_SOURCES` (per ticket type, the fields to group / filter by and the time groupings), `sanitizeChart`, `chartData` (builds its own Cube query: count, one dimension, `equals` / `notEquals` / `contains` filters, open / closed states from `ENTITY_CATALOG`, a day range, plus a dashboard's `scope` (dates, teams via `TEAM_FIELDS`); top N plus an `other` total), `chartTickets` (the tickets behind one bar), `chartFromQuery` (an AI answer's validated query as a chart, returned on `/api/query` as `chartable`), `chartValues` / `teamValues`, `chartCatalog`. In-memory LRU cache, since the data is frozen. Routes: `/api/charts/catalog`, `/api/charts/data`, `/api/charts/values`, `/api/charts/teams`, `/api/charts/tickets` |
 | `shares.mjs` | Shared dashboards (`shared_dashboards` in `onetouch_auth`): one random token per (owner, dashboard), re-sharing updates it, anyone signed in can read it (`/api/shares`). The board goes through `prefs.cleanBoard` |
 | `business_logic.mjs` | Everything Claude knows about the data: `ENTITY_CATALOG`, `buildSystemPrompt()` (sections A-E), `OUTPUT_SCHEMA`, and `normalizeAndValidate()`, which every Claude-built query passes through before Cube |
@@ -14816,13 +16763,13 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 | `export.mjs` | Tables -> pdf/docx/xlsx/csv/txt/rtf, and zip/7z bundles (7-Zip). An optional `chart` (a PNG data URL the browser drew) goes above the tables in pdf/docx/xlsx/rtf and into archives; tables marked `note` stay out of CSV |
 | `auth.mjs` | Accounts and sessions in the `onetouch_auth` Postgres DB (its own role `onetouch_app`); scrypt hashes; `db/accounts.json` export/sync |
 | `remote.mjs` | "Remote mode" for clones: serves `public/` on localhost and forwards `/api`, `/public`, `/app` to a OneTouch server |
-| `public/` | The single-page UI (`index.html`, `app.js`, `style.css`); no build step. The AI assistant is the header's Ask bar (`#nav-ask`, `askFromHeader`: a question is asked in the chat, nothing typed opens it; "/" focuses it; a capturing `pointerdown` on the document closes the chat on any click outside it, header included, except inside a `<dialog>` or the tour; the chat opens as a panel over the page; ticket rows in its answers open in place into the record plus related tickets via `toggleTicketRow`; a record's families go above its fields: `showRelated(container, numbers, conversation, before)`, with `familyRoleLine` saying where the ticket sits and the anchor first. Ticket numbers in fields and answer cells are links via `ticketValueHtml`; in the chat's text (typed questions, answers, text in answer cells via `answerValueHtml`, and `relatedHtml(…, inChat)`) every full number is a `.ticket-link.in-text` button via `linkTicketsHtml`. Ticket results / Starred tickets have checkboxes (`selections`, `selectBarHtml`): ask the AI about the ticked ones (`askAboutTicked`), remove, unstar, or both (`unstarAndRemove`)), ticket results (a clicked ticket's record) and starred tickets; Dashboards is the other tab. Delete chat resets the server conversation and bumps `chatEpoch` so a late answer is dropped. `customize.js` (colors panel, Customize Home, My dashboards and their filter row, hiding team dashboards, the chart builder, the drill-down list, sharing, the tours of Home and of the Dashboards page (`TOURS`, `startTour(name)`, `maybeStartTour(name)`), saving preferences) and `charts.js` (SVG charts incl. several series, tooltips, table view, click-through via a box's `_pick`, pictures for downloads via `chartPicture` / `picturePng`) load before `app.js`; their start-up work (`buildThemePanel`, `buildBuilder`, `buildBoardFilters`) is called from `app.js` because they use its helpers. Every color in `style.css` is a variable (`:root`, `[data-theme="dark"]`, `[data-header=...]`); never hard-code one |
+| `public/` | The single-page UI (`index.html`, `app.js`, `style.css`); no build step. The AI assistant is the header's Ask bar (`#nav-ask`, `askFromHeader`: a question is asked in the chat, nothing typed opens it; "/" focuses it; a capturing `pointerdown` on the document closes the chat on any click outside it, header included, except inside a `<dialog>` or the tour; the chat opens as a panel over the page; ticket rows in its answers open in place into the record plus related tickets via `toggleTicketRow`; a record's families go above its fields: `showRelated(container, numbers, conversation, before)`, with `familyRoleLine` saying where the ticket sits and the anchor first. Ticket numbers in fields and answer cells are links via `ticketValueHtml`. Ticket results / Starred tickets have checkboxes (`selections`, `selectBarHtml`): ask the AI about the ticked ones (`askAboutTicked`), remove, unstar, or both (`unstarAndRemove`)), ticket results (a clicked ticket's record) and starred tickets; Dashboards is the other tab. Delete chat resets the server conversation and bumps `chatEpoch` so a late answer is dropped. `customize.js` (colors panel, Customize Home, My dashboards and their filter row, hiding team dashboards, the chart builder, the drill-down list, sharing, the tours of Home and of the Dashboards page (`TOURS`, `startTour(name)`, `maybeStartTour(name)`), saving preferences) and `charts.js` (SVG charts incl. several series, tooltips, table view, click-through via a box's `_pick`, pictures for downloads via `chartPicture` / `picturePng`) load before `app.js`; their start-up work (`buildThemePanel`, `buildBuilder`, `buildBoardFilters`) is called from `app.js` because they use its helpers. Every color in `style.css` is a variable (`:root`, `[data-theme="dark"]`, `[data-header=...]`); never hard-code one |
 | `db/` | `init-auth.sh`, `init-reporting.sh`, `reporting-views.sql` (typed `reporting.*` views for Metabase), `accounts.json` |
 | `scripts/users.mjs` | Account admin CLI (add, import CSV, export, sync, ...) |
 | `scripts/signin-links.mjs` | Prints a sign-in link per person (`…/#user=…&pass=…`, which `readSignInLink` in app.js fills into the form) from the import CSV plus the test accounts and warmup in `.env`. Its output holds passwords: the person running it reads it in their terminal; don't print it from an agent session |
 | `scripts/warmup.mjs` | `npm run warmup`: before a crowd, asks every question in `scripts/warmup-questions.txt` (so each is answered from the repeated-question cache) and opens every dashboard (filling Metabase's result cache); lists anything that failed |
 | `scripts/share.mjs` | `npm run share`: starts the stack and a Cloudflare tunnel (free, or permanent with `TUNNEL_TOKEN`), checks the link from outside via public DNS, prints and copies it; `--new`, `--stop` |
-| `scripts/metabase-setup.mjs` | Builds the Metabase dashboards (the `DASHBOARDS` list, each with its drawer `group`) and the drill-down pages clicks open (`DETAILS`; each chart's `click` / table's `links` say where a click goes) via Metabase's API; every filter needs suggestions (`distinct(...)` from the reporting views, or `fixed(...)`); turns on result caching (`--cache-only` does just that); checks every link and filter before changing anything; rerunnable (new links each run). Writes `metabase-dashboards.json`, which the Dashboards tab reads; `public/app.js` returns to the main dashboard when a detail page's filters are all cleared |
+| `scripts/metabase-setup.mjs` | Builds the Metabase dashboards (the `DASHBOARDS` list, each with its drawer `group`) and the drill-down pages clicks open (`DETAILS`; each chart's `click` / table's `links` say where a click goes) via Metabase's API; every filter needs suggestions (`distinct(...)` from the reporting views, or `fixed(...)`); turns on result caching (`--cache-only` does just that); checks every link and filter before changing anything; rerunnable. Every chart's SQL goes through `scopedSql`, which narrows each ticket view (`SCOPED_VIEWS`; any other view is refused) to `reporting.visible_tickets({{viewer}})`; `viewer` is a locked embedding parameter on every dashboard. Click links point at `/onetouch/dashboard/<key>?filters`, and `followDashboardFrame` (app.js) swaps in the person's signed address. Needs `METABASE_EMBEDDING_SECRET`; turns public sharing off. Writes `metabase-dashboards.json` (dashboard ids), which `/api/dashboards` signs per person; `public/app.js` returns to the main dashboard when a detail page's filters are all cleared |
 | `model/cubes/*.yml` | Cube data model over `analytics_db` |
 | `docker-compose.yml` | postgres, db-setup (runs `db/init-*.sh` on every `up`), cube, metabase, app, optional Cloudflare tunnels |
 
@@ -14854,7 +16801,7 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 - **Repeated questions skip Claude.** A conversation-opening question asked before reuses the stored user turn *and* Claude's reply as the conversation's history, so follow-ups see exactly what Claude produced. Changing `buildSystemPrompt()`, `buildUserMessage()` or the output schema needs a server restart, which empties that cache. `/api/query` streams `progress` / `result` server-sent events when asked for `text/event-stream`.
 - **Accounts:** after changing accounts, run `node scripts/users.mjs export` and commit `db/accounts.json` (hashes only), so clones get them.
 - **Cloudflare makes browsers keep `.js` / `.css` for 4 hours** (it rewrites `max-age=0` to `max-age=14400`). `server.mjs` serves `index.html` itself, adding `?v=<content hash>` to each `<script src="x.js">` and `<link rel="stylesheet" href="x.css">`, so changed files reach browsers at once. Add new page files in exactly that form, or they skip the versioning and can be stale for hours.
-- **Test as `tester1` (and `tester2` when a second person is needed), passwords `TESTER1_PASSWORD` / `TESTER2_PASSWORD` in `.env`.** Never test as a real person (a wrong-password check counts toward locking them out, and their stars, lists and last sign-in change) or as `warmup` (the warm-up fills its Ticket results). Put back what a test changes on the test accounts; both have the Home and Dashboards tours marked as seen.
+- **Test as `tester1` (and `tester2` when a second person is needed), passwords `TESTER1_PASSWORD` / `TESTER2_PASSWORD` in `.env`.** Never test as a real person (a wrong-password check counts toward locking them out, and their stars, lists and last sign-in change) or as `warmup` (the warm-up fills its Ticket results). Put back what a test changes on the test accounts; both have the Home and Dashboards tours marked as seen. The test accounts are on no team (`teams.mjs` only lets test accounts, `tester*` and `test.<name>`, join a test team such as the Milwaukee Brewers), so they see no tickets: to test teams, assignments or notifications, use a throwaway database (`CREATE DATABASE onetouch_auth_test OWNER onetouch_app`, run the server on another port with `AUTH_DB_NAME=onetouch_auth_test AUTH_DB_HOST=localhost ACCOUNTS_FILE=`, fill in a team or two by hand, then drop it), never real people's assignments. Start that server with `BREVO_API_KEY=` too, since `.env` has the real key and the test accounts may carry a real address. Its `starred_tickets` and `seen_tickets` tables only exist once the server has started on it, so add the demo families (the part of `db/demo-tickets.sql` after `\connect onetouch_auth`) after that.
 - **Metabase's dark look lives in the frame's hash (`theme=night`), and click links drop it.** The click links in `metabase-setup.mjs` can't carry each viewer's look, so `followDashboardFrame` (app.js) adds it back with `location.replace` on a same-page hash change, which Metabase picks up without a reload and which leaves ← Back alone. Change a frame address with `themedFrameHash`, which keeps the rest of the hash (`hide_parameters`); rebuilding the hash from `frameHash()` loses it.
 
 ## Before you finish
@@ -15005,12 +16952,22 @@ const FILES = [
   'seen.mjs', 'relations.mjs',
   'prefs.mjs', 'charts.mjs', 'public/charts.js', 'public/customize.js', 'shares.mjs', 'public/families.js',
   'scripts/signin-links.mjs', 'chats.mjs', 'teams.mjs', 'public/teams.js', 'CLAUDE.md',
+  'notifications.mjs', 'public/notifications.js', 'kpis.mjs', 'public/sorting.js', 'public/picker.js',
+  'public/lookup.js', 'mail.mjs', 'scripts/mail-test.mjs', 'db/demo-tickets.sql', 'db/demo-tickets-remove.sql',
+  'servicenow-sync/package.json', 'servicenow-sync/.env.example', 'servicenow-sync/db/schema.sql',
+  'servicenow-sync/src/app.js', 'servicenow-sync/src/config/db.js', 'servicenow-sync/src/config/schema.js',
+  'servicenow-sync/src/middleware/verifyToken.js', 'servicenow-sync/src/routes/webhook.js',
+  'servicenow-sync/src/processRecord.js', 'servicenow-sync/src/db/upsertRecord.js',
+  'servicenow-sync/src/db/pending.js', 'servicenow-sync/src/families.js',
+  'servicenow-sync/servicenow-blueprint.md',
+  'checks/ticket-order.mjs', '.github/workflows/ci.yml',
 ];
 
 // Not copied in, and why (shown in the appendix)
 const SKIPPED = {
   'README.md': 'this file',
   'package-lock.json': 'written by `npm install`; the versions it pins are in the table above',
+  'servicenow-sync/package-lock.json': 'written by `npm install` in `servicenow-sync/`',
   'db/accounts.json': "everyone's usernames and password hashes; make your own accounts instead (step 16)",
 };
 
@@ -15135,6 +17092,9 @@ if (process.argv.includes('--check')) {
 // TICKET_PATTERN, never from model output, so nothing unchecked reaches Cube.
 // =====================================================================
 
+import { createHash } from 'node:crypto';
+import { ENTITY_CATALOG } from './business_logic.mjs';
+
 // What each prefix is, which cube holds it, and which of its columns fill
 // the summary table (summary / state / level / team / person / opened)
 export const TICKET_KINDS = {
@@ -15150,8 +17110,10 @@ export const TICKET_KINDS = {
   },
   RITM: {
     cube: 'sc_req_item', label: 'Request',
-    // Requests have no team or priority; the catalog item stands in for a missing summary
-    fields: { summary: 'short_description', item: 'item', state: 'state', person: 'requested_for', opened: 'opened', parent: 'request' },
+    // Requests have no team or priority; the catalog item stands in for a missing
+    // summary, who opened it for a missing "requested for", and the teams doing its
+    // catalog tasks for its team (toTicket)
+    fields: { summary: 'short_description', item: 'item', state: 'state', person: 'requested_for', opener: 'opened_by', opened: 'opened', parent: 'request' },
     lead: ['number', 'short_description', 'item', 'state', 'stage', 'approval', 'requested_for', 'opened_by', 'opened', 'closed', 'request', 'location'],
   },
   SCTASK: {
@@ -15188,19 +17150,24 @@ export function parseTicketNumbers(text) {
 
 export const prefixOf = number => number.match(/^[A-Z]+/)[0];
 
+// A request's team: the teams doing its catalog tasks, most tasks first
+// ("A, B"), from the ticket index once it has loaded. RITM -> text.
+let requestTeams = new Map();
+
 // One Cube row -> the summary the ticket tables show (also used by relations.mjs)
 export function toTicket(prefix, row) {
   const { cube, label, fields } = TICKET_KINDS[prefix];
   const value = key => (fields[key] ? row[`${cube}.${fields[key]}`] ?? '' : '');
+  const number = row[`${cube}.number`];
   return {
-    number: row[`${cube}.number`],
+    number,
     kind: prefix,
     type: label,
     summary: value('summary') || value('item'),
     state: value('state'),
     level: value('level'),
-    team: value('team'),
-    person: value('person'),
+    team: value('team') || (prefix === 'RITM' ? requestTeams.get(number) || '' : ''),
+    person: value('person') || (value('opener') ? `${value('opener')} (opened it)` : ''),
     opened: value('opened'),
     parent: value('parent'),
   };
@@ -15264,9 +17231,21 @@ export async function findTickets(text, runQuery) {
   return { found, notFound, ignored: parsed.ignored, tooMany: parsed.wanted.length > MAX_SEARCH_NUMBERS };
 }
 
+// Which of these full numbers (tickets, or orders) are in the data, from the
+// index. Only used to tell someone that a number they couldn't open is someone
+// else's ticket ("you don't have permission"); nothing in it is ever sent.
+export function inTheData(index, numbers) {
+  const known = new Set(numbers.filter(n => index.has(n)));
+  const orders = new Set(numbers.filter(n => prefixOf(n) === ORDER_PREFIX));
+  if (orders.size) for (const t of index.values()) if (t.kind === 'RITM' && orders.has(t.parent)) known.add(t.parent);
+  return known;
+}
+
 // Summaries for a list of exact ticket numbers (e.g. everything someone has
 // been shown), without the search's 200-number limit -> Map(number -> ticket)
 export async function ticketSummaries(numbers, runQuery) {
+  // Just after a start: requests get their teams once the index has loaded
+  await ticketIndex?.catch(() => null);
   const byPrefix = new Map();
   for (const n of new Set(numbers)) {
     if (!STARRABLE.test(n)) continue;
@@ -15276,6 +17255,205 @@ export async function ticketSummaries(numbers, runQuery) {
   }
   const looked = await Promise.all([...byPrefix].map(([p, list]) => lookUp(p, list, runQuery)));
   return new Map(looked.flat().map(t => [t.number, t]));
+}
+
+// ---------------------------------------------------------------------
+// ASSIGNED TO ME (Home): someone's OneTouch tickets, most urgent first. Only
+// incidents have a priority (P1-P4); a change's risk stands in for it, as the
+// "Priority / Risk" column already does. Requests and catalog tasks have
+// neither, so they come after everything that has one. The same priority:
+// the oldest first.
+// ---------------------------------------------------------------------
+
+const RISK_RANK = { High: 2, Medium: 3, Low: 4, Standard: 4 };
+const NO_PRIORITY = 5;
+export function priorityRank(t) {
+  if (t.kind === 'INC') return Number((/^P([1-4])\b/.exec(t.level) || [])[1]) || NO_PRIORITY;
+  if (t.kind === 'CHG') return RISK_RANK[t.level] ?? NO_PRIORITY;
+  return NO_PRIORITY;
+}
+
+const OPEN_STATES = Object.fromEntries(Object.entries(TICKET_KINDS)
+  .map(([prefix, kind]) => [prefix, new Set(ENTITY_CATALOG[kind.cube].openStates)]));
+export const isOpen = t => OPEN_STATES[t.kind]?.has(t.state) ?? false;
+
+// The data is frozen, so one list of numbers always sorts the same: kept
+// (newest 200), keyed by the numbers and who's asking
+const sortedLists = new Map();
+// numbers -> [ticket + { open, rank }], most urgent first
+export function ticketsByPriority(numbers, runQuery) {
+  const key = `${runQuery.scopeKey}:${createHash('sha256').update(numbers.join(',')).digest('hex')}`;
+  if (sortedLists.has(key)) return sortedLists.get(key);
+  const sorted = ticketSummaries(numbers, runQuery).then(found => [...found.values()]
+    .map(t => ({ ...t, open: isOpen(t), rank: priorityRank(t) }))
+    .sort((a, b) => a.rank - b.rank
+      || (a.opened ? 0 : 1) - (b.opened ? 0 : 1)
+      || String(a.opened).localeCompare(String(b.opened))
+      || a.number.localeCompare(b.number)));
+  sorted.catch(() => sortedLists.delete(key));
+  sortedLists.set(key, sorted);
+  if (sortedLists.size > 200) sortedLists.delete(sortedLists.keys().next().value);
+  return sorted;
+}
+
+// ---------------------------------------------------------------------
+// SORTING long lists by any column (the Team tab's tickets, the Families
+// page): every ticket's summary, read from Cube once (the data is frozen),
+// so thousands of tickets sort without asking Cube again. It only ever
+// orders tickets someone may already see; what they're shown still comes
+// from their own queries.
+// ---------------------------------------------------------------------
+
+const INDEX_MAX_ROWS = 50000;
+let ticketIndex = null; // Promise of Map(number -> ticket summary)
+
+// The link columns each ticket keeps in the index (t.links), so a family's
+// tickets are found without asking Cube (relations.mjs familyRow). A request's
+// order and a task's request are already its `parent`.
+const INDEX_LINKS = {
+  INC: { parentIncident: 'parent_incident', problem: 'problem', causedByChange: 'caused_by_change' },
+  CHG: { fixesIncident: 'incident', problem: 'problem' },
+  RITM: { bundle: 'parent' },
+  SCTASK: {},
+};
+
+export function loadTicketIndex(runCubeQuery) {
+  if (!ticketIndex) {
+    ticketIndex = readTicketIndex(runCubeQuery);
+    ticketIndex.catch(() => { ticketIndex = null; }); // try again next time
+  }
+  return ticketIndex;
+}
+
+// Tickets arrived or changed (servicenow-sync/): the index is read again, and
+// the old one serves until the new one is ready
+export async function reloadTicketIndex(runCubeQuery) {
+  const fresh = readTicketIndex(runCubeQuery);
+  await fresh;
+  ticketIndex = fresh;
+  sortedLists.clear();
+}
+
+function readTicketIndex(runCubeQuery) {
+  return (async () => {
+      const index = new Map();
+      for (const [prefix, kind] of Object.entries(TICKET_KINDS)) {
+        const links = INDEX_LINKS[prefix];
+        const dimensions = [...new Set(['number', ...Object.values(kind.fields), ...Object.values(links)])].map(c => `${kind.cube}.${c}`);
+        const rows = await runCubeQuery({ dimensions, limit: INDEX_MAX_ROWS });
+        if (rows.length >= INDEX_MAX_ROWS) throw new Error(`${kind.cube} has ${INDEX_MAX_ROWS.toLocaleString()} tickets or more; tickets.mjs indexes at most that many`);
+        for (const row of rows) {
+          const t = toTicket(prefix, row);
+          t.links = Object.fromEntries(Object.entries(links).map(([key, column]) => [key, String(row[`${kind.cube}.${column}`] ?? '').trim()]));
+          index.set(t.number, t);
+        }
+      }
+      // Each request's team: the teams of its catalog tasks, the one with the most tasks first
+      const byRequest = new Map();
+      for (const t of index.values()) {
+        if (t.kind !== 'SCTASK' || !t.parent || !t.team) continue;
+        if (!byRequest.has(t.parent)) byRequest.set(t.parent, new Map());
+        const teams = byRequest.get(t.parent);
+        teams.set(t.team, (teams.get(t.team) || 0) + 1);
+      }
+      requestTeams = new Map([...byRequest].map(([number, teams]) =>
+        [number, [...teams].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([team]) => team).join(', ')]));
+      for (const [number, team] of requestTeams) {
+        const t = index.get(number);
+        if (t && !t.team) t.team = team;
+      }
+      return index;
+  })();
+}
+
+// What a ticket sorts by in each column people can sort (Priority / Risk by
+// how urgent, as Assigned to me; requests and tasks have neither, so none)
+export const TICKET_SORTS = {
+  number: t => t.number,
+  type: t => t.type,
+  summary: t => t.summary,
+  state: t => t.state,
+  level: t => (t.level ? priorityRank(t) : null),
+  team: t => t.team,
+  person: t => t.person,
+  opened: t => t.opened,
+};
+
+const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
+
+// rows sorted by valueOf(row): numbers as numbers, text A to Z ('P2' before
+// 'P10'). dir: 'asc' | 'desc'. Rows with no value (null or '') come last
+// either way, and ties keep the order they came in.
+export function sortRows(rows, valueOf, dir = 'asc') {
+  const sign = dir === 'desc' ? -1 : 1;
+  const empty = v => v === null || v === undefined || v === '';
+  return rows
+    .map((row, i) => ({ row, i, v: valueOf(row) }))
+    .sort((a, b) => {
+      if (empty(a.v) || empty(b.v)) return (empty(a.v) - empty(b.v)) || a.i - b.i;
+      const c = typeof a.v === 'number' && typeof b.v === 'number' ? a.v - b.v : collator.compare(String(a.v), String(b.v));
+      return sign * c || a.i - b.i;
+    })
+    .map(k => k.row);
+}
+
+// ---------------------------------------------------------------------
+// LOOKING UP tickets in the long lists the server pages (the Team tab's
+// tickets, Team families, the Families page) by what their columns show,
+// the same way the page looks through the lists it holds (public/lookup.js):
+// every word typed must appear, in the chosen column or else in any column;
+// "words in quotes" stay together. Case and spacing don't matter.
+// ---------------------------------------------------------------------
+
+export const LOOKUP_MAX_LENGTH = 100;
+
+// 'p2 "service desk"' -> ['p2', 'service desk']
+export function lookupTerms(q) {
+  const text = String(q ?? '').slice(0, LOOKUP_MAX_LENGTH).toLowerCase();
+  const terms = [];
+  for (const [, phrase, word] of text.matchAll(/"([^"]*)"?|(\S+)/g)) {
+    const term = (phrase ?? word ?? '').replace(/\s+/g, ' ').trim();
+    if (term) terms.push(term);
+  }
+  return terms;
+}
+
+// A request's ?q=&col= -> { terms, col } ('' for any of the labels), or null when nothing was typed
+export function parseLookup(query, labels) {
+  const terms = lookupTerms(query.q);
+  if (!terms.length) return null;
+  return { terms, col: labels.includes(query.col) ? query.col : '' };
+}
+
+const looseText = value => String(value ?? '').toLowerCase().replace(/\s+/g, ' ');
+
+// texts: { column label: what the list shows in it }
+export function lookupMatches(texts, { terms, col }) {
+  const values = (col ? [texts[col]] : Object.values(texts)).map(looseText);
+  return terms.every(term => values.some(v => v.includes(term)));
+}
+
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// "2026-08-14 08:44:55" -> "Aug 14, 2026, 8:44 AM 2026-08-14 08:44:55": the date as
+// the page shows it, and as the data writes it, so either can be looked up
+export function openedText(raw) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}):(\d{2}))?/.exec(String(raw || ''));
+  if (!m) return String(raw || '');
+  const hour = Number(m[4]);
+  const time = m[4] === undefined ? '' : `, ${hour % 12 || 12}:${m[5]} ${hour < 12 ? 'AM' : 'PM'}`;
+  return `${SHORT_MONTHS[Number(m[2]) - 1]} ${Number(m[3])}, ${m[1]}${time} ${raw}`;
+}
+
+// What a list shows in a column where a ticket has nothing, so no cell is left
+// blank (public/app.js blankText shows the same words)
+export function blankText(column, t) {
+  if (t.missing) return '';
+  const requestOrTask = t.kind === 'RITM' || t.kind === 'SCTASK';
+  if (column === 'Priority / Risk') return requestOrTask ? 'No priority' : 'Not recorded';
+  if (column === 'Team') return t.kind === 'RITM' ? 'No team (no catalog tasks)' : 'Not recorded';
+  if (column === 'Summary') return 'No summary';
+  return 'Not recorded';
 }
 
 // The ticket numbers anywhere in a set of result rows, in the order they appear
@@ -15723,13 +17901,15 @@ function describe(data) {
   return { ok: true, text: data.allEmpty ? 'nothing found (explanation ready)' : `${rows.toLocaleString()} ${rows === 1 ? 'row' : 'rows'}` };
 }
 
-// Opens a dashboard the way a browser does: its layout, then every chart's data
+// Opens a dashboard the way a browser does: its layout, then every chart's
+// data. The path is a link signed for the account signed in here, so Metabase
+// keeps the results for that account's view (each person's are kept apart).
 async function openDashboard(dashboardPath) {
-  const uuid = dashboardPath.split('/').pop();
-  const dash = await (await fetch(`${base}/api/public/dashboard/${uuid}`)).json();
+  const token = dashboardPath.split('/').pop();
+  const dash = await (await fetch(`${base}/api/embed/dashboard/${token}`)).json();
   const cards = (dash.dashcards || []).filter(dc => dc.card_id);
   const results = await Promise.all(cards.map(async dc => {
-    const r = await fetch(`${base}/api/public/dashboard/${uuid}/dashcard/${dc.id}/card/${dc.card_id}?parameters=[]`);
+    const r = await fetch(`${base}/api/embed/dashboard/${token}/dashcard/${dc.id}/card/${dc.card_id}`);
     const body = await r.json().catch(() => ({}));
     return r.ok && body.status !== 'failed';
   }));
@@ -15809,7 +17989,8 @@ if (problems.length) {
   process.exitCode = 1;
 } else {
   console.log('Everything worked. These questions now answer instantly for everyone when asked with');
-  console.log(`the same words (see ${QUESTIONS_FILE}), and every dashboard opens from Metabase's cache.`);
+  console.log(`the same words (see ${QUESTIONS_FILE}), and every dashboard chart works. Metabase keeps each`);
+  console.log('person\'s dashboard results apart (they see different tickets), so only this account\'s are ready now.');
 }
 console.log("Don't restart OneTouch before the presentation: a restart forgets the remembered questions.");
 console.log('='.repeat(64) + '\n');
@@ -15992,7 +18173,7 @@ export async function listSeen(userId) {
 // TICKET_NUMBER, never from model output.
 // =====================================================================
 
-import { TICKET_KINDS, toTicket, prefixOf } from './tickets.mjs';
+import { TICKET_KINDS, toTicket, prefixOf, priorityRank } from './tickets.mjs';
 
 const TICKET_NUMBER = /^(INC|CHG|RITM|SCTASK)\d{7}$/;
 const MAX_TICKETS = 500;      // tickets looked at per request
@@ -16427,6 +18608,12 @@ async function buildFamilyList(kind, runQuery) {
 
 // One set of lists per set of tickets someone may see (runQuery.scopeKey, teams.mjs)
 const familyLists = new Map();
+
+// Tickets arrived or changed (servicenow-sync/): links and lists are worked out again
+export function forgetLinks() {
+  linkCache.clear();
+  familyLists.clear();
+}
 const FAMILY_LISTS_KEPT = 600;
 export function familyList(kind, runQuery) {
   const key = `${runQuery.scopeKey ?? ''}|${kind}`;
@@ -16479,6 +18666,94 @@ export async function familyOf(kind, anchor, runQuery) {
   const fixed = fixesNumber ? [fixes[0] || missing(fixesNumber, 'Incident')] : [];
   return fixed.length || caused.length ? changeFamily(anchor, change[0], fixed, caused, wanted) : null;
 }
+
+// =====================================================================
+// A FAMILY'S ROW on the Ticket families page: its anchor ticket's own
+// summary, state, priority, team and opening date when it is a ticket this
+// person may see. Otherwise (an order, a problem record, or a parent that
+// isn't theirs) the same, made from the family's tickets they may see: the
+// commonest summary and team, each state with how many have it, the most
+// urgent priority, and when the first was opened. From the ticket index
+// (tickets.mjs), so a whole list sorts and is looked up without asking Cube.
+// =====================================================================
+
+// What a family holds besides its anchor, as the page names it
+export const FAMILY_CHILD_NOUNS = {
+  'parent-incident': ['child incident', 'child incidents'], 'bundle-request': ['child request', 'child requests'],
+  'request-tasks': ['catalog task', 'catalog tasks'], order: ['request', 'requests'],
+  problem: ['linked ticket', 'linked tickets'], 'change-incident': ['linked incident', 'linked incidents'],
+};
+
+let membersFor = null; // { index, byKind: Map(kind -> Map(anchor -> [ticket])) }, built once per index
+
+// Each family's tickets besides its anchor (for an order or a problem, all of them)
+function familyMembersByKind(index) {
+  if (membersFor?.index === index) return membersFor.byKind;
+  const byKind = new Map(FAMILY_KINDS.map(kind => [kind, new Map()]));
+  const add = (kind, anchor, t) => {
+    if (!anchor || !t) return;
+    const families = byKind.get(kind);
+    if (!families.has(anchor)) families.set(anchor, []);
+    families.get(anchor).push(t);
+  };
+  for (const t of index.values()) {
+    const links = t.links || {};
+    if (t.kind === 'INC') {
+      add('parent-incident', links.parentIncident, t);
+      add('problem', links.problem, t);
+      add('change-incident', links.causedByChange, t);
+    } else if (t.kind === 'CHG') {
+      add('problem', links.problem, t);
+      add('change-incident', t.number, links.fixesIncident && index.get(links.fixesIncident));
+    } else if (t.kind === 'RITM') {
+      add('bundle-request', links.bundle, t);
+      add('order', t.parent, t);
+    } else if (t.kind === 'SCTASK') {
+      add('request-tasks', t.parent, t);
+    }
+  }
+  membersFor = { index, byKind };
+  return byKind;
+}
+
+// The values, most common first: [[value, how many]]
+function commonest(values) {
+  const counts = new Map();
+  for (const v of values) if (v) counts.set(v, (counts.get(v) || 0) + 1);
+  return [...counts].sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])));
+}
+
+// One row's values for a family's tickets taken together
+function rowFromTickets(tickets) {
+  const summaries = commonest(tickets.map(t => t.summary));
+  const states = commonest(tickets.map(t => t.state));
+  const teams = commonest(tickets.map(t => t.team));
+  const urgent = tickets.filter(t => t.level).sort((a, b) => priorityRank(a) - priorityRank(b))[0];
+  const others = (list, one, many) => (list.length > 1 ? ` (and ${list.length - 1} other ${list.length === 2 ? one : many})` : '');
+  return {
+    kind: commonest(tickets.map(t => t.kind))[0]?.[0] || '',
+    summary: summaries.length ? summaries[0][0] + others(summaries, 'summary', 'summaries') : '',
+    state: states.length === 1 ? states[0][0]
+      : states.slice(0, 3).map(([state, n]) => `${state} (${n})`).join(', ') + (states.length > 3 ? `, and ${states.length - 3} more` : ''),
+    level: urgent?.level || '',
+    rank: urgent ? priorityRank(urgent) : null,
+    team: teams.length ? teams[0][0] + others(teams, 'team', 'teams') : '',
+    opened: tickets.map(t => t.opened).filter(Boolean).sort()[0] || '',
+    count: tickets.length,
+  };
+}
+
+// -> { kind, summary, state, level, rank, team, opened, count, from: 'anchor' | 'members' }.
+// canSee(number): whether this person may see that ticket.
+export function familyRow(kind, anchor, index, canSee) {
+  const own = index.get(anchor);
+  if (own && canSee(anchor)) {
+    const { kind: k, summary, state, level, team, opened } = own;
+    return { kind: k, summary, state, level, rank: level ? priorityRank(own) : null, team, opened, count: 1, from: 'anchor' };
+  }
+  const members = (familyMembersByKind(index).get(kind)?.get(anchor) || []).filter(t => canSee(t.number));
+  return { ...rowFromTickets(members), from: 'members' };
+}
 ```
 
 <a id="b44"></a>
@@ -16507,8 +18782,9 @@ const MAX_BYTES = 512 * 1024;
 
 const MODES = ['light', 'dark', 'system'];
 const HEADERS = ['dark', 'accent', 'light'];
-// Home's own sections, besides charts
-const HOME_SECTIONS = ['assistant', 'tickets', 'shortcuts'];
+// Home's own sections, besides charts. (The AI assistant's card moved to the
+// search bar in the header, so an "assistant" section saved before is dropped.)
+const HOME_SECTIONS = ['tickets', 'shortcuts'];
 const ID = /^[A-Za-z0-9_-]{1,40}$/;
 const DASHBOARD_KEY = /^[a-z0-9-]{1,60}$/;
 
@@ -16683,6 +18959,7 @@ const SIZES = ['small', 'medium', 'large'];
 const LIMITS = [5, 10, 15, 20, 30, 50];
 const COLORS = ['accent', '1', '2', '3', '4', '5', '6', '7', '8'];
 const STATUSES = ['all', 'open', 'closed'];
+const DIRECTIONS = ['asc', 'desc'];
 const DATE_PRESETS = ['all', '7', '30', '90', 'custom'];
 // A condition: is one of the values, is none of them, or contains a word
 const FILTER_OPS = ['equals', 'notEquals', 'contains'];
@@ -16744,6 +19021,16 @@ export function sanitizeChart(input) {
   let display = DISPLAYS.includes(c.display) ? c.display : (groupBy ? 'bar' : 'number');
   if (!groupBy) display = 'number';
 
+  // The groups' order: by their count ('count') or their own value ('label':
+  // A to Z, P1 first; over time, oldest first), either way (direction).
+  // Charts saved before they had a direction keep the order they had.
+  let sort = c.sort === 'label' ? 'label' : 'count';
+  let direction = DIRECTIONS.includes(c.direction) ? c.direction : null;
+  if (!direction) {
+    if (src.times[groupBy]) sort = 'label';
+    direction = sort === 'label' ? 'asc' : 'desc';
+  }
+
   return {
     id: typeof c.id === 'string' && ID.test(c.id) ? c.id : newId(),
     title: String(c.title ?? '').replace(/\s+/g, ' ').trim().slice(0, 80),
@@ -16754,7 +19041,8 @@ export function sanitizeChart(input) {
     groupBy,
     display,
     limit: LIMITS.includes(Number(c.limit)) ? Number(c.limit) : 10,
-    sort: c.sort === 'label' ? 'label' : 'count',
+    sort,
+    direction,
     size: SIZES.includes(c.size) ? c.size : 'medium',
     color: COLORS.includes(String(c.color)) ? String(c.color) : 'accent',
   };
@@ -16776,6 +19064,11 @@ export function sanitizeScope(input) {
 
 const CACHE_SIZE = 400;
 const cache = new Map();
+
+// Tickets arrived or changed (servicenow-sync/): every chart is counted again
+export function forgetResults() {
+  cache.clear();
+}
 
 async function cached(runQuery, name, work) {
   const key = `${runQuery.scopeKey ?? ''}|${name}`;
@@ -16870,10 +19163,20 @@ function naturalOrder(cube, field) {
   };
 }
 
+// The groups in the chart's order: by count or by their own value, either
+// way. "(Not set)" comes last when ordered by value; ties go in natural order.
+function inChartOrder(rows, cube, chart) {
+  const natural = naturalOrder(cube, chart.groupBy);
+  const sign = chart.direction === 'desc' ? -1 : 1;
+  return [...rows].sort(chart.sort === 'label'
+    ? (a, b) => (a.value === null || b.value === null ? natural(a, b) : sign * natural(a, b))
+    : (a, b) => sign * (a.count - b.count) || natural(a, b));
+}
+
 // chart (+ its dashboard's filter row) -> { chart, total, rows: [{ value, count }],
-// other: { count, groups } | null, days, skipped }. rows: for a time grouping every
-// period, oldest first; otherwise the chart's top N by count, in the chart's order,
-// with the rest as one "other" count.
+// other: { count, groups } | null, days, skipped }. rows, in the chart's order:
+// for a time grouping every period; otherwise the chart's top N by count, with
+// the rest as one "other" count.
 export async function chartData(input, runQuery, scopeInput) {
   const chart = sanitizeChart(input);
   const scope = sanitizeScope(scopeInput);
@@ -16912,13 +19215,13 @@ export async function chartData(input, runQuery, scopeInput) {
   });
 
   const total = groups.reduce((sum, g) => sum + g.count, 0);
-  if (isTime) return { chart, total, rows: groups, other: null, days, skipped };
+  if (isTime) return { chart, total, rows: inChartOrder(groups, cube, chart), other: null, days, skipped };
 
+  // The biggest N, whichever way they're shown
   const top = groups.slice(0, chart.limit);
   const rest = groups.slice(chart.limit);
-  if (chart.sort === 'label') top.sort(naturalOrder(cube, chart.groupBy));
   const other = rest.length ? { count: rest.reduce((sum, g) => sum + g.count, 0), groups: rest.length } : null;
-  return { chart, total, rows: top, other, days, skipped };
+  return { chart, total, rows: inChartOrder(top, cube, chart), other, days, skipped };
 }
 
 // The tickets behind one bar, slice or point (value: that group's value; null
@@ -17045,9 +19348,13 @@ export function chartFromQuery(entity, query) {
     dropped.push(`${label(field)} ${OP_WORDS[f.operator] || f.operator}${shown ? ` ${shown}` : ''}`);
   }
   if (from || to) chart.dates = { preset: 'custom', from, to };
-  // Sorted by the field itself (A to Z, P1 first) rather than by the count
-  const order = Array.isArray(query.order) ? query.order.map(o => o?.member ?? o?.[0]) : Object.keys(query.order || {});
-  if (!isTime && order[0] === dimensions[0]) chart.sort = 'label';
+  // The answer's order: by the field itself (A to Z, P1 first; oldest first)
+  // or by the count, either way
+  const [first, dir] = Array.isArray(query.order)
+    ? [query.order[0]?.member ?? query.order[0]?.[0], query.order[0]?.direction ?? query.order[0]?.[1]]
+    : Object.entries(query.order || {})[0] || [];
+  if (first === dimensions[0]) Object.assign(chart, { sort: 'label', direction: dir === 'desc' ? 'desc' : 'asc' });
+  else if (first === measures[0]) Object.assign(chart, { sort: 'count', direction: dir === 'asc' ? 'asc' : 'desc' });
   // The answer's "top N", as the nearest a chart offers
   const limit = Number(query.limit) || 0;
   if (!isTime && limit) chart.limit = LIMITS.find(n => n >= limit) || 50;
@@ -17156,6 +19463,35 @@ function chartTitle(chart) {
     return chart.title || chartAutoTitle(chart);
 }
 
+// How a chart's groups are ordered: by their count ('count') or their own value
+// ('label': A to Z, P1 first; over time, oldest first), ascending or descending.
+// Charts saved before they had a direction keep the order they had (as
+// charts.mjs sanitizeChart). -> { sort, direction }
+function chartOrder(chart) {
+    if (chart.direction === 'asc' || chart.direction === 'desc') return { sort: chart.sort === 'label' ? 'label' : 'count', direction: chart.direction };
+    if (isTimeField(chart.groupBy) || chart.sort === 'label') return { sort: 'label', direction: 'asc' };
+    return { sort: 'count', direction: 'desc' };
+}
+
+// The orders a grouped chart can have, as [value ('sort:direction'), what people read]
+function chartOrderChoices(chart) {
+    const field = fieldLabel(chart.source, chart.groupBy);
+    return isTimeField(chart.groupBy)
+        ? [['label:asc', 'Oldest first'], ['label:desc', 'Newest first'], ['count:desc', 'Biggest first'], ['count:asc', 'Smallest first']]
+        : [['count:desc', 'Biggest first'], ['count:asc', 'Smallest first'],
+            ['label:asc', `${field}, in order (A to Z, P1 first)`], ['label:desc', `${field}, reversed (Z to A)`]];
+}
+
+// Rows ({ value, count }) of a chart drawn in the page (an AI answer) in an
+// order: by count, or by value with "(Not set)" last, ascending or descending
+function orderChartRows(rows, sort, direction) {
+    const sign = direction === 'desc' ? -1 : 1;
+    const byValue = (a, b) => (a.value === null || b.value === null
+        ? (a.value === null) - (b.value === null)
+        : sign * sortCollator.compare(String(a.value), String(b.value)));
+    return [...rows].sort(sort === 'label' ? byValue : (a, b) => sign * (a.count - b.count) || byValue(a, b));
+}
+
 const fmtDay = day => periodLabel('x_day', day, true);
 
 function datesText(dates) {
@@ -17213,8 +19549,8 @@ const chartDataCache = new Map();
 
 // What changes the numbers; how it looks (display, color, size) doesn't
 function chartDataKey(chart, scope) {
-    const { source, status, dates, filters, groupBy, limit, sort } = chart;
-    return JSON.stringify({ source, status, dates, filters, groupBy, limit, sort, scope: scope || null });
+    const { source, status, dates, filters, groupBy, limit } = chart;
+    return JSON.stringify({ source, status, dates, filters, groupBy, limit, ...chartOrder(chart), scope: scope || null });
 }
 
 function fetchChartData(chart, scope = null) {
@@ -17428,17 +19764,20 @@ function lineHtml(chart, data, width, area) {
     return html + '</svg>';
 }
 
-// The donut's slices: at most six, the rest folded into "Other"
+// The donut's slices: at most six, the biggest, in the chart's order; the rest
+// folded into "Other"
 function donutParts(chart, data) {
-    let parts = data.rows.map((r, i) => ({ ...r, label: groupLabel(chart, r.value), slot: r.slot || i + 1, index: i }));
+    let parts = data.rows.map((r, i) => ({ ...r, label: groupLabel(chart, r.value), index: i }));
     let otherCount = data.other?.count || 0;
     let otherGroups = data.other?.groups || 0;
     if (parts.length + (otherCount ? 1 : 0) > DONUT_SLICES) {
-        const folded = parts.slice(DONUT_SLICES - 1);
-        parts = parts.slice(0, DONUT_SLICES - 1);
+        const kept = new Set([...parts].sort((a, b) => b.count - a.count).slice(0, DONUT_SLICES - 1));
+        const folded = parts.filter(p => !kept.has(p));
+        parts = parts.filter(p => kept.has(p));
         otherCount += folded.reduce((s, r) => s + r.count, 0);
         otherGroups += folded.length;
     }
+    parts = parts.map((p, i) => ({ ...p, slot: p.slot || i + 1 }));
     if (otherCount) parts.push({ value: '__other', label: `Other (${otherGroups.toLocaleString()})`, count: otherCount, other: true, index: 'other' });
     return parts;
 }
@@ -17482,16 +19821,18 @@ function donutHtml(chart, data, width) {
     return `<div class="chart-donut${side ? ' side' : ''}">${svg}<ul class="chart-legend">${legend}</ul></div>`;
 }
 
-// The table view: every chart has one (and "Table" charts are only this)
+// The table view: every chart has one (and "Table" charts are only this).
+// Its headings sort it ("Other" stays last); the chart's own order is its ⇅.
 function chartTableHtml(chart, data) {
     const label = chart.groupBy ? fieldLabel(chart.source, chart.groupBy) : 'Tickets';
-    const rows = data.rows.map(r => `<tr><td>${escapeHtml(groupLabel(chart, r.value, true))}</td>` +
+    const rows = data.rows.map(r => `<tr><td data-sort="${escapeHtml(String(r.value ?? ''))}">${escapeHtml(groupLabel(chart, r.value, true))}</td>` +
         `<td class="num">${r.count.toLocaleString()}</td><td class="num">${share(r.count, data.total)}</td></tr>`);
     if (data.other) {
-        rows.push(`<tr class="chart-other-row"><td>Other (${data.other.groups.toLocaleString()} more)</td>` +
+        rows.push(`<tr class="chart-other-row sort-pinned"><td>Other (${data.other.groups.toLocaleString()} more)</td>` +
             `<td class="num">${data.other.count.toLocaleString()}</td><td class="num">${share(data.other.count, data.total)}</td></tr>`);
     }
-    return `<div class="table-wrap chart-table"><table class="result-table"><thead><tr><th>${escapeHtml(label)}</th><th class="num">Count</th><th class="num">Share</th></tr></thead>` +
+    return `<div class="table-wrap chart-table"><table class="result-table" data-sort-list=""><thead><tr>${sortHeadHtml('', label)}` +
+        `${sortHeadHtml('', 'Count', 'Count', 'num')}${sortHeadHtml('', 'Share', 'Share', 'num')}</tr></thead>` +
         `<tbody>${rows.join('')}</tbody><tfoot><tr><td>Total</td><td class="num">${data.total.toLocaleString()}</td><td class="num">100%</td></tr></tfoot></table></div>`;
 }
 
@@ -17598,10 +19939,24 @@ function seriesLineHtml(chart, s, width) {
 }
 
 function seriesTableHtml(chart, s) {
-    const head = `<th>${escapeHtml(chart.groupLabel || '')}</th>${s.series.map(x => `<th class="num">${escapeHtml(x.name)}</th>`).join('')}<th class="num">Total</th>`;
-    const body = s.categories.map((c, i) => `<tr><td>${escapeHtml(c.label)}</td>${s.series.map(x => `<td class="num">${x.values[i].toLocaleString()}</td>`).join('')}` +
+    const head = sortHeadHtml('', 'group', chart.groupLabel || '') + s.series.map(x => sortHeadHtml('', x.name, x.name, 'num')).join('') + sortHeadHtml('', 'Total', 'Total', 'num');
+    const body = s.categories.map((c, i) => `<tr><td data-sort="${escapeHtml(String(c.value ?? ''))}">${escapeHtml(c.label)}</td>${s.series.map(x => `<td class="num">${x.values[i].toLocaleString()}</td>`).join('')}` +
         `<td class="num">${s.series.reduce((t, x) => t + x.values[i], 0).toLocaleString()}</td></tr>`).join('');
-    return `<div class="table-wrap chart-table"><table class="result-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+    return `<div class="table-wrap chart-table"><table class="result-table" data-sort-list=""><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+// A chart of several series in an order: 'label' (its categories' own), 'total',
+// or 's<k>' (the k-th series' values), ascending or descending
+function orderSeries(s, by, direction) {
+    const sign = direction === 'desc' ? -1 : 1;
+    const value = i => (by === 'total' ? s.series.reduce((t, x) => t + x.values[i], 0) : by === 'label' ? null : s.series[Number(by.slice(1))]?.values[i] ?? 0);
+    const label = (i, j) => sortCollator.compare(String(s.categories[i].value ?? ''), String(s.categories[j].value ?? ''));
+    const order = s.categories.map((_, i) => i).sort((i, j) => (by === 'label' ? sign * label(i, j) : sign * (value(i) - value(j)) || label(i, j)));
+    return {
+        ...s,
+        categories: order.map(i => s.categories[i]),
+        series: s.series.map(x => ({ ...x, values: order.map(i => x.values[i]) })),
+    };
 }
 
 // ---------------------------------------------------------------------
@@ -18010,7 +20365,7 @@ async function downloadPicture(spec, format, name) {
 // ---------------------------------------------------------------------
 
 const THEME_DEFAULTS = { mode: 'light', accent: '#10a37f', header: 'dark' };
-const defaultHome = () => ({ blocks: [{ type: 'assistant' }, { type: 'tickets' }] });
+const defaultHome = () => ({ blocks: [{ type: 'tickets' }] });
 const defaultDashboards = () => ({ boards: [], hidden: [], last: '' });
 
 // tour: which tours have been seen (done: Home's; dashboards: the Dashboards page's)
@@ -18037,7 +20392,9 @@ function loadPreferences() {
             if (token !== sessionTokenValue) return; // signed out meanwhile
             const saved = data.preferences || {};
             prefs.theme = { ...THEME_DEFAULTS, ...saved.theme };
-            prefs.home = Array.isArray(saved.home?.blocks) ? saved.home : defaultHome();
+            // A section Home no longer has (the AI assistant's card, now the header's Ask bar) is left out
+            prefs.home = Array.isArray(saved.home?.blocks)
+                ? { ...saved.home, blocks: saved.home.blocks.filter(b => b?.type === 'chart' || HOME_SECTIONS[b?.type]) } : defaultHome();
             prefs.dashboards = { ...defaultDashboards(), ...saved.dashboards };
             prefs.tour = { done: saved.tour?.done === true, dashboards: saved.tour?.dashboards === true };
         } catch (err) {
@@ -18120,9 +20477,11 @@ function resetCustomizing() {
     prefs.tour = defaultTour();
     prefsReady = Promise.resolve();
     prefsLoadFailed = false;
+    teamValuesLoading = null; // the Team filter's choices come from this person's tickets
     sharedBoards.clear();
     closeTour(false);
     document.getElementById('bf-team-pop').hidden = true;
+    document.getElementById('bf-team-list').innerHTML = '';
     for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close('cancel');
     applyTheme(prefs.theme);
     try { localStorage.removeItem(THEME_CACHE_KEY); } catch { /* nothing kept */ }
@@ -18135,7 +20494,7 @@ function resetCustomizing() {
     renderMyDashboards();
     document.getElementById('home-blocks').classList.add('waiting');
     dashboardsLoading = null; // the next person's dashboards open where they left them
-    // The team dashboards are admins only: none stay behind for whoever signs in next
+    // The team dashboards' links are signed for this person: none stay behind for whoever signs in next
     dashboardPages.main.clear();
     dashboardPages.details.clear();
     currentMainDashboard = null;
@@ -18286,13 +20645,16 @@ const TILE_BUTTONS = {
     pin: ['📌', 'Add a copy to Home'],
     remove: ['🗑', 'Remove this chart'],
 };
-const HOME_TILE_BUTTONS = ['table', 'download', 'edit', 'earlier', 'later', 'remove'];
-const BOARD_TILE_BUTTONS = ['table', 'download', 'edit', 'earlier', 'later', 'pin', 'remove'];
-// Charts on someone else's shared dashboard: look, don't touch
-const SHARED_TILE_BUTTONS = ['table'];
+// sort: ⇅, a menu of the chart's orders (ascending or descending, by count or by its groups)
+const HOME_TILE_BUTTONS = ['table', 'sort', 'download', 'edit', 'earlier', 'later', 'remove'];
+const BOARD_TILE_BUTTONS = ['table', 'sort', 'download', 'edit', 'earlier', 'later', 'pin', 'remove'];
+// Charts on someone else's shared dashboard: look (in any order), don't touch
+const SHARED_TILE_BUTTONS = ['table', 'sort'];
 
 function tileHtml(chart, buttons, extraClass = '') {
-    const actions = buttons.map(a => `<button type="button" class="tile-btn" data-tile-action="${a}" title="${TILE_BUTTONS[a][1]}" aria-label="${TILE_BUTTONS[a][1]}">${TILE_BUTTONS[a][0]}</button>`).join('');
+    const actions = buttons.map(a => (a === 'sort'
+        ? '<label class="tile-btn tile-sort" title="Order" hidden><span aria-hidden="true">⇅</span><select data-tile-sort aria-label="Order of this chart"></select></label>'
+        : `<button type="button" class="tile-btn" data-tile-action="${a}" title="${TILE_BUTTONS[a][1]}" aria-label="${TILE_BUTTONS[a][1]}">${TILE_BUTTONS[a][0]}</button>`)).join('');
     return `<article class="chart-tile size-${chart.size} ${extraClass}" data-chart-id="${escapeHtml(chart.id)}">` +
         `<div class="tile-head"><div class="tile-titles"><h3 class="tile-title"></h3><p class="tile-sub"></p></div>` +
         (actions ? `<div class="tile-actions">${actions}</div>` : '') + `</div>` +
@@ -18316,6 +20678,7 @@ async function fillTile(tile, chart, asTable = tile._asTable || false, scope = t
         if (body._run !== run) return;
         tile.querySelector('.tile-title').textContent = chartTitle(chart);
         tile.querySelector('.tile-sub').textContent = chartDescription(chart);
+        paintTileSort(tile, chart);
         const data = await fetchChartData(chart, scope);
         if (!data || body._run !== run || !tile.isConnected) return;
         tile._data = data;
@@ -18344,6 +20707,37 @@ async function fillTile(tile, chart, asTable = tile._asTable || false, scope = t
         if (body._run === run) body.classList.remove('refreshing');
     }
 }
+
+// ⇅: the chart's order, picked from its menu (only for charts with groups)
+function paintTileSort(tile, chart) {
+    const pick = tile.querySelector('[data-tile-sort]');
+    if (!pick) return;
+    const box = pick.closest('.tile-sort');
+    box.hidden = !chart.groupBy || chart.display === 'number';
+    if (box.hidden) return;
+    const { sort, direction } = chartOrder(chart);
+    const choices = chartOrderChoices(chart);
+    const current = `${sort}:${direction}`;
+    pick.innerHTML = choices.map(([value, label]) => `<option value="${value}"${value === current ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('');
+    box.title = `Order: ${choices.find(([value]) => value === current)?.[1] || ''}`;
+}
+
+// A new order from ⇅: your own chart keeps it; a shared dashboard's chart
+// changes only on this page
+document.addEventListener('change', e => {
+    if (!e.target.matches('[data-tile-sort]')) return;
+    const tile = e.target.closest('.chart-tile');
+    const [sort, direction] = e.target.value.split(':');
+    const chart = { ...tile._chart, sort, direction };
+    const { where, list, index } = tilePlace(tile);
+    if (tile.querySelector('[data-tile-action="edit"]') && index >= 0) {
+        if (where === 'home') list[index] = { ...list[index], chart };
+        else list[index] = chart;
+        savePreference(where === 'home' ? 'home' : 'dashboards');
+        if (where === 'board') updateShareSoon(currentBoard());
+    }
+    fillTile(tile, chart);
+});
 
 // The list a tile belongs to: Home's sections, or the open dashboard's charts
 function tilePlace(tile) {
@@ -18428,12 +20822,12 @@ document.addEventListener('click', e => {
 });
 
 // ---------------------------------------------------------------------
-// HOME LAYOUT: the AI assistant, your tickets, dashboard shortcuts and
-// your own charts, in the order you choose; "Customize Home" edits it
+// HOME LAYOUT: your tickets, dashboard shortcuts and your own charts, in the
+// order you choose; "Customize Home" edits it. (The AI assistant is the Ask
+// bar in the header, on every page.)
 // ---------------------------------------------------------------------
 
 const HOME_SECTIONS = {
-    assistant: '💬 AI assistant',
     tickets: '🎫 Your tickets',
     shortcuts: '📊 Your dashboards',
 };
@@ -18914,7 +21308,6 @@ function paintBuilder() {
         `<optgroup label="Over time">${src.times.map(([k, l]) => `<option value="${k}">${escapeHtml(l)}</option>`).join('')}</optgroup>`;
     document.getElementById('b-group').value = d.groupBy;
     document.getElementById('b-limit').value = String(d.limit);
-    document.getElementById('b-sort').value = d.sort;
     document.querySelectorAll('input[name="b-size"]').forEach(r => { r.checked = r.value === d.size; });
     document.querySelectorAll('input[name="b-color"]').forEach(r => { r.checked = r.value === d.color; });
     paintFilters();
@@ -18933,8 +21326,15 @@ function paintDisplay() {
     document.getElementById('b-display-note').textContent = grouped
         ? (isTimeField(d.groupBy) && ['bar', 'hbar', 'donut'].includes(d.display) ? 'Tip: Line or Area shows a trend over time best.' : '')
         : 'Choose something to group by to draw a chart; with nothing to group by, the chart is one number.';
-    // Top N and order: only for categories (time always shows every period, oldest first)
-    document.getElementById('b-cut').hidden = !grouped || isTimeField(d.groupBy) || d.display === 'number';
+    // Top N: only for categories (time always shows every period). Order: either
+    // way, by count or by the groups (over time: oldest or newest first)
+    document.getElementById('b-cut').hidden = !grouped || d.display === 'number';
+    document.getElementById('b-limit-wrap').hidden = isTimeField(d.groupBy);
+    if (grouped) {
+        const { sort, direction } = chartOrder(d);
+        document.getElementById('b-sort').innerHTML = chartOrderChoices(d)
+            .map(([value, label]) => `<option value="${value}"${value === `${sort}:${direction}` ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('');
+    }
     document.getElementById('b-color-row').hidden = !['bar', 'hbar', 'line', 'area'].includes(d.display);
     document.getElementById('b-title').placeholder = `${chartAutoTitle(d)} (automatic)`;
 }
@@ -19043,9 +21443,12 @@ function builderInput(e) {
         paintFilterCount(Number(t.dataset.filterValue));
     } else if (t.id === 'b-group') {
         const wasGrouped = Boolean(d.groupBy);
+        const wasTime = isTimeField(d.groupBy);
         d.groupBy = t.value;
         if (d.groupBy && !wasGrouped) d.display = isTimeField(d.groupBy) ? 'line' : 'bar';
         else if (isTimeField(d.groupBy) && ['hbar', 'donut'].includes(d.display)) d.display = 'line';
+        // From categories to time or back: the usual order for it (oldest first; biggest first)
+        if (isTimeField(d.groupBy) !== wasTime) Object.assign(d, isTimeField(d.groupBy) ? { sort: 'label', direction: 'asc' } : { sort: 'count', direction: 'desc' });
         paintDisplay();
     } else if (t.name === 'b-display') {
         d.display = t.value;
@@ -19053,7 +21456,7 @@ function builderInput(e) {
     } else if (t.id === 'b-limit') {
         d.limit = Number(t.value);
     } else if (t.id === 'b-sort') {
-        d.sort = t.value;
+        [d.sort, d.direction] = t.value.split(':');
     } else if (t.name === 'b-color') {
         d.color = t.value;
     } else if (t.name === 'b-size') {
@@ -19118,19 +21521,22 @@ async function afterPreferences() {
 // Saved with the dashboard.
 // ---------------------------------------------------------------------
 
-let teamsLoading = null;
-function loadTeams() {
-    if (!teamsLoading) {
-        teamsLoading = (async () => {
+// The Team filter's choices: the ServiceNow teams in this person's tickets, busiest
+// first. (Not "loadTeams": that's the Team tab's, in teams.js, and the page's
+// scripts share one scope, so the later one would replace this.)
+let teamValuesLoading = null;
+function loadTeamValues() {
+    if (!teamValuesLoading) {
+        teamValuesLoading = (async () => {
             const response = await fetch(`${API_BASE}/api/charts/teams`, { headers: authHeaders() });
             if (handleUnauthorized(response)) return [];
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
             return data.values;
         })();
-        teamsLoading.catch(() => { teamsLoading = null; });
+        teamValuesLoading.catch(() => { teamValuesLoading = null; });
     }
-    return teamsLoading;
+    return teamValuesLoading;
 }
 
 function buildBoardFilters() {
@@ -19231,7 +21637,7 @@ async function paintTeamList() {
     if (!board) return;
     try {
         if (!list.children.length) list.innerHTML = '<p class="chart-loading">Loading teams…</p>';
-        const values = await loadTeams();
+        const values = await loadTeamValues();
         const search = document.getElementById('bf-team-search').value.trim().toLowerCase();
         const chosen = new Set(board.scope?.teams || []);
         const all = [...values.filter(v => chosen.has(v.value)), ...values.filter(v => !chosen.has(v.value))]
@@ -19514,10 +21920,10 @@ window.addEventListener('hashchange', () => {
 const TOUR_STEPS = [
     { target: '.tab-navigation', title: 'Home and Dashboards',
         text: 'OneTouch has two pages. The one you are on lights up. The OneTouch logo also brings you back Home from anywhere.' },
-    { target: '[data-block="assistant"] .guide-card', title: 'Ask anything about the data',
-        text: 'Type a question in plain English, like "How many open incidents are there by priority?". Answers come back as tables you can switch to a chart, download (also as a picture), or save to a dashboard.' },
+    { target: '#nav-ask', title: 'Ask anything about the data',
+        text: 'Type a question in plain English here, on any page, like "How many open incidents are there by priority?", and press Enter. Claude answers in a chat over the page, with tables you can switch to a chart, download (also as a picture), or save to a dashboard. With nothing typed, the button opens your chat; a click anywhere outside the chat closes it. Press / to jump here.' },
     { target: '[data-block="tickets"]', title: 'Your tickets',
-        text: 'Every ticket the AI assistant shows you lands in Ticket results. Click ☆ to star one. Both are saved to your account.' },
+        text: 'The tickets assigned to you, as a list and in charts (📊 My charts), and every ticket the AI assistant shows you in Ticket results. Click ☆ to star one. Every list has a 🔍 box to look up its tickets by any of its columns.' },
     { target: '#customize-home-btn', title: 'Make Home yours',
         text: 'Move or hide these sections, and add charts of your own.' },
     { target: '.tab-btn[data-tab="dashboard"]', title: 'Dashboards: the team\'s and yours',
@@ -19780,7 +22186,7 @@ const FAMILY_KIND_INFO = {
     },
 };
 const FAMILIES_PAGE = 50;
-const familiesState = { kind: 'parent-incident', sort: 'size', loaded: 0, total: 0, summary: null, run: 0 };
+const familiesState = { kind: 'parent-incident', loaded: 0, total: 0, summary: null, run: 0 };
 
 // ---------------------------------------------------------------------
 // Showing the page (from the ☰ Dashboards drawer)
@@ -19812,11 +22218,10 @@ function hideFamilies() {
 function resetFamilies() {
     hideFamilies();
     showRecordFamily('');
-    Object.assign(familiesState, { kind: 'parent-incident', sort: 'size', loaded: 0, total: 0, summary: null, run: familiesState.run + 1 });
+    Object.assign(familiesState, { kind: 'parent-incident', loaded: 0, total: 0, summary: null, run: familiesState.run + 1 });
     document.getElementById('families-list').innerHTML = '';
     document.getElementById('families-kinds').innerHTML = '';
     document.getElementById('families-q').value = '';
-    document.getElementById('families-sort').value = 'size';
 }
 
 async function familiesFetch(path) {
@@ -19836,14 +22241,15 @@ function paintFamilyKinds() {
         `<span class="family-kind-count">${summary[kind] ? summary[kind].families.toLocaleString() : '…'}</span></button>`).join('');
 }
 
-// One kind's families, biggest first (or by the chosen order); more: the next page
-async function loadFamilies(more = false) {
+// One kind's families, biggest first (or sorted by a heading); more: the next page;
+// quiet: keep the list showing until the new one is ready (a heading was clicked)
+async function loadFamilies(more = false, quiet = false) {
     const run = more ? familiesState.run : ++familiesState.run;
     const list = document.getElementById('families-list');
     const kind = familiesState.kind;
     const info = FAMILY_KIND_INFO[kind];
     if (!more) {
-        list.innerHTML = '<p class="home-status">Loading the families…</p>';
+        if (!quiet) list.innerHTML = '<p class="home-status">Loading the families…</p>';
         familiesState.loaded = 0;
     }
     try {
@@ -19853,7 +22259,8 @@ async function loadFamilies(more = false) {
             familiesState.summary = summary.kinds;
         }
         paintFamilyKinds();
-        const data = await familiesFetch(`/api/families/${kind}?sort=${familiesState.sort}&offset=${familiesState.loaded}&limit=${FAMILIES_PAGE}`);
+        const q = new URLSearchParams({ ...sortQuery('families', FAMILY_SORT_KEYS), ...lookupQuery('families'), offset: familiesState.loaded, limit: FAMILIES_PAGE });
+        const data = await familiesFetch(`/api/families/${kind}?${q}`);
         if (!data || run !== familiesState.run) return;
         familiesState.total = data.total;
         familiesState.loaded += data.families.length;
@@ -19862,10 +22269,14 @@ async function loadFamilies(more = false) {
             list.querySelector('tbody').insertAdjacentHTML('beforeend', rows);
         } else {
             const counts = familiesState.summary[kind];
-            list.innerHTML = `<p class="families-about"><b>${data.total.toLocaleString()} ${escapeHtml(info.tab.toLowerCase())}</b>, ` +
+            const all = data.before ?? data.total;
+            list.innerHTML = `<p class="families-about"><b>${all.toLocaleString()} ${escapeHtml(info.tab.toLowerCase())}</b>, ` +
                 `holding ${counts.tickets.toLocaleString()} ${counts.tickets === 1 ? info.child[0] : info.child[1]}. ${escapeHtml(info.about)} ` +
                 'Click a row to see the whole family, or any ticket number, parent or child, to open that ticket.</p>' +
-                familyTableHtml(rows, false) + '<div class="families-more"></div>';
+                (!all ? `<p class="home-status">None of the tickets you can see are in ${escapeHtml(info.tab.toLowerCase())}.</p>`
+                    : lookupBarHtml('families', FAMILY_HEADS, { mode: 'list', noun: 'families', count: { shown: data.total, total: all } }) +
+                      (data.total ? familyTableHtml(rows, false) : '<p class="home-status">No families match what you typed. Change it, or press Escape in the box to see them all.</p>')) +
+                '<div class="families-more"></div>';
         }
         paintFamiliesMore();
     } catch (err) {
@@ -19876,37 +22287,57 @@ async function loadFamilies(more = false) {
 function paintFamiliesMore() {
     const box = document.querySelector('#families-list .families-more');
     if (!box) return;
+    if (!familiesState.total) { box.innerHTML = ''; return; }
     const left = familiesState.total - familiesState.loaded;
     box.innerHTML = `<span class="home-status">Showing ${familiesState.loaded.toLocaleString()} of ${familiesState.total.toLocaleString()}.</span>` +
         (left > 0 ? `<button type="button" class="home-action" data-families-more>Show ${Math.min(left, FAMILIES_PAGE).toLocaleString()} more</button>` : '');
 }
 
 const FAMILY_HEADS = ['Parent', 'Summary', 'State', 'Priority / Risk', 'Team', 'Opened', 'Family'];
+// What the server sorts the list by for each heading (no sort: the biggest families first)
+const FAMILY_SORT_KEYS = { Parent: 'parent', Summary: 'summary', State: 'state', 'Priority / Risk': 'level', Team: 'team', Opened: 'opened', Family: 'size' };
 
-function familyTableHtml(rowsHtml, withKind) {
+// list: 'families' for the page's list of one kind (sorted by the server), '' for others
+function familyTableHtml(rowsHtml, withKind, list = 'families') {
     const heads = withKind ? ['Parent', 'Kind of family', ...FAMILY_HEADS.slice(1)] : FAMILY_HEADS;
-    return `<div class="table-wrap families-table"><table class="result-table"><thead><tr>${heads.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead>` +
+    return `<div class="table-wrap families-table"><table class="result-table" data-sort-list="${list}"><thead><tr>${heads.map(h => sortHeadHtml(list, h)).join('')}</tr></thead>` +
         `<tbody>${rowsHtml}</tbody></table></div>`;
 }
 
-// One row per family: its parent (or order / problem / change), and how many it holds
+// One row per family: its parent (or order / problem / change), and how many it
+// holds. Its columns are what the server made (relations.mjs familyRow): the
+// parent's own, or, for an order, a problem record or a parent that isn't yours
+// to see, those of the family's tickets you may see, which the row says.
 function familyRowsHtml(families, withKind) {
     return families.map(f => {
-        const info = FAMILY_KIND_INFO[f.kind || familiesState.kind];
         const kind = f.kind || familiesState.kind;
-        const t = f.ticket;
+        const info = FAMILY_KIND_INFO[kind];
+        const r = f.row || {};
         // A ticket opens; an order shows its requests; a problem record isn't in the data
         const anchor = /^PRB/.test(f.anchor)
             ? `<span class="family-anchor-text">${escapeHtml(f.anchor)}</span>`
             : `<button type="button" class="ticket-link" data-ticket="${escapeHtml(f.anchor)}" title="Open ${escapeHtml(f.anchor)}">${escapeHtml(f.anchor)}</button>${starFor(f.anchor)}`;
-        const summary = t ? t.summary : kind === 'order' ? 'An order of several requests' : kind === 'problem' ? "Problem record (the record itself isn't in this export)" : 'Not in this export';
-        const cell = text => `<td>${escapeHtml(text || '—')}</td>`;
-        const short = String(summary || '');
+        // Something in every cell: what's there, or why there's nothing
+        const cell = (label, text, sort = null) => (text
+            ? `<td${sort === null ? '' : ` data-sort="${escapeHtml(String(sort))}"`}>${escapeHtml(text)}</td>`
+            : `<td data-sort="">${blankHtml(label, r)}</td>`);
+        const summary = String(r.summary || '');
+        const made = r.from === 'members'
+            ? `<div class="family-sub">${r.count
+                ? `From its ${r.count.toLocaleString()} ${r.count === 1 ? info.child[0] : info.child[1]}${/^(PRB|REQ)/.test(f.anchor) ? '' : ' you can see'}`
+                : 'None of its tickets are yours to see'}</div>` : '';
+        const summaryCell = summary
+            ? `<td${summary.length > 110 ? ` title="${escapeHtml(summary)}"` : ''}>${escapeHtml(summary.length > 110 ? `${summary.slice(0, 107)}…` : summary)}${made}</td>`
+            : `<td data-sort="">${blankHtml('Summary', r)}${made}</td>`;
+        const level = r.level && r.from === 'members' && r.count > 1 ? `${r.level} (highest)` : r.level;
         return `<tr class="family-row" data-kind="${kind}" data-anchor="${escapeHtml(f.anchor)}" tabindex="0" aria-expanded="false" title="Click to see the whole family">` +
-            `<td class="ticket-cell"><span class="expand-caret" aria-hidden="true">▸</span>${anchor}</td>` +
-            (withKind ? cell(info.tab) : '') +
-            (short.length > 110 ? `<td title="${escapeHtml(short)}">${escapeHtml(short.slice(0, 107))}…</td>` : cell(short)) +
-            cell(t?.state) + cell(t?.level) + cell(t?.team) + cell(t?.opened ? formatValue('ticket.opened', t.opened) : '') +
+            `<td class="ticket-cell" data-sort="${escapeHtml(f.anchor)}"><span class="expand-caret" aria-hidden="true">▸</span>${anchor}</td>` +
+            (withKind ? `<td>${escapeHtml(info.tab)}</td>` : '') +
+            summaryCell +
+            cell('State', r.state) +
+            cell('Priority / Risk', level, r.rank ?? '') +
+            cell('Team', r.team) +
+            cell('Opened', r.opened ? formatValue('ticket.opened', r.opened) : '', r.opened || '') +
             `<td class="family-size">${f.children.toLocaleString()} ${f.children === 1 ? info.child[0] : info.child[1]}</td></tr>`;
     }).join('');
 }
@@ -19954,12 +22385,13 @@ async function findFamilies(number) {
         const back = '<button type="button" class="home-action" data-families-back>← All families</button>';
         const open = data.known ? ` <button type="button" class="home-action" data-ticket="${escapeHtml(data.number)}">Open ${escapeHtml(data.number)}</button>` : '';
         if (!data.known) {
-            list.innerHTML = `<p class="families-about">${escapeHtml(data.number)} is not in the data. ${back}</p>`;
+            list.innerHTML = `<p class="families-about">${escapeHtml(notOpenedText(data.number, data.noAccess))} ${back}</p>`;
         } else if (!data.families.length) {
             list.innerHTML = `<p class="families-about">${escapeHtml(data.number)} has no parent, children or other linked tickets.${open} ${back}</p>`;
         } else {
             list.innerHTML = `<p class="families-about"><b>${escapeHtml(data.number)}</b> is in ${data.families.length} ${data.families.length === 1 ? 'family' : 'families'}.${open} ${back}</p>` +
-                familyTableHtml(familyRowsHtml(data.families, true), true);
+                (data.families.length >= 2 ? lookupBarHtml('', ['Parent', 'Kind of family', ...FAMILY_HEADS.slice(1)], { noun: 'families' }) : '') +
+                familyTableHtml(familyRowsHtml(data.families, true), true, '');
             // One family: open it straight away
             if (data.families.length === 1) toggleFamilyRow(list.querySelector('tr.family-row'));
         }
@@ -19999,10 +22431,10 @@ document.getElementById('families-find').addEventListener('submit', e => {
     e.preventDefault();
     findFamilies(document.getElementById('families-q').value);
 });
-document.getElementById('families-sort').addEventListener('change', e => {
-    familiesState.sort = e.target.value;
-    loadFamilies();
-});
+// A heading of the list, or a lookup: every family of the kind, sorted or looked
+// through by the server, from the first page
+pagedSorts.families = () => loadFamilies(false, true);
+pagedLookups.families = pagedSorts.families;
 
 // ---------------------------------------------------------------------
 // THE TICKET WINDOW: one ticket's record, its family first, over the page.
@@ -20036,7 +22468,7 @@ async function openTicketDialog(number, { back = false } = {}) {
         const data = await searchTickets(number, true);
         if (!data || run !== ticketDialogRun) return;
         if (!data.found.length) {
-            body.innerHTML = `<p class="home-status">${escapeHtml(number)} is not in the data.</p>`;
+            body.innerHTML = `<p class="home-status">${escapeHtml(notOpenedText(number, data.noAccess))}</p>`;
         } else if (data.found.length === 1) {
             document.getElementById('ticket-dialog-title').textContent = `${data.found[0].type} ${number}`;
             body.innerHTML = ticketCardHtml(data.found[0], data.record);
@@ -20334,10 +22766,16 @@ function fitTranscript(transcript) {
 // Every Cube query made for someone who isn't an admin goes through
 // restrictQuery, which adds "the ticket is one of theirs". So the AI
 // assistant, search, records, charts and families only ever see those.
+//
+// People hear about changes through notifications.mjs: tickets given to
+// them, a family moved to the team they're the project manager of, and
+// (for a project manager) a member saying they resolved or closed a ticket.
 // =====================================================================
 
 import { createHash } from 'node:crypto';
 import { pool } from './auth.mjs';
+import { notify } from './notifications.mjs';
+import { sortRows } from './tickets.mjs';
 
 // They see absolutely everything
 export const ADMIN_USERNAMES = ['vperez', 'lvang', 'lbell'];
@@ -20350,8 +22788,16 @@ export const ROLES = {
 };
 // Accounts that aren't people (scripts/warmup.mjs) never join a team
 const SERVICE_ACCOUNTS = ['warmup'];
-// Test accounts join teams but never lead one
-const TEST_ACCOUNT = /^tester\d*$/;
+// Test accounts (tester1, tester2, ..., and test.<name>, like the Milwaukee
+// Brewers' players) only ever join a test team, never a real one. A Postgres
+// pattern, also used as a RegExp.
+const TEST_ACCOUNT = '^(tester[0-9]*|test\\.[a-z0-9._-]+)$';
+const isTestAccount = username => new RegExp(TEST_ACCOUNT).test(username);
+// Not a person's account (mail.mjs never emails these)
+export const isTestOrServiceAccount = username => isTestAccount(username) || SERVICE_ACCOUNTS.includes(username);
+// What a member can tell their project manager about one of their tickets
+export const REPORT_STATUSES = { resolved: 'resolved', closed: 'closed' };
+const MAX_NOTE = 500;
 
 const PREFIXES = ['INC', 'CHG', 'RITM', 'SCTASK'];
 const TICKET = /^(INC|CHG|RITM|SCTASK)\d{7}$/;
@@ -20366,7 +22812,8 @@ const SCOPED_CUBES = {
 };
 // The link columns that join tickets into families (the same ones as
 // relations.mjs). A problem record isn't a ticket, so it's marked PRB:.
-const LINKS = {
+// servicenow-sync/ links each new ticket by these too (placeTicket).
+export const LINKS = {
   incident: ['parent_incident', 'problem', 'caused_by_change'],
   change_request: ['incident', 'problem'],
   sc_req_item: ['request', 'parent'],
@@ -20411,7 +22858,77 @@ export async function ensureTeamsSchema() {
     );
     CREATE INDEX IF NOT EXISTS ticket_assignments_family_idx ON ticket_assignments (family_id);
     CREATE INDEX IF NOT EXISTS ticket_assignments_assignee_idx ON ticket_assignments (assignee_id);
+    -- "I resolved / closed this", told to the project manager. Only a
+    -- message: the ticket itself never changes.
+    CREATE TABLE IF NOT EXISTS ticket_reports (
+      id          serial PRIMARY KEY,
+      number      text NOT NULL,
+      user_id     integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      team_id     integer REFERENCES teams(id) ON DELETE SET NULL,
+      status      text NOT NULL CHECK (status IN ('resolved', 'closed')),
+      note        text,
+      created_at  timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS ticket_reports_number_idx ON ticket_reports (number, created_at DESC);
+    -- A team for trying things out (the Milwaukee Brewers): test accounts
+    -- may join it, and they may join no other
+    ALTER TABLE teams ADD COLUMN IF NOT EXISTS is_test boolean NOT NULL DEFAULT false;
+    -- What the Metabase dashboards may show each person: every ticket's team
+    -- and who has it, and nothing else. analytics_db reads it through
+    -- postgres_fdw as access_reader (db/init-reporting.sh), which can read
+    -- this view and no other table here.
+    CREATE OR REPLACE VIEW ticket_access AS
+      SELECT a.number, f.team_id, a.assignee_id
+        FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id;
+    DO $$ BEGIN
+      IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'access_reader') THEN
+        GRANT SELECT ON ticket_access TO access_reader;
+      END IF;
+    END $$;
   `);
+}
+
+// Who someone is to the Metabase dashboards (a locked filter in their signed
+// link, see server.mjs): everyone ("all"), a team's tickets, or their own.
+// Ends with the scope's key, so Metabase keeps cached results apart for each
+// set of tickets and a change in someone's tickets isn't answered from an old
+// cache. reporting.visible_tickets in analytics_db reads it.
+export function dashboardViewer(scope) {
+  if (scope.all) return 'all';
+  const { access } = scope;
+  return access.role === 'project_manager'
+    ? `team:${access.team.id}:${scope.key}`
+    : `person:${access.userId}:${scope.key}`;
+}
+
+// Test accounts used to be dealt onto teams with everyone else. Takes any
+// that are on a real team off it; their tickets stay with the team,
+// unassigned, for its project manager to hand out. Safe to run every start.
+// -> null, or { people: [usernames], tickets }
+export async function takeTestAccountsOffTeams() {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `SELECT m.user_id, u.username FROM team_members m JOIN users u ON u.id = m.user_id JOIN teams t ON t.id = m.team_id
+        WHERE u.username ~ $1 AND NOT t.is_test FOR UPDATE OF m`, [TEST_ACCOUNT]);
+    if (!rows.length) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    const ids = rows.map(r => r.user_id);
+    const { rowCount } = await client.query(
+      'UPDATE ticket_assignments SET assignee_id = NULL, assigned_at = NULL, assigned_by = NULL WHERE assignee_id = ANY($1::int[])', [ids]);
+    await client.query('DELETE FROM team_members WHERE user_id = ANY($1::int[])', [ids]);
+    await client.query('COMMIT');
+    changed();
+    return { people: rows.map(r => r.username), tickets: rowCount };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -20493,15 +23010,14 @@ export async function seedTeams(runQuery) {
     // One project manager and one process excellence member per team, then
     // everyone else to whichever team is smallest
     const { rows: people } = await client.query(
-      'SELECT id, username FROM users WHERE is_active AND username <> ALL($1::text[])',
-      [[...ADMIN_USERNAMES, ...SERVICE_ACCOUNTS]]);
+      'SELECT id, username FROM users WHERE is_active AND username <> ALL($1::text[]) AND username !~ $2',
+      [[...ADMIN_USERNAMES, ...SERVICE_ACCOUNTS], TEST_ACCOUNT]);
     people.sort((a, b) => (hash('person', a.username) - hash('person', b.username)) || a.username.localeCompare(b.username));
-    const leaders = people.filter(p => !TEST_ACCOUNT.test(p.username));
     const members = teamIds.map(() => []);
     const placed = new Set();
     const place = (person, team, role) => { members[team].push({ id: person.id, role }); placed.add(person.id); };
-    leaders.slice(0, teamIds.length).forEach((p, t) => place(p, t, 'project_manager'));
-    leaders.slice(teamIds.length, teamIds.length * 2).forEach((p, t) => place(p, t, 'process_excellence'));
+    people.slice(0, teamIds.length).forEach((p, t) => place(p, t, 'project_manager'));
+    people.slice(teamIds.length, teamIds.length * 2).forEach((p, t) => place(p, t, 'process_excellence'));
     for (const p of people.filter(p => !placed.has(p.id))) {
       const smallest = members.reduce((best, list, t) => (list.length < members[best].length ? t : best), 0);
       place(p, smallest, 'project_team');
@@ -20587,10 +23103,8 @@ export function scopeNote(scope) {
     : 'No tickets are assigned to you yet, so there is nothing to show. Your project manager or an admin can assign you some.';
 }
 
-// A Cube query -> the same query limited to the scope's tickets. A cube with
-// no rule here is refused rather than run unfiltered.
-export function restrictQuery(query, scope) {
-  if (scope.all) return query;
+// The tables (cubes) a Cube query reads
+function cubesOf(query) {
   const cubes = new Set();
   const note = member => { if (typeof member === 'string' && member.includes('.')) cubes.add(member.split('.')[0]); };
   const walk = f => {
@@ -20607,7 +23121,14 @@ export function restrictQuery(query, scope) {
   if (Array.isArray(query.order)) query.order.forEach(o => note(Array.isArray(o) ? o[0] : o?.id));
   else if (query.order && typeof query.order === 'object') Object.keys(query.order).forEach(note);
   if (!cubes.size) throw new AccessError('That query names no ticket type.');
+  return cubes;
+}
 
+// A Cube query -> the same query limited to the scope's tickets. A cube with
+// no rule here is refused rather than run unfiltered.
+export function restrictQuery(query, scope) {
+  if (scope.all) return query;
+  const cubes = cubesOf(query);
   const filters = [...(query.filters || [])];
   for (const cube of cubes) {
     const rule = SCOPED_CUBES[cube];
@@ -20616,6 +23137,27 @@ export function restrictQuery(query, scope) {
     filters.push({ member: `${cube}.${rule[1]}`, operator: 'equals', values: values.length ? values : [NO_TICKET] });
   }
   return { ...query, filters };
+}
+
+// Would this query (an AI answer's, already validated) also find tickets the
+// person can't see? Its filters plus "not one of theirs", counted over every
+// ticket by runUnscoped (runCubeQuery). This is the one place a person's query
+// runs on tickets that aren't theirs, so only true or false ever leaves here,
+// never a count or a row: it lets the chat say "this isn't the full report".
+// Filters on the count itself ("more than 5") are left out, since the
+// question is only whether other people's tickets match.
+export async function findsHiddenTickets(query, scope, runUnscoped) {
+  if (scope.all) return false;
+  for (const cube of cubesOf(query)) {
+    const rule = SCOPED_CUBES[cube];
+    if (!rule) throw new AccessError(`${cube} has no access rule, so it can't be shown.`);
+    const theirs = scope.byKind[rule[0]];
+    const filters = (query.filters || []).filter(f => !String(f.member).endsWith('.count'));
+    if (theirs.length) filters.push({ member: `${cube}.${rule[1]}`, operator: 'notEquals', values: theirs });
+    const rows = await runUnscoped({ measures: [`${cube}.count`], filters });
+    if (Number(rows[0]?.[`${cube}.count`]) > 0) return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------
@@ -20640,7 +23182,7 @@ const personName = r => r.display_name || r.username;
 export async function listTeams(scope) {
   const { access } = scope;
   const { rows: teams } = await pool.query(
-    `SELECT t.id, t.name, count(f.id)::int AS families, coalesce(sum(f.size), 0)::int AS tickets
+    `SELECT t.id, t.name, t.is_test AS test, count(f.id)::int AS families, coalesce(sum(f.size), 0)::int AS tickets
        FROM teams t LEFT JOIN ticket_families f ON f.team_id = t.id
       ${access.admin ? '' : 'WHERE t.id = $1'}
       GROUP BY t.id ORDER BY t.id`,
@@ -20677,27 +23219,102 @@ export async function listTeams(scope) {
         canManage: manages,
         unassigned: manages ? loadOf(t.id, null) : null,
         members: members.filter(m => m.team_id === t.id).map(m => ({
-          id: m.id, username: m.username, name: personName(m), role: m.role,
+          id: m.id, username: m.username, name: personName(m), role: m.role, test: isTestAccount(m.username),
           load: manages || m.id === access.userId ? loadOf(t.id, m.id) : null,
         })),
       };
     }),
   };
   if (access.admin) {
+    // Test accounts only while there's a test team for them to join
     const { rows } = await pool.query(
-      `SELECT id, username, display_name FROM users
+      `SELECT id, username, display_name, username ~ $2 AS test FROM users
         WHERE is_active AND id NOT IN (SELECT user_id FROM team_members) AND username <> ALL($1::text[])
-        ORDER BY lower(coalesce(display_name, username))`,
-      [[...ADMIN_USERNAMES, ...SERVICE_ACCOUNTS]]);
-    result.people = rows.map(r => ({ id: r.id, username: r.username, name: personName(r) }));
+          AND (username !~ $2 OR EXISTS (SELECT 1 FROM teams WHERE is_test))
+        ORDER BY username ~ $2, lower(coalesce(display_name, username))`,
+      [[...ADMIN_USERNAMES, ...SERVICE_ACCOUNTS], TEST_ACCOUNT]);
+    result.people = rows.map(r => ({ id: r.id, username: r.username, name: personName(r), test: r.test }));
+    // Every ticket nobody has yet, on a team or on none (the Team tab's "Not assigned yet")
+    const { rows: [u] } = await pool.query(
+      `SELECT count(*)::int AS tickets, count(DISTINCT a.family_id)::int AS families,
+              count(*) FILTER (WHERE f.team_id IS NULL)::int AS no_team_tickets,
+              count(DISTINCT a.family_id) FILTER (WHERE f.team_id IS NULL)::int AS no_team_families
+         FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id
+        WHERE a.assignee_id IS NULL`);
+    result.unassigned = {
+      tickets: u.tickets, families: u.families,
+      noTeam: { tickets: u.no_team_tickets, families: u.no_team_families },
+    };
+    // For the "Before a presentation" card: the demo tickets, and how many tickets have a status
+    const { rows: [d] } = await pool.query(
+      `SELECT count(*)::int AS tickets, count(*) FILTER (WHERE a.assignee_id IS NOT NULL)::int AS assigned,
+              count(*) FILTER (WHERE f.team_id IS NOT NULL)::int AS on_team
+         FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id WHERE a.number ~ $1`, [DEMO_TICKET]);
+    const { rows: [s] } = await pool.query('SELECT count(DISTINCT number)::int AS tickets FROM ticket_reports');
+    result.presentation = { demo: { tickets: d.tickets, assigned: d.assigned, onTeam: d.on_team }, statuses: s.tickets };
   }
   return result;
 }
 
-// One page of a team's tickets, grouped by family (biggest first).
+// May this person see this ticket (and so its KPIs)? Admins any, a project
+// manager their team's, anyone else the ones assigned to them
+const scopeSets = new WeakMap(); // scope -> Set of its ticket numbers
+export function canSeeTicket(scope, number) {
+  if (scope.all) return true;
+  if (!scopeSets.has(scope)) scopeSets.set(scope, new Set(Object.values(scope.byKind).flat()));
+  return scopeSets.get(scope).has(number);
+}
+
+// A team's families with their tickets and who has each, for its project
+// manager or an admin -> Map(id -> { id, size, members: [{ number, assigneeId }] })
+export async function teamFamilies(scope, teamId) {
+  if (!canManage(scope, teamId)) throw new AccessError('Only an admin or this team\'s project manager can see its families.');
+  const { rows } = await pool.query(
+    `SELECT f.id, f.size, a.number, a.assignee_id
+       FROM ticket_families f JOIN ticket_assignments a ON a.family_id = f.id
+      WHERE f.team_id = $1 ORDER BY f.id, a.number`, [teamId]);
+  const families = new Map();
+  for (const r of rows) {
+    if (!families.has(r.id)) families.set(r.id, { id: r.id, size: r.size, members: [] });
+    families.get(r.id).members.push({ number: r.number, assigneeId: r.assignee_id });
+  }
+  return families;
+}
+
+// One family's tickets and who has each, for its team's project manager or
+// an admin -> { id, size, team: { id, name }, members: [{ number, assigneeId, assignee }] }
+export async function familyMembers(scope, familyId) {
+  const { rows: [f] } = await pool.query(
+    'SELECT f.id, f.size, f.team_id, t.name FROM ticket_families f LEFT JOIN teams t ON t.id = f.team_id WHERE f.id = $1', [String(familyId || '')]);
+  if (!f) throw new AccessError('There is no such family.');
+  if (!f.team_id || !canManage(scope, f.team_id)) throw new AccessError('Only an admin or this family\'s project manager can see it.');
+  const { rows } = await pool.query(
+    `SELECT a.number, a.assignee_id, u.username, u.display_name
+       FROM ticket_assignments a LEFT JOIN users u ON u.id = a.assignee_id
+      WHERE a.family_id = $1 ORDER BY a.number`, [f.id]);
+  return {
+    id: f.id, size: f.size, team: { id: f.team_id, name: f.name },
+    members: rows.map(r => ({ number: r.number, assigneeId: r.assignee_id, assignee: r.assignee_id ? personName(r) : null })),
+  };
+}
+
+// The tickets assigned to someone in OneTouch (Home's "Assigned to me")
+export async function assignedNumbers(userId) {
+  const { rows } = await pool.query('SELECT number FROM ticket_assignments WHERE assignee_id = $1 ORDER BY number', [userId]);
+  return rows.map(r => r.number);
+}
+
+// One page of a team's tickets, grouped by family (biggest first), each with
+// the latest "I resolved / closed it" someone told the project manager.
 // assignee: a user id, 'none' (unassigned) or null (everyone). Someone who
 // doesn't manage the team only ever gets their own.
-export async function teamTickets(scope, teamId, { assignee = null, kind = null, search = '', offset = 0, limit = 50 } = {}) {
+// sort: { by, dir: 'asc' | 'desc', valueOf } orders every match before the
+// page is cut: by 'family' (its size), 'assignee' (their name), or anything
+// else through valueOf(number) (the ticket's summary, from server.mjs).
+// matches({ number, familySize, assignee }): only the tickets it says yes to (a
+// lookup typed over the list; assignee is a name or null). -> { total, before
+// (the total before that lookup), tickets: one page }
+export async function teamTickets(scope, teamId, { assignee = null, kind = null, matches = null, offset = 0, limit = 50, sort = null } = {}) {
   if (!canManage(scope, teamId)) {
     if (scope.access.team?.id !== teamId) throw new AccessError('That is not your team.');
     assignee = scope.access.userId;
@@ -20707,28 +23324,120 @@ export async function teamTickets(scope, teamId, { assignee = null, kind = null,
   if (assignee === 'none') where.push('a.assignee_id IS NULL');
   else if (assignee) { params.push(Number(assignee)); where.push(`a.assignee_id = $${params.length}`); }
   if (PREFIXES.includes(kind)) { params.push(`${kind}%`); where.push(`a.number LIKE $${params.length}`); }
-  const text = String(search || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20);
-  if (text) { params.push(`%${text}%`); where.push(`a.number LIKE $${params.length}`); }
 
-  const from = `FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id
-                LEFT JOIN users u ON u.id = a.assignee_id WHERE ${where.join(' AND ')}`;
-  const { rows: [{ total }] } = await pool.query(`SELECT count(*)::int AS total ${from}`, params);
-  const { rows } = await pool.query(
-    `SELECT a.number, a.family_id, f.size, a.assignee_id, u.username, u.display_name ${from}
-      ORDER BY f.size DESC, a.family_id, a.number
-      LIMIT ${Math.min(Math.max(Number(limit) || 50, 1), 200)} OFFSET ${Math.max(Number(offset) || 0, 0)}`,
+  // Every match (a team has about 10,000 tickets at most), so a sort covers them all
+  const { rows: all } = await pool.query(
+    `SELECT a.number, a.family_id, f.size, a.assignee_id, u.username, u.display_name
+       FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id
+       LEFT JOIN users u ON u.id = a.assignee_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY f.size DESC, a.family_id, a.number`,
     params);
+  let list = matches
+    ? all.filter(r => matches({ number: r.number, familySize: r.size, assignee: r.assignee_id ? personName(r) : null }))
+    : all;
+  if (sort) {
+    const valueOf = sort.by === 'family' ? r => r.size
+      : sort.by === 'assignee' ? r => (r.assignee_id ? personName(r) : null)
+        : r => sort.valueOf(r.number);
+    list = sortRows(list, valueOf, sort.dir);
+  }
+  const start = Math.max(Number(offset) || 0, 0);
+  const rows = list.slice(start, start + Math.min(Math.max(Number(limit) || 50, 1), 200));
+  const { rows: reports } = await pool.query(
+    `SELECT DISTINCT ON (r.number) r.number, r.status, r.note, r.created_at, r.user_id, coalesce(u.display_name, u.username) AS by
+       FROM ticket_reports r LEFT JOIN users u ON u.id = r.user_id
+      WHERE r.number = ANY($1::text[])
+      ORDER BY r.number, r.created_at DESC`,
+    [rows.map(r => r.number)]);
+  const latest = new Map(reports.map(r => [r.number, r]));
   return {
-    total,
+    total: list.length,
+    before: all.length,
+    tickets: rows.map(r => {
+      const report = latest.get(r.number);
+      return {
+        number: r.number, family: { id: r.family_id, size: r.size },
+        assignee: r.assignee_id ? { id: r.assignee_id, name: personName(r) } : null,
+        report: report ? {
+          status: report.status, note: report.note, at: report.created_at,
+          by: report.by, mine: report.user_id === scope.access.userId,
+        } : null,
+      };
+    }),
+  };
+}
+
+// Admins: one page of every ticket nobody has yet, on any team or on none,
+// family by family (families on no team first, then each team's, biggest
+// first). team: a team id, 'none' (on no team) or null (any). kind, matches,
+// offset, limit and sort as for teamTickets, except that sort.by may be 'team'
+// (its name) and not 'assignee', and matches gets { number, familyId,
+// familySize, team } (team: a name or null). -> { total, before, tickets: one
+// page, families: { id -> { id, size, kinds, unassigned, team } } for the
+// families on that page }
+export async function unassignedTickets(scope, { team = null, kind = null, matches = null, offset = 0, limit = 50, sort = null } = {}) {
+  requireAdmin(scope);
+  const params = [];
+  const where = ['a.assignee_id IS NULL'];
+  if (team === 'none') where.push('f.team_id IS NULL');
+  else if (team) {
+    const teamId = Number(team);
+    if (!Number.isInteger(teamId)) throw new AccessError('There is no such team.');
+    params.push(teamId);
+    where.push(`f.team_id = $${params.length}`);
+  }
+  if (PREFIXES.includes(kind)) { params.push(`${kind}%`); where.push(`a.number LIKE $${params.length}`); }
+
+  const { rows: all } = await pool.query(
+    `SELECT a.number, a.family_id, f.size, f.team_id, t.name AS team
+       FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id LEFT JOIN teams t ON t.id = f.team_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY f.team_id NULLS FIRST, f.size DESC, a.family_id, a.number`,
+    params);
+  let list = matches
+    ? all.filter(r => matches({ number: r.number, familyId: r.family_id, familySize: r.size, team: r.team }))
+    : all;
+  if (sort) {
+    const valueOf = sort.by === 'family' ? r => r.size
+      : sort.by === 'team' ? r => r.team
+        : r => sort.valueOf(r.number);
+    list = sortRows(list, valueOf, sort.dir);
+  }
+  const start = Math.max(Number(offset) || 0, 0);
+  const rows = list.slice(start, start + Math.min(Math.max(Number(limit) || 50, 1), 200));
+
+  // The page's families: how many of each type they hold, and how many nobody has
+  const families = {};
+  for (const r of rows) {
+    families[r.family_id] ??= {
+      id: r.family_id, size: r.size, kinds: {}, unassigned: 0,
+      team: r.team_id ? { id: r.team_id, name: r.team } : null,
+    };
+  }
+  const { rows: kinds } = await pool.query(
+    `SELECT family_id, substring(number from '^[A-Z]+') AS kind, count(*)::int AS n,
+            count(*) FILTER (WHERE assignee_id IS NULL)::int AS unassigned
+       FROM ticket_assignments WHERE family_id = ANY($1::text[]) GROUP BY 1, 2`,
+    [Object.keys(families)]);
+  for (const k of kinds) {
+    families[k.family_id].kinds[k.kind] = k.n;
+    families[k.family_id].unassigned += k.unassigned;
+  }
+  return {
+    total: list.length,
+    before: all.length,
     tickets: rows.map(r => ({
       number: r.number, family: { id: r.family_id, size: r.size },
-      assignee: r.assignee_id ? { id: r.assignee_id, name: personName(r) } : null,
+      team: r.team_id ? { id: r.team_id, name: r.team } : null,
     })),
+    families,
   };
 }
 
 // Gives tickets of one team to one of its members (null: nobody). Admins can
-// for any team, a project manager for their own. -> how many changed
+// for any team, a project manager for their own. The person they go to gets
+// a notification (unless they gave them to themselves). -> how many changed
 export async function assignTickets(scope, numbers, assigneeId) {
   const wanted = [...new Set((Array.isArray(numbers) ? numbers : []).map(n => String(n).toUpperCase()))].filter(n => TICKET.test(n));
   if (!wanted.length) throw new AccessError('No tickets to assign.');
@@ -20736,22 +23445,57 @@ export async function assignTickets(scope, numbers, assigneeId) {
   const { rows } = await pool.query(
     'SELECT a.number, f.team_id FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id WHERE a.number = ANY($1::text[])', [wanted]);
   if (rows.length !== wanted.length) throw new AccessError('Some of those tickets aren\'t on any team.');
+  if (rows.some(r => r.team_id === null)) throw new AccessError('Those tickets\' family isn\'t on a team yet. Move it to one first.');
   const teamIds = new Set(rows.map(r => r.team_id));
-  if (teamIds.size !== 1 || rows[0].team_id === null) throw new AccessError('Assign one team\'s tickets at a time.');
-  const teamId = rows[0].team_id;
+  if (teamIds.size !== 1) throw new AccessError('Assign one team\'s tickets at a time.');
+  return giveTickets(scope, rows[0].team_id, wanted, assigneeId);
+}
+
+// Gives a whole family (every ticket in it) to one member of its team (null:
+// nobody), for its team's project manager or an admin -> how many changed
+export async function assignFamily(scope, familyId, assigneeId) {
+  const { rows: [f] } = await pool.query('SELECT id, team_id FROM ticket_families WHERE id = $1', [String(familyId || '')]);
+  if (!f || f.team_id === null) throw new AccessError('There is no such family on a team.');
+  const { rows } = await pool.query('SELECT number FROM ticket_assignments WHERE family_id = $1 ORDER BY number', [f.id]);
+  return giveTickets(scope, f.team_id, rows.map(r => r.number), assigneeId, f.id);
+}
+
+// The tickets (all of them one team's) to one of the team's members, or to
+// nobody. Whoever gets them is told (unless they gave them to themselves).
+// family: the family's id when it's a whole family. -> how many changed
+async function giveTickets(scope, teamId, numbers, assigneeId, family = null) {
   if (!canManage(scope, teamId)) throw new AccessError('Only an admin or this team\'s project manager can assign its tickets.');
   const person = assigneeId === null ? null : Number(assigneeId);
   if (person !== null) {
     const { rows: on } = await pool.query('SELECT 1 FROM team_members WHERE user_id = $1 AND team_id = $2', [person, teamId]);
     if (!on.length) throw new AccessError('That person isn\'t on this team.');
   }
-  const { rowCount } = await pool.query(
-    `UPDATE ticket_assignments
-        SET assignee_id = $2, assigned_at = CASE WHEN $2::int IS NULL THEN NULL ELSE now() END, assigned_by = $3
-      WHERE number = ANY($1::text[]) AND assignee_id IS DISTINCT FROM $2::int`,
-    [wanted, person, scope.access.userId]);
-  if (rowCount) changed();
-  return rowCount;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: given } = await client.query(
+      `UPDATE ticket_assignments
+          SET assignee_id = $2, assigned_at = CASE WHEN $2::int IS NULL THEN NULL ELSE now() END, assigned_by = $3
+        WHERE number = ANY($1::text[]) AND assignee_id IS DISTINCT FROM $2::int
+        RETURNING number`,
+      [numbers, person, scope.access.userId]);
+    if (given.length && person !== null && person !== scope.access.userId) {
+      const { rows: [team] } = await client.query('SELECT name FROM teams WHERE id = $1', [teamId]);
+      await notify(client, [person], {
+        kind: 'assigned', actorId: scope.access.userId,
+        numbers: given.map(r => r.number).sort(),
+        detail: { count: given.length, team: team.name, ...(family ? { family, size: numbers.length } : {}) },
+      });
+    }
+    await client.query('COMMIT');
+    if (given.length) changed();
+    return given.length;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 // A ticket's family: its size, how many of each type, and its team (admins only)
@@ -20778,13 +23522,13 @@ export async function familyOfTicket(scope, number) {
 
 // Moves a whole family to another team (admins only). Its tickets were the
 // old team's people's, so they become unassigned for the new team's project
-// manager to hand out. -> how many tickets moved
+// manager to hand out, who gets a notification. -> how many tickets moved
 export async function moveFamily(scope, familyId, teamId) {
   requireAdmin(scope);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const { rows: [team] } = await client.query('SELECT id FROM teams WHERE id = $1', [teamId]);
+    const { rows: [team] } = await client.query('SELECT id, name FROM teams WHERE id = $1', [teamId]);
     if (!team) throw new AccessError('There is no such team.');
     const { rows: [family] } = await client.query('SELECT size, team_id FROM ticket_families WHERE id = $1 FOR UPDATE', [familyId]);
     if (!family) throw new AccessError('There is no such family.');
@@ -20796,6 +23540,17 @@ export async function moveFamily(scope, familyId, teamId) {
     await client.query(
       `UPDATE ticket_assignments SET assignee_id = NULL, assigned_at = NULL, assigned_by = $2
         WHERE family_id = $1 AND assignee_id IS NOT NULL`, [familyId, scope.access.userId]);
+    const { rows: managers } = await client.query(
+      `SELECT user_id FROM team_members WHERE team_id = $1 AND role = 'project_manager' AND user_id <> $2`,
+      [team.id, scope.access.userId]);
+    if (managers.length) {
+      const { rows: tickets } = await client.query(
+        'SELECT number FROM ticket_assignments WHERE family_id = $1 ORDER BY number', [familyId]);
+      await notify(client, managers.map(m => m.user_id), {
+        kind: 'family', actorId: scope.access.userId,
+        numbers: tickets.map(t => t.number), detail: { count: family.size, team: team.name, family: familyId },
+      });
+    }
     await client.query('COMMIT');
     changed();
     return family.size;
@@ -20807,9 +23562,107 @@ export async function moveFamily(scope, familyId, teamId) {
   }
 }
 
+// ---------------------------------------------------------------------
+// NEW TICKETS FROM SERVICENOW (servicenow-sync/, after it saves the ticket
+// in the data). The first start's rules, one ticket at a time: a ticket
+// linked to others joins their family, and so their team; one linked to
+// nothing gets a family of its own on the real team with the fewest
+// tickets. It arrives unassigned, for the project manager to hand out. A
+// ticket that links two families merges them into the bigger one, keeping
+// its id and team (no family is ever split between teams); tickets that
+// change team that way become unassigned, and that team's project manager
+// is told, as when an admin moves a family. Families only grow: a link that
+// goes away never splits one.
+// ---------------------------------------------------------------------
+
+// Postgres channel (onetouch_auth): a ticket arrived or changed, so OneTouch
+// reads again what it read at start (server.mjs)
+export const TICKETS_CHANGED = 'onetouch_tickets_changed';
+
+export async function announceTicketsChanged(note = '', db = pool) {
+  await db.query('SELECT pg_notify($1, $2)', [TICKETS_CHANGED, String(note).slice(0, 200)]);
+}
+
+// number: the ticket that arrived; linked: the tickets it's linked to, either
+// way (servicenow-sync works them out from the data, by LINKS)
+// -> { family, team, action: 'new' | 'joined' | 'merged' | 'kept', moved }
+export async function placeTicket(number, linked = []) {
+  const n = String(number || '').toUpperCase().trim();
+  if (!TICKET.test(n)) throw new Error(`${number} isn't a ticket number`);
+  const numbers = [...new Set([n, ...linked.map(x => String(x).toUpperCase().trim()).filter(x => TICKET.test(x))])];
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // One placement at a time, so two linked tickets arriving together end up in one family
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['onetouch:placeTicket']);
+    const { rows: [mine] } = await client.query('SELECT family_id FROM ticket_assignments WHERE number = $1', [n]);
+    // Every family it touches (its own, if it has one), biggest first
+    const { rows: families } = await client.query(
+      `SELECT DISTINCT f.id, f.team_id, f.size FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id
+        WHERE a.number = ANY($1::text[])`, [numbers]);
+    families.sort((a, b) => (b.size - a.size) || a.id.localeCompare(b.id));
+
+    let family, team, action, moved = [];
+    if (!families.length) {
+      // Linked to nothing: a family of its own, on the real team with the fewest tickets
+      const { rows: [smallest] } = await client.query(
+        `SELECT t.id FROM teams t LEFT JOIN ticket_families f ON f.team_id = t.id
+          WHERE NOT t.is_test GROUP BY t.id ORDER BY coalesce(sum(f.size), 0), t.id LIMIT 1`);
+      family = n;
+      team = smallest?.id ?? null;
+      action = 'new';
+      await client.query('INSERT INTO ticket_families (id, team_id, size) VALUES ($1, $2, 0)', [family, team]);
+    } else {
+      ({ id: family, team_id: team } = families[0]);
+      const others = families.slice(1).map(f => f.id);
+      if (others.length) {
+        // Merged into the biggest: tickets changing team become nobody's
+        const { rows } = await client.query(
+          `UPDATE ticket_assignments a SET family_id = $1,
+                  assignee_id = CASE WHEN f.team_id IS NOT DISTINCT FROM $2::int THEN a.assignee_id END,
+                  assigned_at = CASE WHEN f.team_id IS NOT DISTINCT FROM $2::int THEN a.assigned_at END,
+                  assigned_by = CASE WHEN f.team_id IS NOT DISTINCT FROM $2::int THEN a.assigned_by END
+             FROM ticket_families f
+            WHERE f.id = a.family_id AND a.family_id = ANY($3::text[])
+        RETURNING a.number, f.team_id IS DISTINCT FROM $2::int AS changed_team`, [family, team, others]);
+        moved = rows.filter(r => r.changed_team).map(r => r.number).sort();
+        await client.query('DELETE FROM ticket_families WHERE id = ANY($1::text[])', [others]);
+        action = 'merged';
+      } else {
+        action = mine ? 'kept' : 'joined';
+      }
+    }
+    if (!mine) await client.query('INSERT INTO ticket_assignments (number, family_id) VALUES ($1, $2)', [n, family]);
+    await client.query('UPDATE ticket_families SET size = (SELECT count(*) FROM ticket_assignments WHERE family_id = $1) WHERE id = $1', [family]);
+
+    if (moved.length && team !== null) {
+      const { rows: managers } = await client.query(
+        `SELECT m.user_id, t.name FROM team_members m JOIN teams t ON t.id = m.team_id WHERE m.team_id = $1 AND m.role = 'project_manager'`, [team]);
+      if (managers.length) {
+        await notify(client, managers.map(m => m.user_id), {
+          kind: 'family', numbers: moved,
+          detail: { count: moved.length, team: managers[0].name, family, source: 'servicenow' },
+        });
+      }
+    }
+    await announceTicketsChanged(n, client);
+    await client.query('COMMIT');
+    changed();
+    return { family, team, action, moved: moved.length };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// Someone's access, sorting and the like, read again (server.mjs, when tickets change)
+export const dataChanged = () => changed();
+
 // Puts someone on a team with a role, changes their role, or (teamId null)
-// takes them off their team (admins only). Leaving a team hands their
-// tickets back to it, unassigned.
+// takes them off their team, and with it their role (admins only). Leaving a
+// team hands their tickets back to it, unassigned. -> { unassigned }: how many
 export async function setMembership(scope, userId, teamId, role) {
   requireAdmin(scope);
   if (teamId !== null && !ROLES[role]) throw new AccessError('Choose a role.');
@@ -20818,15 +23671,18 @@ export async function setMembership(scope, userId, teamId, role) {
     await client.query('BEGIN');
     const { rows: [user] } = await client.query('SELECT id, username FROM users WHERE id = $1 AND is_active', [userId]);
     if (!user) throw new AccessError('There is no such account.');
-    if (SERVICE_ACCOUNTS.includes(user.username)) throw new AccessError(`${user.username} is a service account and can't join a team.`);
-    if (teamId !== null && !(await client.query('SELECT 1 FROM teams WHERE id = $1', [teamId])).rows.length) {
-      throw new AccessError('There is no such team.');
+    if (teamId !== null) {
+      const { rows: [team] } = await client.query('SELECT is_test FROM teams WHERE id = $1', [teamId]);
+      if (!team) throw new AccessError('There is no such team.');
+      if (SERVICE_ACCOUNTS.includes(user.username)) throw new AccessError(`${user.username} is a service account and can't join a team.`);
+      if (isTestAccount(user.username) && !team.is_test) throw new AccessError(`${user.username} is a test account, so it can only join a test team.`);
     }
     const { rows: [now] } = await client.query('SELECT team_id FROM team_members WHERE user_id = $1 FOR UPDATE', [userId]);
+    let unassigned = 0;
     if (now && now.team_id !== teamId) {
-      await client.query(
+      ({ rowCount: unassigned } = await client.query(
         'UPDATE ticket_assignments SET assignee_id = NULL, assigned_at = NULL, assigned_by = $2 WHERE assignee_id = $1',
-        [userId, scope.access.userId]);
+        [userId, scope.access.userId]));
     }
     if (teamId === null) {
       await client.query('DELETE FROM team_members WHERE user_id = $1', [userId]);
@@ -20839,6 +23695,161 @@ export async function setMembership(scope, userId, teamId, role) {
     }
     await client.query('COMMIT');
     changed();
+    return { unassigned };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// ---------------------------------------------------------------------
+// TELLING THE PROJECT MANAGER: someone on a team says they resolved or
+// closed one of their tickets. Their team's project manager gets a
+// notification, and the Team tab shows it next to the ticket. Nothing in
+// the ticket data changes: the export is a frozen snapshot.
+// ---------------------------------------------------------------------
+
+// -> { told: [project managers' names] }
+export async function reportTicket(scope, number, status, note) {
+  const { access } = scope;
+  const n = String(number || '').toUpperCase().trim();
+  if (!TICKET.test(n)) throw new AccessError('That isn\'t a ticket number.');
+  if (!REPORT_STATUSES[status]) throw new AccessError('Say whether you resolved or closed it.');
+  const text = String(note ?? '').trim().slice(0, MAX_NOTE) || null;
+  if (!access.team) throw new AccessError('You\'re not on a team, so there\'s no project manager to tell.');
+  const { rows: [mine] } = await pool.query(
+    `SELECT 1 FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id
+      WHERE a.number = $1 AND a.assignee_id = $2 AND f.team_id = $3`, [n, access.userId, access.team.id]);
+  if (!mine) throw new AccessError(`${n} isn't assigned to you.`);
+  const { rows: managers } = await pool.query(
+    `SELECT u.id, u.username, u.display_name FROM team_members m JOIN users u ON u.id = m.user_id
+      WHERE m.team_id = $1 AND m.role = 'project_manager' AND m.user_id <> $2 ORDER BY u.id`,
+    [access.team.id, access.userId]);
+  if (!managers.length) {
+    throw new AccessError(access.role === 'project_manager'
+      ? 'You\'re your team\'s project manager, so there\'s nobody else to tell.'
+      : `${access.team.name} has no project manager to tell yet. An admin can add one.`);
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      'INSERT INTO ticket_reports (number, user_id, team_id, status, note) VALUES ($1, $2, $3, $4, $5)',
+      [n, access.userId, access.team.id, status, text]);
+    await notify(client, managers.map(m => m.id), {
+      kind: 'report', actorId: access.userId, numbers: [n], detail: { status, note: text, team: access.team.name },
+    });
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+  return { told: managers.map(personName) };
+}
+
+// ---------------------------------------------------------------------
+// RESOLVED OR CLOSED: the tickets whose latest report says resolved or
+// closed, for admins (every team) and project managers (their team's
+// tickets). They can change that status, or set the ticket open again,
+// which takes its reports away. Only OneTouch's record changes: the
+// ticket's data never does. Admins can also undo every status at once, and
+// put the demo tickets back as they were made, before a presentation.
+// ---------------------------------------------------------------------
+
+// db/demo-tickets.sql's made-up tickets
+const DEMO_TICKET = '^(INC|CHG|RITM|SCTASK)99000[0-9]{2}$';
+export const STATUS_CHOICES = ['resolved', 'closed', 'open'];
+
+function requireManager(scope) {
+  if (!scope.access.admin && scope.access.role !== 'project_manager') throw new AccessError('Only an admin or a project manager can see those.');
+}
+
+// -> [{ number, status, note, at, by, family, team, assignee }], newest first
+export async function ticketStatuses(scope) {
+  requireManager(scope);
+  const { rows } = await pool.query(
+    `SELECT r.number, r.status, r.note, r.created_at, r.by, a.family_id, f.size, f.team_id, t.name AS team,
+            a.assignee_id, p.username, p.display_name
+       FROM (SELECT DISTINCT ON (r.number) r.number, r.status, r.note, r.created_at, coalesce(u.display_name, u.username) AS by
+               FROM ticket_reports r LEFT JOIN users u ON u.id = r.user_id
+              ORDER BY r.number, r.created_at DESC, r.id DESC) r
+       JOIN ticket_assignments a ON a.number = r.number
+       JOIN ticket_families f ON f.id = a.family_id
+       LEFT JOIN teams t ON t.id = f.team_id
+       LEFT JOIN users p ON p.id = a.assignee_id
+      WHERE r.status IN ('resolved', 'closed') AND ($1::int IS NULL OR f.team_id = $1)
+      ORDER BY r.created_at DESC, r.number`,
+    [scope.access.admin ? null : scope.access.team.id]);
+  return rows.map(r => ({
+    number: r.number, status: r.status, note: r.note, at: r.created_at, by: r.by,
+    family: { id: r.family_id, size: r.size },
+    team: r.team_id ? { id: r.team_id, name: r.team } : null,
+    assignee: r.assignee_id ? { id: r.assignee_id, name: personName(r) } : null,
+  }));
+}
+
+// One ticket's status, set by an admin or its team's project manager: resolved
+// or closed (a report in their name), or open again (its reports go, as if
+// nobody had said so) -> { number, status }
+export async function setTicketStatus(scope, number, status) {
+  const n = String(number || '').toUpperCase().trim();
+  if (!TICKET.test(n)) throw new AccessError('That isn\'t a ticket number.');
+  if (!STATUS_CHOICES.includes(status)) throw new AccessError('Pick resolved, closed or open.');
+  const { rows: [t] } = await pool.query(
+    'SELECT f.team_id FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id WHERE a.number = $1', [n]);
+  if (!t || !canManage(scope, t.team_id)) throw new AccessError(`Only an admin or ${n}'s team's project manager can change its status.`);
+  if (status === 'open') await pool.query('DELETE FROM ticket_reports WHERE number = $1', [n]);
+  else {
+    await pool.query('INSERT INTO ticket_reports (number, user_id, team_id, status) VALUES ($1, $2, $3, $4)',
+      [n, scope.access.userId, t.team_id, status]);
+  }
+  return { number: n, status };
+}
+
+// Every status anyone set, undone (admins): the reports go, and so do the 🔔
+// notifications that told project managers about them -> { tickets, notifications }
+export async function undoAllStatuses(scope) {
+  requireAdmin(scope);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query('DELETE FROM ticket_reports RETURNING number');
+    const { rowCount } = await client.query('DELETE FROM notifications WHERE kind = \'report\'');
+    await client.query('COMMIT');
+    return { tickets: new Set(rows.map(r => r.number)).size, notifications: rowCount };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// The demo tickets as db/demo-tickets.sql made them (admins): their families
+// on no team, nobody assigned, and nothing OneTouch kept about them since
+// (statuses, notifications, stars, ticket results) -> { tickets, families }
+export async function resetDemoTickets(scope) {
+  requireAdmin(scope);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      'UPDATE ticket_assignments SET assignee_id = NULL, assigned_at = NULL, assigned_by = NULL WHERE number ~ $1 RETURNING family_id', [DEMO_TICKET]);
+    const families = [...new Set(rows.map(r => r.family_id))];
+    // Only families of nothing but demo tickets (as the script makes them)
+    await client.query(
+      `UPDATE ticket_families f SET team_id = NULL WHERE f.id = ANY($1::text[])
+          AND NOT EXISTS (SELECT 1 FROM ticket_assignments a WHERE a.family_id = f.id AND a.number !~ $2)`, [families, DEMO_TICKET]);
+    await client.query('DELETE FROM notifications WHERE EXISTS (SELECT 1 FROM unnest(numbers) n WHERE n ~ $1)', [DEMO_TICKET]);
+    for (const table of ['ticket_reports', 'starred_tickets', 'seen_tickets']) await client.query(`DELETE FROM ${table} WHERE number ~ $1`, [DEMO_TICKET]);
+    await client.query('COMMIT');
+    changed();
+    return { tickets: rows.length, families: families.length };
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
     throw error;
@@ -20855,19 +23866,32 @@ export async function setMembership(scope, userId, teamId, role) {
 // =====================================================================
 // TEAMS: the Team tab (teams.mjs on the server). Admins see every team -
 // who's on it and in what role, its tickets and who has each one - and can
-// put people on teams and move families between teams. A project manager
+// put people on teams and move families between teams; "Not assigned yet"
+// shows them every ticket nobody has, on a team or on none. A project manager
 // sees their own team the same way and hands out its tickets. Everyone
 // else sees who's on their team and the tickets assigned to them.
+// "Resolved or closed" lists the tickets someone said they resolved or
+// closed (admins: every team's; project managers: their team's), whose
+// status they can change; admins also put things back before a presentation.
 // Loaded before app.js, whose helpers these functions use when they run.
 // =====================================================================
 
 const TEAM_PAGE_SIZE = 50;
+// The ticket list's headings, and what the server sorts every ticket by for each
+const TEAM_TICKET_SORT_KEYS = { Ticket: 'number', Type: 'type', Summary: 'summary', State: 'state', Family: 'family', 'Assigned to': 'assignee' };
 const TEAM_KINDS = [['INC', 'Incidents'], ['CHG', 'Changes'], ['RITM', 'Requests'], ['SCTASK', 'Catalog tasks']];
+// Admins' "Not assigned yet" (in place of a team's id), and its list's headings, as above
+const UNASSIGNED_VIEW = 'unassigned';
+const UNASSIGNED_SORT_KEYS = { Ticket: 'number', Type: 'type', Summary: 'summary', State: 'state', Family: 'family', Team: 'team' };
+// The Team tab's menus over a list, and what each sets in teamsView.filter
+const TEAM_FILTERS = { 'team-filter-assignee': 'assignee', 'team-filter-kind': 'kind', 'team-filter-team': 'team' };
 
 const teamsView = {
-    data: null,     // GET /api/teams: { teams, roles, people? }
-    teamId: null,   // the team showing
-    filter: { assignee: '', kind: '', search: '' },
+    data: null,     // GET /api/teams: { teams, roles, people?, unassigned? }
+    teamId: null,   // the team showing, or UNASSIGNED_VIEW
+    // assignee: a team's; team: "Not assigned yet"'s (a team's id, 'none' or '').
+    // What's typed in the 🔍 box is the 'team-tickets' or 'unassigned-tickets' lookup (lookup.js)
+    filter: { assignee: '', kind: '', team: '' },
     offset: 0,
     run: 0,         // bumped on every load, so an answer for an older view is dropped
 };
@@ -20876,9 +23900,10 @@ const teamsView = {
 function resetTeams() {
     teamsView.data = null;
     teamsView.teamId = null;
-    teamsView.filter = { assignee: '', kind: '', search: '' };
+    teamsView.filter = { assignee: '', kind: '', team: '' };
     teamsView.offset = 0;
     teamsView.run += 1;
+    pickerPeople.clear();
     document.getElementById('teams').innerHTML = '';
 }
 
@@ -20895,6 +23920,13 @@ async function teamsFetch(path, options = {}) {
 }
 
 const currentTeam = () => teamsView.data?.teams.find(t => t.id === teamsView.teamId) || null;
+const showingUnassigned = () => teamsView.teamId === UNASSIGNED_VIEW;
+const howMany = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
+
+// Each team's people, for the boxes where their names are typed (picker.js)
+function rememberPickerPeople(data) {
+    for (const t of data.teams) setPickerPeople(t.id, t.members, data.roles);
+}
 const roleName = role => teamsView.data?.roles[role] || '';
 
 async function loadTeams() {
@@ -20904,7 +23936,8 @@ async function loadTeams() {
         const data = await teamsFetch('/api/teams');
         if (!data) return;
         teamsView.data = data;
-        if (!currentTeam()) {
+        rememberPickerPeople(data);
+        if (showingUnassigned() ? !data.unassigned : !currentTeam()) {
             const mine = data.teams.find(t => t.id === currentAccess.team?.id) || data.teams[0];
             teamsView.teamId = mine ? mine.id : null;
         }
@@ -20921,20 +23954,30 @@ async function refreshTeamCounts() {
         const data = await teamsFetch('/api/teams');
         if (!data) return;
         teamsView.data = data;
+        rememberPickerPeople(data);
         const summary = document.getElementById('team-summary');
-        if (summary && currentTeam()) summary.innerHTML = teamSummaryHtml(currentTeam());
+        if (summary && currentTeam()) {
+            summary.innerHTML = teamSummaryHtml(currentTeam());
+            restoreSorts(summary);
+        }
+        const nobody = document.getElementById('unassigned-summary');
+        if (nobody && data.unassigned) nobody.innerHTML = unassignedSummaryHtml();
         const picker = document.getElementById('team-picker');
         if (picker) picker.innerHTML = teamPickerHtml();
+        const presentation = document.getElementById('presentation-card');
+        if (presentation) presentation.innerHTML = presentationHtml();
     } catch (err) {
         console.error('Could not refresh the team counts:', err);
     }
 }
 
 function youLine(team) {
-    if (currentAccess.admin) return 'You\'re an admin: you see every team and every ticket, put people on teams, and move families between them.';
+    if (currentAccess.admin) return 'You\'re an admin: you see every team and every ticket, put people on teams, and move families between them. ' +
+        '📥 Not assigned yet shows every ticket nobody has, on a team or on none.';
     if (!team) return 'You\'re not on a team yet, so no tickets are assigned to you. An admin can add you to one.';
     if (currentAccess.role === 'project_manager') return `You're the project manager of ${team.name}: you see all of its tickets, hand them out, and see who's working on what.`;
-    return `You're on ${team.name} as ${roleName(currentAccess.role).toLowerCase()}. You see the tickets assigned to you.`;
+    return `You're on ${team.name} as ${roleName(currentAccess.role).toLowerCase()}. You see the tickets assigned to you, ` +
+        'and when you resolve or close one you can tell your project manager from its row.';
 }
 
 function renderTeams() {
@@ -20943,34 +23986,51 @@ function renderTeams() {
     const box = document.getElementById('teams');
     let html = `<div class="home-head"><h2 class="home-welcome">👥 ${currentAccess.admin ? 'Teams' : escapeHtml(team?.name || 'Your team')}</h2></div>` +
         `<p class="home-status">${escapeHtml(youLine(team))}</p>`;
+    if (canSeeStatuses()) html += '<section class="team-card" id="ticket-statuses"><h3>✅ Resolved or closed</h3><p class="home-status">Loading…</p></section>';
     if (currentAccess.admin) html += `<div class="team-picker" id="team-picker">${teamPickerHtml()}</div>`;
-    if (team) {
+    if (showingUnassigned()) {
+        html += unassignedCardHtml();
+    } else if (team) {
         const manage = team.canManage;
         html += `<section class="team-card" id="team-summary">${teamSummaryHtml(team)}</section>` +
             `<section class="team-card">` +
             `<h3>${manage ? `${escapeHtml(team.name)}'s tickets` : 'My tickets'}</h3>` +
             `<div class="team-filters">` +
             (manage ? `<label>Who has it <select id="team-filter-assignee">${assigneeFilterOptions(team)}</select></label>` : '') +
-            `<label>Type <select id="team-filter-kind"><option value="">All types</option>` +
-            TEAM_KINDS.map(([k, label]) => `<option value="${k}"${teamsView.filter.kind === k ? ' selected' : ''}>${label}</option>`).join('') +
-            `</select></label>` +
-            `<label>Ticket number <input type="search" id="team-filter-search" value="${escapeHtml(teamsView.filter.search)}" placeholder="e.g. 1813970"></label>` +
-            `<button type="button" class="home-action" data-team-search>Search</button>` +
+            kindFilterHtml() +
             `</div>` +
+            // Any of the list's columns; the server looks through all of the team's tickets
+            lookupBarHtml('team-tickets', Object.keys(TEAM_TICKET_SORT_KEYS), { mode: 'list' }) +
             (manage ? `<div class="team-bulk"><label><input type="checkbox" class="team-select-all"> Tick all on this page</label>` +
-                `<span>Give the ticked tickets to</span> <select id="team-bulk-to" aria-label="Give the ticked tickets to">${assigneeOptions(team, null)}</select>` +
+                `<span>Give the ticked tickets to</span> ${personPickerHtml(team.id, undefined, 'Give the ticked tickets to', { attrs: 'id="team-bulk-to"' })}` +
                 `<button type="button" class="home-action" data-team-bulk>Assign</button></div>` : '') +
             `<div id="team-tickets"></div></section>`;
     }
-    if (currentAccess.admin) html += familyCardHtml() + peopleCardHtml(data.people || []);
+    if (currentAccess.admin) html += familyCardHtml() + peopleCardHtml(data.people || []) + `<section class="team-card" id="presentation-card">${presentationHtml()}</section>`;
     box.innerHTML = html;
-    if (team) loadTeamTickets();
+    restoreSorts(box);
+    if (team || showingUnassigned()) loadTeamTickets();
+    if (canSeeStatuses()) loadTicketStatuses();
 }
 
+function kindFilterHtml() {
+    return `<label>Type <select id="team-filter-kind"><option value="">All types</option>` +
+        TEAM_KINDS.map(([k, label]) => `<option value="${k}"${teamsView.filter.kind === k ? ' selected' : ''}>${label}</option>`).join('') +
+        `</select></label>`;
+}
+
+// Admins first get "Not assigned yet", then every team
 function teamPickerHtml() {
-    return teamsView.data.teams.map(t =>
+    const u = teamsView.data.unassigned;
+    const nobody = u
+        ? `<button type="button" class="team-pick team-pick-nobody${showingUnassigned() ? ' active' : ''}${u.tickets ? ' waiting' : ''}" data-team-pick="${UNASSIGNED_VIEW}">` +
+          `<span class="team-pick-name">📥 Not assigned yet</span>` +
+          `<span class="team-pick-meta">${howMany(u.tickets, 'ticket', 'tickets')} · ${howMany(u.families, 'family', 'families')}` +
+          `${u.noTeam.families ? ` · ${u.noTeam.families.toLocaleString()} on no team` : ''}</span></button>`
+        : '';
+    return nobody + teamsView.data.teams.map(t =>
         `<button type="button" class="team-pick${t.id === teamsView.teamId ? ' active' : ''}" data-team-pick="${t.id}">` +
-        `<span class="team-pick-name">${escapeHtml(t.name)}</span>` +
+        `<span class="team-pick-name">${escapeHtml(t.name)}${t.test ? ' <span class="team-test-tag">Test team</span>' : ''}</span>` +
         `<span class="team-pick-meta">${t.tickets.toLocaleString()} tickets · ${t.members.length} people</span></button>`).join('');
 }
 
@@ -20985,25 +24045,27 @@ function teamSummaryHtml(team) {
     const manage = team.canManage;
     const admin = currentAccess.admin;
     const unassigned = team.unassigned?.total || 0;
-    const head = '<th>Name</th><th>Role</th>' + TEAM_KINDS.map(([, label]) => `<th class="num">${label}</th>`).join('') + '<th class="num">Total</th>' +
-        (manage ? '<th></th>' : '') + (admin ? '<th>Team</th>' : '');
+    const head = sortHeadHtml('team-members', 'Name') + sortHeadHtml('team-members', 'Role') +
+        TEAM_KINDS.map(([, label]) => sortHeadHtml('team-members', label, label, 'num')).join('') + sortHeadHtml('team-members', 'Total', 'Total', 'num') +
+        (manage ? '<th></th>' : '') + (admin ? sortHeadHtml('team-members', 'Team') : '');
     const rows = team.members.map(m =>
         `<tr${m.username === currentUsername ? ' class="team-you"' : ''}>` +
         `<td>${escapeHtml(m.name)}${m.username === currentUsername ? ' <span class="team-you-tag">you</span>' : ''}</td>` +
         `<td>${admin ? roleSelectHtml(`data-member-role="${m.id}"`, m.role) : escapeHtml(roleName(m.role))}</td>` +
         loadCells(m.load) +
         (manage ? `<td><button type="button" class="home-action" data-team-show="${m.id}">Their tickets</button></td>` : '') +
-        (admin ? `<td>${teamSelectHtml(`data-member-team="${m.id}"`, team.id, true)}</td>` : '') +
+        (admin ? `<td><div class="team-member-team">${teamSelectHtml(`data-member-team="${m.id}"`, team.id, true, m.test)}` +
+            `<button type="button" class="home-action danger" data-member-remove="${m.id}" title="Take ${escapeHtml(m.name)} off ${escapeHtml(team.name)} and away from their role">Remove from team</button></div></td>` : '') +
         '</tr>').join('');
     const unassignedRow = manage
-        ? `<tr class="team-unassigned"><td>Not assigned yet</td><td>—</td>${loadCells(team.unassigned)}` +
+        ? `<tr class="team-unassigned sort-pinned"><td>Not assigned yet</td><td>—</td>${loadCells(team.unassigned)}` +
           `<td><button type="button" class="home-action" data-team-show="none"${unassigned ? '' : ' disabled'}>Show them</button></td>${admin ? '<td></td>' : ''}</tr>`
         : '';
-    return `<h3>${escapeHtml(team.name)}</h3>` +
+    return `<h3>${escapeHtml(team.name)}${team.test ? ' <span class="team-test-tag">Test team</span>' : ''}</h3>` +
         `<p class="home-status">${team.tickets.toLocaleString()} tickets in ${team.families.toLocaleString()} families · ${team.members.length} people` +
         (manage && unassigned ? ` · <strong>${unassigned.toLocaleString()} not assigned yet</strong>` : '') + '</p>' +
         (team.members.length
-            ? `<div class="table-wrap"><table class="result-table team-table"><thead><tr>${head}</tr></thead><tbody>${rows}${unassignedRow}</tbody></table></div>`
+            ? `<div class="table-wrap"><table class="result-table team-table" data-sort-list="team-members"><thead><tr>${head}</tr></thead><tbody>${rows}${unassignedRow}</tbody></table></div>`
             : '<p class="home-status">Nobody is on this team yet.</p>');
 }
 
@@ -21012,15 +24074,11 @@ function roleSelectHtml(attr, selected) {
         .map(([value, label]) => `<option value="${value}"${value === selected ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('') + '</select>';
 }
 
-function teamSelectHtml(attr, selected, withNone) {
+// testOnly: for a test account, which may only join a test team
+function teamSelectHtml(attr, selected, withNone, testOnly = false) {
     return `<select ${attr} aria-label="Team">` + (withNone ? `<option value="">No team</option>` : '') + teamsView.data.teams
+        .filter(t => !testOnly || t.test)
         .map(t => `<option value="${t.id}"${t.id === selected ? ' selected' : ''}>${escapeHtml(t.name)}</option>`).join('') + '</select>';
-}
-
-// The team's people to give a ticket to (or nobody)
-function assigneeOptions(team, selected) {
-    return `<option value=""${selected ? '' : ' selected'}>Not assigned</option>` + team.members
-        .map(m => `<option value="${m.id}"${m.id === selected ? ' selected' : ''}>${escapeHtml(m.name)} (${escapeHtml(roleName(m.role))})</option>`).join('');
 }
 
 function assigneeFilterOptions(team) {
@@ -21029,18 +24087,24 @@ function assigneeFilterOptions(team) {
         team.members.map(m => `<option value="${m.id}"${String(m.id) === f ? ' selected' : ''}>${escapeHtml(m.name)}</option>`).join('');
 }
 
-async function loadTeamTickets() {
+// The team's tickets, or (admins) "Not assigned yet"'s.
+// quiet: keep the list showing until the new one is ready (a heading was clicked)
+async function loadTeamTickets(quiet = false) {
     const team = currentTeam();
+    const nobody = showingUnassigned();
     const out = document.getElementById('team-tickets');
-    if (!team || !out) return;
+    if ((!team && !nobody) || !out) return;
+    const list = nobody ? 'unassigned-tickets' : 'team-tickets';
     const run = ++teamsView.run;
-    out.innerHTML = '<p class="home-status">Loading tickets…</p>';
-    const q = new URLSearchParams({ offset: teamsView.offset, limit: TEAM_PAGE_SIZE });
+    if (!quiet) out.innerHTML = '<p class="home-status">Loading tickets…</p>';
+    const q = new URLSearchParams({ offset: teamsView.offset, limit: TEAM_PAGE_SIZE,
+        ...sortQuery(list, nobody ? UNASSIGNED_SORT_KEYS : TEAM_TICKET_SORT_KEYS), ...lookupQuery(list) });
     for (const [key, value] of Object.entries(teamsView.filter)) if (value) q.set(key, value);
     try {
-        const data = await teamsFetch(`/api/teams/${team.id}/tickets?${q}`);
+        const data = await teamsFetch(nobody ? `/api/teams/unassigned/tickets?${q}` : `/api/teams/${team.id}/tickets?${q}`);
         if (!data || run !== teamsView.run) return;
-        out.innerHTML = teamTicketsHtml(team, data);
+        out.innerHTML = nobody ? unassignedTicketsHtml(data) : teamTicketsHtml(team, data);
+        setLookupCount(list, data.total, data.before ?? data.total);
         const all = document.querySelector('#teams .team-select-all');
         if (all) all.checked = false;
     } catch (err) {
@@ -21049,52 +24113,111 @@ async function loadTeamTickets() {
     }
 }
 
-function teamTicketsHtml(team, data) {
-    if (!data.total) {
-        return `<p class="home-status">${teamsView.filter.assignee || teamsView.filter.kind || teamsView.filter.search
-            ? 'No tickets match.' : team.canManage ? 'This team has no tickets.' : 'No tickets are assigned to you yet.'}</p>`;
-    }
-    const manage = team.canManage;
-    const admin = currentAccess.admin;
-    const rows = data.tickets.map(t => {
-        const n = escapeHtml(t.number);
-        const summary = String(t.summary || '');
-        const family = t.family.size > 1
-            ? `${t.family.size.toLocaleString()} linked tickets` + (admin ? ` <button type="button" class="link-btn" data-family-find="${n}" title="Move this family to another team">Move…</button>` : '')
-            : 'On its own' + (admin ? ` <button type="button" class="link-btn" data-family-find="${n}" title="Move this ticket to another team">Move…</button>` : '');
-        return '<tr>' +
-            (manage ? `<td class="select-cell"><input type="checkbox" class="team-select" value="${n}" aria-label="Tick ${n}"></td>` : '') +
-            `<td class="ticket-cell"><button type="button" class="ticket-link" data-ticket="${n}" title="Open ${n}">${n}</button>${starButtonHtml(t.number)}</td>` +
-            `<td>${escapeHtml(t.type || '—')}</td>` +
-            `<td${summary.length > 100 ? ` title="${escapeHtml(summary)}"` : ''}>${escapeHtml(summary.length > 100 ? `${summary.slice(0, 97)}…` : summary || '—')}</td>` +
-            `<td>${escapeHtml(t.state || '—')}</td>` +
-            `<td>${family}</td>` +
-            `<td>${manage
-                ? `<select class="team-assign" data-number="${n}" aria-label="Who has ${n}">${assigneeOptions(team, t.assignee?.id ?? null)}</select>`
-                : escapeHtml(t.assignee?.name || 'Not assigned')}</td>` +
-            '</tr>';
-    }).join('');
+// A heading, or a lookup: every ticket that matches, sorted or looked through by the server, from the first page
+pagedSorts['team-tickets'] = () => {
+    teamsView.offset = 0;
+    return loadTeamTickets(true);
+};
+pagedLookups['team-tickets'] = pagedSorts['team-tickets'];
+pagedSorts['unassigned-tickets'] = pagedSorts['team-tickets'];
+pagedLookups['unassigned-tickets'] = pagedSorts['team-tickets'];
+
+// A ticket's number, type, summary and state (with what its project manager was told)
+function ticketCellsHtml(t) {
+    const n = escapeHtml(t.number);
+    const summary = String(t.summary || '');
+    return `<td class="ticket-cell"><button type="button" class="ticket-link" data-ticket="${n}" title="Open ${n}">${n}</button>${starButtonHtml(t.number)}</td>` +
+        `<td>${t.type ? escapeHtml(t.type) : blankHtml('Type', t)}</td>` +
+        `<td${summary.length > 100 ? ` title="${escapeHtml(summary)}"` : ''}>${summary ? escapeHtml(summary.length > 100 ? `${summary.slice(0, 97)}…` : summary) : blankHtml('Summary', t)}</td>` +
+        `<td>${t.state ? escapeHtml(t.state) : blankHtml('State', t)}${reportLineHtml(t.report)}</td>`;
+}
+
+function teamPagerHtml(data) {
     const first = teamsView.offset + 1;
     const last = teamsView.offset + data.tickets.length;
-    return `<div class="table-wrap"><table class="result-table"><thead><tr>` +
-        (manage ? '<th class="select-cell"></th>' : '') +
-        '<th>Ticket</th><th>Type</th><th>Summary</th><th>State</th><th>Family</th><th>Assigned to</th>' +
-        `</tr></thead><tbody>${rows}</tbody></table></div>` +
-        `<div class="team-pager"><span>${first.toLocaleString()}–${last.toLocaleString()} of ${data.total.toLocaleString()}</span>` +
+    return `<div class="team-pager"><span>${first.toLocaleString()}–${last.toLocaleString()} of ${data.total.toLocaleString()}</span>` +
         `<button type="button" class="home-action" data-team-page="-1"${teamsView.offset ? '' : ' disabled'}>← Previous</button>` +
         `<button type="button" class="home-action" data-team-page="1"${last < data.total ? '' : ' disabled'}>Next →</button></div>`;
 }
 
-async function assign(numbers, assigneeId) {
+function teamTicketsHtml(team, data) {
+    if (!data.total) {
+        return `<p class="home-status">${teamsView.filter.assignee || teamsView.filter.kind || lookupActive('team-tickets')
+            ? 'No tickets match.' : team.canManage ? 'This team has no tickets.' : 'No tickets are assigned to you yet.'}</p>`;
+    }
+    const manage = team.canManage;
+    const admin = currentAccess.admin;
+    // Members tell their project manager when they've resolved or closed one (notifications.js)
+    const tell = !manage && canTellManager();
+    const rows = data.tickets.map(t => {
+        const n = escapeHtml(t.number);
+        const family = t.family.size > 1
+            ? `${t.family.size.toLocaleString()} linked tickets` +
+              (manage ? ` <button type="button" class="link-btn" data-family-give="${escapeHtml(t.family.id)}" data-family-size="${t.family.size}" title="Give all ${t.family.size.toLocaleString()} of them to one person">Give all…</button>` : '') +
+              (admin ? ` <button type="button" class="link-btn" data-family-find="${n}" title="Move this family to another team">Move…</button>` : '')
+            : 'On its own' + (admin ? ` <button type="button" class="link-btn" data-family-find="${n}" title="Move this ticket to another team">Move…</button>` : '');
+        return '<tr>' +
+            (manage ? `<td class="select-cell"><input type="checkbox" class="team-select" value="${n}" aria-label="Tick ${n}"></td>` : '') +
+            ticketCellsHtml(t) +
+            `<td>${family}</td>` +
+            `<td>${manage
+                ? personPickerHtml(team.id, t.assignee?.id ?? null, `Who has ${t.number}`, { attrs: `data-number="${n}"` })
+                : escapeHtml(t.assignee?.name || 'Not assigned')}</td>` +
+            (tell ? `<td>${reportButtonHtml(t.number, t.report?.mine ? 'Tell them again…' : 'Resolved or closed?…')}</td>` : '') +
+            '</tr>';
+    }).join('');
+    return `<div class="table-wrap"><table class="result-table" data-sort-list="team-tickets"><thead><tr>` +
+        (manage ? '<th class="select-cell"></th>' : '') +
+        Object.keys(TEAM_TICKET_SORT_KEYS).map(label => sortHeadHtml('team-tickets', label)).join('') +
+        (tell ? '<th>Tell your project manager</th>' : '') +
+        `</tr></thead><tbody>${rows}</tbody></table></div>` + teamPagerHtml(data);
+}
+
+// Under a ticket's state: the latest time someone told the project manager
+// they'd resolved or closed it (the state itself is the data's, unchanged)
+function reportLineHtml(report) {
+    if (!report) return '';
+    const note = String(report.note || '');
+    return `<div class="team-report"${note ? ` title="${escapeHtml(note)}"` : ''}>✅ ` +
+        // An admin or project manager who set the status themselves (Resolved or closed)
+        (report.mine ? (canSeeStatuses() ? `You set it to ${escapeHtml(report.status)}` : `You told your project manager you ${escapeHtml(report.status)} it`)
+            : `${escapeHtml(report.by || 'Someone')} says it's ${escapeHtml(report.status)}`) +
+        ` · ${escapeHtml(formatShownAt(report.at))}` +
+        (note ? `<span class="team-report-note">“${escapeHtml(note.length > 80 ? `${note.slice(0, 77)}…` : note)}”</span>` : '') +
+        '</div>';
+}
+
+// name: who they go to, when the team showing isn't theirs ("Not assigned yet")
+async function assign(numbers, assigneeId, name = null) {
     const data = await teamsFetch('/api/assignments', { method: 'PUT', body: JSON.stringify({ numbers, assigneeId }) });
     if (!data) return false;
-    const team = currentTeam();
-    const who = assigneeId ? team?.members.find(m => m.id === assigneeId)?.name : null;
+    const who = assigneeId ? name || currentTeam()?.members.find(m => m.id === assigneeId)?.name : null;
     showToast(numbers.length === 1
         ? `${numbers[0]} ${who ? `is now ${who}'s` : 'is not assigned now'}`
         : `${data.changed.toLocaleString()} tickets ${who ? `given to ${who}` : 'unassigned'}`);
     refreshTeamCounts();
     return true;
+}
+
+// Every ticket of a family to one person (null: nobody), after asking, since
+// some may be other people's now -> true if it was done
+async function giveFamily(familyId, size, assigneeId, name) {
+    const question = assigneeId === null
+        ? `Take back all ${size.toLocaleString()} tickets in this family, so nobody has them?`
+        : `Give all ${size.toLocaleString()} tickets in this family to ${name}? Any of them that are someone else's now go to ${name} too.`;
+    if (!confirm(question)) return false;
+    try {
+        const data = await teamsFetch(`/api/ticket-families/${encodeURIComponent(familyId)}/assignee`, { method: 'PUT', body: JSON.stringify({ assigneeId }) });
+        if (!data) return false;
+        showToast(data.changed
+            ? `${data.changed.toLocaleString()} ${data.changed === 1 ? 'ticket' : 'tickets'} ${assigneeId === null ? 'taken back' : `given to ${name}`}${data.changed < size ? ` (the other ${(size - data.changed).toLocaleString()} already were)` : ''}`
+            : `They all ${assigneeId === null ? 'were unassigned' : `were ${name}'s`} already`);
+        refreshTeamCounts();
+        return true;
+    } catch (err) {
+        showToast(err.message);
+        return false;
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -21128,26 +24251,117 @@ async function findFamily(number) {
             (f.size > 1 ? ` Includes ${f.sample.map(escapeHtml).join(', ')}${f.size > f.sample.length ? ', …' : ''}.` : '') + '</p>' +
             `<div class="team-filters"><label>Move to ${teamSelectHtml('id="family-move-to"', f.team?.id ?? null, false)}</label>` +
             `<button type="button" class="home-action" data-family-move="${escapeHtml(f.id)}">Move ${f.size === 1 ? 'it' : `all ${f.size.toLocaleString()}`}</button></div>` +
-            `<p class="home-status">They become unassigned, for the new team's project manager to hand out.</p>`;
+            `<p class="home-status">They become unassigned, for the new team's project manager to hand out.</p>` +
+            (f.team ? `<div class="team-filters"><span>Or give ${f.size === 1 ? 'it' : `all ${f.size.toLocaleString()}`} to someone on ${escapeHtml(f.team.name)}</span>` +
+                personPickerHtml(f.team.id, undefined, `Give the family to someone on ${f.team.name}`,
+                    { placeholder: 'Type a name…', attrs: `data-family="${escapeHtml(f.id)}" data-family-size="${f.size}"` }) + '</div>' : '');
     } catch (err) {
         out.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
     }
 }
 
-async function moveFamily(familyId) {
-    const teamId = Number(document.getElementById('family-move-to').value);
+// done(text): says what happened (in the card, or a toast)
+async function moveFamily(familyId, teamId, done) {
     const team = teamsView.data.teams.find(t => t.id === teamId);
+    if (!team) { showToast('Choose the team to move it to first'); return; }
     try {
         const data = await teamsFetch(`/api/ticket-families/${encodeURIComponent(familyId)}/team`, { method: 'PUT', body: JSON.stringify({ teamId }) });
         if (!data) return;
-        document.getElementById('family-found').innerHTML = data.moved
-            ? `<p class="home-status">✓ Moved ${data.moved.toLocaleString()} ${data.moved === 1 ? 'ticket' : 'tickets'} to ${escapeHtml(team.name)}. ${escapeHtml(team.name)}'s project manager can now hand them out.</p>`
-            : `<p class="home-status">That family is already ${escapeHtml(team.name)}'s.</p>`;
+        done(data.moved
+            ? `✓ Moved ${data.moved.toLocaleString()} ${data.moved === 1 ? 'ticket' : 'tickets'} to ${team.name}. ${team.name}'s project manager can now hand them out.`
+            : `That family is already ${team.name}'s.`);
         await refreshTeamCounts();
-        loadTeamTickets();
+        loadTeamTickets(showingUnassigned());
     } catch (err) {
         showToast(err.message);
     }
+}
+
+// ---------------------------------------------------------------------
+// Admins: "Not assigned yet": every ticket nobody has, on a team or on none,
+// under a row for its family, where the family is moved or given out
+// ---------------------------------------------------------------------
+
+function unassignedSummaryHtml() {
+    const u = teamsView.data.unassigned;
+    if (!u.tickets) return 'Every ticket has someone. Nothing is waiting to be handed out.';
+    const onTeams = u.tickets - u.noTeam.tickets;
+    return `<strong>${howMany(u.tickets, 'ticket', 'tickets')} in ${howMany(u.families, 'family', 'families')}</strong> ${u.tickets === 1 ? 'has' : 'have'} nobody yet.` +
+        (u.noTeam.tickets ? ` On no team: ${howMany(u.noTeam.tickets, 'ticket', 'tickets')} in ${howMany(u.noTeam.families, 'family', 'families')}. ` +
+            'Move a family to a team, then give its tickets to someone on it.' : '') +
+        (onTeams ? ` On a team: ${howMany(onTeams, 'ticket', 'tickets')}, for you or the team's project manager to hand out.` : '');
+}
+
+function unassignedCardHtml() {
+    const f = teamsView.filter.team;
+    const teamOptions = `<option value=""${f ? '' : ' selected'}>Any team, or none</option><option value="none"${f === 'none' ? ' selected' : ''}>No team</option>` +
+        teamsView.data.teams.map(t => `<option value="${t.id}"${String(t.id) === f ? ' selected' : ''}>${escapeHtml(t.name)}</option>`).join('');
+    return `<section class="team-card"><h3>📥 Not assigned yet</h3>` +
+        `<p class="home-status" id="unassigned-summary">${unassignedSummaryHtml()}</p>` +
+        `<div class="team-filters"><label>Team <select id="team-filter-team">${teamOptions}</select></label>${kindFilterHtml()}</div>` +
+        // Any of the list's columns; the server looks through every ticket nobody has
+        lookupBarHtml('unassigned-tickets', Object.keys(UNASSIGNED_SORT_KEYS), { mode: 'list' }) +
+        `<div id="team-tickets"></div></section>`;
+}
+
+// "3 incidents, 1 change"
+function familyKindsText(kinds) {
+    return TEAM_KINDS.filter(([k]) => kinds[k]).map(([k]) => howMany(kinds[k], ...KIND_NOUNS[k])).join(', ');
+}
+
+// The row over a family's tickets: what it is, its team, and moving it or
+// (on a team) giving all of it to one person
+function familyGroupHtml(f) {
+    const id = escapeHtml(f.id);
+    const whole = f.size === 1 ? 'it' : `all ${f.size.toLocaleString()}`;
+    const what = f.size > 1 ? `${howMany(f.size, 'linked ticket', 'linked tickets')}: ${familyKindsText(f.kinds)}` : 'On its own';
+    const nobody = f.unassigned === f.size ? (f.size === 1 ? 'nobody has it' : 'nobody has any') : `${f.unassigned.toLocaleString()} not assigned`;
+    const give = f.team && f.size > 1
+        ? `<span>Give ${whole} to</span>` + personPickerHtml(f.team.id, undefined, `Give ${f.id}'s family to someone on ${f.team.name}`,
+            { placeholder: 'Type a name…', attrs: `data-family="${id}" data-family-size="${f.size}"` })
+        : '';
+    const move = `<label>${give ? 'or move it to' : `Move ${whole} to`} <select data-group-move-to aria-label="Move ${id}'s family to">` +
+        '<option value="">Choose a team…</option>' +
+        teamsView.data.teams.filter(t => t.id !== f.team?.id)
+            .map(t => `<option value="${t.id}">${escapeHtml(t.name)}${t.test ? ' (test team)' : ''}</option>`).join('') +
+        `</select></label><button type="button" class="home-action" data-group-move="${id}" data-family-size="${f.size}" data-family-unassigned="${f.unassigned}">Move</button>`;
+    return `<tr class="family-group"><td colspan="7"><div class="family-group-head">` +
+        `<div class="family-group-what"><span>👪 <button type="button" class="ticket-link" data-ticket="${id}" title="Open ${id}: its record and family">${id}</button>` +
+        (f.size > 1 && f.summary ? ` <span class="family-group-summary">${escapeHtml(f.summary.length > 90 ? `${f.summary.slice(0, 87)}…` : f.summary)}</span>` : '') + '</span>' +
+        `<span class="family-group-meta">${what} · ${nobody} · ${f.team ? `on ${escapeHtml(f.team.name)}` : '<strong>on no team</strong>'}</span></div>` +
+        `<div class="family-group-do">${give}${move}</div></div></td></tr>`;
+}
+
+function unassignedTicketsHtml(data) {
+    if (!data.total) {
+        return `<p class="home-status">${teamsView.filter.team || teamsView.filter.kind || lookupActive('unassigned-tickets')
+            ? 'No tickets match.' : '✓ Every ticket has someone.'}</p>`;
+    }
+    // In the list's own order a family's tickets come together, under its row;
+    // sorted by a heading, each ticket says which family it's in and how to move it
+    const grouped = !listSorts.get('unassigned-tickets');
+    const families = new Map(data.families.map(f => [f.id, f]));
+    let last = null;
+    const rows = data.tickets.map(t => {
+        const n = escapeHtml(t.number);
+        const fid = escapeHtml(t.family.id);
+        const head = grouped && t.family.id !== last ? familyGroupHtml(families.get(t.family.id)) : '';
+        last = t.family.id;
+        const family = (t.family.size > 1 ? `${fid} · ${t.family.size.toLocaleString()} linked tickets` : 'On its own') +
+            (grouped ? '' : (t.team && t.family.size > 1
+                ? ` <button type="button" class="link-btn" data-family-give="${fid}" data-family-size="${t.family.size}" data-family-team="${t.team.id}" title="Give all ${t.family.size.toLocaleString()} of them to one person">Give all…</button>`
+                : '') + ` <button type="button" class="link-btn" data-family-find="${n}" title="Move this family to another team">Move…</button>`);
+        return head + '<tr>' + ticketCellsHtml(t) +
+            `<td>${family}</td>` +
+            `<td>${t.team ? escapeHtml(t.team.name) : '<span class="blank" title="This ticket\'s family isn\'t on any team yet">No team</span>'}</td>` +
+            `<td>${t.team
+                ? personPickerHtml(t.team.id, null, `Who has ${t.number}`, { attrs: `data-number="${n}"` })
+                : '<span class="blank" title="Only someone on its family\'s team can have it">Move its family to a team first</span>'}</td>` +
+            '</tr>';
+    }).join('');
+    return `<div class="table-wrap"><table class="result-table" data-sort-list="unassigned-tickets"><thead><tr>` +
+        Object.keys(UNASSIGNED_SORT_KEYS).map(label => sortHeadHtml('unassigned-tickets', label)).join('') +
+        `<th>Give it to</th></tr></thead><tbody>${rows}</tbody></table></div>` + teamPagerHtml(data);
 }
 
 // ---------------------------------------------------------------------
@@ -21155,27 +24369,163 @@ async function moveFamily(familyId) {
 // ---------------------------------------------------------------------
 
 function peopleCardHtml(people) {
-    const rows = people.map(p => `<tr><td>${escapeHtml(p.name)}</td>` +
-        `<td>${teamSelectHtml(`data-person-team="${p.id}"`, teamsView.teamId, false)}</td>` +
+    const rows = people.map(p => `<tr><td>${escapeHtml(p.name)}${p.test ? ' <span class="team-test-tag">Test account</span>' : ''}</td>` +
+        `<td>${teamSelectHtml(`data-person-team="${p.id}"`, teamsView.teamId, false, p.test)}</td>` +
         `<td>${roleSelectHtml(`data-person-role="${p.id}"`, 'project_team')}</td>` +
         `<td><button type="button" class="home-action" data-person-add="${p.id}">Add</button></td></tr>`).join('');
     return `<section class="team-card"><h3>People on no team</h3>` +
         (people.length
-            ? `<p class="home-status">They see no tickets until they're on a team and have tickets assigned.</p>` +
-              `<div class="table-wrap"><table class="result-table team-table"><thead><tr><th>Name</th><th>Team</th><th>Role</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
-            : '<p class="home-status">Everyone is on a team. (Admins and the warm-up account don\'t need one.)</p>') +
+            ? `<p class="home-status">They see no tickets until they're on a team and have tickets assigned. Test accounts can only join a test team.</p>` +
+              `<div class="table-wrap"><table class="result-table team-table" data-sort-list=""><thead><tr>${['Name', 'Team', 'Role'].map(h => sortHeadHtml('', h)).join('')}<th></th></tr></thead><tbody>${rows}</tbody></table></div>`
+            : '<p class="home-status">Everyone is on a team. (Admins, the warm-up account and the test accounts don\'t join one.)</p>') +
         '</section>';
 }
 
-async function setMembership(userId, teamId, role) {
+// done: what the toast says, from the answer ({ unassigned })
+async function setMembership(userId, teamId, role, done = () => 'Saved') {
     try {
         const data = await teamsFetch(`/api/teams/members/${userId}`, { method: 'PUT', body: JSON.stringify({ teamId, role }) });
         if (!data) return;
-        showToast('Saved');
+        showToast(done(data));
         await loadTeams();
     } catch (err) {
         showToast(err.message);
         loadTeams();
+    }
+}
+
+// ---------------------------------------------------------------------
+// ✅ RESOLVED OR CLOSED: the tickets someone said they resolved or closed
+// (admins: every team's; project managers: their team's). Each one's menu
+// changes its status; "Open" takes the status away. Only OneTouch's record
+// changes: the ticket's data never does.
+// ---------------------------------------------------------------------
+
+const STATUS_NAMES = { resolved: 'Resolved', closed: 'Closed', open: 'Open (takes the status away)' };
+const STATUS_HEADS = ['Ticket', 'Type', 'Summary', 'State in the data', 'Status', 'Changed by', 'When', 'Team', 'Assigned to'];
+const canSeeStatuses = () => currentAccess.admin || currentAccess.role === 'project_manager';
+
+async function loadTicketStatuses() {
+    const box = document.getElementById('ticket-statuses');
+    if (!box) return;
+    try {
+        const data = await teamsFetch('/api/ticket-statuses');
+        if (!data || !box.isConnected) return;
+        box.innerHTML = ticketStatusesHtml(data.tickets);
+        restoreSorts(box);
+        applyLookups(box);
+    } catch (err) {
+        if (box.isConnected) box.innerHTML = `<h3>✅ Resolved or closed</h3><p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+    }
+}
+
+function ticketStatusesHtml(tickets) {
+    const admin = currentAccess.admin;
+    const heads = STATUS_HEADS.filter(h => admin || h !== 'Team');
+    const where = admin ? 'on every team' : `on ${escapeHtml(currentAccess.team?.name || 'your team')}`;
+    let html = '<h3>✅ Resolved or closed</h3><p class="home-status">' + (tickets.length
+        ? `${howMany(tickets.length, 'ticket', 'tickets')} ${where} that someone said they resolved or closed, newest first. Change one's status with its menu; ` +
+          '"Open" takes the status away. Only OneTouch\'s record changes, never the ticket\'s data.'
+        : `Nobody has said they resolved or closed a ticket ${where} yet. When someone does, it shows here.`) + '</p>';
+    if (!tickets.length) return html;
+    if (tickets.length >= 2) html += lookupBarHtml('ticket-statuses', heads);
+    const rows = tickets.map(t => {
+        const n = escapeHtml(t.number);
+        const blank = { kind: kindOf(t.number) };
+        return '<tr>' +
+            `<td class="ticket-cell"><button type="button" class="ticket-link" data-ticket="${n}" title="Open ${n}">${n}</button>${starButtonHtml(t.number)}</td>` +
+            `<td>${escapeHtml(t.type || capitalize(KIND_NOUNS[blank.kind]?.[0] || 'ticket'))}</td>` +
+            `<td>${t.summary ? escapeHtml(t.summary) : blankHtml('Summary', blank)}</td>` +
+            `<td>${t.state ? escapeHtml(t.state) : blankHtml('State', blank)}</td>` +
+            `<td><span class="status-tag">✅ ${STATUS_NAMES[t.status]}</span>` +
+            (t.note ? `<span class="team-report-note">“${escapeHtml(t.note)}”</span>` : '') + '</td>' +
+            `<td>${escapeHtml(t.by || 'Someone')}</td>` +
+            `<td data-sort="${escapeHtml(t.at)}">${escapeHtml(formatShownAt(t.at))}</td>` +
+            (admin ? `<td>${t.team ? escapeHtml(t.team.name) : '<span class="blank">No team</span>'}</td>` : '') +
+            `<td>${t.assignee ? escapeHtml(t.assignee.name) : '<span class="blank">Not assigned</span>'}</td>` +
+            `<td><select data-status-change="${n}" aria-label="Change ${n}'s status">` +
+            Object.entries(STATUS_NAMES).map(([s, name]) => `<option value="${s}"${s === t.status ? ' selected' : ''}>${name}</option>`).join('') +
+            '</select></td></tr>';
+    }).join('');
+    return html + '<div class="table-wrap"><table class="result-table status-table" data-sort-list="ticket-statuses"><thead><tr>' +
+        heads.map(h => sortHeadHtml('ticket-statuses', h)).join('') + `<th>Change it to</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+// A ticket's menu changed: asks first before "Open" takes its status away
+async function changeTicketStatus(select) {
+    const number = select.dataset.statusChange;
+    const status = select.value;
+    const before = select.querySelector('option[selected]')?.value;
+    if (status === before) return;
+    if (status === 'open' && !confirm(`Set ${number} open again? Its status (${STATUS_NAMES[before]}) is taken away, as if nobody had said they ${before} it.`)) {
+        select.value = before;
+        return;
+    }
+    select.disabled = true;
+    try {
+        const data = await teamsFetch(`/api/ticket-statuses/${encodeURIComponent(number)}`, { method: 'PUT', body: JSON.stringify({ status }) });
+        if (!data) return;
+        showToast(status === 'open' ? `↩ ${number} is open again` : `✅ ${number} is ${STATUS_NAMES[status].toLowerCase()} now`);
+        afterStatusChange();
+    } catch (err) {
+        select.value = before;
+        select.disabled = false;
+        showToast(`❌ ${err.message}`);
+    }
+}
+
+// The list again, the team's tickets (they show a status under their state), and the counts
+function afterStatusChange() {
+    loadTicketStatuses();
+    if (document.getElementById('team-tickets')) loadTeamTickets(true);
+    if (currentAccess.admin) refreshTeamCounts();
+}
+
+// ---------------------------------------------------------------------
+// 🎬 BEFORE A PRESENTATION (admins): every status undone, and the [Demo]
+// tickets (db/demo-tickets.sql) back on no team with nobody, ready to move
+// to a team and hand out live. The real tickets stay on their teams.
+// ---------------------------------------------------------------------
+
+function presentationHtml() {
+    const p = teamsView.data?.presentation;
+    if (!p) return '';
+    const d = p.demo;
+    const demo = !d.tickets ? 'There are no [Demo] tickets; db/demo-tickets.sql adds them.'
+        : d.onTeam || d.assigned ? `${howMany(d.tickets, '[Demo] ticket', '[Demo] tickets')}: ${d.onTeam.toLocaleString()} on a team, ${d.assigned.toLocaleString()} assigned to someone.`
+            : `The ${howMany(d.tickets, '[Demo] ticket is', '[Demo] tickets are')} on no team and assigned to nobody, ready to hand out.`;
+    const statuses = p.statuses ? `${howMany(p.statuses, 'ticket has', 'tickets have')} a status (someone said they resolved or closed it).` : 'No ticket has a status.';
+    return '<h3>🎬 Before a presentation</h3>' +
+        '<p class="home-status">Puts things back the way a presentation starts. Every real ticket stays on its team, by family, as it is now.</p>' +
+        '<ul class="presentation-steps">' +
+        `<li><span>${escapeHtml(statuses)}</span><button type="button" class="home-action danger" data-undo-statuses="${p.statuses}"${p.statuses ? '' : ' disabled'}>↩ Undo every status</button></li>` +
+        `<li><span>${escapeHtml(demo)}</span><button type="button" class="home-action danger" data-reset-demo="${d.tickets}"${d.tickets ? '' : ' disabled'}>🧹 Put the demo tickets back</button></li>` +
+        '</ul>';
+}
+
+async function undoAllStatuses(count) {
+    if (!confirm(`Undo every status? The ${howMany(count, 'ticket', 'tickets')} someone said they resolved or closed go back to having no status, ` +
+        'and the 🔔 notifications that told project managers about them go too. This can\'t be undone.')) return;
+    try {
+        const data = await teamsFetch('/api/ticket-statuses/undo-all', { method: 'POST', body: '{}' });
+        if (!data) return;
+        showToast(`↩ Undid the status of ${howMany(data.tickets, 'ticket', 'tickets')}`);
+        afterStatusChange();
+    } catch (err) {
+        showToast(`❌ ${err.message}`);
+    }
+}
+
+async function resetDemoTickets(count) {
+    if (!confirm(`Put the ${howMany(count, '[Demo] ticket', '[Demo] tickets')} back? Their families go back on no team, nobody has them, ` +
+        'and their statuses, notifications, stars and ticket results go. The real tickets aren\'t touched.')) return;
+    try {
+        const data = await teamsFetch('/api/demo-tickets/reset', { method: 'POST', body: '{}' });
+        if (!data) return;
+        showToast(`🧹 The ${howMany(data.tickets, '[Demo] ticket is', '[Demo] tickets are')} back on no team, assigned to nobody`);
+        loadTeams();
+    } catch (err) {
+        showToast(`❌ ${err.message}`);
     }
 }
 
@@ -21186,8 +24536,10 @@ async function setMembership(userId, teamId, role) {
 document.getElementById('teams-view').addEventListener('click', e => {
     const pick = e.target.closest('[data-team-pick]');
     if (pick) {
-        teamsView.teamId = Number(pick.dataset.teamPick);
-        teamsView.filter = { assignee: '', kind: '', search: '' };
+        teamsView.teamId = pick.dataset.teamPick === UNASSIGNED_VIEW ? UNASSIGNED_VIEW : Number(pick.dataset.teamPick);
+        teamsView.filter = { assignee: '', kind: '', team: '' };
+        listLookups.delete('team-tickets');
+        listLookups.delete('unassigned-tickets');
         teamsView.offset = 0;
         renderTeams();
         return;
@@ -21208,43 +24560,95 @@ document.getElementById('teams-view').addEventListener('click', e => {
         loadTeamTickets();
         return;
     }
-    if (e.target.closest('[data-team-search]')) {
-        teamsView.filter.search = document.getElementById('team-filter-search').value.trim();
-        teamsView.offset = 0;
-        loadTeamTickets();
-        return;
-    }
     if (e.target.closest('[data-team-bulk]')) {
         const numbers = [...document.querySelectorAll('#team-tickets .team-select:checked')].map(b => b.value);
         if (!numbers.length) { showToast('Tick some tickets first'); return; }
-        const to = document.getElementById('team-bulk-to').value;
-        assign(numbers, to ? Number(to) : null).then(ok => { if (ok) loadTeamTickets(); }).catch(err => showToast(err.message));
+        const to = pickerCurrent(document.getElementById('team-bulk-to'));
+        if (to === undefined) { showToast('Type the name of who gets them (or "Not assigned") first'); return; }
+        assign(numbers, to).then(ok => { if (ok) loadTeamTickets(); }).catch(err => showToast(err.message));
+        return;
+    }
+    // "Give all…": a box to type who gets the whole family, in place of the link
+    const give = e.target.closest('[data-family-give]');
+    if (give) {
+        give.outerHTML = personPickerHtml(Number(give.dataset.familyTeam) || teamsView.teamId, undefined, `Give all ${give.dataset.familySize} tickets in this family to`,
+            { placeholder: 'Give all to…', attrs: `data-family="${escapeHtml(give.dataset.familyGive)}" data-family-size="${give.dataset.familySize}"` });
         return;
     }
     const find = e.target.closest('[data-family-find]');
     if (find) { findFamily(find.dataset.familyFind); return; }
     if (e.target.closest('[data-family-lookup]')) { findFamily(); return; }
     const move = e.target.closest('[data-family-move]');
-    if (move) { moveFamily(move.dataset.familyMove); return; }
+    if (move) {
+        moveFamily(move.dataset.familyMove, Number(document.getElementById('family-move-to').value), text => {
+            document.getElementById('family-found').innerHTML = `<p class="home-status">${escapeHtml(text)}</p>`;
+        });
+        return;
+    }
+    // A family's row in "Not assigned yet": the team picked beside it. Asks first
+    // when some of its tickets are people's now, since they'd lose them.
+    const groupMove = e.target.closest('[data-group-move]');
+    if (groupMove) {
+        const select = groupMove.closest('.family-group-do').querySelector('[data-group-move-to]');
+        const team = teamsView.data.teams.find(t => t.id === Number(select.value));
+        if (!team) { showToast('Choose the team to move it to first'); select.focus(); return; }
+        const size = Number(groupMove.dataset.familySize);
+        const held = size - Number(groupMove.dataset.familyUnassigned);
+        if (held && !confirm(`Move all ${size.toLocaleString()} tickets in this family to ${team.name}? ` +
+            `The ${held.toLocaleString()} that people have now become unassigned too, for ${team.name}'s project manager to hand out.`)) return;
+        moveFamily(groupMove.dataset.groupMove, team.id, showToast);
+        return;
+    }
+    const remove = e.target.closest('[data-member-remove]');
+    if (remove) {
+        const team = currentTeam();
+        const member = team?.members.find(m => m.id === Number(remove.dataset.memberRemove));
+        if (!member) return;
+        const held = member.load?.total || 0;
+        if (!confirm(`Take ${member.name} off ${team.name}? They stop being its ${roleName(member.role).toLowerCase()} and stop seeing its tickets.` +
+            (held ? ` Their ${held.toLocaleString()} ${held === 1 ? 'ticket stays' : 'tickets stay'} with ${team.name}, unassigned, for its project manager to hand out.` : ''))) return;
+        setMembership(member.id, null, null, data => `${member.name} is off ${team.name}` +
+            (data.unassigned ? `; ${data.unassigned.toLocaleString()} ${data.unassigned === 1 ? 'ticket is' : 'tickets are'} unassigned now` : ''));
+        return;
+    }
     const add = e.target.closest('[data-person-add]');
     if (add) {
         const id = add.dataset.personAdd;
         const row = add.closest('tr');
         setMembership(Number(id), Number(row.querySelector('[data-person-team]').value), row.querySelector('[data-person-role]').value);
+        return;
+    }
+    const undo = e.target.closest('[data-undo-statuses]');
+    if (undo) { undoAllStatuses(Number(undo.dataset.undoStatuses)); return; }
+    const demo = e.target.closest('[data-reset-demo]');
+    if (demo) resetDemoTickets(Number(demo.dataset.resetDemo));
+});
+
+// A name picked in a ticket's box gives it to them; in a family's, the whole family
+document.getElementById('teams-view').addEventListener('personpick', e => {
+    const picker = e.target;
+    const { id, previous, name } = e.detail;
+    if (picker.dataset.number) {
+        assign([picker.dataset.number], id, name)
+            // "Not assigned yet" lists only tickets nobody has, so it goes from there
+            .then(ok => { if (!ok) setPickerValue(picker, previous); else if (showingUnassigned()) loadTeamTickets(true); })
+            .catch(err => { setPickerValue(picker, previous); showToast(err.message); });
+    } else if (picker.dataset.family) {
+        giveFamily(picker.dataset.family, Number(picker.dataset.familySize), id, name).then(done => {
+            if (!done) setPickerValue(picker, undefined);
+            loadTeamTickets(true);
+        });
     }
 });
 
 document.getElementById('teams-view').addEventListener('change', e => {
     const t = e.target;
-    if (t.classList.contains('team-assign')) {
-        const previous = [...t.options].find(o => o.defaultSelected)?.value ?? '';
-        assign([t.dataset.number], t.value ? Number(t.value) : null)
-            .then(() => { for (const o of t.options) o.defaultSelected = o.selected; })
-            .catch(err => { t.value = previous; showToast(err.message); });
-    } else if (t.id === 'team-filter-assignee' || t.id === 'team-filter-kind') {
-        teamsView.filter[t.id === 'team-filter-kind' ? 'kind' : 'assignee'] = t.value;
+    if (TEAM_FILTERS[t.id]) {
+        teamsView.filter[TEAM_FILTERS[t.id]] = t.value;
         teamsView.offset = 0;
         loadTeamTickets();
+    } else if (t.dataset.statusChange) {
+        changeTicketStatus(t);
     } else if (t.classList.contains('team-select-all')) {
         for (const box of document.querySelectorAll('#team-tickets .team-select')) box.checked = t.checked;
     } else if (t.dataset.memberRole) {
@@ -21264,7 +24668,6 @@ document.getElementById('teams-view').addEventListener('change', e => {
 
 document.getElementById('teams-view').addEventListener('keydown', e => {
     if (e.key !== 'Enter') return;
-    if (e.target.id === 'team-filter-search') document.querySelector('#teams [data-team-search]').click();
     if (e.target.id === 'family-find') findFamily();
 });
 ```
@@ -21284,16 +24687,153 @@ replacing that.
 
 - **Admins** (`ADMIN_USERNAMES` in `teams.mjs`: vperez, lvang, lbell) see every
   ticket. They put people on teams, set roles, move families between teams,
-  and assign any ticket. They're the only ones who see the Metabase
-  dashboards, because those show every ticket and can't be filtered per person.
+  and assign any ticket. The Team tab's **📥 Not assigned yet**
+  (`GET /api/teams/unassigned/tickets`, `teams.unassignedTickets`; admins only)
+  lists every ticket nobody has, on a team or on none, under a row for its
+  family, where the family is moved to a team or given whole to one person.
+- **Everyone gets the Metabase dashboards, each showing only their own
+  tickets.** The server signs a Metabase embed link per person
+  (`signedDashboardPath` in `server.mjs`) with a locked `viewer` filter
+  (`dashboardViewer` in `teams.mjs`: `all`, `team:<id>:<key>` or
+  `person:<id>:<key>`). Every chart's SQL reads the ticket views through
+  `scopedSql` (`scripts/metabase-setup.mjs`), which keeps only
+  `reporting.visible_tickets(viewer)`. That function reads OneTouch's live
+  assignments from `onetouch_auth` through `postgres_fdw`, as `access_reader`,
+  which can read only the `ticket_access` view (number, team id, assignee id)
+  and can't log in from outside the Postgres container (`db/init-reporting.sh`).
+  Public links are off. A chart may only use a view listed in `SCOPED_VIEWS`,
+  and the script refuses any other view. Filter suggestions (team names,
+  sites, …) still list every value, but the charts don't.
+- **Assigning** is done by typing a name (`public/picker.js`): a project
+  manager or admin types part of a team member's name and picks from the
+  matches, for one ticket, the ticked tickets, or a whole family at once
+  ("Give all…" on the Team tab, "Give it all to" in Team families;
+  `PUT /api/ticket-families/:id/assignee`, `teams.assignFamily`). Only the
+  family's team's people can be picked, and they're notified.
 - **Project manager**: sees every ticket of their team, assigns them to the
   team's members, and sees each member's workload (Team tab).
 - **Process excellence** and **project team member**: see only the tickets
   assigned to them.
 - People on no team, and the `warmup` service account, see no tickets.
-- There are six teams, Example Team 1 to Example Team 6. Each has one
-  project manager, one process excellence member, and 3–4 project team members
-  (the first members were placed at random).
+- Test accounts (`tester1`, `tester2`, …, and any `test.<name>`) only ever
+  join a **test team** (`teams.is_test`), never a real one. Seeding skips them,
+  an admin can only put them on a test team, and the server takes any that
+  are on a real team off it when it starts (`takeTestAccountsOffTeams`). Their
+  tickets stay with the team, unassigned. `tester1` and `tester2` are on no team.
+- An admin takes someone off a team with **Remove from team** in the Team tab
+  (or by picking "No team"). They lose their role and stop seeing the team's
+  tickets, and their tickets go back to the team, unassigned.
+- There are six real teams, Example Team 1 to Example Team 6. Each has one
+  project manager, one process excellence member, and 2–4 project team
+  members (the first members were placed at random).
+- One test team, the **Milwaukee Brewers**, for trying out the project manager's
+  side: `vperez` (an admin, who still sees everything) is its project manager.
+  Its players are test accounts made on this server only (they're not in
+  `db/accounts.json`): William Contreras (`test.wcontreras`, process
+  excellence), and Christian Yelich (`test.cyelich`), Jackson Chourio
+  (`test.jchourio`) and Brice Turang (`test.bturang`) as project team members.
+  Their passwords are random; set one with
+  `docker exec -it analytics_node_app npm run users -- reset-password test.cyelich`.
+  It starts with no tickets: an admin moves families to it from 📥 Not assigned
+  yet or with "Move tickets to another team". For presentations, `db/demo-tickets.sql` adds 11 made-up
+  "[Demo]" tickets in 5 families (numbers `…99000xx`, outside the export) on no
+  team, ready to move to the Brewers live; running it again resets them, and
+  `db/demo-tickets-remove.sql` removes them (restart the app after either).
+  Without a restart, an admin's **🎬 Before a presentation** card (Team tab)
+  puts them back (`POST /api/demo-tickets/reset`, `teams.resetDemoTickets`: no
+  team, nobody, and their statuses, notifications, stars and ticket results
+  gone) and undoes every status (`POST /api/ticket-statuses/undo-all`,
+  `teams.undoAllStatuses`: all of `ticket_reports` and the 'report'
+  notifications). Real tickets keep their teams and people.
+
+**Assigned to me** (Home's first tab, `GET /api/my-tickets`): everyone's
+OneTouch tickets, most urgent first, then oldest (`ticketsByPriority` in
+`tickets.mjs`). Only incidents have a priority (P1–P4). A change ranks by its
+risk (High like P2, Medium like P3, Low and Standard like P4). Requests and
+catalog tasks have no priority, so they come after everything else. The list
+opens on open tickets, with Closed and All a click away.
+
+**KPIs** (`kpis.mjs`). Every ticket's KPI fields are read from Cube once at
+start, because the data is frozen. Ages count to the end of the data, not
+today, and "typical" means the median for that kind of ticket.
+
+- **Each ticket's KPIs** appear in "Assigned to me" (`POST /api/kpis/tickets`).
+  Anyone may get them for a ticket they can see, so most people only see
+  their own tickets' KPIs.
+  - Incidents: open for / resolved in (against the median for its
+    priority), last update, reassigned, reopened, SLA breach recorded, plus
+    workaround, was a P1, caused by a change and problem when they apply.
+  - Changes: open for, lead time, window, past its planned end / starts
+    soon, outcome, approval, outage, emergency or expedited.
+  - Requests: open for / fulfilled in, last update, approval.
+  - Catalog tasks: open for / closed in (to their last update, since tasks
+    have no closing date), last update, SLA.
+- **Each family's KPIs** are only for its team's project manager and admins
+  (Home's "Team families", `GET /api/kpis/families` and
+  `/api/kpis/families/:id`). They cover: tickets, how many are closed,
+  oldest open, no update for a week, highest priority, median resolve and
+  fulfil times, SLA breaches, reassignments, reopens, successful changes,
+  incidents caused by its changes, how long it's been active, people on it,
+  and open-but-unassigned. Families with open tickets come first.
+
+**Sorting** (`public/sorting.js`). Every ticket list and table sorts by any of its
+columns: a heading sorts ascending, then descending, then back to the list's own order.
+Lists shown a page at a time sort all of their tickets, not just the page; the Team tab,
+Team families and the Families page are sorted by the server, from every ticket's summary
+read once at start (`tickets.mjs` `loadTicketIndex`). That index only orders tickets the
+person may already see; it never decides what they see. Charts sort with their ⇅ menu,
+the builder's Order, or an answer's Order menu: by count or by their groups, either way.
+
+**Looking up** (`public/lookup.js`). Every ticket list has a 🔍 box that finds its
+tickets by any of its columns (or one picked column): every word must appear, "quoted
+words" stay together. Lists the page holds whole are looked up where they are; lists
+shown a page at a time look through all of their tickets, the Team tab, Team families
+and the Families page on the server (`?q=&col=`, `tickets.mjs` `lookupMatches`), only
+ever among the tickets that person may already see.
+
+**No blank cells.** Where the data has nothing, a list says why ("No priority" for
+requests and catalog tasks, "Not assigned", "No parent", …; `blankText` in `app.js` and
+`tickets.mjs`). A request's team is the team of its catalog tasks, and a request with no
+"requested for" shows who opened it. On the Families page, an order, a problem record or
+a parent that isn't the person's own gets its row from the family's tickets they may see
+(`relations.mjs` `familyRow`), never from a ticket they can't see.
+
+**My charts** (Home): the tickets assigned to that person, drawn by type, state, priority,
+KPIs, week opened and ServiceNow team, from the same list as "Assigned to me"; a click on a
+bar shows those tickets in "Assigned to me". **The AI assistant** is the Ask bar in the
+header (right of 👥 Team) on every page; a click anywhere outside the chat closes it.
+Every full ticket number in the chat (typed questions, answers, answer tables, family notes
+under an answer) is a button that opens that ticket (`linkTicketsHtml` in `app.js`).
+
+**Notifications** (`notifications.mjs`, the 🔔 in the header, checked every
+minute). Each one is saved in the same transaction as the change it reports:
+
+- Someone gets tickets (from their project manager or an admin): they're told
+  which ones. Giving tickets to yourself, or unassigning, tells nobody.
+- An admin moves a family to a team: that team's project manager is told. The
+  tickets arrive unassigned.
+- A member says they resolved or closed one of their tickets (a button on the
+  ticket's record and on its row in the Team tab): their project manager is
+  told, and the Team tab shows it under the ticket's state. This is only a
+  message (`ticket_reports`): the ticket's data never changes. The Team tab's
+  **✅ Resolved or closed** (`GET /api/ticket-statuses`, `teams.ticketStatuses`)
+  lists each ticket whose latest report is resolved or closed: every team's for
+  admins, a project manager's own team's. They change it
+  (`PUT /api/ticket-statuses/:number`, `teams.setTicketStatus`): resolved or
+  closed adds a report in their name; open deletes the ticket's reports.
+
+Each one can be cleared off the person's list ("Clear" on it, or "Clear all"
+up to the newest shown; `POST /api/notifications/clear`,
+`notifications.clearNotifications`). Clearing sets `cleared_at` and keeps the
+row, so the email outbox is unaffected; only the person's own can be cleared.
+
+**Each notification is also emailed** (`mail.mjs`, through Brevo's API, from
+`notifications@onetouch.fyi`): an outbox on the `notifications` table, sent after the
+change commits, retried up to 5 times, never older than an hour. Only to people with
+`users.email` set (an admin sets it: `npm run users -- email|emails`; never in
+`db/accounts.json`) who haven't unticked "Email me these too" in the 🔔 panel; never test
+or service accounts; only `MAIL_ONLY_TO` while that's set. An email holds who did what
+and the ticket numbers, never summaries or notes. No `BREVO_API_KEY` in `.env`: off.
 
 **Families decide teams.** Tickets linked to each other form one family: a
 parent incident and its children, a bundle request and its child requests, a
@@ -21305,13 +24845,50 @@ is ever split between two teams. Moving a ticket to another team moves its
 whole group, and those tickets become unassigned until the new team's project
 manager hands them out.
 
+**New tickets from ServiceNow** (`servicenow-sync/`, its own process; not
+connected to ServiceNow yet). ServiceNow's async Business Rules post
+`{ table, record }` to `POST /api/v1/servicenow-webhook` (`X-Webhook-Token`).
+The record goes into the export's own table (analytics_db: `incident`,
+`change_request`, `sc_req_item`, `sc_task`, `change_approvals`,
+`ritm_approvals`) under its column names, upserted by the table's key; the
+columns and keys are read from the database at start, never listed in the
+code. Older updates (by `updated`) never replace newer ones. A task before
+its request, or an approval before its ticket, waits in `servicenow_pending`
+and is saved as soon as that arrives. Each ticket is then placed by
+`teams.placeTicket`, with the same `LINKS` as the first start, followed both
+ways: linked tickets' family (and team), or a family of its own on the real
+team with the fewest tickets; it arrives unassigned. A ticket linking two
+families merges them into the biggest (it keeps its id and team; ties: the
+lower id); tickets changing team become unassigned and that team's project
+manager is told ('family' notification, `detail.source: 'servicenow'`).
+Families never split. `placeTicket` signals `onetouch_tickets_changed` in
+onetouch_auth; `server.mjs` listens, re-reads scopes at once and, 15 s later
+(Cube's cache), KPIs, the ticket index, family links and chart results.
+The ServiceNow side is in `servicenow-sync/servicenow-blueprint.md`.
+
 **What people see is enforced on the server.** `restrictQuery` adds "ticket
 number is one of theirs" to every Cube query made for anyone who isn't an
 admin. That covers the AI assistant, ticket search, records, families, charts
 and their own dashboards. Approval records follow the ticket they approve.
 Never add a route that calls `runCubeQuery` directly with input from a person:
-use `req.runQuery`. The only direct calls are the first-start seeding and
-summaries for numbers that were already checked.
+use `req.runQuery`. The only direct calls are the first-start seeding,
+summaries for numbers that were already checked, and `teams.findsHiddenTickets`,
+which counts an AI answer's validated query over tickets that aren't the
+person's and only ever returns true or false (never a count or a row).
+
+**The AI assistant and permissions** (`answerQuestion` in `server.mjs`). A
+question naming only tickets the person can't see is refused before Claude
+(`intent: 'denied'`); one whose generated query filters only on such tickets is
+refused before anything runs. Otherwise the answer shows only their tickets, and
+`restricted` ("You can't see the full report…") says when matching tickets that
+aren't theirs were left out (`findsHiddenTickets`, per query). A query that is
+empty only because of permissions gets no Claude explanation; one where nothing
+anywhere matches is explained as "the data has none". A full ticket number someone
+can't open but that is in the data comes back in `noAccess` (ticket search,
+Families page find, starred list; `noAccessTo` in `server.mjs`, `inTheData` in
+`tickets.mjs`, from the ticket index): the page says "You don't have permission
+to see …". Only the number is sent, never anything in the ticket; admins never
+get one.
 
 **Two kinds of "assigned".** `assigned_to` and `assignment_group` in the
 ServiceNow export are who worked a ticket in ServiceNow. They have nothing to
@@ -21386,10 +24963,2922 @@ makes sure the fix is scheduled (usually as a change).
 4. **Decide what admins and project managers want to approve.** For example,
    whether a project manager may take tickets from another team's family, or
    only an admin.
-5. **New tickets.** The export is a frozen snapshot, so seeding once is enough.
-   If live data ever arrives, new tickets need adding to an existing family
-   (and so a team) when they're linked, or to the smallest team when they
-   aren't.
+5. **New tickets.** Built, waiting for ServiceNow access: see "New tickets
+   from ServiceNow" above.
+```
+
+<a id="b55"></a>
+### B.55 `notifications.mjs`
+
+```js
+// =====================================================================
+// NOTIFICATIONS: what someone should hear about, shown under the 🔔 in the
+// header, kept with the accounts in the onetouch_auth database. teams.mjs
+// makes them:
+//
+//   assigned   someone gave you tickets
+//   family     a family was moved to the team you're the project manager of
+//   report     someone on your team says they resolved or closed a ticket
+//
+// Each one keeps who did it, the tickets (up to MAX_NUMBERS of them) and a
+// few details; the page words them. Each is also emailed (mail.mjs): its
+// email_state starts 'pending', and the sender marks it 'sent', 'skipped'
+// (with why) or 'failed'. Those made before email existed are 'before'.
+// Someone can clear one, or all of them, off their list: cleared_at is set
+// and the row stays, so an email still on its way goes out all the same.
+// =====================================================================
+
+import { pool } from './auth.mjs';
+
+export const KINDS = ['assigned', 'family', 'report'];
+const MAX_NUMBERS = 100;
+// The newest this many are listed (the unread count covers them all)
+const LIST_LIMIT = 50;
+
+// Safe to run every start (after auth.ensureSchema, which creates users)
+export async function ensureNotificationsSchema() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id          serial PRIMARY KEY,
+      user_id     integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      kind        text NOT NULL CHECK (kind IN (${KINDS.map(k => `'${k}'`).join(', ')})),
+      actor_id    integer REFERENCES users(id) ON DELETE SET NULL,
+      numbers     text[] NOT NULL DEFAULT '{}',
+      detail      jsonb NOT NULL DEFAULT '{}',
+      created_at  timestamptz NOT NULL DEFAULT now(),
+      read_at     timestamptz
+    );
+    CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, id DESC);
+
+    -- Email (mail.mjs). The notifications already here when this column arrives
+    -- are 'before', so they're never emailed; every later one starts 'pending'.
+    ALTER TABLE notifications ADD COLUMN IF NOT EXISTS email_state text NOT NULL DEFAULT 'before';
+    ALTER TABLE notifications ALTER COLUMN email_state SET DEFAULT 'pending';
+    ALTER TABLE notifications ADD COLUMN IF NOT EXISTS email_tries integer NOT NULL DEFAULT 0;
+    ALTER TABLE notifications ADD COLUMN IF NOT EXISTS email_next_at timestamptz;
+    ALTER TABLE notifications ADD COLUMN IF NOT EXISTS emailed_at timestamptz;
+    ALTER TABLE notifications ADD COLUMN IF NOT EXISTS email_note text;
+    CREATE INDEX IF NOT EXISTS notifications_email_idx ON notifications (id) WHERE email_state = 'pending';
+
+    -- Cleared off the person's list (clearNotifications)
+    ALTER TABLE notifications ADD COLUMN IF NOT EXISTS cleared_at timestamptz;
+  `);
+}
+
+// The same notification for each of userIds. db: the pool, or a client in
+// the middle of a transaction, so the notification goes in with the change
+export async function notify(db, userIds, { kind, actorId = null, numbers = [], detail = {} }) {
+  if (!userIds.length) return;
+  await db.query(
+    `INSERT INTO notifications (user_id, kind, actor_id, numbers, detail)
+     SELECT unnest($1::int[]), $2, $3, $4::text[], $5::jsonb`,
+    [userIds, kind, actorId, numbers.slice(0, MAX_NUMBERS), JSON.stringify(detail)]);
+}
+
+// -> { unread, notifications: newest first }
+export async function listNotifications(userId) {
+  const { rows } = await pool.query(
+    `SELECT n.id, n.kind, n.numbers, n.detail, n.created_at, n.read_at, coalesce(u.display_name, u.username) AS actor
+       FROM notifications n LEFT JOIN users u ON u.id = n.actor_id
+      WHERE n.user_id = $1 AND n.cleared_at IS NULL ORDER BY n.id DESC LIMIT ${LIST_LIMIT}`,
+    [userId]);
+  const { rows: [{ unread }] } = await pool.query(
+    'SELECT count(*)::int AS unread FROM notifications WHERE user_id = $1 AND read_at IS NULL AND cleared_at IS NULL', [userId]);
+  return {
+    unread,
+    notifications: rows.map(r => ({
+      id: r.id, kind: r.kind, actor: r.actor, numbers: r.numbers, detail: r.detail,
+      at: r.created_at, read: Boolean(r.read_at),
+    })),
+  };
+}
+
+// Some of this person's notifications (ids), or all of them, as read -> how many
+export async function markRead(userId, ids = null) {
+  const wanted = Array.isArray(ids) ? ids.map(Number).filter(Number.isInteger).slice(0, LIST_LIMIT) : null;
+  const { rowCount } = await pool.query(
+    `UPDATE notifications SET read_at = now()
+      WHERE user_id = $1 AND read_at IS NULL AND ($2::int[] IS NULL OR id = ANY($2::int[]))`,
+    [userId, wanted]);
+  return rowCount;
+}
+
+// Clears some of this person's notifications (ids) off their list, or all of
+// them up to and including upTo: the newest their list showed, so one that
+// arrived since isn't cleared before they've seen it -> how many
+export async function clearNotifications(userId, { ids = null, upTo = null } = {}) {
+  const wanted = Array.isArray(ids) ? ids.map(Number).filter(Number.isInteger).slice(0, LIST_LIMIT) : null;
+  if (wanted ? !wanted.length : !Number.isInteger(upTo)) return 0;
+  const { rowCount } = await pool.query(
+    `UPDATE notifications SET cleared_at = now(), read_at = coalesce(read_at, now())
+      WHERE user_id = $1 AND cleared_at IS NULL AND ($2::int[] IS NULL OR id = ANY($2::int[])) AND ($3::int IS NULL OR id <= $3)`,
+    [userId, wanted, wanted ? null : upTo]);
+  return rowCount;
+}
+```
+
+<a id="b56"></a>
+### B.56 `public/notifications.js`
+
+```js
+// =====================================================================
+// NOTIFICATIONS: the 🔔 in the header (notifications.mjs on the server):
+// tickets someone gave you, a family moved to the team you're the project
+// manager of, and someone on your team saying they resolved or closed a
+// ticket. Checked every minute while signed in; opening the list marks
+// them read. Each can be cleared off the list, or all of them at once.
+// Also the box for telling your project manager you resolved or closed a
+// ticket, from a ticket's record and the Team tab.
+// Loaded before app.js, whose helpers these functions use when they run.
+// =====================================================================
+
+const NOTIFY_CHECK_MS = 60 * 1000;
+// How many of a notification's tickets are listed before "and N more"
+const NOTIFY_SHOWN_NUMBERS = 8;
+// The tickets a member can report on (not orders: they aren't assigned to anyone)
+const REPORTABLE = /^(INC|CHG|RITM|SCTASK)\d{7}$/;
+
+const notifyState = {
+    items: [],      // the newest ones, newest first
+    unread: 0,
+    newestId: null, // the newest one seen so far (null: not checked yet), so only later ones pop up
+    timer: null,
+    run: 0,         // bumped on sign-out, so a check still on its way is dropped
+    cleared: new Set(), // ids cleared here, kept off the list even if a check started before the server heard
+    clearedUpTo: 0,     // "Clear all": every id up to this one, likewise
+};
+
+// Signing out: nothing of this person's stays on the page
+function resetNotifications() {
+    clearInterval(notifyState.timer);
+    Object.assign(notifyState, { items: [], unread: 0, newestId: null, timer: null, run: notifyState.run + 1, cleared: new Set(), clearedUpTo: 0 });
+    toggleNotifications(false);
+    paintNotifyCount();
+    document.getElementById('notify-list').innerHTML = '';
+}
+
+// Signed in: check now and every minute
+function startNotifications() {
+    resetNotifications();
+    checkNotifications();
+    notifyState.timer = setInterval(checkNotifications, NOTIFY_CHECK_MS);
+}
+
+async function checkNotifications() {
+    if (!sessionTokenValue) return;
+    const run = notifyState.run;
+    try {
+        const response = await fetch(`${API_BASE}/api/notifications`, { headers: authHeaders() });
+        if (handleUnauthorized(response) || !response.ok || run !== notifyState.run) return;
+        const data = await response.json();
+        if (run !== notifyState.run) return;
+        const listed = data.notifications.filter(n => n.id > notifyState.clearedUpTo && !notifyState.cleared.has(n.id));
+        // New since the last check (none on the first one: the count says enough)
+        const fresh = notifyState.newestId === null ? [] : listed.filter(n => n.id > notifyState.newestId && !n.read);
+        notifyState.items = listed;
+        notifyState.unread = data.unread;
+        notifyState.newestId = Math.max(notifyState.newestId ?? 0, ...listed.map(n => n.id));
+        paintNotifyCount();
+        if (notificationsOpen()) {
+            renderNotifications();
+            markNotificationsRead();
+        }
+        if (fresh.length) showToast(fresh.length === 1 ? `🔔 ${notificationText(fresh[0])}` : `🔔 ${fresh.length} new notifications`);
+        // New tickets for them: Home's "Assigned to me" catches up if it's showing
+        if (fresh.some(n => n.kind === 'assigned') && homeMode === 'assigned'
+            && document.getElementById('home-view').classList.contains('active')) showAssigned(true);
+    } catch (err) {
+        console.error('Could not check notifications:', err);
+    }
+}
+
+function paintNotifyCount() {
+    const count = document.getElementById('notify-count');
+    const button = document.getElementById('notify-btn');
+    count.hidden = !notifyState.unread;
+    count.textContent = notifyState.unread > 99 ? '99+' : String(notifyState.unread);
+    button.setAttribute('aria-label', notifyState.unread ? `Notifications (${notifyState.unread} new)` : 'Notifications');
+}
+
+function notificationsOpen() {
+    return !document.getElementById('notify-panel').hidden;
+}
+
+function toggleNotifications(open) {
+    const panel = document.getElementById('notify-panel');
+    const button = document.getElementById('notify-btn');
+    const willOpen = typeof open === 'boolean' ? open : panel.hidden;
+    panel.hidden = !willOpen;
+    button.setAttribute('aria-expanded', String(willOpen));
+    if (willOpen) {
+        toggleThemePanel(false);
+        renderNotifications();
+        markNotificationsRead();
+        panel.querySelector('.drawer-close').focus();
+    } else if (panel.contains(document.activeElement)) {
+        button.focus();
+    }
+}
+
+// Seen: the count goes, but they stay highlighted until the list is next drawn
+async function markNotificationsRead() {
+    if (!notifyState.unread) return;
+    notifyState.unread = 0;
+    paintNotifyCount();
+    try {
+        const response = await fetch(`${API_BASE}/api/notifications/read`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({}),
+        });
+        handleUnauthorized(response);
+    } catch (err) {
+        console.error('Could not mark the notifications read:', err);
+    }
+}
+
+// ---------------------------------------------------------------------
+// ✉️ Email me these too: the 🔔's notifications by email as well (mail.mjs
+// on the server), to the address an admin put on file for this person
+// ---------------------------------------------------------------------
+
+let emailSetting = null; // { address, on, enabled } from /api/me; null when signed out
+
+// email: from /api/me (undefined: keep what's there, e.g. right after signing in)
+function paintEmailSetting(email) {
+    if (email !== undefined) emailSetting = email;
+    const box = document.getElementById('notify-email');
+    const e = emailSetting;
+    box.hidden = !e;
+    if (!e) return;
+    const input = document.getElementById('notify-email-on');
+    input.checked = Boolean(e.address && e.on);
+    input.disabled = !e.address;
+    document.getElementById('notify-email-to').textContent = !e.address ? 'There\'s no email address on file for you. An admin can add one.'
+        : !e.enabled ? `They'll go to ${e.address} once email is set up on this server.`
+        : e.on ? `Each one is emailed to ${e.address}.` : `Off. They'd go to ${e.address}.`;
+}
+
+document.getElementById('notify-email-on').addEventListener('change', async e => {
+    const on = e.target.checked;
+    try {
+        const response = await fetch(`${API_BASE}/api/me/email`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ on }),
+        });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+        paintEmailSetting(data.email);
+        showToast(on ? `✉️ Your notifications will be emailed to ${data.email.address} too` : '✉️ No more notification emails; they still show here');
+    } catch (err) {
+        paintEmailSetting();
+        showToast(`❌ ${err.message}`);
+    }
+});
+
+// One notification in words. html: ticket numbers become links, the rest is escaped.
+function notificationText(n, html = false) {
+    const text = html ? escapeHtml : String;
+    const ticket = number => html ? `<button type="button" class="link-btn" data-ticket="${escapeHtml(number)}">${escapeHtml(number)}</button>` : number;
+    const d = n.detail || {};
+    const who = text(n.actor || 'Someone');
+    const count = d.count || n.numbers.length;
+    if (n.kind === 'assigned') {
+        const on = d.team ? ` on ${text(d.team)}` : '';
+        // A whole family at once
+        if (d.family && d.size > 1) return `${who} gave you the family of ${d.size.toLocaleString()} linked tickets around ${ticket(d.family)}${on}.`;
+        return `${who} gave you ${count === 1 ? ticket(n.numbers[0]) : `${count.toLocaleString()} tickets`}${on}.`;
+    }
+    if (n.kind === 'family') {
+        // A ticket from ServiceNow linked two families: the smaller one joined the bigger one's team
+        if (d.source === 'servicenow') {
+            return `A new link from ServiceNow brought ${count === 1 ? ticket(n.numbers[0]) : `${count.toLocaleString()} linked tickets`} into a family on ${text(d.team)}. ` +
+                `${count === 1 ? 'It isn\'t' : 'They aren\'t'} assigned to anyone yet.`;
+        }
+        return count === 1
+            ? `${who} moved ${ticket(n.numbers[0])} to ${text(d.team)}. It isn't assigned to anyone yet.`
+            : `${who} moved a family of ${count.toLocaleString()} linked tickets to ${text(d.team)}. They aren't assigned to anyone yet.`;
+    }
+    if (n.kind === 'report') return `${who} says they ${text(d.status)} ${ticket(n.numbers[0])}.`;
+    return `${who} sent you a notification.`;
+}
+
+function renderNotifications() {
+    const list = document.getElementById('notify-list');
+    document.getElementById('notify-clear-all').hidden = !notifyState.items.length;
+    if (!notifyState.items.length) {
+        list.innerHTML = '<p class="home-status">No notifications. You\'ll hear here when someone gives you tickets. Project managers also hear when a family ' +
+            'of tickets is moved to their team, and when someone on it says they resolved or closed a ticket.</p>';
+        return;
+    }
+    list.innerHTML = '<ul class="notify-items">' + notifyState.items.map(n => {
+        const d = n.detail || {};
+        const count = d.count || n.numbers.length;
+        const shown = count > 1 ? n.numbers.slice(0, NOTIFY_SHOWN_NUMBERS) : [];
+        const more = count - shown.length;
+        return `<li class="notify-item${n.read ? '' : ' unread'}" data-notify-id="${n.id}">` +
+            `<div class="notify-text">${notificationText(n, true)}</div>` +
+            (d.note ? `<blockquote class="notify-note">${escapeHtml(d.note)}</blockquote>` : '') +
+            (shown.length ? `<div class="notify-tickets">${shown.map(number =>
+                `<button type="button" class="link-btn" data-ticket="${escapeHtml(number)}">${escapeHtml(number)}</button>`).join(', ')}` +
+                (more > 0 ? ` and ${more.toLocaleString()} more` : '') + '</div>' : '') +
+            `<div class="notify-foot"><span>${escapeHtml(formatShownAt(n.at))}</span><span class="notify-foot-actions">` +
+            (n.kind === 'report' ? '' : '<button type="button" class="link-btn" data-notify-team>Open the Team tab</button>') +
+            `<button type="button" class="notify-clear" data-notify-clear="${n.id}" aria-label="Clear this notification">Clear</button>` +
+            '</span></div></li>';
+    }).join('') + '</ul>';
+}
+
+// Takes notifications off the list at once, and off the server's; they come
+// back if that fails. ids: some of them, or null: all of them, up to the
+// newest showing (one that arrives meanwhile isn't cleared unseen)
+async function clearNotifications(ids) {
+    const upTo = ids ? null : Math.max(...notifyState.items.map(n => n.id));
+    const gone = new Set(ids || notifyState.items.map(n => n.id));
+    const before = { cleared: new Set(notifyState.cleared), clearedUpTo: notifyState.clearedUpTo };
+    if (ids) ids.forEach(id => notifyState.cleared.add(id));
+    else notifyState.clearedUpTo = Math.max(notifyState.clearedUpTo, upTo);
+    notifyState.items = notifyState.items.filter(n => !gone.has(n.id));
+    renderNotifications();
+    try {
+        const response = await fetch(`${API_BASE}/api/notifications/clear`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify(ids ? { ids } : { upTo }),
+        });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
+    } catch (err) {
+        Object.assign(notifyState, before);
+        showToast(`❌ ${err.message}`);
+        checkNotifications(); // the list as the server has it
+    }
+}
+
+function clearAllNotifications() {
+    if (!notifyState.items.length) return;
+    if (!confirm('Clear all your notifications? They leave this list for good.')) return;
+    clearNotifications(null);
+    document.querySelector('#notify-panel .drawer-close').focus();
+}
+
+document.getElementById('notify-panel').addEventListener('click', e => {
+    // One notification's Clear: the keys go to the next one's, or the one before
+    const clear = e.target.closest('[data-notify-clear]');
+    if (clear) {
+        const item = clear.closest('.notify-item');
+        const next = item.nextElementSibling?.dataset.notifyId || item.previousElementSibling?.dataset.notifyId;
+        clearNotifications([Number(clear.dataset.notifyClear)]);
+        (document.querySelector(`#notify-list [data-notify-clear="${next}"]`) || document.querySelector('#notify-panel .drawer-close')).focus();
+        return;
+    }
+    // A ticket number: app.js's click listener opens it; the list gets out of the way
+    if (e.target.closest('[data-ticket]')) { toggleNotifications(false); return; }
+    if (e.target.closest('[data-notify-team]')) {
+        toggleNotifications(false);
+        switchTab('teams');
+    }
+});
+
+// A click outside the list closes it
+document.addEventListener('pointerdown', e => {
+    const panel = document.getElementById('notify-panel');
+    if (!panel.hidden && !panel.contains(e.target) && !e.target.closest('#notify-btn')) toggleNotifications(false);
+});
+
+// Back to this tab after a while: check straight away
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && notifyState.timer) checkNotifications();
+});
+
+// ---------------------------------------------------------------------
+// Telling your project manager you resolved or closed a ticket. Only a
+// notification for them: the ticket's data doesn't change.
+// ---------------------------------------------------------------------
+
+let reportNumber = null;
+
+// Anyone on a team except its project manager (and admins, who have none)
+function canTellManager() {
+    return Boolean(currentAccess.team) && !currentAccess.admin && currentAccess.role !== 'project_manager';
+}
+
+// The button, for a ticket's record (app.js) and the Team tab (teams.js)
+function reportButtonHtml(number, label = '✅ Tell my project manager') {
+    if (!canTellManager() || !REPORTABLE.test(number)) return '';
+    return `<button type="button" class="home-action" data-report="${escapeHtml(number)}">${escapeHtml(label)}</button>`;
+}
+
+function openReportDialog(number) {
+    const dialog = document.getElementById('report-dialog');
+    reportNumber = number;
+    document.getElementById('report-ticket').textContent = `${number}: did you resolve it or close it? Your project manager hears about it.`;
+    document.getElementById('report-status').value = 'resolved';
+    document.getElementById('report-note').value = '';
+    document.getElementById('report-error').hidden = true;
+    dialog.showModal();
+    document.getElementById('report-status').focus();
+}
+
+document.querySelector('#report-dialog form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const number = reportNumber;
+    const status = document.getElementById('report-status').value;
+    const send = document.getElementById('report-send');
+    const error = document.getElementById('report-error');
+    send.disabled = true;
+    error.hidden = true;
+    try {
+        const response = await fetch(`${API_BASE}/api/tickets/report`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ number, status, note: document.getElementById('report-note').value }),
+        });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'That didn\'t work. Please try again.');
+        document.getElementById('report-dialog').close();
+        const names = data.told.length > 1 ? `${data.told.slice(0, -1).join(', ')} and ${data.told.at(-1)}` : data.told[0];
+        showToast(`✓ Told ${names} that you ${status} ${number}`);
+        // The Team tab shows it next to the ticket
+        if (document.getElementById('teams-view').classList.contains('active')) loadTeamTickets();
+    } catch (err) {
+        error.textContent = `❌ ${err.message}`;
+        error.hidden = false;
+    } finally {
+        send.disabled = false;
+    }
+});
+
+document.addEventListener('click', e => {
+    const report = e.target.closest('[data-report]');
+    if (report) openReportDialog(report.dataset.report);
+});
+```
+
+<a id="b57"></a>
+### B.57 `kpis.mjs`
+
+```js
+// =====================================================================
+// KPIs: how each ticket and each ticket family is doing. Home's "Assigned
+// to me" shows each of someone's tickets' KPIs; a project manager's "Team
+// families" shows each of their team's families' (a family being the linked
+// group teams.mjs gives to one team). Who may see which is checked in
+// server.mjs: a ticket's only by someone who may see the ticket, a family's
+// only by its team's project manager or an admin.
+//
+// Worked out here from every ticket's fields, read from Cube once (the data
+// is a frozen snapshot). "Now" is the newest timestamp in the data, as in
+// the reporting views (reporting.data_as_of), so ages don't grow with the
+// calendar. "Typical" is the median of every ticket of the same kind.
+//
+// A KPI: { key, label, value, tone, detail }. tone: good | warn | bad | info.
+// =====================================================================
+
+import { ENTITY_CATALOG } from './business_logic.mjs';
+import { sortRows } from './tickets.mjs';
+
+// The fields each ticket type's KPIs need (a fixed query: nobody's input reaches it)
+const SOURCES = {
+  INC: { cube: 'incident', fields: ['number', 'created', 'resolved', 'closed', 'updated', 'state', 'priority', 'reassignment_count', 'reopen_count', 'was_p1', 'breach_reason', 'close_code', 'caused_by_change', 'problem'] },
+  CHG: { cube: 'change_request', fields: ['number', 'created', 'planned_start_date', 'planned_end_date', 'state', 'type', 'risk', 'approval', 'close_code', 'failure_code', 'outage'] },
+  RITM: { cube: 'sc_req_item', fields: ['number', 'opened', 'closed', 'fulfilled_time', 'updated', 'state', 'approval'] },
+  SCTASK: { cube: 'sc_task', fields: ['number', 'created', 'updated', 'state', 'sla_flag'] },
+};
+const KIND_NAMES = { INC: ['incident', 'incidents'], CHG: ['change', 'changes'], RITM: ['request', 'requests'], SCTASK: ['catalog task', 'catalog tasks'] };
+const MAX_ROWS = 50000;
+
+const HOUR = 3600e3;
+const DAY = 24 * HOUR;
+// "2026-08-17 09:15:56" (the export's text) -> ms; '' -> null
+const ts = text => (text ? Date.parse(`${String(text).replace(' ', 'T')}Z`) || null : null);
+const PRIORITY_NAME = { 1: 'P1', 2: 'P2', 3: 'P3', 4: 'P4' };
+const RISK_RANK = { High: 2, Medium: 3, Low: 4, Standard: 4 };
+
+// "45 min", "5.2 h", "3.4 days"
+export function duration(ms) {
+  if (ms == null || Number.isNaN(ms)) return '—';
+  const abs = Math.abs(ms);
+  if (abs < HOUR) return `${Math.max(1, Math.round(abs / 60000))} min`;
+  if (abs < 2 * DAY) return `${(abs / HOUR).toFixed(1)} h`;
+  return `${(abs / DAY).toFixed(1)} days`;
+}
+
+const kpi = (key, label, value, tone = 'info', detail = '') => ({ key, label, value: String(value), tone, detail });
+// At or under the typical time: good; up to three times it: warn; beyond: bad
+const vsTypical = (ms, typical) => (typical == null ? 'info' : ms <= typical ? 'good' : ms <= 3 * typical ? 'warn' : 'bad');
+const median = values => {
+  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return null;
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+};
+
+// ---------------------------------------------------------------------
+// The data: every ticket, loaded once. load() starts it (server start-up
+// calls it once Cube answers); everything else waits for it.
+// ---------------------------------------------------------------------
+
+let loading = null;
+let data = null; // { asOf, tickets: Map(number -> ticket), typical }
+
+export function load(runCubeQuery) {
+  if (!loading) {
+    loading = readAll(runCubeQuery).then(d => { data = d; return d; });
+    loading.catch(() => { loading = null; }); // try again next time
+  }
+  return loading;
+}
+
+// Tickets arrived or changed (servicenow-sync/): read again; the old data
+// serves until the new is ready
+export async function reload(runCubeQuery) {
+  const fresh = await readAll(runCubeQuery);
+  data = fresh;
+  loading = Promise.resolve(fresh);
+}
+
+async function readAll(runCubeQuery) {
+  const tickets = new Map();
+  for (const [kind, { cube, fields }] of Object.entries(SOURCES)) {
+    const rows = await runCubeQuery({ dimensions: fields.map(f => `${cube}.${f}`), limit: MAX_ROWS });
+    if (rows.length >= MAX_ROWS) throw new Error(`${cube} has ${MAX_ROWS.toLocaleString()} tickets or more; kpis.mjs reads at most that many`);
+    const open = new Set(ENTITY_CATALOG[cube].openStates);
+    for (const row of rows) {
+      const raw = Object.fromEntries(fields.map(f => [f, String(row[`${cube}.${f}`] ?? '').trim()]));
+      tickets.set(raw.number, toTicket(kind, raw, open.has(raw.state)));
+    }
+  }
+  // "Now": the newest moment the data knows of (as reporting.data_as_of)
+  let asOf = 0;
+  for (const t of tickets.values()) asOf = Math.max(asOf, t.updated || 0, t.kind === 'CHG' ? t.created || 0 : 0);
+  const finished = kind => [...tickets.values()].filter(t => t.kind === kind && t.done && t.created);
+  const typical = {
+    INC: Object.fromEntries([1, 2, 3, 4].map(p => [p, median(finished('INC').filter(t => t.priority === p).map(t => t.done - t.created))])),
+    CHG: median([...tickets.values()].filter(t => t.kind === 'CHG' && t.plannedStart && t.created).map(t => t.plannedStart - t.created)),
+    RITM: median(finished('RITM').map(t => t.done - t.created)),
+    SCTASK: median(finished('SCTASK').map(t => t.done - t.created)),
+  };
+  return { asOf, tickets, typical };
+}
+
+// One row of the export -> what the KPIs read. done: when it was finished
+// (an incident resolved, a request fulfilled or closed, a catalog task's last
+// update once it closed: tasks have no closing date of their own)
+function toTicket(kind, r, open) {
+  const t = { number: r.number, kind, state: r.state, open };
+  if (kind === 'INC') {
+    Object.assign(t, {
+      created: ts(r.created), updated: ts(r.updated), done: ts(r.resolved) || ts(r.closed),
+      priority: Number((/^P([1-4])\b/.exec(r.priority) || [])[1]) || null,
+      reassigned: Number(r.reassignment_count) || 0, reopened: Number(r.reopen_count) || 0,
+      wasP1: r.was_p1 === 'true', breach: r.breach_reason, workaround: r.close_code === 'Solved (Work Around)',
+      causedBy: r.caused_by_change && r.caused_by_change !== 'zzz' ? r.caused_by_change : '',
+      problem: r.problem && r.problem !== 'zzz' ? r.problem : '',
+    });
+  } else if (kind === 'CHG') {
+    Object.assign(t, {
+      created: ts(r.created), updated: ts(r.created), done: null,
+      plannedStart: ts(r.planned_start_date), plannedEnd: ts(r.planned_end_date),
+      type: r.type, risk: r.risk, approval: r.approval, closeCode: r.close_code, failure: r.failure_code, outage: r.outage === 'Yes',
+    });
+  } else if (kind === 'RITM') {
+    Object.assign(t, { created: ts(r.opened), updated: ts(r.updated), done: ts(r.fulfilled_time) || ts(r.closed), approval: r.approval });
+  } else {
+    Object.assign(t, { created: ts(r.created), updated: ts(r.updated), done: open ? null : ts(r.updated), sla: r.sla_flag === 'true' });
+  }
+  return t;
+}
+
+// How urgent a ticket is: an incident's priority, a change's risk (as the
+// "Priority / Risk" column), nothing for requests and tasks (5)
+const rankOf = t => (t.kind === 'INC' ? t.priority || 5 : t.kind === 'CHG' ? RISK_RANK[t.risk] ?? 5 : 5);
+
+// ---------------------------------------------------------------------
+// One ticket's KPIs
+// ---------------------------------------------------------------------
+
+function idleKpi(t, asOf) {
+  if (!t.open || !t.updated) return null;
+  const idle = asOf - t.updated;
+  return kpi('idle', 'Last update', `${duration(idle)} ago`, idle < 3 * DAY ? 'good' : idle < 7 * DAY ? 'warn' : 'bad',
+    'Time since anyone last updated it. A week or more without an update usually means it is stuck.');
+}
+
+function incidentKpis(t, { asOf, typical }) {
+  const usual = typical.INC[t.priority];
+  const prio = PRIORITY_NAME[t.priority] || 'incident';
+  const list = [];
+  if (t.open) {
+    const age = asOf - t.created;
+    list.push(kpi('age', 'Open for', duration(age), vsTypical(age, usual), `A ${prio} incident is typically resolved in ${duration(usual)}.`));
+  } else if (t.done) {
+    const took = t.done - t.created;
+    list.push(kpi('resolve', 'Resolved in', duration(took), vsTypical(took, usual), `Typical for a ${prio} incident: ${duration(usual)}.`));
+  }
+  list.push(idleKpi(t, asOf));
+  list.push(kpi('reassigned', 'Reassigned', `${t.reassigned}×`, t.reassigned === 0 ? 'good' : t.reassigned < 3 ? 'info' : 'bad',
+    'How many times it was passed to another team. 3 or more usually means it was routed to the wrong team.'));
+  list.push(kpi('reopened', 'Reopened', `${t.reopened}×`, t.reopened ? 'bad' : 'good', 'Reopened after it was resolved: the first fix didn\'t hold.'));
+  list.push(t.breach
+    ? kpi('sla', 'SLA', 'breached', 'bad', `Reason given: ${t.breach}.`)
+    : kpi('sla', 'SLA', 'no breach recorded', 'good', 'No SLA breach reason was recorded on it.'));
+  if (t.workaround) list.push(kpi('workaround', 'Fixed with', 'a workaround', 'warn', 'Closed with a workaround, not a permanent fix: a candidate for problem management.'));
+  if (t.wasP1) list.push(kpi('p1', 'Was a', 'P1', 'warn', 'It was a P1 (critical) at some point.'));
+  if (t.causedBy) list.push(kpi('cause', 'Caused by', t.causedBy, 'warn', 'The change that caused it.'));
+  if (t.problem) list.push(kpi('problem', 'Problem', t.problem, 'info', 'The problem record investigating its root cause.'));
+  return list;
+}
+
+function changeKpis(t, { asOf, typical }) {
+  const list = [];
+  if (t.open) list.push(kpi('age', 'Open for', duration(asOf - t.created), 'info', 'Since it was raised.'));
+  if (t.plannedStart && t.created) {
+    const lead = t.plannedStart - t.created;
+    list.push(lead < 0
+      ? kpi('lead', 'Raised', `${duration(lead)} after its start`, 'bad', 'Logged after the work had already started.')
+      : kpi('lead', 'Raised', `${duration(lead)} ahead`, lead < 2 * DAY ? 'warn' : 'good',
+        `How far ahead of its planned start it was raised. Typical: ${duration(typical.CHG)}. Under 2 days is short notice for approval.`));
+  }
+  if (t.plannedStart && t.plannedEnd) list.push(kpi('window', 'Window', duration(t.plannedEnd - t.plannedStart), 'info', 'How long the planned change window is.'));
+  if (t.open && t.plannedEnd && t.plannedEnd < asOf) {
+    list.push(kpi('overdue', 'Past its planned end by', duration(asOf - t.plannedEnd), 'bad', 'Still open after its window should have ended.'));
+  } else if (t.open && t.plannedStart && t.plannedStart >= asOf && t.plannedStart < asOf + 7 * DAY) {
+    list.push(kpi('upcoming', 'Starts in', duration(t.plannedStart - asOf), 'info', 'Planned to start within the next week.'));
+  }
+  if (!t.open) {
+    if (t.closeCode === 'Successful') list.push(kpi('outcome', 'Outcome', 'successful', 'good'));
+    else if (t.closeCode === 'Unsuccessful') list.push(kpi('outcome', 'Outcome', `unsuccessful${t.failure ? ` (${t.failure})` : ''}`, 'bad'));
+    else if (t.state === 'Canceled') list.push(kpi('outcome', 'Outcome', 'canceled', 'info'));
+    else list.push(kpi('outcome', 'Outcome', 'not recorded', 'warn', 'Closed without saying whether it worked.'));
+  }
+  if (t.approval === 'Requested') list.push(kpi('approval', 'Approval', 'waiting', t.open ? 'warn' : 'info', 'Approval was requested and not yet given.'));
+  else if (t.approval === 'Rejected') list.push(kpi('approval', 'Approval', 'rejected', 'bad'));
+  else if (t.approval === 'Approved') list.push(kpi('approval', 'Approval', 'approved', 'good'));
+  else if (t.open && t.approval) list.push(kpi('approval', 'Approval', 'not requested yet', 'info'));
+  if (t.outage) list.push(kpi('outage', 'Needs', 'an outage', 'warn', 'The service is down while the change is carried out.'));
+  if (['Emergency', 'Expedited'].includes(t.type)) list.push(kpi('type', 'Type', t.type.toLowerCase(), 'warn', 'Approved and carried out under time pressure.'));
+  return list;
+}
+
+function requestKpis(t, { asOf, typical }) {
+  const list = [];
+  if (t.open) {
+    const age = asOf - t.created;
+    list.push(kpi('age', 'Open for', duration(age), vsTypical(age, typical.RITM), `A request is typically fulfilled in ${duration(typical.RITM)}.`));
+  } else if (t.done) {
+    const took = t.done - t.created;
+    list.push(kpi('fulfil', 'Fulfilled in', duration(took), vsTypical(took, typical.RITM), `Typical: ${duration(typical.RITM)}.`));
+  }
+  list.push(idleKpi(t, asOf));
+  if (t.open && t.approval === 'Requested') list.push(kpi('approval', 'Approval', 'waiting', 'warn', 'Waiting for someone to approve it.'));
+  else if (t.approval === 'Rejected') list.push(kpi('approval', 'Approval', 'rejected', 'bad'));
+  return list;
+}
+
+function taskKpis(t, { asOf, typical }) {
+  const list = [];
+  if (t.open) {
+    const age = asOf - t.created;
+    list.push(kpi('age', 'Open for', duration(age), vsTypical(age, typical.SCTASK), `A catalog task is typically closed in ${duration(typical.SCTASK)}.`));
+  } else if (t.done) {
+    const took = t.done - t.created;
+    list.push(kpi('close', 'Closed in about', duration(took), vsTypical(took, typical.SCTASK),
+      `Measured to its last update (catalog tasks have no closing date). Typical: ${duration(typical.SCTASK)}.`));
+  }
+  list.push(idleKpi(t, asOf));
+  list.push(t.sla ? kpi('sla', 'SLA', 'breached', 'bad') : kpi('sla', 'SLA', 'met', 'good'));
+  return list;
+}
+
+const BUILDERS = { INC: incidentKpis, CHG: changeKpis, RITM: requestKpis, SCTASK: taskKpis };
+
+// numbers -> { asOf, kpis: { number: [kpi] } } (numbers not in the data are left out)
+export async function ticketKpis(numbers, runCubeQuery) {
+  const d = data || await load(runCubeQuery);
+  const kpis = {};
+  for (const n of numbers) {
+    const t = d.tickets.get(n);
+    if (t) kpis[n] = BUILDERS[t.kind](t, d).filter(Boolean);
+  }
+  return { asOf: new Date(d.asOf).toISOString(), kpis };
+}
+
+// ---------------------------------------------------------------------
+// One family's KPIs: its tickets taken together. members: [{ number, assigneeId }]
+// ---------------------------------------------------------------------
+
+// { INC: 2, CHG: 1 } -> "2 incidents, 1 change"
+export const kindsText = kinds => Object.entries(kinds).map(([k, n]) => `${n} ${KIND_NAMES[k][n === 1 ? 0 : 1]}`).join(', ');
+
+function familySummary(members, d) {
+  const tickets = members.map(m => d.tickets.get(m.number)).filter(Boolean);
+  const open = tickets.filter(t => t.open);
+  const kinds = {};
+  for (const t of tickets) kinds[t.kind] = (kinds[t.kind] || 0) + 1;
+  return {
+    tickets, open, kinds,
+    rank: Math.min(5, ...open.map(rankOf)),
+    oldestOpen: open.length ? Math.min(...open.map(t => t.created || Infinity)) : null,
+  };
+}
+
+function familyKpis(members, d, summary = familySummary(members, d)) {
+  const { tickets, open, kinds } = summary;
+  const { asOf, typical } = d;
+  const list = [];
+  const mix = kindsText(kinds);
+  list.push(kpi('tickets', 'Tickets', tickets.length, 'info', mix));
+  const closed = tickets.length - open.length;
+  list.push(kpi('progress', 'Closed', `${closed} of ${tickets.length}`, open.length ? 'warn' : 'good',
+    `${tickets.length ? Math.round((closed / tickets.length) * 100) : 0}% of its tickets are closed.`));
+  if (open.length) {
+    const age = asOf - summary.oldestOpen;
+    list.push(kpi('oldest', 'Oldest open', duration(age), age < 3 * DAY ? 'good' : age < 7 * DAY ? 'warn' : 'bad', 'How long its oldest open ticket has been open.'));
+    const stale = open.filter(t => t.updated && asOf - t.updated >= 7 * DAY).length;
+    list.push(kpi('stale', 'No update for a week', stale, stale ? 'bad' : 'good', 'Open tickets nobody has updated for 7 days or more.'));
+  }
+  const incidents = tickets.filter(t => t.kind === 'INC');
+  const top = Math.min(...incidents.map(t => t.priority || 5));
+  if (top < 5) list.push(kpi('priority', 'Highest priority', PRIORITY_NAME[top], top <= 2 ? 'bad' : 'info', 'The most urgent incident in the family.'));
+  const resolved = incidents.filter(t => t.done).map(t => t.done - t.created);
+  if (resolved.length) {
+    const usual = median(Object.values(typical.INC).filter(v => v != null));
+    const took = median(resolved);
+    list.push(kpi('resolve', 'Incidents resolved in', `${duration(took)} (median)`, vsTypical(took, usual), `Across its ${resolved.length} resolved incidents. Typical for any incident: ${duration(usual)}.`));
+  }
+  const fulfilled = tickets.filter(t => t.kind === 'RITM' && t.done).map(t => t.done - t.created);
+  if (fulfilled.length) {
+    const took = median(fulfilled);
+    list.push(kpi('fulfil', 'Requests fulfilled in', `${duration(took)} (median)`, vsTypical(took, typical.RITM), `Typical: ${duration(typical.RITM)}.`));
+  }
+  const breaches = incidents.filter(t => t.breach).length + tickets.filter(t => t.kind === 'SCTASK' && t.sla).length;
+  if (incidents.length || kinds.SCTASK) list.push(kpi('sla', 'SLA breaches', breaches, breaches ? 'bad' : 'good'));
+  if (incidents.length) {
+    const passes = incidents.reduce((n, t) => n + t.reassigned, 0);
+    list.push(kpi('reassigned', 'Reassignments', passes, incidents.some(t => t.reassigned >= 3) ? 'bad' : passes ? 'info' : 'good',
+      'Times its incidents were passed to another team, in total. Red when one was passed 3 times or more.'));
+    const reopens = incidents.reduce((n, t) => n + t.reopened, 0);
+    list.push(kpi('reopened', 'Reopens', reopens, reopens ? 'bad' : 'good'));
+  }
+  const changes = tickets.filter(t => t.kind === 'CHG' && !t.open && t.closeCode);
+  if (changes.length) {
+    const failed = changes.filter(t => t.closeCode === 'Unsuccessful').length;
+    list.push(kpi('changes', 'Successful changes', `${changes.length - failed} of ${changes.length}`, failed ? 'bad' : 'good'));
+  }
+  const familyChanges = new Set(tickets.filter(t => t.kind === 'CHG').map(t => t.number));
+  const caused = incidents.filter(t => familyChanges.has(t.causedBy)).length;
+  if (familyChanges.size) list.push(kpi('caused', 'Incidents caused by its changes', caused, caused ? 'bad' : 'good'));
+  const first = Math.min(...tickets.map(t => t.created || Infinity));
+  const last = Math.max(...tickets.map(t => (t.open ? asOf : t.done || t.updated || t.created || 0)));
+  if (Number.isFinite(first) && last > first) list.push(kpi('span', 'Active over', duration(last - first), 'info', 'From its first ticket being opened to its last being closed (or now, while any is open).'));
+  const people = new Set(members.map(m => m.assigneeId).filter(Boolean)).size;
+  const unassigned = members.filter(m => !m.assigneeId && d.tickets.get(m.number)?.open).length;
+  list.push(kpi('people', 'People on it', people, 'info', 'How many people on the team have one of its tickets.'));
+  if (unassigned) list.push(kpi('unassigned', 'Open and unassigned', unassigned, 'warn', 'Open tickets nobody on the team has yet.'));
+  return list;
+}
+
+// How much a list of KPIs needs attention, for sorting by it: each red one
+// counts for more than any number of amber ones (public/app.js kpiAttention
+// works it out the same way from the chips on the page)
+export const attention = list => list.reduce((n, k) => n + (k.tone === 'bad' ? 100 : k.tone === 'warn' ? 1 : 0), 0);
+
+// A team's families, most in need of attention first: those with open
+// tickets, by their most urgent open ticket, then their oldest open one.
+// families: Map(id -> { id, size, members }). status: 'open' | 'all';
+// linked: only families of 2 or more tickets. sort: 'family' (its first
+// ticket's number), 'size' or 'kpis' (how much needs attention), with dir
+// 'asc' | 'desc', instead of the most urgent first. matches({ id, size, kinds, kpis }):
+// only the families it says yes to (a lookup typed over the list).
+// -> { asOf, counts: { open, all }, total, before (total before the lookup), families: [{ id, size, kinds, open, kpis }] } (one page)
+export async function teamFamilyKpis(families, { status = 'open', linked = true, offset = 0, limit = 25, sort = null, dir = 'asc', matches = null }, runCubeQuery) {
+  const d = data || await load(runCubeQuery);
+  const rows = [];
+  for (const f of families.values()) {
+    if (linked && f.size < 2) continue;
+    rows.push({ f, s: familySummary(f.members, d) });
+  }
+  const counts = { open: rows.filter(r => r.s.open.length).length, all: rows.length };
+  let shown = status === 'all' ? rows : rows.filter(r => r.s.open.length);
+  const before = shown.length;
+  shown.sort((a, b) => (b.s.open.length ? 1 : 0) - (a.s.open.length ? 1 : 0)
+    || a.s.rank - b.s.rank
+    || (a.s.oldestOpen ?? Infinity) - (b.s.oldestOpen ?? Infinity)
+    || b.f.size - a.f.size
+    || a.f.id.localeCompare(b.f.id));
+  if (sort === 'kpis' || matches) for (const r of shown) r.kpis = familyKpis(r.f.members, d, r.s);
+  if (matches) shown = shown.filter(r => matches({ id: r.f.id, size: r.f.size, kinds: r.s.kinds, kpis: r.kpis }));
+  const valueOf = { family: r => r.f.id, size: r => r.f.size, kpis: r => attention(r.kpis) }[sort];
+  if (valueOf) shown = sortRows(shown, valueOf, dir);
+  const page = shown.slice(offset, offset + limit);
+  return {
+    asOf: new Date(d.asOf).toISOString(),
+    counts,
+    total: shown.length,
+    before,
+    families: page.map(({ f, s, kpis }) => ({ id: f.id, size: f.size, kinds: s.kinds, open: s.open.length, kpis: kpis || familyKpis(f.members, d, s) })),
+  };
+}
+
+// One family's KPIs and each of its tickets' (for a project manager opening it)
+export async function oneFamilyKpis(members, runCubeQuery) {
+  const d = data || await load(runCubeQuery);
+  const { kpis } = await ticketKpis(members.map(m => m.number), runCubeQuery);
+  return { asOf: new Date(d.asOf).toISOString(), kpis: familyKpis(members, d), tickets: kpis };
+}
+```
+
+<a id="b58"></a>
+### B.58 `public/sorting.js`
+
+```js
+// =====================================================================
+// SORTING TABLES: every ticket list and table sorts by any of its columns.
+// A click on a column's heading sorts by it in ascending order (smallest,
+// oldest, A first); a second click, descending; a third, back to the list's
+// own order. Empty cells stay at the bottom either way.
+//
+// Lists shown a page at a time (Assigned to me, Team families, the Team
+// tab's tickets, the Families page) sort every one of their tickets, not
+// just the page showing: they register in pagedSorts and draw themselves
+// again (some ask the server). Every other table is sorted where it is.
+// Charts have an order of their own (charts.js chartOrder).
+// Loaded before app.js, whose helpers these functions use when they run.
+// =====================================================================
+
+// A list's sort while the page is open, by the list's name: { col, dir: 'asc' | 'desc' }
+const listSorts = new Map();
+// Lists shown a page at a time: the list's name (up to any ':') -> function (table),
+// called once listSorts has the new sort, that sorts all of it and draws it again
+const pagedSorts = {};
+
+const sortCollator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
+
+// "12", "1,234", "45.5%", "3 incidents" -> the number they start with; anything else -> null
+function leadingNumber(value) {
+    if (typeof value === 'number') return value;
+    const m = /^-?\d[\d,]*(\.\d+)?/.exec(String(value));
+    return m ? Number(m[0].replace(/,/g, '')) : null;
+}
+
+// a before b (negative), after (positive) or tied (0): numbers as numbers, text
+// A to Z ('P2' before 'P10'); empty last whichever way the list is sorted
+function compareSorted(a, b, dir) {
+    const empty = v => v === null || v === undefined || v === '' || v === '—';
+    if (empty(a) || empty(b)) return empty(a) - empty(b);
+    const na = leadingNumber(a), nb = leadingNumber(b);
+    const c = na !== null && nb !== null && na !== nb ? na - nb : sortCollator.compare(String(a), String(b));
+    return dir === 'desc' ? -c : c;
+}
+
+// How much a ticket's KPIs need attention: each red one counts for more than
+// any number of amber ones (as kpis.mjs attention). tones: ['bad', 'warn', …]
+const kpiAttention = tones => tones.reduce((n, t) => n + (t === 'bad' ? 100 : t === 'warn' ? 1 : 0), 0);
+
+// list: what a click does next (the column it's on, and which way)
+function nextSort(sort, col) {
+    if (sort?.col !== col) return { col, dir: 'asc' };
+    return sort.dir === 'asc' ? { col, dir: 'desc' } : null;
+}
+
+function sortTitle(label, dir) {
+    if (dir === 'asc') return `Sorted by ${label}, ascending. Click for descending`;
+    if (dir === 'desc') return `Sorted by ${label}, descending. Click to go back to the list's own order`;
+    return `Sort by ${label}, ascending`;
+}
+
+// A heading people can sort by. list: the table's list name, whose sort is kept
+// while the page is open ('' for a table that forgets it when drawn again);
+// col: what it sorts by (usually its label); cls: the cell's other classes
+function sortHeadHtml(list, col, label = col, cls = '') {
+    const sort = list ? listSorts.get(list) : null;
+    const dir = sort?.col === col ? sort.dir : null;
+    return `<th class="sortable${cls ? ` ${cls}` : ''}" data-sort-col="${escapeHtml(col)}" aria-sort="${dir ? `${dir}ending` : 'none'}">` +
+        `<button type="button" class="sort-btn" title="${escapeHtml(sortTitle(label, dir))}">${escapeHtml(label)}` +
+        '<span class="sort-arrow" aria-hidden="true"></span></button></th>';
+}
+
+// The headings' arrows and hints, for the sort a table now has
+function paintSortHeads(table, sort) {
+    for (const th of table.tHead?.rows[0]?.cells || []) {
+        if (th.dataset.sortCol === undefined) continue;
+        const dir = sort?.col === th.dataset.sortCol ? sort.dir : null;
+        th.setAttribute('aria-sort', dir ? `${dir}ending` : 'none');
+        const button = th.querySelector('.sort-btn');
+        if (button) button.title = sortTitle(button.firstChild.textContent, dir);
+    }
+}
+
+// What a cell sorts by: its data-sort (a date, a rank…) if it has one, how much
+// its KPIs need attention, the choice in its menu, or else its text
+function cellSortValue(cell) {
+    if (!cell) return '';
+    if (cell.dataset.sort !== undefined) return cell.dataset.sort;
+    const chips = cell.querySelectorAll('.kpi');
+    if (chips.length) return kpiAttention([...chips].map(c => (c.classList.contains('kpi-bad') ? 'bad' : c.classList.contains('kpi-warn') ? 'warn' : '')));
+    const select = cell.querySelector('select');
+    if (select) return select.selectedOptions[0]?.text || '';
+    return cell.textContent.trim();
+}
+
+// Sorts a table's rows where they are (sort null: back to how they came).
+// A row opened to show more (a .row-detail row under it) moves with it;
+// .sort-pinned rows ("Other", "Not assigned yet") stay at the bottom; a long
+// family that shows only its first rows (.more-member) still shows the first ones.
+function sortTableRows(table, sort) {
+    const body = table.tBodies[0];
+    if (!body) return;
+    const groups = [], pinned = [];
+    for (const row of [...body.rows]) {
+        if (row.classList.contains('row-detail') && groups.length) groups.at(-1).rows.push(row);
+        else if (row.classList.contains('sort-pinned')) pinned.push(row);
+        else {
+            row.dataset.sortAt ??= String(groups.length); // its place as drawn, for going back
+            groups.push({ rows: [row], at: Number(row.dataset.sortAt) });
+        }
+    }
+    const head = sort && [...table.tHead.rows[0].cells].find(th => th.dataset.sortCol === sort.col);
+    if (head) for (const g of groups) g.value = cellSortValue(g.rows[0].cells[head.cellIndex]);
+    groups.sort((a, b) => (head ? compareSorted(a.value, b.value, sort.dir) : 0) || a.at - b.at);
+    const hidden = groups.filter(g => g.rows[0].classList.contains('more-member')).length;
+    if (hidden) groups.forEach((g, k) => g.rows[0].classList.toggle('more-member', k >= groups.length - hidden));
+    body.append(...groups.flatMap(g => g.rows), ...pinned);
+    paintSortHeads(table, sort);
+}
+
+// A table drawn again (a refresh): sorted the way it was, if its list keeps its sort
+function restoreSorts(root) {
+    for (const table of root.querySelectorAll('table[data-sort-list]')) {
+        const sort = listSorts.get(table.dataset.sortList);
+        if (sort && !pagedSorts[table.dataset.sortList.split(':')[0]]) sortTableRows(table, sort);
+    }
+}
+
+// A list of tickets in its list's sort. columns: the table's ([label, get]);
+// sortValue(column) says what each ticket sorts by in that column.
+function sortedTickets(tickets, list, columns, sortValue) {
+    const sort = listSorts.get(list);
+    const column = sort && columns.find(([label]) => label === sort.col);
+    if (!column) return tickets;
+    const value = sortValue(column);
+    return tickets.map((t, i) => ({ t, i, v: value(t) }))
+        .sort((a, b) => compareSorted(a.v, b.v, sort.dir) || a.i - b.i)
+        .map(x => x.t);
+}
+
+// The query string a server-sorted list adds: &sort=<its key for the column>&dir=…
+function sortQuery(list, keys) {
+    const sort = listSorts.get(list);
+    return sort && keys[sort.col] ? { sort: keys[sort.col], dir: sort.dir } : {};
+}
+
+// Signing out: the next person starts with every list in its own order
+function resetSorts() {
+    listSorts.clear();
+}
+
+document.addEventListener('click', e => {
+    const button = e.target.closest('.sort-btn');
+    if (!button) return;
+    const th = button.closest('th');
+    const table = th.closest('table');
+    const list = table.dataset.sortList || '';
+    const sort = nextSort(list ? listSorts.get(list) : table._sort, th.dataset.sortCol);
+    table._sort = sort;
+    if (list) {
+        if (sort) listSorts.set(list, sort);
+        else listSorts.delete(list);
+    }
+    const paged = list && pagedSorts[list.split(':')[0]];
+    if (paged) paged(table);
+    else sortTableRows(table, sort);
+});
+```
+
+<a id="b59"></a>
+### B.59 `public/picker.js`
+
+```js
+// =====================================================================
+// PERSON PICKER: a box where a project manager or an admin types the name
+// of someone on the team to give them tickets or a whole family. Everyone
+// on the team drops down at a click; as they type, only the names that match
+// (any part of the name, or the username), best match first, each with
+// their role and how many tickets they have. "Not assigned" takes tickets
+// back. Arrow keys and Enter, or a click, pick someone; a full name typed and
+// left also counts; Escape (or anything else left typed) puts back who had it.
+// A pick fires a "personpick" event on the box ({ id, previous, name }; id
+// null for nobody) for its list to act on. It follows the ARIA combobox pattern.
+// Loaded before app.js, whose helpers these functions use when they run.
+// =====================================================================
+
+// Each team's people, by team id: [{ id, name, username, roleName, load }]
+const pickerPeople = new Map();
+let pickerCount = 0;
+let openPickerBox = null; // the box whose list is showing
+const NOBODY_LABEL = 'Not assigned';
+
+// members: as /api/teams lists them; roles: its role names
+function setPickerPeople(teamId, members, roles = {}) {
+    pickerPeople.set(String(teamId), members.map(m => ({ ...m, roleName: roles[m.role] || '' })));
+}
+
+// What a box shows for a person (id), nobody (null) or no one picked yet (undefined)
+function pickerLabel(teamId, id) {
+    if (id === undefined) return '';
+    if (id === null) return NOBODY_LABEL;
+    return pickerPeople.get(String(teamId))?.find(p => p.id === id)?.name || '';
+}
+
+// current: who has it now (an id, null for nobody, undefined when there's
+// nothing to show yet). nobody: "Not assigned" is a choice. attrs: the box's
+// other attributes (data-number, data-family, …)
+function personPickerHtml(teamId, current, label, { nobody = true, placeholder = 'Type a name…', attrs = '' } = {}) {
+    const list = `person-options-${++pickerCount}`;
+    return `<div class="person-picker" data-team="${escapeHtml(String(teamId))}"${current === undefined ? '' : ` data-current="${current ?? ''}"`}` +
+        `${nobody ? ' data-nobody' : ''}${attrs ? ` ${attrs}` : ''}>` +
+        `<input type="text" class="person-input" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="${list}"` +
+        ` autocomplete="off" spellcheck="false" aria-label="${escapeHtml(label)}" placeholder="${escapeHtml(placeholder)}" value="${escapeHtml(pickerLabel(teamId, current))}">` +
+        `<ul class="person-options" id="${list}" role="listbox" aria-label="${escapeHtml(label)}" hidden></ul></div>`;
+}
+
+// Who the box says has it: an id, null (nobody) or undefined (no one picked yet)
+function pickerCurrent(picker) {
+    const v = picker.dataset.current;
+    return v === undefined ? undefined : v === '' ? null : Number(v);
+}
+
+function setPickerValue(picker, id) {
+    if (id === undefined) delete picker.dataset.current;
+    else picker.dataset.current = id ?? '';
+    picker.querySelector('.person-input').value = pickerLabel(picker.dataset.team, id);
+}
+
+// The choices for what's typed, best match first: names starting with it, then
+// a word of the name, then the username, then anywhere. Nothing typed: everyone,
+// in the team's order (project manager first).
+function pickerChoices(picker, text) {
+    const q = text.trim().toLowerCase();
+    const rank = p => {
+        if (!q) return 0;
+        const name = p.name.toLowerCase(), user = p.username.toLowerCase();
+        if (name.startsWith(q)) return 1;
+        if (name.split(/\s+/).some(w => w.startsWith(q))) return 2;
+        if (user.startsWith(q)) return 3;
+        return name.includes(q) || user.includes(q) ? 4 : -1;
+    };
+    const people = (pickerPeople.get(picker.dataset.team) || [])
+        .map((p, i) => ({ p, i, r: rank(p) }))
+        .filter(x => x.r >= 0)
+        .sort((a, b) => a.r - b.r || a.i - b.i)
+        .map(x => ({ id: x.p.id, name: x.p.name, person: x.p }));
+    const nobody = picker.dataset.nobody !== undefined && (!q || [NOBODY_LABEL, 'nobody', 'none', 'unassign'].some(w => w.toLowerCase().startsWith(q)));
+    return [...(nobody ? [{ id: null, name: NOBODY_LABEL }] : []), ...people];
+}
+
+// The name with the typed part marked
+function markedName(name, text) {
+    const q = text.trim().toLowerCase();
+    const at = q ? name.toLowerCase().indexOf(q) : -1;
+    if (at < 0) return escapeHtml(name);
+    return escapeHtml(name.slice(0, at)) + `<mark>${escapeHtml(name.slice(at, at + q.length))}</mark>` + escapeHtml(name.slice(at + q.length));
+}
+
+// Shows the choices for what's typed ('' for everyone) and opens the list
+function paintPicker(picker, text) {
+    const list = picker.querySelector('.person-options');
+    const choices = pickerChoices(picker, text);
+    picker._choices = choices;
+    list.innerHTML = choices.length
+        ? choices.map((c, i) => `<li role="option" id="${list.id}-${i}" class="person-option" data-choice="${i}" aria-selected="false">` +
+            `<span class="person-name">${markedName(c.name, text)}</span><span class="person-meta">${escapeHtml(c.person
+                ? [c.person.roleName, c.person.load ? `${c.person.load.total.toLocaleString()} ${c.person.load.total === 1 ? 'ticket' : 'tickets'}` : ''].filter(Boolean).join(' · ')
+                : 'Nobody has it')}</span></li>`).join('')
+        : `<li class="person-empty" role="option" aria-disabled="true">No one on this team matches “${escapeHtml(text.trim())}”</li>`;
+    list.hidden = false;
+    picker.querySelector('.person-input').setAttribute('aria-expanded', 'true');
+    openPickerBox = picker;
+    placePickerList(picker);
+    // Typed: the best match is ready for Enter. Just opened: whoever has it now.
+    const current = choices.findIndex(c => c.id === pickerCurrent(picker));
+    highlightChoice(picker, picker._typed ? (choices.length ? 0 : -1) : current);
+}
+
+function highlightChoice(picker, i) {
+    picker._active = i;
+    const input = picker.querySelector('.person-input');
+    picker.querySelectorAll('.person-option').forEach((li, k) => li.setAttribute('aria-selected', String(k === i)));
+    const li = picker.querySelector(`.person-option[data-choice="${i}"]`);
+    if (li) {
+        input.setAttribute('aria-activedescendant', li.id);
+        li.scrollIntoView({ block: 'nearest' });
+    } else {
+        input.removeAttribute('aria-activedescendant');
+    }
+}
+
+// The list floats over the page, so a table's scroll box can't cut it off:
+// under the box, or above it when there's more room there
+function placePickerList(picker) {
+    const list = picker.querySelector('.person-options');
+    const r = picker.querySelector('.person-input').getBoundingClientRect();
+    const width = Math.max(r.width, 240);
+    list.style.left = `${Math.max(8, Math.min(r.left, innerWidth - width - 8))}px`;
+    list.style.width = `${width}px`;
+    const below = innerHeight - r.bottom;
+    if (below < Math.min(list.scrollHeight, 280) + 8 && r.top > below) {
+        list.style.top = '';
+        list.style.bottom = `${innerHeight - r.top + 4}px`;
+    } else {
+        list.style.bottom = '';
+        list.style.top = `${r.bottom + 4}px`;
+    }
+}
+
+function closePicker(picker) {
+    picker.querySelector('.person-options').hidden = true;
+    const input = picker.querySelector('.person-input');
+    input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant');
+    if (openPickerBox === picker) openPickerBox = null;
+}
+
+// Back to who has it, as if nothing was typed
+function restorePicker(picker) {
+    picker._typed = false;
+    setPickerValue(picker, pickerCurrent(picker));
+    closePicker(picker);
+}
+
+function choosePerson(picker, choice) {
+    const previous = pickerCurrent(picker);
+    picker._typed = false;
+    setPickerValue(picker, choice.id);
+    closePicker(picker);
+    // Still in the box: the name is selected, so typing another replaces it
+    const input = picker.querySelector('.person-input');
+    if (document.activeElement === input) input.select();
+    if (choice.id !== previous) picker.dispatchEvent(new CustomEvent('personpick', { bubbles: true, detail: { id: choice.id, previous, name: choice.name } }));
+}
+
+// A whole name (or username) typed, matching one choice exactly
+function exactChoice(picker, text) {
+    const q = text.trim().toLowerCase();
+    if (!q) return null;
+    return pickerChoices(picker, text).find(c => c.name.toLowerCase() === q || c.person?.username.toLowerCase() === q) || null;
+}
+
+document.addEventListener('focusin', e => {
+    if (!e.target.matches?.('.person-input')) return;
+    const picker = e.target.closest('.person-picker');
+    picker._typed = false;
+    e.target.select(); // typing replaces the name showing
+    paintPicker(picker, '');
+});
+
+// A click on the box while it's already in use (after a pick) opens the list again
+document.addEventListener('click', e => {
+    if (!e.target.matches?.('.person-input')) return;
+    const picker = e.target.closest('.person-picker');
+    if (!picker.querySelector('.person-options').hidden) return;
+    picker._typed = false;
+    e.target.select();
+    paintPicker(picker, '');
+});
+
+document.addEventListener('input', e => {
+    if (!e.target.matches?.('.person-input')) return;
+    const picker = e.target.closest('.person-picker');
+    picker._typed = true;
+    paintPicker(picker, e.target.value);
+});
+
+document.addEventListener('keydown', e => {
+    if (!e.target.matches?.('.person-input')) return;
+    const picker = e.target.closest('.person-picker');
+    const open = !picker.querySelector('.person-options').hidden;
+    const count = picker._choices?.length || 0;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (!open) paintPicker(picker, picker._typed ? e.target.value : '');
+        else if (count) highlightChoice(picker, (picker._active + (e.key === 'ArrowDown' ? 1 : count - 1)) % count);
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        const active = open ? picker._choices?.[picker._active] : null;
+        const choice = active || exactChoice(picker, e.target.value);
+        if (choice) choosePerson(picker, choice);
+    } else if (e.key === 'Escape' && (open || picker._typed)) {
+        e.preventDefault();
+        restorePicker(picker);
+    }
+});
+
+// Leaving the box: a whole name typed counts; anything else goes back
+document.addEventListener('focusout', e => {
+    if (!e.target.matches?.('.person-input')) return;
+    const picker = e.target.closest('.person-picker');
+    const exact = picker._typed ? exactChoice(picker, e.target.value) : null;
+    if (exact) choosePerson(picker, exact);
+    else restorePicker(picker);
+});
+
+// A click on a name (mousedown, so the box keeps the focus until it's picked)
+document.addEventListener('mousedown', e => {
+    const option = e.target.closest?.('.person-option');
+    if (!option) return;
+    e.preventDefault();
+    const picker = option.closest('.person-picker');
+    choosePerson(picker, picker._choices[Number(option.dataset.choice)]);
+});
+
+window.addEventListener('scroll', () => { if (openPickerBox) placePickerList(openPickerBox); }, true);
+window.addEventListener('resize', () => { if (openPickerBox) placePickerList(openPickerBox); });
+```
+
+<a id="b60"></a>
+### B.60 `public/lookup.js`
+
+```js
+// =====================================================================
+// LOOKING UP TICKETS: every ticket list has a box above it (🔍 Look up…)
+// that finds its tickets by anything its columns show, in every column or
+// in the one picked next to the box. Every word typed must appear (each in
+// any column, or all in the picked one); "words in quotes" stay together;
+// case doesn't matter. Escape empties the box.
+//
+// A list drawn whole is looked up where it is: the rows that don't match
+// hide. Lists shown a page at a time (Assigned to me, Team families, a
+// family's tickets, the Team tab's tickets, the Families page) look through
+// all of their tickets: they register in pagedLookups and draw themselves
+// again (some ask the server, which looks up the same way: tickets.mjs
+// lookupMatches).
+// Loaded before app.js, whose helpers these functions use when they run.
+// =====================================================================
+
+// A list's lookup while the page is open, by the list's name: { q, col }
+const listLookups = new Map();
+// Lists that draw themselves again: the list's name (up to any ':') -> function (list),
+// called once listLookups has the new lookup; it may return a promise
+const pagedLookups = {};
+const LOOKUP_MAX_LENGTH = 100; // what the server reads (tickets.mjs)
+const LOOKUP_DELAY = 250;      // ms after the last key before a list is drawn again
+let lookupTimer = null;
+let lookupTyping = null;       // the list whose box was being typed in when it was drawn again
+
+// 'p2 "service desk"' -> ['p2', 'service desk'] (as tickets.mjs lookupTerms)
+function lookupTerms(q) {
+    const text = String(q ?? '').slice(0, LOOKUP_MAX_LENGTH).toLowerCase();
+    const terms = [];
+    for (const [, phrase, word] of text.matchAll(/"([^"]*)"?|(\S+)/g)) {
+        const term = (phrase ?? word ?? '').replace(/\s+/g, ' ').trim();
+        if (term) terms.push(term);
+    }
+    return terms;
+}
+
+// texts: what each column looked in shows. Every term must be in one of them.
+function textsMatch(texts, terms) {
+    const values = texts.map(v => String(v ?? '').toLowerCase().replace(/\s+/g, ' '));
+    return terms.every(term => values.some(v => v.includes(term)));
+}
+
+const lookupFor = list => (list && listLookups.get(list)) || { q: '', col: '' };
+const lookupActive = list => lookupTerms(lookupFor(list).q).length > 0;
+
+// What a server-paged list adds to its request: q and col while something is typed
+function lookupQuery(list) {
+    const { q, col } = lookupFor(list);
+    return lookupTerms(q).length ? { q: q.trim().slice(0, LOOKUP_MAX_LENGTH), ...(col ? { col } : {}) } : {};
+}
+
+// "12 of 340 tickets", "None of the 340 tickets match"; nothing while nothing is typed
+function lookupCountText(shown, total, noun, active) {
+    if (!active) return '';
+    if (!shown) return `None of the ${total.toLocaleString()} ${noun} match`;
+    return shown === total ? `All ${total.toLocaleString()} ${noun} match` : `${shown.toLocaleString()} of ${total.toLocaleString()} ${noun}`;
+}
+
+// The box over a list. list: its name, whose lookup is kept while the page is open
+// ('' forgets it when the list is drawn again). labels: the columns it can look in.
+// mode: 'rows' (every row is on the page) or 'list' (pagedLookups draws it again).
+// count: { shown, total } for a 'list' box.
+function lookupBarHtml(list, labels, { mode = 'rows', count = null, noun = 'tickets' } = {}) {
+    const { q, col } = lookupFor(list);
+    const options = `<option value="">every column</option>` +
+        labels.map(label => `<option value="${escapeHtml(label)}"${label === col ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('');
+    return `<div class="lookup-bar" role="search" data-lookup="${escapeHtml(list)}" data-lookup-mode="${mode}" data-noun="${escapeHtml(noun)}">` +
+        '<span class="lookup-icon" aria-hidden="true">🔍</span>' +
+        `<input type="search" class="lookup-input" value="${escapeHtml(q)}" maxlength="${LOOKUP_MAX_LENGTH}" placeholder="Look up ${escapeHtml(noun)}…"` +
+        ` aria-label="Look up ${escapeHtml(noun)} in this list" title='Every word must appear; "words in quotes" stay together' autocomplete="off" spellcheck="false">` +
+        `<label class="lookup-in">in <select class="lookup-col" aria-label="Which column to look in">${options}</select></label>` +
+        `<span class="lookup-count" aria-live="polite">${count ? escapeHtml(lookupCountText(count.shown, count.total, noun, lookupTerms(q).length > 0)) : ''}</span></div>`;
+}
+
+// A box outside the part of the page its list draws again (the Team tab's): its count
+function setLookupCount(list, shown, total) {
+    const bar = document.querySelector(`.lookup-bar[data-lookup="${CSS.escape(list)}"]`);
+    if (bar) bar.querySelector('.lookup-count').textContent = lookupCountText(shown, total, bar.dataset.noun, lookupActive(list));
+}
+
+// For a list the page holds and draws a page at a time: the tickets its lookup
+// keeps. columns: [label, …] as its table's; textOf(column, ticket): what that column shows.
+function lookedUpTickets(tickets, list, columns, textOf) {
+    const { q, col } = lookupFor(list);
+    const terms = lookupTerms(q);
+    if (!terms.length) return tickets;
+    const looked = col ? columns.filter(([label]) => label === col) : columns;
+    return tickets.filter(t => textsMatch(looked.map(c => textOf(c, t)), terms));
+}
+
+// What a cell shows, for looking it up: its full text when it was cut short, and a
+// date as the data writes it too
+function cellLookupText(cell) {
+    if (!cell) return '';
+    const sort = cell.dataset.sort || '';
+    return `${cell.getAttribute('title') || cell.textContent}${/^\d{4}-\d{2}-\d{2}/.test(sort) ? ` ${sort}` : ''}`;
+}
+
+// A list drawn whole: hides the rows that don't match (a row opened to show more
+// goes with its row), and shows how many do
+function filterTableRows(bar) {
+    const table = bar.nextElementSibling?.querySelector('table');
+    const body = table?.tBodies[0];
+    if (!body) return;
+    const terms = lookupTerms(bar.querySelector('.lookup-input').value);
+    const col = bar.querySelector('.lookup-col').value;
+    const labels = new Set([...bar.querySelectorAll('.lookup-col option')].map(o => o.value).filter(Boolean));
+    const heads = [...table.tHead.rows[0].cells].map(th => th.textContent.trim());
+    const columns = heads.map((label, i) => ((col ? label === col : labels.has(label)) ? i : -1)).filter(i => i >= 0);
+    let shown = 0, total = 0, match = true;
+    for (const row of body.rows) {
+        if (row.classList.contains('row-detail')) { row.classList.toggle('lookup-miss', !match); continue; }
+        if (row.classList.contains('sort-pinned')) continue;
+        total += 1;
+        match = !terms.length || textsMatch(columns.map(i => cellLookupText(row.cells[i])), terms);
+        row.classList.toggle('lookup-miss', !match);
+        if (match) shown += 1;
+    }
+    table.classList.toggle('looking', terms.length > 0);
+    bar.querySelector('.lookup-count').textContent = lookupCountText(shown, total, bar.dataset.noun, terms.length > 0);
+    // For a list with tick boxes, whose "tick all" ticks only what shows
+    bar.dispatchEvent(new CustomEvent('lookedup', { bubbles: true }));
+}
+
+// Lists drawn again whole (a refresh): looked up the way they were
+function applyLookups(root) {
+    for (const bar of root.querySelectorAll('.lookup-bar[data-lookup-mode="rows"]')) {
+        if (bar.querySelector('.lookup-input').value.trim()) filterTableRows(bar);
+    }
+}
+
+// A row the lookup is showing (selecting "all" ticks only those)
+const lookupShows = row => !row.classList.contains('lookup-miss');
+
+// A list drawn again while its box was being typed in: the new box gets the
+// keys, unless the person has gone on to something else meanwhile
+function restoreLookupFocus() {
+    const list = lookupTyping;
+    lookupTyping = null;
+    if (list === null) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    const input = document.querySelector(`.lookup-bar[data-lookup="${CSS.escape(list)}"] .lookup-input`);
+    if (!input) return;
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+}
+
+function runLookup(bar) {
+    const list = bar.dataset.lookup;
+    const q = bar.querySelector('.lookup-input').value;
+    const col = bar.querySelector('.lookup-col').value;
+    const had = lookupActive(list);
+    if (list) {
+        if (q.trim() || col) listLookups.set(list, { q, col });
+        else listLookups.delete(list);
+    }
+    if (bar.dataset.lookupMode === 'rows') return filterTableRows(bar);
+    // Only the column changed, with nothing typed: the list stays as it is
+    if (!had && !lookupTerms(q).length) return;
+    clearTimeout(lookupTimer);
+    lookupTimer = setTimeout(() => {
+        const redraw = pagedLookups[list.split(':')[0]];
+        if (!redraw) return;
+        lookupTyping = document.activeElement?.closest?.('.lookup-bar')?.dataset.lookup === list ? list : null;
+        Promise.resolve(redraw(list)).finally(restoreLookupFocus);
+    }, LOOKUP_DELAY);
+}
+
+// Signing out: the next person starts with every list whole
+function resetLookups() {
+    clearTimeout(lookupTimer);
+    listLookups.clear();
+    lookupTyping = null;
+}
+
+document.addEventListener('input', e => {
+    if (e.target.matches?.('.lookup-input')) runLookup(e.target.closest('.lookup-bar'));
+});
+document.addEventListener('change', e => {
+    if (e.target.matches?.('.lookup-col')) runLookup(e.target.closest('.lookup-bar'));
+});
+document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape' || !e.target.matches?.('.lookup-input') || !e.target.value) return;
+    // Empties the box, and doesn't close the window the list is in (or the chat: app.js
+    // listens on the document too, after this file)
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    e.target.value = '';
+    runLookup(e.target.closest('.lookup-bar'));
+});
+```
+
+<a id="b61"></a>
+### B.61 `mail.mjs`
+
+```js
+// =====================================================================
+// EMAIL: every 🔔 notification (notifications.mjs) also goes out by email,
+// through Brevo's transactional email API, to people with an address on
+// file (users.email) who haven't turned it off in the 🔔 panel:
+//
+//   assigned   someone gave you tickets
+//   family     a family was moved to the team you're the project manager of
+//   report     someone on your team says they resolved or closed a ticket
+//
+// An outbox: notify() saves each notification in the same transaction as
+// the change it reports, as 'pending', and every MAIL_INTERVAL this sends the
+// pending ones. So an email only ever goes out for a change that was saved,
+// and a failed send never undoes the change: it's tried again, waiting longer
+// each time, up to MAX_TRIES times. One notification is one email, however
+// many tickets it's about.
+//
+// Never emailed (marked 'skipped', with why): test and service accounts,
+// deactivated accounts, anyone with no address or who turned it off, anyone
+// not on MAIL_ONLY_TO when that's set (for trying it out), and a notification
+// more than MAX_AGE old when its turn comes, so a server that was off, or
+// email switched on later, doesn't send a pile of old news. An email says who
+// did what and which tickets, with a link to OneTouch; ticket summaries and a
+// member's note stay behind the sign-in.
+//
+// Settings, in .env (read at start):
+//   BREVO_API_KEY   Brevo → SMTP & API → API keys. None: email is off.
+//   MAIL_FROM       the sender, on a domain authenticated in Brevo (notifications@onetouch.fyi)
+//   MAIL_FROM_NAME  the name it shows (OneTouch)
+//   APP_URL         where the emails link to (https://onetouch.fyi)
+//   MAIL_ONLY_TO    comma-separated addresses: while it's set, nobody else is emailed
+// For tests only: BREVO_API_URL (a stand-in for Brevo), MAIL_INTERVAL_MS, MAIL_RETRY_MS.
+// =====================================================================
+
+import { pool } from './auth.mjs';
+import { isTestOrServiceAccount } from './teams.mjs';
+
+const BREVO_URL = 'https://api.brevo.com/v3/smtp/email';
+const BATCH = 20;                  // emails per round, well inside Brevo's limits
+const MAX_TRIES = 5;
+const MAX_AGE_MS = 60 * 60 * 1000; // older than this when its turn comes: not sent
+const SHOWN_NUMBERS = 20;          // tickets listed in an email before "and N more"
+const SEND_TIMEOUT_MS = 15000;
+
+export function mailConfig(env = process.env) {
+  return {
+    key: env.BREVO_API_KEY || '',
+    url: env.BREVO_API_URL || BREVO_URL,
+    from: env.MAIL_FROM || 'notifications@onetouch.fyi',
+    fromName: env.MAIL_FROM_NAME || 'OneTouch',
+    appUrl: (env.APP_URL || 'https://onetouch.fyi').replace(/\/+$/, ''),
+    onlyTo: String(env.MAIL_ONLY_TO || '').split(',').map(a => a.trim().toLowerCase()).filter(Boolean),
+    intervalMs: Number(env.MAIL_INTERVAL_MS) || 30 * 1000,
+    retryMs: Number(env.MAIL_RETRY_MS) || 60 * 1000,
+  };
+}
+
+// Is email set up on this server? (the 🔔 panel says so when it isn't)
+export const mailEnabled = () => Boolean(mailConfig().key);
+
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// One notification as an email, worded as the 🔔 panel words it (public/notifications.js).
+// n: { kind, numbers, detail, actor, display_name, username } -> { subject, text, html }
+export function emailFor(n, cfg = mailConfig()) {
+  const d = n.detail || {};
+  const who = n.actor || 'Someone';
+  const count = d.count || n.numbers.length;
+  const many = number => number.toLocaleString('en-US');
+  let what, where;
+  if (n.kind === 'assigned') {
+    const on = d.team ? ` on ${d.team}` : '';
+    what = d.family && d.size > 1
+      ? `${who} gave you a family of ${many(d.size)} linked tickets${on}`
+      : `${who} gave you ${count === 1 ? n.numbers[0] : `${many(count)} tickets`}${on}`;
+    where = 'They\'re in Assigned to me on your OneTouch Home page.';
+  } else if (n.kind === 'family') {
+    what = d.source === 'servicenow'
+      ? `A new link from ServiceNow brought ${count === 1 ? n.numbers[0] : `${many(count)} linked tickets`} into a family on ${d.team}`
+      : count === 1 ? `${who} moved ${n.numbers[0]} to ${d.team}` : `${who} moved a family of ${many(count)} linked tickets to ${d.team}`;
+    where = `${count === 1 ? 'It isn\'t' : 'They aren\'t'} assigned to anyone yet: hand ${count === 1 ? 'it' : 'them'} out on the Team tab.`;
+  } else if (n.kind === 'report') {
+    what = `${who} says they ${d.status} ${n.numbers[0]}`;
+    where = `${d.note ? 'They left you a note. ' : ''}See it on the Team tab, under the ticket's state. The ticket itself doesn't change in OneTouch.`;
+  } else {
+    what = `${who} sent you a notification`;
+    where = 'See it under the 🔔 in OneTouch.';
+  }
+  const shown = count > 1 ? n.numbers.slice(0, SHOWN_NUMBERS) : [];
+  const more = shown.length ? count - shown.length : 0;
+  const tickets = shown.length ? `Tickets: ${shown.join(', ')}${more > 0 ? `, and ${many(more)} more` : ''}` : '';
+  const first = String(n.display_name || n.username || '').trim().split(/\s+/)[0] || 'there';
+  const footer = 'You get these emails because email is on for your OneTouch notifications. ' +
+    'To stop them, open the 🔔 in OneTouch and untick "Email me these too".';
+  const text = [`Hi ${first},`, '', `${what}.`, ...(tickets ? ['', tickets] : []), '', where, '', `Open OneTouch: ${cfg.appUrl}`, '', '--', footer].join('\n');
+  const html = '<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.5;color:#2d3748;max-width:560px">' +
+    `<p>Hi ${escapeHtml(first)},</p>` +
+    `<p style="font-size:16px"><strong>${escapeHtml(what)}.</strong></p>` +
+    (tickets ? `<p style="color:#4a5568">${escapeHtml(tickets)}</p>` : '') +
+    `<p>${escapeHtml(where)}</p>` +
+    `<p><a href="${escapeHtml(cfg.appUrl)}" style="display:inline-block;background:#10a37f;color:#ffffff;text-decoration:none;padding:9px 16px;border-radius:6px;font-weight:600">Open OneTouch</a></p>` +
+    `<p style="font-size:12px;color:#718096;border-top:1px solid #e2e8f0;padding-top:10px;margin-top:20px">${escapeHtml(footer)}</p></div>`;
+  return { subject: what, text, html };
+}
+
+// Why a notification isn't emailed, or '' if it is.
+// n: { username, email, email_notifications, is_active, created_at }
+export function skipReason(n, cfg = mailConfig(), now = Date.now()) {
+  if (isTestOrServiceAccount(n.username)) return 'a test or service account';
+  if (!n.is_active) return 'the account is deactivated';
+  if (!n.email) return 'no email address on file';
+  if (!n.email_notifications) return 'they turned email off';
+  if (cfg.onlyTo.length && !cfg.onlyTo.includes(String(n.email).toLowerCase())) return 'not on MAIL_ONLY_TO';
+  if (now - new Date(n.created_at).getTime() > MAX_AGE_MS) return 'too old by the time it could be sent';
+  return '';
+}
+
+// One email through Brevo -> { ok, id } or { ok: false, status, message }
+export async function sendEmail({ to, name, subject, text, html }, cfg = mailConfig()) {
+  try {
+    const response = await fetch(cfg.url, {
+      method: 'POST',
+      headers: { 'api-key': cfg.key, 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        sender: { name: cfg.fromName, email: cfg.from },
+        to: [{ email: to, ...(name ? { name } : {}) }],
+        subject, textContent: text, htmlContent: html,
+        tags: ['onetouch-notification'],
+      }),
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (response.ok) return { ok: true, id: body.messageId || null };
+    return { ok: false, status: response.status, message: String(body.message || body.code || response.statusText).slice(0, 300) };
+  } catch (error) {
+    return { ok: false, status: 0, message: `Could not reach Brevo: ${error.message}`.slice(0, 300) };
+  }
+}
+
+// One round: every pending notification whose turn it is, oldest first
+let sending = false;
+export async function sendPending(cfg = mailConfig()) {
+  if (sending || !cfg.key) return { sent: 0, skipped: 0, failed: 0 };
+  sending = true;
+  const tally = { sent: 0, skipped: 0, failed: 0 };
+  try {
+    const { rows } = await pool.query(
+      `SELECT n.id, n.kind, n.numbers, n.detail, n.created_at, n.email_tries,
+              u.username, u.display_name, u.email, u.email_notifications, u.is_active,
+              coalesce(a.display_name, a.username) AS actor
+         FROM notifications n JOIN users u ON u.id = n.user_id LEFT JOIN users a ON a.id = n.actor_id
+        WHERE n.email_state = 'pending' AND (n.email_next_at IS NULL OR n.email_next_at <= now())
+        ORDER BY n.id LIMIT ${BATCH}`);
+    for (const n of rows) {
+      const why = skipReason(n, cfg);
+      if (why) {
+        await pool.query("UPDATE notifications SET email_state = 'skipped', email_note = $2 WHERE id = $1", [n.id, why]);
+        tally.skipped += 1;
+        continue;
+      }
+      const mail = emailFor(n, cfg);
+      const result = await sendEmail({ to: n.email, name: n.display_name || n.username, ...mail }, cfg);
+      const tries = n.email_tries + 1;
+      if (result.ok) {
+        await pool.query("UPDATE notifications SET email_state = 'sent', email_tries = $2, emailed_at = now(), email_note = $3 WHERE id = $1",
+          [n.id, tries, result.id]);
+        console.log(`✉️  Emailed ${n.username}: ${n.kind} (notification ${n.id})`);
+        tally.sent += 1;
+      } else {
+        const note = `${result.status ? `Brevo answered ${result.status}: ` : ''}${result.message}`;
+        // Waits 1, 2, 4, 8 minutes between tries, then gives up
+        await pool.query(
+          `UPDATE notifications SET email_tries = $2, email_note = $3,
+                  email_state = CASE WHEN $2 >= ${MAX_TRIES} THEN 'failed' ELSE 'pending' END,
+                  email_next_at = now() + make_interval(secs => $4)
+            WHERE id = $1`,
+          [n.id, tries, note, (cfg.retryMs * 2 ** (tries - 1)) / 1000]);
+        console.error(`✉️  Could not email ${n.username} (notification ${n.id}, try ${tries} of ${MAX_TRIES}): ${note}`);
+        tally.failed += 1;
+      }
+    }
+  } finally {
+    sending = false;
+  }
+  return tally;
+}
+
+// Starts the rounds (once the notifications table is ready). No key: email is off.
+let timer = null;
+export function startMail() {
+  const cfg = mailConfig();
+  if (!cfg.key) {
+    console.log('✉️  Email is off (no BREVO_API_KEY in .env); notifications only show under the 🔔');
+    return;
+  }
+  console.log(`✉️  Email is on: from ${cfg.from}${cfg.onlyTo.length
+    ? `, only to ${cfg.onlyTo.length} ${cfg.onlyTo.length === 1 ? 'address' : 'addresses'} (MAIL_ONLY_TO)` : ', to everyone with an address'}`);
+  const round = () => sendPending(cfg).catch(error => console.error('✉️  Sending emails failed:', error.message));
+  clearInterval(timer);
+  timer = setInterval(round, cfg.intervalMs);
+  round();
+}
+```
+
+<a id="b62"></a>
+### B.62 `scripts/mail-test.mjs`
+
+```js
+// Sends one test email through Brevo with the settings in .env, to check
+// that email works before anyone's notifications depend on it (mail.mjs):
+//   docker exec analytics_node_app npm run mail-test -- you@example.com
+// Says what Brevo answered, and what to fix when it refuses.
+
+import dotenv from 'dotenv';
+dotenv.config({ quiet: true });
+
+const { mailConfig, sendEmail } = await import('../mail.mjs');
+const { pool } = await import('../auth.mjs');
+
+const to = String(process.argv[2] || '').trim().toLowerCase();
+const cfg = mailConfig();
+try {
+  if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(to)) throw new Error('Give the address to send the test to: npm run mail-test -- you@example.com');
+  if (!cfg.key) throw new Error('There is no BREVO_API_KEY in .env, so email is off. Add it, then try again.');
+  if (cfg.onlyTo.length && !cfg.onlyTo.includes(to)) throw new Error(`${to} isn't on MAIL_ONLY_TO in .env, which is set while email is being tried out.`);
+  const result = await sendEmail({
+    to,
+    subject: 'OneTouch test email',
+    text: `This is a test from OneTouch (${cfg.appUrl}). If you can read it, notification emails work.\n\nSent from ${cfg.from}.`,
+    html: `<p>This is a test from <a href="${cfg.appUrl}">OneTouch</a>. If you can read it, notification emails work.</p><p style="color:#718096;font-size:12px">Sent from ${cfg.from}.</p>`,
+  }, cfg);
+  if (result.ok) {
+    console.log(`Sent to ${to} from ${cfg.from} (Brevo message ${result.id || 'id not given'}). Check that inbox, and its junk folder.`);
+  } else {
+    console.error(`Brevo didn't send it: ${result.status ? `${result.status} ` : ''}${result.message}`);
+    if (result.status === 401) console.error('  The API key is wrong, or Brevo blocked this computer\'s IP address: check your email from Brevo, or Security → Authorized IPs in Brevo.');
+    if (result.status === 400 && /sender/i.test(result.message)) console.error(`  ${cfg.from} isn't a sender Brevo accepts yet: authenticate onetouch.fyi and add the sender in Brevo (Senders, Domains & Dedicated IPs).`);
+    if (result.status === 403) console.error('  Brevo hasn\'t activated sending for this account yet; its support can.');
+    process.exitCode = 1;
+  }
+} catch (error) {
+  console.error(error.message);
+  process.exitCode = 1;
+} finally {
+  await pool.end();
+}
+```
+
+<a id="b63"></a>
+### B.63 `db/demo-tickets.sql`
+
+```sql
+-- =====================================================================
+-- DEMO TICKETS for presentations: 11 made-up tickets in 5 families, on no
+-- team and assigned to nobody, ready to move to the Milwaukee Brewers live
+-- (Team tab → Move tickets to another team) and hand out to its players.
+-- Their numbers are in a range the real export never uses (…99000xx), and
+-- every summary starts with "[Demo]", so they're never mistaken for real
+-- tickets in lists, dashboards or the AI assistant's answers.
+--
+--   INC9900001  parent incident + 3 child incidents   (P2, packaging line down)
+--   CHG9900001  change + the incident it fixes          (INC9900005)
+--   RITM9900001 request + 2 catalog tasks               (order REQ9900001)
+--   INC9900006  on its own                              (P4, badge reader)
+--   INC9900007  on its own                              (P3, reopened, passed around)
+--
+-- Running this again starts the demo over: it removes them, and everything
+-- OneTouch kept about them (team, assignments, notifications, reports, stars,
+-- ticket results), then adds them again. db/demo-tickets-remove.sql removes
+-- them for good. From PowerShell, in this folder:
+--
+--   Get-Content db\demo-tickets.sql | docker exec -i analytics_postgres psql -U admin -d analytics_db
+--   docker restart analytics_node_app
+--
+-- The restart makes OneTouch read them (its KPIs and sorting read every
+-- ticket when it starts). Dates stay inside the export (up to Sep 1, 2026),
+-- because "now" for the KPIs is the newest moment in the data.
+-- Remove them before seeding the teams again, or they'd join a real team.
+-- =====================================================================
+
+\set ON_ERROR_STOP on
+
+-- ---- The tickets themselves (analytics_db, read by Cube and Metabase) ----
+BEGIN;
+-- Any from an earlier run (the same as demo-tickets-remove.sql)
+DELETE FROM sc_task WHERE number ~ '^SCTASK99000[0-9]{2}$';
+DELETE FROM sc_req_item WHERE number ~ '^RITM99000[0-9]{2}$';
+DELETE FROM change_request WHERE number ~ '^CHG99000[0-9]{2}$';
+DELETE FROM incident WHERE number ~ '^INC99000[0-9]{2}$';
+
+INSERT INTO incident (number, created, updated, short_description, description, affected_user, assignment_group, assigned_to,
+  state, parent_incident, priority, impact, urgency, category, subcategory, was_p1, global_incident, configuration_item,
+  contact_type, reassignment_count, reopen_count, opened_by_group, location, on_hold_reason, work_notes) VALUES
+('INC9900001', '2026-08-31 07:12:00', '2026-09-01 18:40:00', '[Demo] Packaging line 4 labeler offline at the Milwaukee brewery',
+ 'Line 4 has stopped labeling cases since 6:50 AM. Operators restarted the labeler twice; it faults again within minutes. Cases are being held at the end of the line.',
+ 'Individual 9901', 'MC-GLP-MES-PACK', 'Individual 9911', 'In Progress', NULL, 'P2 - High', '2 - Site/Dept', '1 - xxx (Immediate Loss)',
+ 'Hardware', 'Printer', 'false', 'false', 'MKE-PKG-L4-LABELER', 'Phone', '1', '0', 'TCS-ServiceDesk-L1-NA-WE', 'Milwaukee Brewery', NULL,
+ '2026-09-01 18:40:00 - Individual 9911 (Work notes)' || chr(10) || 'Vendor engineer on site; replacing the print head controller.'),
+('INC9900002', '2026-08-31 06:58:00', '2026-08-31 07:15:00', '[Demo] Labeler on line 4 shows fault code E-217',
+ 'Monitoring alert: labeler MKE-PKG-L4-LABELER reported fault E-217 (print head communication error).',
+ 'Event Ops', 'MC-GLP-MES-PACK', NULL, 'New', 'INC9900001', 'P3 - Average', '3 - Multiple Users', '3 - xxx (No Loss)',
+ 'Hardware', 'Printer', 'false', 'false', 'MKE-PKG-L4-LABELER', 'Event Management', '0', '0', 'ACN-MEM-ALERTING', 'Milwaukee Brewery', NULL, NULL),
+('INC9900003', '2026-08-31 07:05:00', '2026-08-31 07:16:00', '[Demo] Line 4 operators cannot print case labels',
+ 'Case labels come out blank on line 4. Tried reloading the label roll.',
+ 'Individual 9902', 'MC-GLP-MES-PACK', NULL, 'New', 'INC9900001', 'P3 - Average', '3 - Multiple Users', '2 - xxx (Workaround)',
+ 'Hardware', 'Printer', 'false', 'false', 'MKE-PKG-L4-LABELER', 'Self-service', '0', '0', 'TCS-ServiceDesk-L1-NA-WE', 'Milwaukee Brewery', NULL, NULL),
+('INC9900004', '2026-08-31 07:20:00', '2026-08-31 07:22:00', '[Demo] Line 4 output stopped; shift lead reporting',
+ 'Shift lead called: line 4 output has stopped while labels are down.',
+ 'Individual 9903', 'MC-GLP-MES-PACK', NULL, 'New', 'INC9900001', 'P3 - Average', '2 - Site/Dept', '1 - xxx (Immediate Loss)',
+ 'Hardware', 'Printer', 'false', 'false', 'MKE-PKG-L4-LABELER', 'Phone', '0', '0', 'TCS-ServiceDesk-L1-NA-WE', 'Milwaukee Brewery', NULL, NULL),
+('INC9900005', '2026-08-27 09:30:00', '2026-08-31 16:00:00', '[Demo] MES dashboards slow for brewhouse operators',
+ 'Brewhouse MES screens take 30 seconds or more to load during shift change. The application server runs out of memory at peak.',
+ 'Individual 9904', 'ACN-L2-MSL3MES', 'Individual 9912', 'On Hold', NULL, 'P3 - Average', '3 - Multiple Users', '2 - xxx (Workaround)',
+ 'Software/Configuration', 'Performance', 'false', 'false', 'MKE-MES-APP01', 'Email', '2', '0', 'TCS-ServiceDesk-L1-NA-WE', 'Milwaukee Brewery', 'Awaiting Change',
+ '2026-08-31 16:00:00 - Individual 9912 (Work notes)' || chr(10) || 'Change CHG9900001 raised to add memory to the application server.'),
+('INC9900006', '2026-09-01 08:05:00', '2026-09-01 08:05:00', '[Demo] Badge reader at Milwaukee brewery gate 2 not reading cards',
+ 'Gate 2 badge reader shows a red light for every badge. Security is letting people in by hand.',
+ 'Individual 9905', 'TCS-EUS-Remote-Support', NULL, 'New', NULL, 'P4 - Low', '4 - User', '4 - Low',
+ 'Hardware', 'Badge Reader', 'false', 'false', 'MKE-SEC-GATE2-READER', 'Walk-in', '0', '0', 'TCS-ServiceDesk-L1-NA-WE', 'Milwaukee Brewery', NULL, NULL),
+('INC9900007', '2026-08-24 13:40:00', '2026-08-28 10:00:00', '[Demo] Wi-Fi keeps dropping in the Milwaukee brewery warehouse',
+ 'Handheld scanners lose Wi-Fi in aisles 12 to 18 several times an hour. Reopened: the access point restart only helped for a day.',
+ 'Individual 9906', 'TCS-Network-Data', 'Individual 9913', 'In Progress', NULL, 'P3 - Average', '3 - Multiple Users', '2 - xxx (Workaround)',
+ 'Network', 'Wireless', 'false', 'false', 'MKE-WHSE-AP-12', 'Chat', '3', '1', 'TCS-ServiceDesk-L1-NA-WE', 'Milwaukee Brewery', NULL,
+ '2026-08-28 10:00:00 - Individual 9913 (Work notes)' || chr(10) || 'Waiting for a site survey of the warehouse access points.');
+
+INSERT INTO change_request (number, type, created, sub_type, task_type, configuration_item, short_description, owner_group, outage,
+  state, state_1, approval, requested_by, planned_start_date, planned_end_date, planned_start_date_1, planned_end_date_1, risk,
+  incident, environment, brewery, brewery_locations, description, purpose_of_change) VALUES
+('CHG9900001', 'Normal', '2026-08-31 11:00:00', 'Infrastructure', 'Change Request', 'MKE-MES-APP01',
+ '[Demo] Add memory to the Milwaukee MES application server', 'ACN-L2-MSL3MES', 'Yes',
+ 'Pending', 'Pending', 'Requested', 'Individual 9912',
+ '2026-09-03 22:00:00', '2026-09-04 02:00:00', '2026-09-03 22:00:00', '2026-09-04 02:00:00', 'Medium',
+ 'INC9900005', 'Production', 'Yes', 'Milwaukee',
+ 'Add 32 GB of memory to MKE-MES-APP01 during the overnight window. MES screens are down for about an hour.',
+ 'Fix the slow brewhouse MES dashboards (INC9900005).');
+
+INSERT INTO sc_req_item (number, item, short_description, description, opened, updated, stage, state, request, requested_for, opened_by, approval, location) VALUES
+('RITM9900001', 'Laptop - Standard', '[Demo] New laptop for the Milwaukee brewery shift supervisor',
+ 'New shift supervisor starts September 8 and needs a standard laptop with the brewery production apps.',
+ '2026-08-30 10:15:00', '2026-08-31 09:00:00', 'Fulfillment', 'Open', 'REQ9900001', 'Individual 9907', 'Individual 9907', 'Approved', 'Milwaukee Brewery');
+
+INSERT INTO sc_task (number, item, state, short_description, assignment_group, parent, opened_by, approval, request, request_item, sla_flag, created, updated, active) VALUES
+('SCTASK9900001', 'Laptop - Standard', 'Work in Progress', '[Demo] Image and configure the laptop', 'TCS-USHWASSETMGMT',
+ 'RITM9900001', 'Individual 9907', 'Not Yet Requested', 'REQ9900001', 'RITM9900001', 'false', '2026-08-30 10:16:00', '2026-08-31 09:00:00', 'true'),
+('SCTASK9900002', 'Laptop - Standard', 'Open', '[Demo] Deliver the laptop to the Milwaukee brewery', 'TCS-EUS-Remote-Support',
+ 'RITM9900001', 'Individual 9907', 'Not Yet Requested', 'REQ9900001', 'RITM9900001', 'true', '2026-08-30 10:16:00', '2026-08-30 10:16:00', 'true');
+COMMIT;
+
+-- ---- In OneTouch (onetouch_auth): their families, on no team, assigned to nobody ----
+\connect onetouch_auth
+BEGIN;
+-- Anything OneTouch kept about them from an earlier run
+DELETE FROM notifications WHERE EXISTS (SELECT 1 FROM unnest(numbers) n WHERE n ~ '^(INC|CHG|RITM|SCTASK)99000[0-9]{2}$');
+DELETE FROM ticket_reports WHERE number ~ '^(INC|CHG|RITM|SCTASK)99000[0-9]{2}$';
+DELETE FROM starred_tickets WHERE number ~ '^(INC|CHG|RITM|SCTASK)99000[0-9]{2}$';
+DELETE FROM seen_tickets WHERE number ~ '^(INC|CHG|RITM|SCTASK)99000[0-9]{2}$';
+DELETE FROM ticket_families WHERE id ~ '^(INC|CHG|RITM|SCTASK)99000[0-9]{2}$'; -- and their assignments
+
+-- A family's id is its lowest ticket number (teams.mjs linkedGroups)
+INSERT INTO ticket_families (id, team_id, size) VALUES
+  ('INC9900001', NULL, 4), ('CHG9900001', NULL, 2), ('RITM9900001', NULL, 3), ('INC9900006', NULL, 1), ('INC9900007', NULL, 1);
+INSERT INTO ticket_assignments (number, family_id) VALUES
+  ('INC9900001', 'INC9900001'), ('INC9900002', 'INC9900001'), ('INC9900003', 'INC9900001'), ('INC9900004', 'INC9900001'),
+  ('CHG9900001', 'CHG9900001'), ('INC9900005', 'CHG9900001'),
+  ('RITM9900001', 'RITM9900001'), ('SCTASK9900001', 'RITM9900001'), ('SCTASK9900002', 'RITM9900001'),
+  ('INC9900006', 'INC9900006'),
+  ('INC9900007', 'INC9900007');
+COMMIT;
+
+\echo 'Demo tickets ready: 11 tickets in 5 families, on no team, assigned to nobody. Now run: docker restart analytics_node_app'
+```
+
+<a id="b64"></a>
+### B.64 `db/demo-tickets-remove.sql`
+
+```sql
+-- Removes the demo tickets (db/demo-tickets.sql) for good: from the data and
+-- from everything OneTouch kept about them. From PowerShell, in this folder:
+--
+--   Get-Content db\demo-tickets-remove.sql | docker exec -i analytics_postgres psql -U admin -d analytics_db
+--   docker restart analytics_node_app
+
+\set ON_ERROR_STOP on
+
+BEGIN;
+DELETE FROM sc_task WHERE number ~ '^SCTASK99000[0-9]{2}$';
+DELETE FROM sc_req_item WHERE number ~ '^RITM99000[0-9]{2}$';
+DELETE FROM change_request WHERE number ~ '^CHG99000[0-9]{2}$';
+DELETE FROM incident WHERE number ~ '^INC99000[0-9]{2}$';
+COMMIT;
+
+\connect onetouch_auth
+BEGIN;
+DELETE FROM notifications WHERE EXISTS (SELECT 1 FROM unnest(numbers) n WHERE n ~ '^(INC|CHG|RITM|SCTASK)99000[0-9]{2}$');
+DELETE FROM ticket_reports WHERE number ~ '^(INC|CHG|RITM|SCTASK)99000[0-9]{2}$';
+DELETE FROM starred_tickets WHERE number ~ '^(INC|CHG|RITM|SCTASK)99000[0-9]{2}$';
+DELETE FROM seen_tickets WHERE number ~ '^(INC|CHG|RITM|SCTASK)99000[0-9]{2}$';
+DELETE FROM ticket_families WHERE id ~ '^(INC|CHG|RITM|SCTASK)99000[0-9]{2}$'; -- and their assignments
+COMMIT;
+
+\echo 'Demo tickets removed. Now run: docker restart analytics_node_app'
+```
+
+<a id="b65"></a>
+### B.65 `servicenow-sync/package.json`
+
+```json
+{
+  "name": "servicenow-sync",
+  "version": "1.0.0",
+  "description": "Receives ServiceNow records through an outbound REST webhook and upserts them into PostgreSQL.",
+  "type": "module",
+  "main": "src/app.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node --env-file=.env src/app.js",
+    "dev": "node --env-file=.env --watch src/app.js",
+    "db:schema": "psql -f db/schema.sql"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "pg": "^8.16.3"
+  }
+}
+```
+
+<a id="b66"></a>
+### B.66 `servicenow-sync/.env.example`
+
+```
+# Copy to .env and fill in. .env is never committed.
+
+# The ticket data (analytics_db): the tables the ServiceNow export was loaded
+# into. Read by pg's Pool (the standard libpq variable names).
+PGHOST=localhost
+PGPORT=5432
+PGDATABASE=analytics_db
+PGUSER=servicenow_sync
+PGPASSWORD=change-me
+
+# OneTouch's own database (onetouch_auth): families, teams, who has each
+# ticket. The same names OneTouch's .env uses (OneTouch's code reads them).
+AUTH_DB_HOST=localhost
+AUTH_DB_PORT=5432
+AUTH_DB_NAME=onetouch_auth
+AUTH_DB_USER=onetouch_app
+AUTH_DB_PASSWORD=change-me
+
+# The port this listener serves on
+PORT=8090
+
+# Shared secret ServiceNow sends in the X-Webhook-Token header.
+# Long and random, e.g.: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+WEBHOOK_SECRET=change-me-to-a-long-random-string
+```
+
+<a id="b67"></a>
+### B.67 `servicenow-sync/db/schema.sql`
+
+```sql
+-- New tickets from ServiceNow go into the tables the export was loaded into
+-- (load_csv.sql: incident, change_request, sc_req_item, sc_task,
+-- change_approvals, ritm_approvals), and into a family in onetouch_auth.
+-- This file adds the one table the listener needs of its own, in the same
+-- database as the ticket tables (analytics_db). The listener also makes it
+-- when it starts, if it may.
+--
+-- Records that can't be saved yet wait here: a catalog task that arrives
+-- before its request, an approval before its ticket (the tables link them),
+-- or a ticket that couldn't be put in a family. They're tried again after
+-- every record saved, and every minute.
+--
+-- Run once: psql -f db/schema.sql   (or: npm run db:schema, with the PG* variables set)
+
+CREATE TABLE IF NOT EXISTS servicenow_pending (
+    id             bigserial PRIMARY KEY,
+    table_name     text NOT NULL,
+    record_key     text NOT NULL,               -- its number (or approval_id)
+    record         jsonb NOT NULL,              -- the newest version received
+    reason         text NOT NULL,
+    tries          integer NOT NULL DEFAULT 1,
+    received_at    timestamptz NOT NULL DEFAULT now(),
+    last_tried_at  timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (table_name, record_key)
+);
+
+-- The account the listener uses needs, in analytics_db: SELECT, INSERT and
+-- UPDATE on the six ticket tables, and all of these on servicenow_pending;
+-- in onetouch_auth: what OneTouch's own account (onetouch_app) has.
+```
+
+<a id="b68"></a>
+### B.68 `servicenow-sync/src/app.js`
+
+```js
+// =====================================================================
+// SERVICENOW SYNC: an Express listener that ServiceNow's outbound REST
+// message calls on every insert or update (servicenow-blueprint.md). Each
+// record is saved in the table the export was loaded into (analytics_db),
+// and each new ticket is put in a family, and so on a team, by OneTouch's
+// own rules (../../teams.mjs placeTicket); OneTouch hears about it and
+// reads its data again (server.mjs).
+//
+//   POST /api/v1/servicenow-webhook   the webhook (routes/webhook.js)
+//   GET  /health                       200 when both databases answer
+//
+// Settings come from the environment (.env.example). Start: npm start
+// =====================================================================
+
+import express from 'express';
+import { analytics, checkDatabase } from './config/db.js';
+import { loadSchema } from './config/schema.js';
+import { ensurePendingTable } from './db/pending.js';
+import { retryWaitingSoon } from './processRecord.js';
+import { webhookRouter, pending } from './routes/webhook.js';
+import { pool as onetouch } from '../../auth.mjs';
+
+const PORT = Number(process.env.PORT) || 8090;
+const SECRET = process.env.WEBHOOK_SECRET;
+if (!SECRET) {
+  console.error('WEBHOOK_SECRET is not set: refusing to start without it (see .env.example).');
+  process.exit(1);
+}
+
+// Nothing that slips past the handlers below takes the listener down
+process.on('unhandledRejection', error => console.error('💥 Unhandled rejection:', error));
+
+// The tables' columns and keys first: calls are only checked against them
+for (let attempt = 1; ; attempt++) {
+  try {
+    const schema = await loadSchema();
+    console.log(`🐘 Ticket tables ready: ${[...schema.keys()].join(', ')}`);
+    break;
+  } catch (error) {
+    const wait = Math.min(attempt * 5, 60);
+    console.error(`🐘 Could not read the ticket tables yet (${error.message}); retrying in ${wait}s`);
+    await new Promise(r => setTimeout(r, wait * 1000));
+  }
+}
+await ensurePendingTable().catch(error => console.error(`⏳ Could not make servicenow_pending (${error.message}); run db/schema.sql`));
+
+const app = express();
+app.disable('x-powered-by');
+
+app.use('/api/v1', webhookRouter({ secret: SECRET }));
+
+app.get('/health', async (req, res) => {
+  try {
+    await Promise.all([checkDatabase(), onetouch.query('SELECT 1')]);
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(503).json({ ok: false, error: 'A database is not answering.' });
+  }
+});
+
+app.use((req, res) => res.status(404).json({ error: 'Not found' }));
+
+// Bad JSON, a body over the limit, or anything else thrown in a route:
+// answered, logged, and the process carries on
+app.use((error, req, res, next) => {
+  const status = error.status || error.statusCode || 500;
+  if (status >= 500) console.error('💥 Request failed:', error);
+  if (res.headersSent) return next(error);
+  res.status(status).json({ error: status < 500 ? error.message : 'Internal error' });
+});
+
+const server = app.listen(PORT, () => {
+  console.log(`🚀 ServiceNow webhook listening on port ${PORT}`);
+  retryWaitingSoon();
+});
+// Records waiting for what they belong to: tried again every minute too
+setInterval(retryWaitingSoon, 60 * 1000).unref();
+
+// Stop taking calls, finish the work already acknowledged, then close the pools
+async function shutdown(signal) {
+  console.log(`${signal}: finishing ${pending.size} record(s), then stopping`);
+  server.close();
+  await Promise.allSettled([...pending]);
+  await Promise.allSettled([analytics.end(), onetouch.end()]);
+  process.exit(0);
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+```
+
+<a id="b69"></a>
+### B.69 `servicenow-sync/src/config/db.js`
+
+```js
+// =====================================================================
+// THE DATABASES. Two, as OneTouch has them:
+//
+//   analytics   the ticket data (analytics_db): the tables the ServiceNow
+//               export was loaded into, which Cube, KPIs and Metabase read.
+//               pg reads the standard PGHOST, PGPORT, PGDATABASE, PGUSER and
+//               PGPASSWORD variables itself.
+//   onetouch    families, teams and who has each ticket (onetouch_auth),
+//               through OneTouch's own code (../../auth.mjs, ../../teams.mjs),
+//               which reads AUTH_DB_HOST, AUTH_DB_PORT, AUTH_DB_NAME,
+//               AUTH_DB_USER and AUTH_DB_PASSWORD, as OneTouch does.
+// =====================================================================
+
+import pg from 'pg';
+
+export const analytics = new pg.Pool({
+  max: Number(process.env.PG_POOL_MAX) || 10,
+  idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 5_000,
+});
+
+// A connection that dies while idle (database restarted, network dropped)
+// is logged; without this listener pg would crash the process
+analytics.on('error', error => {
+  console.error('🐘 Idle database connection failed:', error.message);
+});
+
+export async function checkDatabase() {
+  await analytics.query('SELECT 1');
+}
+```
+
+<a id="b70"></a>
+### B.70 `servicenow-sync/src/config/schema.js`
+
+```js
+// =====================================================================
+// THE TABLES: the six the ServiceNow export was loaded into (load_csv.sql),
+// which Cube, the KPIs, families and Metabase all read. A record may only
+// name columns its table has. The columns and keys are read from the
+// database at start, so nothing here repeats the schema: change a table
+// there and the listener follows.
+// =====================================================================
+
+import { analytics } from './db.js';
+
+// Each table, and the prefix its ticket numbers have (as the export writes
+// them: INC1814467). Approval records aren't tickets: they follow the ticket
+// they approve, which must arrive first.
+export const TABLES = {
+  incident: 'INC',
+  change_request: 'CHG',
+  sc_req_item: 'RITM',
+  sc_task: 'SCTASK',
+  change_approvals: null,
+  ritm_approvals: null,
+};
+
+let schema = null; // table -> { columns: Set, key, numericKey, updated }
+
+export async function loadSchema() {
+  const { rows } = await analytics.query(`
+    SELECT c.relname AS table, array_agg(a.attname::text ORDER BY a.attnum) AS columns,
+           max(a.attname::text) FILTER (WHERE a.attnum = ANY(i.indkey)) AS key,
+           bool_or(a.attnum = ANY(i.indkey) AND format_type(a.atttypid, NULL) IN ('bigint', 'integer')) AS numeric_key,
+           bool_or(a.attnum = ANY(i.indkey) AND a.attidentity <> '') AS identity_key
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
+      JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+      LEFT JOIN pg_index i ON i.indrelid = c.oid AND i.indisprimary
+     WHERE c.relname = ANY($1::text[]) AND c.relkind = 'r'
+     GROUP BY c.relname`, [Object.keys(TABLES)]);
+  const missing = Object.keys(TABLES).filter(t => !rows.some(r => r.table === t));
+  if (missing.length) throw new Error(`the database has no ${missing.join(', ')} table`);
+  const keyless = rows.filter(r => !r.key).map(r => r.table);
+  if (keyless.length) throw new Error(`${keyless.join(', ')} has no primary key to upsert on`);
+  schema = new Map(rows.map(r => [r.table, {
+    columns: new Set(r.columns), key: r.key, numericKey: r.numeric_key,
+    // The approval tables number their rows themselves: ServiceNow's id overrides that
+    identityKey: r.identity_key,
+    // When ServiceNow last changed it: an older update never replaces a newer one
+    updated: r.columns.includes('updated'),
+  }]));
+  return schema;
+}
+
+export const tableSchema = table => schema?.get(table) || null;
+```
+
+<a id="b71"></a>
+### B.71 `servicenow-sync/src/middleware/verifyToken.js`
+
+```js
+// =====================================================================
+// THE SHARED SECRET: every webhook call must carry X-Webhook-Token equal
+// to WEBHOOK_SECRET. Compared in constant time, so the response time says
+// nothing about how much of a guess was right.
+// =====================================================================
+
+import { createHash, timingSafeEqual } from 'node:crypto';
+
+// Both sides hashed first: timingSafeEqual needs equal lengths
+const digest = value => createHash('sha256').update(String(value)).digest();
+
+export function verifyToken(secret) {
+  if (!secret) throw new Error('WEBHOOK_SECRET is not set');
+  const expected = digest(secret);
+  return (req, res, next) => {
+    const token = req.get('X-Webhook-Token');
+    if (!token || !timingSafeEqual(digest(token), expected)) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    next();
+  };
+}
+```
+
+<a id="b72"></a>
+### B.72 `servicenow-sync/src/routes/webhook.js`
+
+```js
+// =====================================================================
+// POST /api/v1/servicenow-webhook: one ServiceNow record per call, as
+//   { "table": "incident", "record": { "number": "INC1900001", "state": "New", … } }
+// table: one of the six the export was loaded into (config/schema.js);
+// record: that table's own column names, its key among them (a ticket's
+// number, an approval's approval_id).
+//
+// The caller gets its answer as soon as the call is known to be good
+// (right token, a table and columns that exist, a valid key):
+// 200 { received: true }. Saving, and putting a ticket in its family, runs
+// after that (processRecord.js), so a slow or failing database never makes
+// ServiceNow wait or time out. Its outcome is logged here.
+// =====================================================================
+
+import { Router, json } from 'express';
+import { verifyToken } from '../middleware/verifyToken.js';
+import { TABLES, tableSchema } from '../config/schema.js';
+import { processRecord } from '../processRecord.js';
+
+// Work still running, so a shutdown can wait for it (app.js)
+export const pending = new Set();
+
+const SIMPLE = new Set(['string', 'number', 'boolean']);
+
+// body -> { table, record } ready to save, or { error }
+function checkBody(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return { error: 'The body must be one JSON object: { "table": …, "record": { … } }.' };
+  const { table, record } = body;
+  if (!Object.hasOwn(TABLES, table)) return { error: `"table" must be one of: ${Object.keys(TABLES).join(', ')}.` };
+  if (!record || typeof record !== 'object' || Array.isArray(record)) return { error: '"record" must be a JSON object of column names and values.' };
+  const { columns, key, numericKey } = tableSchema(table);
+  const unknown = Object.keys(record).filter(c => !columns.has(c));
+  if (unknown.length) return { error: `${table} has no ${unknown.map(c => `"${c}"`).join(', ')} column${unknown.length > 1 ? 's' : ''}.` };
+  const notText = Object.keys(record).filter(c => record[c] !== null && !SIMPLE.has(typeof record[c]));
+  if (notText.length) return { error: `${notText.join(', ')}: each value must be text, a number, true/false or null.` };
+
+  const clean = { ...record };
+  const id = String(record[key] ?? '').trim();
+  if (TABLES[table]) {
+    // A ticket's number as the export writes it, which families and the rest of OneTouch go by
+    const number = id.toUpperCase();
+    if (!new RegExp(`^${TABLES[table]}\\d{7}$`).test(number)) return { error: `"${key}" must be a ${TABLES[table]} number like ${TABLES[table]}1234567.` };
+    clean[key] = number;
+  } else if (numericKey ? !/^\d{1,18}$/.test(id) : !id) {
+    return { error: `"${key}" must be ${numericKey ? 'a whole number' : 'given'}.` };
+  } else {
+    clean[key] = id;
+  }
+  return { table, record: clean, id: clean[key], key };
+}
+
+export function webhookRouter({ secret }) {
+  const router = Router();
+
+  router.post('/servicenow-webhook',
+    verifyToken(secret),
+    json({ limit: '1mb', type: ['application/json', 'application/*+json'] }),
+    (req, res) => {
+      const checked = checkBody(req.body);
+      if (checked.error) return res.status(400).json({ error: checked.error });
+      const { table, record, id, key } = checked;
+
+      res.status(200).json({ received: true, table, [key]: id });
+
+      const job = processRecord(table, record)
+        .then(result => console.log(`📥 ${table} ${id}: ${result}`))
+        .catch(error => console.error(`❌ ${table} ${id}: not saved: ${error.message}`))
+        .finally(() => pending.delete(job));
+      pending.add(job);
+    });
+
+  return router;
+}
+```
+
+<a id="b73"></a>
+### B.73 `servicenow-sync/src/processRecord.js`
+
+```js
+// =====================================================================
+// ONE RECORD, AFTER THE WEBHOOK HAS ANSWERED: saved in its table, then (a
+// ticket) put in its family, as OneTouch's own rules do it
+// (teams.placeTicket); an approval just tells OneTouch the data changed.
+// Anything that can't be done yet waits in servicenow_pending, and is tried
+// again as soon as what it names is saved, and every minute.
+// =====================================================================
+
+import { TABLES, tableSchema } from './config/schema.js';
+import { upsertRecord } from './db/upsertRecord.js';
+import { park, unpark, waiting, waitingFor } from './db/pending.js';
+import { linkedTickets } from './families.js';
+import { placeTicket, announceTicketsChanged } from '../../teams.mjs';
+
+const FOREIGN_KEY_VIOLATION = '23503';
+
+// -> what happened, for the log
+export async function processRecord(table, record) {
+  const { key } = tableSchema(table);
+  const id = String(record[key]);
+  let saved;
+  try {
+    saved = await upsertRecord(table, record);
+  } catch (error) {
+    // A task before its request, an approval before its ticket
+    if (error.code !== FOREIGN_KEY_VIOLATION) throw error;
+    await park(table, id, record, `waiting for what it belongs to (${error.constraint})`);
+    return 'waiting for what it belongs to';
+  }
+  await unpark(table, id);
+  if (saved === 'stale') return 'stale: an older update than the one saved';
+  let result = saved;
+  try {
+    if (TABLES[table]) {
+      const placed = await placeTicket(id, await linkedTickets(table, id));
+      result += placed.action === 'kept' ? `, in family ${placed.family}`
+        : `, ${placed.action} family ${placed.family} (team ${placed.team ?? 'none'})${placed.moved ? `; ${placed.moved} moved team` : ''}`;
+    } else {
+      await announceTicketsChanged(`${table}:${id}`);
+    }
+  } catch (error) {
+    // Saved, but OneTouch's database didn't take it: tried again, so it never stays family-less
+    await park(table, id, record, `saved, not yet in a family: ${error.message}`);
+    result += `, not yet in a family (${error.message}): waiting`;
+  }
+  retryWaitingFor(id);
+  return result;
+}
+
+// ---- Trying the waiting ones again ----
+
+// The ones waiting for this key, now it's saved (a request's tasks, a ticket's approvals)
+function retryWaitingFor(id) {
+  waitingFor(id).then(retry).catch(error => console.error(`⏳ Could not try what waits for ${id}:`, error.message));
+}
+
+// Every minute: all of them, one round at a time
+let round = null;
+export function retryWaitingSoon() {
+  if (round) return;
+  round = waiting().then(retry)
+    .catch(error => console.error('⏳ Could not try the waiting records:', error.message))
+    .finally(() => { round = null; });
+}
+
+async function retry(rows) {
+  for (const row of rows) {
+    if (!tableSchema(row.table_name)) continue;
+    try {
+      const result = await processRecord(row.table_name, row.record);
+      if (!result.startsWith('waiting')) console.log(`📥 ${row.table_name} ${row.record_key} (waited, ${row.tries}× tried): ${result}`);
+    } catch (error) {
+      await park(row.table_name, row.record_key, row.record, error.message).catch(() => {});
+    }
+  }
+}
+```
+
+<a id="b74"></a>
+### B.74 `servicenow-sync/src/db/upsertRecord.js`
+
+```js
+// =====================================================================
+// THE UPSERT: one record into its table, inserted or replaced by the
+// table's key (a ticket's number, an approval's approval_id) in a single
+// statement, safe with any number of deliveries at once. Only the columns
+// the record names are written, so a record that leaves one out never
+// blanks it.
+// =====================================================================
+
+import { analytics } from '../config/db.js';
+import { tableSchema } from '../config/schema.js';
+
+// Names come from the database's own schema (config/schema.js), quoted all the same
+const quote = name => `"${name.replace(/"/g, '""')}"`;
+
+// Empty text is stored as NULL, as the export has it; everything else as text
+const columnValue = value => (value === undefined || value === null || value === '' ? null : String(value));
+
+// table, record (column -> value, its key among them) -> 'inserted' | 'updated' | 'stale'
+export async function upsertRecord(table, record) {
+  const { key, updated, identityKey } = tableSchema(table);
+  const columns = Object.keys(record);
+  const others = columns.filter(c => c !== key);
+  const t = quote(table);
+  // An update older than the stored row (by "updated", where the table has
+  // it) changes nothing: async deliveries can arrive out of order
+  const newest = updated && columns.includes('updated')
+    ? `WHERE ${t}."updated" IS NULL OR EXCLUDED."updated" IS NULL OR EXCLUDED."updated" >= ${t}."updated"` : '';
+  const { rows } = await analytics.query(
+    `INSERT INTO ${t} (${columns.map(quote).join(', ')}) ${identityKey ? 'OVERRIDING SYSTEM VALUE' : ''} VALUES (${columns.map((_, i) => `$${i + 1}`).join(', ')})
+     ON CONFLICT (${quote(key)}) DO UPDATE SET ${(others.length ? others : [key]).map(c => `${quote(c)} = EXCLUDED.${quote(c)}`).join(', ')}
+     ${newest}
+     RETURNING (xmax = 0) AS inserted`,
+    columns.map(c => columnValue(record[c])));
+  if (!rows.length) return 'stale';
+  return rows[0].inserted ? 'inserted' : 'updated';
+}
+```
+
+<a id="b75"></a>
+### B.75 `servicenow-sync/src/db/pending.js`
+
+```js
+// =====================================================================
+// WAITING RECORDS (servicenow_pending, db/schema.sql): ones that can't be
+// saved yet. A catalog task before its request, an approval before its
+// ticket (the tables link them), or a ticket that couldn't be put in a
+// family. The newest version of each is kept, and tried again.
+// =====================================================================
+
+import { analytics } from '../config/db.js';
+
+export async function ensurePendingTable() {
+  await analytics.query(`
+    CREATE TABLE IF NOT EXISTS servicenow_pending (
+      id bigserial PRIMARY KEY, table_name text NOT NULL, record_key text NOT NULL, record jsonb NOT NULL,
+      reason text NOT NULL, tries integer NOT NULL DEFAULT 1,
+      received_at timestamptz NOT NULL DEFAULT now(), last_tried_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE (table_name, record_key))`);
+}
+
+export async function park(table, key, record, reason) {
+  await analytics.query(
+    `INSERT INTO servicenow_pending (table_name, record_key, record, reason) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (table_name, record_key) DO UPDATE
+        SET record = EXCLUDED.record, reason = EXCLUDED.reason, tries = servicenow_pending.tries + 1, last_tried_at = now()`,
+    [table, String(key), JSON.stringify(record), reason]);
+}
+
+// Saved after all (or a newer version was): it waits no more
+export async function unpark(table, key) {
+  await analytics.query('DELETE FROM servicenow_pending WHERE table_name = $1 AND record_key = $2', [table, String(key)]);
+}
+
+// The ones that name this key anywhere (a task's request_item, an approval's
+// parent): it has just been saved, so they may be saved now too
+export async function waitingFor(key, limit = 200) {
+  const { rows } = await analytics.query(
+    `SELECT table_name, record_key, record, tries FROM servicenow_pending
+      WHERE EXISTS (SELECT 1 FROM jsonb_each_text(record) e WHERE upper(e.value) = upper($1))
+        AND record_key <> $1 ORDER BY id LIMIT $2`, [String(key), limit]);
+  return rows;
+}
+
+// Every minute: the oldest waiting first, not the ones just tried
+export async function waiting(limit = 200) {
+  const { rows } = await analytics.query(
+    `SELECT table_name, record_key, record, tries FROM servicenow_pending
+      WHERE last_tried_at < now() - interval '2 seconds' ORDER BY id LIMIT $1`, [limit]);
+  return rows;
+}
+```
+
+<a id="b76"></a>
+### B.76 `servicenow-sync/src/families.js`
+
+```js
+// =====================================================================
+// FAMILIES: which tickets a new one is linked to, by the same link columns
+// OneTouch built every family from (LINKS in ../../teams.mjs): a parent
+// incident, a problem, the change that caused it, a change's incident, a
+// request's order and bundle, a task's request. Both ways: what it points
+// at, what points at it (a child that arrived before its parent), and the
+// tickets sharing its problem or order. teams.placeTicket then puts it in
+// their family, and so on their team, as the first start would have.
+// =====================================================================
+
+import { analytics } from './config/db.js';
+import { LINKS } from '../../teams.mjs';
+
+// These name something several tickets share, not another ticket
+const SHARED = new Set(['problem', 'request']);
+// "zzz" is the export's placeholder for "none"
+const clean = value => {
+  const v = String(value ?? '').trim();
+  return v && v !== 'zzz' ? v : '';
+};
+const quote = name => `"${name}"`;
+
+// table, number -> the ticket numbers it's linked to (read from the data,
+// after the upsert, so links saved by an earlier delivery count too)
+export async function linkedTickets(table, number) {
+  const links = LINKS[table];
+  if (!links) return [];
+  const { rows: [row] } = await analytics.query(`SELECT ${links.map(quote).join(', ')} FROM ${quote(table)} WHERE number = $1`, [number]);
+  if (!row) return [];
+  const found = new Set();
+  const asked = [];
+  for (const link of links) {
+    const value = clean(row[link]);
+    if (!value) continue;
+    if (!SHARED.has(link)) found.add(value.toUpperCase());
+    // Every ticket with the same problem, or in the same order
+    else for (const [t, cols] of Object.entries(LINKS)) if (cols.includes(link)) asked.push([t, link, value]);
+  }
+  // Every ticket that points at this one
+  for (const [t, cols] of Object.entries(LINKS)) for (const c of cols) if (!SHARED.has(c)) asked.push([t, c, number]);
+  const answers = await Promise.all(asked.map(([t, c, value]) =>
+    analytics.query(`SELECT number FROM ${quote(t)} WHERE ${quote(c)} = $1`, [value])));
+  for (const { rows } of answers) for (const r of rows) found.add(String(r.number).toUpperCase());
+  found.delete(number);
+  return [...found];
+}
+```
+
+<a id="b77"></a>
+### B.77 `servicenow-sync/servicenow-blueprint.md`
+
+````markdown
+# ServiceNow blueprint: sending tickets to OneTouch
+
+What to set up in the ServiceNow instance, once there's access, so that every
+insert and update of an incident, change, requested item, catalog task and
+approval reaches OneTouch the way the original export did:
+
+- **The same tables and columns.** Each record goes into the table the export
+  was loaded into (`incident`, `change_request`, `sc_req_item`, `sc_task`,
+  `change_approvals`, `ritm_approvals`), under that table's own column names,
+  written the way the export writes them: a person or group by name, a choice
+  by its label, a linked ticket by its number.
+- **The same families and teams.** A new ticket joins the family of whatever
+  it's linked to, and so that family's team. A ticket linked to nothing gets
+  a family of its own on the team with the fewest tickets. It arrives
+  unassigned, for that team's project manager to hand out. See "What happens
+  to a ticket" below.
+
+The pieces: a system property holding the shared secret, one outbound REST
+Message, one Script Include that turns a record into the export's columns,
+and one async Business Rule per table.
+
+## 1. The shared secret (System Property)
+
+**System Properties > System Properties > New** (`sys_properties.list`):
+
+| Field | Value |
+| --- | --- |
+| Name | `x_onetouch.webhook_secret` |
+| Type | string |
+| Value | the same long random value as `WEBHOOK_SECRET` in the listener's `.env` |
+| Read roles | `admin` |
+| Write roles | `admin` |
+
+## 2. The outbound REST Message
+
+**System Web Services > Outbound > REST Message > New**:
+
+| Field | Value |
+| --- | --- |
+| Name | `OneTouch Webhook` |
+| Endpoint | `https://<listener-host>/api/v1/servicenow-webhook` |
+| Authentication type | No authentication (the token header does it) |
+
+On its **HTTP Methods** tab, open the default method (or add one):
+
+| Field | Value |
+| --- | --- |
+| Name | `post` |
+| HTTP method | POST |
+| HTTP Request headers | `Content-Type: application/json` |
+| Content | `${payload}` |
+
+Add one **Variable Substitution**: `payload` (test value below). The Script
+Include fills it with the whole JSON body, already escaped, through
+`setStringParameterNoEscape`.
+
+### The outbound JSON payload
+
+One record per call: the table, and the record under that table's column
+names. The key must be there: a ticket's `number`, an approval's `approval_id`.
+
+```json
+{
+  "table": "incident",
+  "record": {
+    "number": "INC1900001",
+    "created": "2026-11-02 14:03:11",
+    "short_description": "Printer offline on the packaging line",
+    "state": "New",
+    "priority": "P3 - Average",
+    "assignment_group": "TCS-EUS-Remote-Support",
+    "parent_incident": null,
+    "problem": null,
+    "caused_by_change": null,
+    "updated": "2026-11-02 14:03:11"
+  }
+}
+```
+
+A column that's left out keeps what it had; one sent empty (`""` or `null`) is
+emptied. A column the table doesn't have is refused (400), so a mapping
+mistake shows up the first time it's tried.
+
+## 3. The Script Include: a record as the export's columns
+
+**System Definition > Script Includes > New**: Name `OneTouchWebhook`,
+Accessible from: This application scope only, Active.
+
+Each table's map says, for each export column, which ServiceNow field fills it
+and how:
+
+- `display`: what people see: a person's or group's name, a choice's label, a
+  linked ticket's number. The export holds these.
+- `value`: the stored value (numbers, true/false).
+- `date`: the stored UTC time, `yyyy-MM-dd HH:mm:ss`.
+- `journal`: the latest entry of a journal field (work notes).
+
+Fields marked **check** don't have a standard ServiceNow field, or the export
+used a custom one (`u_…`): fill in your instance's field name, or leave them
+out (the column is then left as it is). The export's other custom columns
+(`brewery`, `sap_impact`, `breach_reason`, …) can be added the same way.
+
+```javascript
+var OneTouchWebhook = Class.create();
+OneTouchWebhook.prototype = {
+    initialize: function () {},
+
+    // export column: [ServiceNow field (dot-walking allowed), how]
+    MAPS: {
+        incident: {
+            number: ['number', 'value'],
+            created: ['sys_created_on', 'date'],
+            short_description: ['short_description', 'value'],
+            description: ['description', 'value'],
+            affected_user: ['caller_id', 'display'],
+            assignment_group: ['assignment_group', 'display'],
+            assigned_to: ['assigned_to', 'display'],
+            problem: ['problem_id', 'display'],             // family link: a problem
+            state: ['state', 'display'],
+            parent_incident: ['parent_incident', 'display'], // family link: parent incident
+            priority: ['priority', 'display'],
+            impact: ['impact', 'display'],
+            urgency: ['urgency', 'display'],
+            category: ['category', 'display'],
+            subcategory: ['subcategory', 'display'],
+            updated: ['sys_updated_on', 'date'],
+            configuration_item: ['cmdb_ci', 'display'],
+            contact_type: ['contact_type', 'display'],
+            reassignment_count: ['reassignment_count', 'value'],
+            reopen_count: ['reopen_count', 'value'],
+            close_code: ['close_code', 'display'],
+            close_notes: ['close_notes', 'value'],
+            caused_by_change: ['caused_by', 'display'],      // family link: the change that caused it
+            resolved: ['resolved_at', 'date'],
+            closed: ['closed_at', 'date'],
+            location: ['location', 'display'],
+            on_hold_reason: ['hold_reason', 'display'],
+            work_notes: ['work_notes', 'journal']
+            // check: was_p1, opened_by_group, cause_code, cause_sub_code, business_impact_outage, ...
+        },
+        change_request: {
+            number: ['number', 'value'],
+            type: ['type', 'display'],
+            created: ['sys_created_on', 'date'],
+            short_description: ['short_description', 'value'],
+            description: ['description', 'value'],
+            configuration_item: ['cmdb_ci', 'display'],
+            owner_group: ['assignment_group', 'display'],    // check: the export's owning group
+            state: ['state', 'display'],
+            approval: ['approval', 'display'],
+            close_code: ['close_code', 'display'],
+            risk: ['risk', 'display'],
+            requested_by: ['requested_by', 'display'],
+            planned_start_date: ['start_date', 'date'],
+            planned_end_date: ['end_date', 'date'],
+            change_plan: ['implementation_plan', 'value'],
+            backout_plan: ['backout_plan', 'value'],
+            verification_plan: ['test_plan', 'value'],
+            purpose_of_change: ['justification', 'value'],
+            work_notes: ['work_notes', 'journal']
+            // check, and family links: incident (the incident it fixes), problem
+            // check: outage, failure_code, environment, sub_type, ...
+        },
+        sc_req_item: {
+            number: ['number', 'value'],
+            item: ['cat_item', 'display'],
+            description: ['description', 'value'],
+            short_description: ['short_description', 'value'],
+            opened: ['opened_at', 'date'],
+            updated: ['sys_updated_on', 'date'],
+            closed: ['closed_at', 'date'],
+            stage: ['stage', 'display'],
+            state: ['state', 'display'],
+            parent: ['parent', 'display'],                   // family link: bundle request
+            request: ['request', 'display'],                 // family link: the order (REQ)
+            requested_for: ['requested_for', 'display'],
+            opened_by: ['opened_by', 'display'],
+            approval: ['approval', 'display'],
+            approval_set: ['approval_set', 'date'],
+            location: ['location', 'display'],
+            order_guide: ['order_guide', 'display'],
+            work_notes: ['work_notes', 'journal']
+        },
+        sc_task: {
+            number: ['number', 'value'],
+            item: ['request_item.cat_item', 'display'],
+            state: ['state', 'display'],
+            short_description: ['short_description', 'value'],
+            description: ['description', 'value'],
+            assignment_group: ['assignment_group', 'display'],
+            assigned_to: ['assigned_to', 'display'],
+            parent: ['parent', 'display'],
+            opened_by: ['opened_by', 'display'],
+            approval: ['approval', 'display'],
+            approval_set: ['approval_set', 'date'],
+            request: ['request', 'display'],
+            request_item: ['request_item', 'display'],       // family link: its request
+            created: ['sys_created_on', 'date'],
+            updated: ['sys_updated_on', 'date'],
+            active: ['active', 'value'],
+            work_notes: ['work_notes', 'journal']
+            // check: sla_flag (the export's "SLA breached" flag)
+        },
+        // sysapproval_approver records, split by what they approve
+        approvals: {
+            task_type: ['sysapproval.sys_class_name', 'display'],
+            parent: ['sysapproval', 'display'],              // the change or request it approves
+            assignment_group: ['group.assignment_group', 'display'],
+            short_description: ['sysapproval.short_description', 'value'],
+            created: ['sys_created_on', 'date'],
+            approval: ['sysapproval.approval', 'display'],
+            state: ['state', 'display']
+        }
+    },
+
+    read: function (gr, field, how) {
+        var el = gr.getElement(field);
+        if (!el || el.nil()) return null;
+        if (how === 'display') return el.getDisplayValue();
+        if (how === 'journal') return el.getJournalEntry(1);
+        return el.toString(); // 'value' and 'date' (stored UTC)
+    },
+
+    // table: incident, change_request, sc_req_item, sc_task, or 'approvals'
+    send: function (table, gr) {
+        try {
+            var secret = gs.getProperty('x_onetouch.webhook_secret');
+            if (!secret) {
+                gs.error('OneTouch webhook: x_onetouch.webhook_secret is not set; ' + gr.getDisplayValue() + ' not sent');
+                return;
+            }
+            var record = {};
+            if (table === 'approvals') {
+                // Only approvals of changes and requested items have a table in OneTouch
+                var of = gr.sysapproval.sys_class_name + '';
+                if (of !== 'change_request' && of !== 'sc_req_item') return;
+                table = of === 'change_request' ? 'change_approvals' : 'ritm_approvals';
+                // approval_id is a whole number in OneTouch: the sys_id's first 13
+                // hex digits, the same every time for the same approval
+                record.approval_id = String(parseInt(gr.getUniqueValue().substring(0, 13), 16));
+                if (table === 'change_approvals') record.work_notes = this.read(gr, 'comments', 'journal');
+            }
+            var map = this.MAPS[table === 'change_approvals' || table === 'ritm_approvals' ? 'approvals' : table];
+            for (var column in map) record[column] = this.read(gr, map[column][0], map[column][1]);
+
+            var request = new sn_ws.RESTMessageV2('OneTouch Webhook', 'post');
+            request.setRequestHeader('X-Webhook-Token', secret);
+            request.setHttpTimeout(30000);
+            request.setStringParameterNoEscape('payload', JSON.stringify({ table: table, record: record }));
+            // Queued on the instance and sent from there; nothing waits for it
+            request.executeAsync();
+        } catch (ex) {
+            gs.error('OneTouch webhook: could not send ' + gr.getDisplayValue() + ': ' + ex.message);
+        }
+    },
+
+    type: 'OneTouchWebhook'
+};
+```
+
+## 4. The async Business Rules, one per table
+
+**System Definition > Business Rules > New**, five times:
+
+| Name | Table | Script line |
+| --- | --- | --- |
+| `OneTouch: send incident` | Incident `[incident]` | `new OneTouchWebhook().send('incident', current);` |
+| `OneTouch: send change` | Change Request `[change_request]` | `new OneTouchWebhook().send('change_request', current);` |
+| `OneTouch: send requested item` | Requested Item `[sc_req_item]` | `new OneTouchWebhook().send('sc_req_item', current);` |
+| `OneTouch: send catalog task` | Catalog Task `[sc_task]` | `new OneTouchWebhook().send('sc_task', current);` |
+| `OneTouch: send approval` | Approval `[sysapproval_approver]` | `new OneTouchWebhook().send('approvals', current);` |
+
+For each: Advanced ticked, **When: async**, Insert and Update ticked, Order
+1000. On the Advanced tab:
+
+```javascript
+(function executeRule(current, previous /* null when async */) {
+    new OneTouchWebhook().send('incident', current);   // the table, as in the list above
+})(current, previous);
+```
+
+**async** runs after the record is saved, on a scheduler worker, so nobody
+saving a ticket waits for the call. Async rules can run in any order (a
+catalog task's before its request's). The listener keeps a record that
+arrives before the one it belongs to, and saves it once that one arrives.
+
+## What happens to a ticket
+
+| It arrives… | It goes |
+| --- | --- |
+| linked to tickets in one family (its parent incident, problem, the change that caused it, the incident a change fixes, its order or bundle, a task's request), either way | into that family, on that family's team |
+| linked to tickets in two or more families | they merge into the biggest, which keeps its id and team; the others' tickets join it, and any that change team that way become unassigned, and that team's project manager is told under the 🔔 |
+| linked to nothing (or only to tickets OneTouch doesn't have) | into a family of its own, on the real team (not a test team) with the fewest tickets |
+| again (an update) | stays where it is; a new link can still merge families, but a link that goes away never splits one |
+
+New tickets arrive **unassigned**: they show in the team's "Not assigned yet"
+and in an admin's 📥 Not assigned yet, for the project manager to hand out.
+Who can see them follows at once; OneTouch re-reads its KPIs, sorting,
+families and charts about 15 seconds later.
+
+## What the listener answers
+
+| Answer | When |
+| --- | --- |
+| `200 {"received": true, "table": "…", "number": "…"}` | Accepted. Saving and the family run straight after; the outcome is in the listener's log. |
+| `401 {"error": "Unauthorized"}` | `X-Webhook-Token` missing or wrong. |
+| `400` | Not `{ table, record }`; a table or column that doesn't exist; a key that isn't a ticket number of that table (`INC` + 7 digits for an incident) or a whole number (approvals); a value that isn't text, a number, true/false or null; or not valid JSON. |
+| `413` | The body is over 1 MB. |
+
+The listener answers before it writes, so ServiceNow never waits on it. A
+failed write shows up in the listener's log, not in ServiceNow's outbound HTTP
+log. Older updates (by `updated`, on the tables that have it) never replace
+newer ones.
+
+## Trying it before ServiceNow is connected
+
+With the listener running (`npm start`):
+
+```bash
+curl -i -X POST http://localhost:8090/api/v1/servicenow-webhook \
+  -H "Content-Type: application/json" \
+  -H "X-Webhook-Token: $WEBHOOK_SECRET" \
+  -d '{"table":"incident","record":{"number":"INC1900001","created":"2026-11-02 14:03:11","short_description":"Printer offline","state":"New","priority":"P3 - Average","updated":"2026-11-02 14:03:11"}}'
+```
+
+## Checklist for go-live
+
+- [ ] `db/schema.sql` run on analytics_db (or the listener allowed to make `servicenow_pending`)
+- [ ] An account for the listener with SELECT, INSERT and UPDATE on the six tables
+- [ ] `.env` filled in on the listener's server (never committed)
+- [ ] The listener reachable from ServiceNow over HTTPS (ServiceNow's cloud
+      can't reach `localhost`; use a public host or a tunnel, and a MID Server
+      only if the endpoint is on a private network)
+- [ ] The system property, REST Message, Script Include and five Business
+      Rules created, with the same secret on both sides
+- [ ] The **check** fields filled in for your instance
+- [ ] Times: the map sends UTC. If the export's times were in another time
+      zone, send `getDisplayValue()` in that zone instead, so new and old
+      tickets compare correctly in the KPIs
+- [ ] One ticket saved in ServiceNow and seen in OneTouch, in the right family
+````
+
+<a id="b78"></a>
+### B.78 `checks/ticket-order.mjs`
+
+```js
+// Assigned to me's order, checked against tickets made up here (no Cube, no
+// database, no API key): most urgent first, a change's risk standing in for
+// a priority, requests and tasks last, and the oldest first within each.
+//
+//   npm test        (CI runs it on every push)
+//
+// Exits non-zero on the first wrong answer.
+
+import { ticketsByPriority, sortRows } from '../tickets.mjs';
+
+// cube -> its rows, with the columns tickets.mjs asks for
+const DATA = {
+  incident: [
+    { number: 'INC0000001', priority: 'P3 - Moderate', state: 'In Progress', created: '2026-07-10' },
+    { number: 'INC0000002', priority: 'P1 - Critical', state: 'New', created: '2026-08-01' },
+    { number: 'INC0000003', priority: 'P1 - Critical', state: 'Closed', created: '2026-07-05' },
+    { number: 'INC0000004', priority: 'P4 - Low', state: 'New', created: '2026-07-12' },
+  ],
+  change_request: [
+    { number: 'CHG0000001', risk: 'High', state: 'Pending', created: '2026-07-20' },
+    { number: 'CHG0000002', risk: 'Low', state: 'Closed', created: '2026-07-15' },
+  ],
+  sc_req_item: [
+    { number: 'RITM0000001', state: 'Open', opened: '2026-07-01' },
+  ],
+  sc_task: [
+    { number: 'SCTASK0000001', state: 'Closed', created: '2026-07-02' },
+  ],
+};
+
+// Stands in for req.runQuery: answers the number filter tickets.mjs sends,
+// with Cube's "cube.column" keys
+async function runQuery({ filters }) {
+  const [cube] = filters[0].member.split('.');
+  const wanted = new Set(filters[0].values);
+  return DATA[cube]
+    .filter(row => wanted.has(row.number))
+    .map(row => Object.fromEntries(Object.entries(row).map(([k, v]) => [`${cube}.${k}`, v])));
+}
+runQuery.scopeKey = 'check';
+
+let failed = 0;
+function expect(label, got, want) {
+  const ok = JSON.stringify(got) === JSON.stringify(want);
+  if (ok) console.log(`PASS: ${label}`);
+  else { console.error(`FAIL: ${label}\n  expected ${JSON.stringify(want)}\n  got      ${JSON.stringify(got)}`); failed++; }
+}
+
+const numbers = Object.values(DATA).flat().map(r => r.number);
+const sorted = await ticketsByPriority(numbers, runQuery);
+
+expect('Assigned to me: P1s (oldest first), High-risk change, P3, P4 and Low risk, then requests and tasks',
+  sorted.map(t => t.number),
+  ['INC0000003', 'INC0000002', 'CHG0000001', 'INC0000001', 'INC0000004', 'CHG0000002', 'RITM0000001', 'SCTASK0000001']);
+
+expect('Assigned to me: 5 of the 8 are open',
+  sorted.filter(t => t.open).length, 5);
+
+expect('a column sorts P2 before P10, and blanks come last',
+  sortRows(['P10', '', 'P2', null, 'P1'], v => v),
+  ['P1', 'P2', 'P10', '', null]);
+
+expect('blanks still come last sorted the other way',
+  sortRows(['P10', '', 'P2', null, 'P1'], v => v, 'desc'),
+  ['P10', 'P2', 'P1', '', null]);
+
+if (failed) {
+  console.error(`\n${failed} check(s) failed.`);
+  process.exit(1);
+}
+console.log('\nAll checks passed.');
+```
+
+<a id="b79"></a>
+### B.79 `.github/workflows/ci.yml`
+
+```yaml
+name: CI
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # Rung 1: it builds. Rung 3: it is right (npm test: Assigned to me's order
+  # against made-up tickets, checks/ticket-order.mjs)
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+  # Rung 2: it is alive. onetouch.fyi is served from Ventura's computer through
+  # the Cloudflare tunnel, so this fails whenever that computer or tunnel is off
+  smoke:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: The URL responds and it is ours
+        run: |
+          URL="https://onetouch.fyi"
+          BODY=$(curl -fsS --max-time 20 "$URL")
+          echo "$BODY" | grep -q "Sign in to OneTouch" \
+            || { echo "::error::The URL responded but the page is not our app."; exit 1; }
+          echo "Alive, and it is ours."
 ```
 
 ## Appendix C: images
@@ -21417,6 +27906,7 @@ Make or download an image with the same name and size (step 14). The SHA-256 let
 |---|---|
 | `README.md` | this file |
 | `package-lock.json` | written by `npm install`; the versions it pins are in the table above |
+| `servicenow-sync/package-lock.json` | written by `npm install` in `servicenow-sync/` |
 | `db/accounts.json` | everyone's usernames and password hashes; make your own accounts instead (step 16) |
 
 <!-- END GENERATED -->

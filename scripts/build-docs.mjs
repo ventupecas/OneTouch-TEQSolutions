@@ -37,12 +37,22 @@ const FILES = [
   'seen.mjs', 'relations.mjs',
   'prefs.mjs', 'charts.mjs', 'public/charts.js', 'public/customize.js', 'shares.mjs', 'public/families.js',
   'scripts/signin-links.mjs', 'chats.mjs', 'teams.mjs', 'public/teams.js', 'CLAUDE.md',
+  'notifications.mjs', 'public/notifications.js', 'kpis.mjs', 'public/sorting.js', 'public/picker.js',
+  'public/lookup.js', 'mail.mjs', 'scripts/mail-test.mjs', 'db/demo-tickets.sql', 'db/demo-tickets-remove.sql',
+  'servicenow-sync/package.json', 'servicenow-sync/.env.example', 'servicenow-sync/db/schema.sql',
+  'servicenow-sync/src/app.js', 'servicenow-sync/src/config/db.js', 'servicenow-sync/src/config/schema.js',
+  'servicenow-sync/src/middleware/verifyToken.js', 'servicenow-sync/src/routes/webhook.js',
+  'servicenow-sync/src/processRecord.js', 'servicenow-sync/src/db/upsertRecord.js',
+  'servicenow-sync/src/db/pending.js', 'servicenow-sync/src/families.js',
+  'servicenow-sync/servicenow-blueprint.md',
+  'checks/ticket-order.mjs', '.github/workflows/ci.yml',
 ];
 
 // Not copied in, and why (shown in the appendix)
 const SKIPPED = {
   'README.md': 'this file',
   'package-lock.json': 'written by `npm install`; the versions it pins are in the table above',
+  'servicenow-sync/package-lock.json': 'written by `npm install` in `servicenow-sync/`',
   'db/accounts.json': "everyone's usernames and password hashes; make your own accounts instead (step 16)",
 };
 
