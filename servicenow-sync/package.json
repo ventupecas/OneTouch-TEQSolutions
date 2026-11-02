@@ -1,0 +1,19 @@
+{
+  "name": "servicenow-sync",
+  "version": "1.0.0",
+  "description": "Receives ServiceNow records through an outbound REST webhook and upserts them into PostgreSQL.",
+  "type": "module",
+  "main": "src/app.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node --env-file=.env src/app.js",
+    "dev": "node --env-file=.env --watch src/app.js",
+    "db:schema": "psql -f db/schema.sql"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "pg": "^8.16.3"
+  }
+}

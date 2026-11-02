@@ -454,6 +454,12 @@ async function buildFamilyList(kind, runQuery) {
 
 // One set of lists per set of tickets someone may see (runQuery.scopeKey, teams.mjs)
 const familyLists = new Map();
+
+// Tickets arrived or changed (servicenow-sync/): links and lists are worked out again
+export function forgetLinks() {
+  linkCache.clear();
+  familyLists.clear();
+}
 const FAMILY_LISTS_KEPT = 600;
 export function familyList(kind, runQuery) {
   const key = `${runQuery.scopeKey ?? ''}|${kind}`;

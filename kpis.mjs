@@ -69,6 +69,14 @@ export function load(runCubeQuery) {
   return loading;
 }
 
+// Tickets arrived or changed (servicenow-sync/): read again; the old data
+// serves until the new is ready
+export async function reload(runCubeQuery) {
+  const fresh = await readAll(runCubeQuery);
+  data = fresh;
+  loading = Promise.resolve(fresh);
+}
+
 async function readAll(runCubeQuery) {
   const tickets = new Map();
   for (const [kind, { cube, fields }] of Object.entries(SOURCES)) {

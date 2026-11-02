@@ -74,7 +74,9 @@ export function emailFor(n, cfg = mailConfig()) {
       : `${who} gave you ${count === 1 ? n.numbers[0] : `${many(count)} tickets`}${on}`;
     where = 'They\'re in Assigned to me on your OneTouch Home page.';
   } else if (n.kind === 'family') {
-    what = count === 1 ? `${who} moved ${n.numbers[0]} to ${d.team}` : `${who} moved a family of ${many(count)} linked tickets to ${d.team}`;
+    what = d.source === 'servicenow'
+      ? `A new link from ServiceNow brought ${count === 1 ? n.numbers[0] : `${many(count)} linked tickets`} into a family on ${d.team}`
+      : count === 1 ? `${who} moved ${n.numbers[0]} to ${d.team}` : `${who} moved a family of ${many(count)} linked tickets to ${d.team}`;
     where = `${count === 1 ? 'It isn\'t' : 'They aren\'t'} assigned to anyone yet: hand ${count === 1 ? 'it' : 'them'} out on the Team tab.`;
   } else if (n.kind === 'report') {
     what = `${who} says they ${d.status} ${n.numbers[0]}`;

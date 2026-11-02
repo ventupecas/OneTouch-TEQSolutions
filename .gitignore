@@ -22,6 +22,8 @@ csv_data/
 !load_csv.sql
 # ...and the reporting views Metabase uses
 !db/*.sql
+# ...and the ServiceNow sync's table (servicenow-sync/)
+!servicenow-sync/db/*.sql
 
 # Metabase dashboard links differ per machine (scripts/metabase-setup.mjs writes them)
 metabase-dashboards.json

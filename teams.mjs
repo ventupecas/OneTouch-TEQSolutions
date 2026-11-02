@@ -64,7 +64,8 @@ const SCOPED_CUBES = {
 };
 // The link columns that join tickets into families (the same ones as
 // relations.mjs). A problem record isn't a ticket, so it's marked PRB:.
-const LINKS = {
+// servicenow-sync/ links each new ticket by these too (placeTicket).
+export const LINKS = {
   incident: ['parent_incident', 'problem', 'caused_by_change'],
   change_request: ['incident', 'problem'],
   sc_req_item: ['request', 'parent'],
@@ -812,6 +813,104 @@ export async function moveFamily(scope, familyId, teamId) {
     client.release();
   }
 }
+
+// ---------------------------------------------------------------------
+// NEW TICKETS FROM SERVICENOW (servicenow-sync/, after it saves the ticket
+// in the data). The first start's rules, one ticket at a time: a ticket
+// linked to others joins their family, and so their team; one linked to
+// nothing gets a family of its own on the real team with the fewest
+// tickets. It arrives unassigned, for the project manager to hand out. A
+// ticket that links two families merges them into the bigger one, keeping
+// its id and team (no family is ever split between teams); tickets that
+// change team that way become unassigned, and that team's project manager
+// is told, as when an admin moves a family. Families only grow: a link that
+// goes away never splits one.
+// ---------------------------------------------------------------------
+
+// Postgres channel (onetouch_auth): a ticket arrived or changed, so OneTouch
+// reads again what it read at start (server.mjs)
+export const TICKETS_CHANGED = 'onetouch_tickets_changed';
+
+export async function announceTicketsChanged(note = '', db = pool) {
+  await db.query('SELECT pg_notify($1, $2)', [TICKETS_CHANGED, String(note).slice(0, 200)]);
+}
+
+// number: the ticket that arrived; linked: the tickets it's linked to, either
+// way (servicenow-sync works them out from the data, by LINKS)
+// -> { family, team, action: 'new' | 'joined' | 'merged' | 'kept', moved }
+export async function placeTicket(number, linked = []) {
+  const n = String(number || '').toUpperCase().trim();
+  if (!TICKET.test(n)) throw new Error(`${number} isn't a ticket number`);
+  const numbers = [...new Set([n, ...linked.map(x => String(x).toUpperCase().trim()).filter(x => TICKET.test(x))])];
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // One placement at a time, so two linked tickets arriving together end up in one family
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['onetouch:placeTicket']);
+    const { rows: [mine] } = await client.query('SELECT family_id FROM ticket_assignments WHERE number = $1', [n]);
+    // Every family it touches (its own, if it has one), biggest first
+    const { rows: families } = await client.query(
+      `SELECT DISTINCT f.id, f.team_id, f.size FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id
+        WHERE a.number = ANY($1::text[])`, [numbers]);
+    families.sort((a, b) => (b.size - a.size) || a.id.localeCompare(b.id));
+
+    let family, team, action, moved = [];
+    if (!families.length) {
+      // Linked to nothing: a family of its own, on the real team with the fewest tickets
+      const { rows: [smallest] } = await client.query(
+        `SELECT t.id FROM teams t LEFT JOIN ticket_families f ON f.team_id = t.id
+          WHERE NOT t.is_test GROUP BY t.id ORDER BY coalesce(sum(f.size), 0), t.id LIMIT 1`);
+      family = n;
+      team = smallest?.id ?? null;
+      action = 'new';
+      await client.query('INSERT INTO ticket_families (id, team_id, size) VALUES ($1, $2, 0)', [family, team]);
+    } else {
+      ({ id: family, team_id: team } = families[0]);
+      const others = families.slice(1).map(f => f.id);
+      if (others.length) {
+        // Merged into the biggest: tickets changing team become nobody's
+        const { rows } = await client.query(
+          `UPDATE ticket_assignments a SET family_id = $1,
+                  assignee_id = CASE WHEN f.team_id IS NOT DISTINCT FROM $2::int THEN a.assignee_id END,
+                  assigned_at = CASE WHEN f.team_id IS NOT DISTINCT FROM $2::int THEN a.assigned_at END,
+                  assigned_by = CASE WHEN f.team_id IS NOT DISTINCT FROM $2::int THEN a.assigned_by END
+             FROM ticket_families f
+            WHERE f.id = a.family_id AND a.family_id = ANY($3::text[])
+        RETURNING a.number, f.team_id IS DISTINCT FROM $2::int AS changed_team`, [family, team, others]);
+        moved = rows.filter(r => r.changed_team).map(r => r.number).sort();
+        await client.query('DELETE FROM ticket_families WHERE id = ANY($1::text[])', [others]);
+        action = 'merged';
+      } else {
+        action = mine ? 'kept' : 'joined';
+      }
+    }
+    if (!mine) await client.query('INSERT INTO ticket_assignments (number, family_id) VALUES ($1, $2)', [n, family]);
+    await client.query('UPDATE ticket_families SET size = (SELECT count(*) FROM ticket_assignments WHERE family_id = $1) WHERE id = $1', [family]);
+
+    if (moved.length && team !== null) {
+      const { rows: managers } = await client.query(
+        `SELECT m.user_id, t.name FROM team_members m JOIN teams t ON t.id = m.team_id WHERE m.team_id = $1 AND m.role = 'project_manager'`, [team]);
+      if (managers.length) {
+        await notify(client, managers.map(m => m.user_id), {
+          kind: 'family', numbers: moved,
+          detail: { count: moved.length, team: managers[0].name, family, source: 'servicenow' },
+        });
+      }
+    }
+    await announceTicketsChanged(n, client);
+    await client.query('COMMIT');
+    changed();
+    return { family, team, action, moved: moved.length };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// Someone's access, sorting and the like, read again (server.mjs, when tickets change)
+export const dataChanged = () => changed();
 
 // Puts someone on a team with a role, changes their role, or (teamId null)
 // takes them off their team, and with it their role (admins only). Leaving a

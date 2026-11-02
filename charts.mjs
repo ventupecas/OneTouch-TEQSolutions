@@ -166,6 +166,11 @@ export function sanitizeScope(input) {
 const CACHE_SIZE = 400;
 const cache = new Map();
 
+// Tickets arrived or changed (servicenow-sync/): every chart is counted again
+export function forgetResults() {
+  cache.clear();
+}
+
 async function cached(runQuery, name, work) {
   const key = `${runQuery.scopeKey ?? ''}|${name}`;
   if (cache.has(key)) {

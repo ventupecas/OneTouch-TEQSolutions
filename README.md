@@ -778,6 +778,17 @@ On the first start the server sets the teams up by itself (`teams.mjs`): familie
 whichever team has the fewest tickets so far, and each ticket goes to a random member of its
 team. Which role should work which kinds of tickets is being worked out in `CLAUDE.md`.
 
+**New tickets from ServiceNow** (ready, waiting for access to an instance) follow the same
+rules. A listener of its own, `servicenow-sync/` (`npm start` there, settings in its
+`.env.example`), takes each record ServiceNow sends and saves it in the same table and
+columns as the export. A new ticket joins the family of whatever it's linked to, and so that
+family's team; one linked to nothing gets a family of its own on the team with the fewest
+tickets. It arrives unassigned, in the team's "Not assigned yet". A ticket that links two
+families merges them into the bigger one; tickets that change team that way become
+unassigned, and that team's project manager is told. OneTouch picks the new tickets up by
+itself: who sees them at once, KPIs, sorting and charts about 15 seconds later. What to set
+up in ServiceNow is in `servicenow-sync/servicenow-blueprint.md`.
+
 ### Accounts
 
 Accounts live in the server's own Postgres database (`onetouch_auth`). Manage them on the server:

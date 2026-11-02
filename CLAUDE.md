@@ -167,6 +167,27 @@ is ever split between two teams. Moving a ticket to another team moves its
 whole group, and those tickets become unassigned until the new team's project
 manager hands them out.
 
+**New tickets from ServiceNow** (`servicenow-sync/`, its own process; not
+connected to ServiceNow yet). ServiceNow's async Business Rules post
+`{ table, record }` to `POST /api/v1/servicenow-webhook` (`X-Webhook-Token`).
+The record goes into the export's own table (analytics_db: `incident`,
+`change_request`, `sc_req_item`, `sc_task`, `change_approvals`,
+`ritm_approvals`) under its column names, upserted by the table's key; the
+columns and keys are read from the database at start, never listed in the
+code. Older updates (by `updated`) never replace newer ones. A task before
+its request, or an approval before its ticket, waits in `servicenow_pending`
+and is saved as soon as that arrives. Each ticket is then placed by
+`teams.placeTicket`, with the same `LINKS` as the first start, followed both
+ways: linked tickets' family (and team), or a family of its own on the real
+team with the fewest tickets; it arrives unassigned. A ticket linking two
+families merges them into the biggest (it keeps its id and team; ties: the
+lower id); tickets changing team become unassigned and that team's project
+manager is told ('family' notification, `detail.source: 'servicenow'`).
+Families never split. `placeTicket` signals `onetouch_tickets_changed` in
+onetouch_auth; `server.mjs` listens, re-reads scopes at once and, 15 s later
+(Cube's cache), KPIs, the ticket index, family links and chart results.
+The ServiceNow side is in `servicenow-sync/servicenow-blueprint.md`.
+
 **What people see is enforced on the server.** `restrictQuery` adds "ticket
 number is one of theirs" to every Cube query made for anyone who isn't an
 admin. That covers the AI assistant, ticket search, records, families, charts
@@ -264,7 +285,5 @@ makes sure the fix is scheduled (usually as a change).
 4. **Decide what admins and project managers want to approve.** For example,
    whether a project manager may take tickets from another team's family, or
    only an admin.
-5. **New tickets.** The export is a frozen snapshot, so seeding once is enough.
-   If live data ever arrives, new tickets need adding to an existing family
-   (and so a team) when they're linked, or to the smallest team when they
-   aren't.
+5. **New tickets.** Built, waiting for ServiceNow access: see "New tickets
+   from ServiceNow" above.

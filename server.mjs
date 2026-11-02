@@ -16,10 +16,10 @@ import { buildExport, validateExport, ExportUnavailableError } from './export.mj
 import * as auth from './auth.mjs';
 import * as stars from './stars.mjs';
 import * as seen from './seen.mjs';
-import { findTickets, ticketRecord, ticketSummaries, ticketNumbersIn, ticketsByPriority, isOpen, priorityRank, STARRABLE, loadTicketIndex, TICKET_SORTS, sortRows, parseLookup, lookupMatches, openedText, blankText, inTheData, parseTicketNumbers } from './tickets.mjs';
-import { relatedFamilies, describeFamilies, ticketLinks, FAMILY_KINDS, LINK_KIND, familyList, familySummary, familyOf, familyRow, FAMILY_CHILD_NOUNS } from './relations.mjs';
+import { findTickets, ticketRecord, ticketSummaries, ticketNumbersIn, ticketsByPriority, isOpen, priorityRank, STARRABLE, loadTicketIndex, reloadTicketIndex, TICKET_SORTS, sortRows, parseLookup, lookupMatches, openedText, blankText, inTheData, parseTicketNumbers } from './tickets.mjs';
+import { relatedFamilies, describeFamilies, ticketLinks, FAMILY_KINDS, LINK_KIND, familyList, familySummary, familyOf, familyRow, FAMILY_CHILD_NOUNS, forgetLinks } from './relations.mjs';
 import * as prefs from './prefs.mjs';
-import { chartData, chartValues, chartCatalog, chartTickets, chartFromQuery, teamValues, ChartError } from './charts.mjs';
+import { chartData, chartValues, chartCatalog, chartTickets, chartFromQuery, teamValues, ChartError, forgetResults } from './charts.mjs';
 import * as shares from './shares.mjs';
 import * as chats from './chats.mjs';
 import * as teams from './teams.mjs';
@@ -1814,3 +1814,49 @@ async function seedTeamsWhenReady(attempt = 1) {
     setTimeout(() => seedTeamsWhenReady(attempt + 1), wait * 1000).unref();
   }
 }
+
+// ---------------------------------------------------------------------
+// NEW TICKETS FROM SERVICENOW: servicenow-sync/ saves each one in the data,
+// puts it in a family (teams.placeTicket) and says so on a Postgres channel.
+// Who sees what is read again at once; what was read once at start (KPIs,
+// the sorting index, families, charts) a little later, once Cube's own
+// cache (10 s) has the new rows. Many arrivals together refresh once.
+// ---------------------------------------------------------------------
+
+const REFRESH_AFTER_MS = 15 * 1000;
+let refreshTimer = null;
+
+function ticketsChanged() {
+  teams.dataChanged();
+  if (refreshTimer) return;
+  refreshTimer = setTimeout(async () => {
+    refreshTimer = null;
+    const t0 = Date.now();
+    forgetLinks();
+    forgetResults();
+    const done = await Promise.allSettled([kpis.reload(runCubeQuery), reloadTicketIndex(runCubeQuery)]);
+    const failed = done.filter(d => d.status === 'rejected').map(d => d.reason.message);
+    console.log(failed.length ? `🔄 Tickets changed; could not read them all again: ${failed.join('; ')}`
+      : `🔄 Tickets changed: KPIs and sorting read again in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+  }, REFRESH_AFTER_MS);
+}
+
+async function listenForTicketChanges() {
+  let client;
+  try {
+    client = await auth.pool.connect();
+    client.on('notification', ticketsChanged);
+    // A dropped connection: listen again
+    client.on('error', error => {
+      console.error('🔄 Lost the ticket-change channel:', error.message);
+      client.release(true);
+      setTimeout(listenForTicketChanges, 10 * 1000).unref();
+    });
+    await client.query(`LISTEN ${teams.TICKETS_CHANGED}`);
+  } catch (error) {
+    client?.release(true);
+    console.error(`🔄 Could not listen for ticket changes yet (${error.message}); retrying in 10s`);
+    setTimeout(listenForTicketChanges, 10 * 1000).unref();
+  }
+}
+listenForTicketChanges();

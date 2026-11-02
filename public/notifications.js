@@ -169,6 +169,11 @@ function notificationText(n, html = false) {
         return `${who} gave you ${count === 1 ? ticket(n.numbers[0]) : `${count.toLocaleString()} tickets`}${on}.`;
     }
     if (n.kind === 'family') {
+        // A ticket from ServiceNow linked two families: the smaller one joined the bigger one's team
+        if (d.source === 'servicenow') {
+            return `A new link from ServiceNow brought ${count === 1 ? ticket(n.numbers[0]) : `${count.toLocaleString()} linked tickets`} into a family on ${text(d.team)}. ` +
+                `${count === 1 ? 'It isn\'t' : 'They aren\'t'} assigned to anyone yet.`;
+        }
         return count === 1
             ? `${who} moved ${ticket(n.numbers[0])} to ${text(d.team)}. It isn't assigned to anyone yet.`
             : `${who} moved a family of ${count.toLocaleString()} linked tickets to ${text(d.team)}. They aren't assigned to anyone yet.`;

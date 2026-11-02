@@ -231,7 +231,23 @@ const INDEX_LINKS = {
 
 export function loadTicketIndex(runCubeQuery) {
   if (!ticketIndex) {
-    ticketIndex = (async () => {
+    ticketIndex = readTicketIndex(runCubeQuery);
+    ticketIndex.catch(() => { ticketIndex = null; }); // try again next time
+  }
+  return ticketIndex;
+}
+
+// Tickets arrived or changed (servicenow-sync/): the index is read again, and
+// the old one serves until the new one is ready
+export async function reloadTicketIndex(runCubeQuery) {
+  const fresh = readTicketIndex(runCubeQuery);
+  await fresh;
+  ticketIndex = fresh;
+  sortedLists.clear();
+}
+
+function readTicketIndex(runCubeQuery) {
+  return (async () => {
       const index = new Map();
       for (const [prefix, kind] of Object.entries(TICKET_KINDS)) {
         const links = INDEX_LINKS[prefix];
@@ -259,10 +275,7 @@ export function loadTicketIndex(runCubeQuery) {
         if (t && !t.team) t.team = team;
       }
       return index;
-    })();
-    ticketIndex.catch(() => { ticketIndex = null; }); // try again next time
-  }
-  return ticketIndex;
+  })();
 }
 
 // What a ticket sorts by in each column people can sort (Priority / Risk by
