@@ -158,9 +158,12 @@ export function exportFileName(payload) {
 // CSV
 // ---------------------------------------------------------------------
 
+// A cell starting with = + - @ (or a tab / carriage return) would run as a
+// formula when the CSV is opened in Excel, and anyone can put that in a
+// ServiceNow summary; a leading ' keeps it text
 function csvField(value) {
   if (value === null || value === undefined) return '';
-  const s = String(value);
+  const s = /^[=+\-@\t\r]/.test(String(value)) && !/^-?\d+(\.\d+)?$/.test(String(value)) ? `'${value}` : String(value);
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 

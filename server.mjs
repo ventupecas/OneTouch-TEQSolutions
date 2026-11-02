@@ -2,7 +2,6 @@ import dns from 'node:dns/promises';
 import { createHash, createHmac } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import express from 'express';
-import cors from 'cors';
 import dotenv from 'dotenv';
 import Anthropic from '@anthropic-ai/sdk';
 import {
@@ -33,8 +32,9 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 8000;
 
-// Content-Disposition is exposed so the browser can read the download's file name
-app.use(cors({ origin: '*', exposedHeaders: ['Content-Disposition'] }));
+// No CORS headers: only OneTouch's own page calls its API (remote mode
+// passes requests through its own server, not the browser)
+app.disable('x-powered-by');
 
 // =====================================================================
 // METABASE DASHBOARDS: Metabase only listens on this computer, so its
@@ -57,10 +57,21 @@ const EMBED_TTL_S = 12 * 60 * 60;
 const METABASE_RESPONSE_HEADERS = ['content-type', 'cache-control', 'etag', 'last-modified',
   'content-security-policy', 'x-frame-options', 'location'];
 
+// The address passed to Metabase, or null. Checked after "../" (and its
+// %2e%2e spelling) is resolved, since fetch resolves it too: "/embed/../api/…"
+// would otherwise reach any of Metabase's API.
+function metabaseTarget(req) {
+  if (!['GET', 'HEAD'].includes(req.method) || !METABASE_PATHS.test(req.path)) return null;
+  if (/\.\.|%2e|\\|%5c/i.test(req.originalUrl.split('?')[0])) return null;
+  const target = new URL(req.originalUrl, METABASE_URL);
+  return target.origin === new URL(METABASE_URL).origin && METABASE_PATHS.test(target.pathname) ? target : null;
+}
+
 app.use(async (req, res, next) => {
-  if (!METABASE_PATHS.test(req.path) || !['GET', 'HEAD'].includes(req.method)) return next();
+  const target = metabaseTarget(req);
+  if (!target) return next();
   try {
-    const upstream = await fetch(METABASE_URL + req.originalUrl, {
+    const upstream = await fetch(target, {
       method: req.method,
       headers: { accept: req.get('accept') || '*/*', 'accept-language': req.get('accept-language') || 'en' },
       redirect: 'manual',
@@ -77,6 +88,36 @@ app.use(async (req, res, next) => {
     res.status(502).send('Metabase is not reachable right now.');
   }
 });
+// Security headers on everything OneTouch serves itself (Metabase's pages
+// above keep Metabase's own). Nothing loads from, or sends to, another site;
+// the page can only be framed by itself. Scripts still allow inline code,
+// because index.html and the page scripts use onclick="…" handlers.
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  "frame-src 'self'",
+  "frame-ancestors 'self'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'self'",
+].join('; ');
+app.use((req, res, next) => {
+  res.set({
+    'Content-Security-Policy': CONTENT_SECURITY_POLICY,
+    'X-Frame-Options': 'SAMEORIGIN',
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'same-origin',
+    'Strict-Transport-Security': 'max-age=31536000',
+    'Cross-Origin-Opener-Policy': 'same-origin',
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()',
+  });
+  next();
+});
+
 // A click inside a dashboard that opens another page lands here
 // (/onetouch/dashboard/<page>?filters): the link can't hold each person's
 // signed address, so the page around the frame swaps it in (app.js,
@@ -610,27 +651,53 @@ function describeResults(sections) {
     .join('; ') + '.';
 }
 
+// Cube checks a token signed with CUBEJS_API_SECRET on every request; this
+// server signs its own, good for an hour, and makes a new one before then
+const CUBE_URL = process.env.CUBE_API_URL || 'http://localhost:4000/cubejs-api/v1/load';
+const CUBE_TOKEN_TTL_S = 60 * 60;
+let cubeTokenCache = { token: null, renewAt: 0 };
+function cubeToken() {
+  const now = Math.floor(Date.now() / 1000);
+  if (cubeTokenCache.token && now < cubeTokenCache.renewAt) return cubeTokenCache.token;
+  if (!process.env.CUBEJS_API_SECRET) throw new Error('CUBEJS_API_SECRET is not set, so Cube cannot be asked anything');
+  const body = `${base64url({ alg: 'HS256', typ: 'JWT' })}.${base64url({ iat: now, exp: now + CUBE_TOKEN_TTL_S })}`;
+  const token = `${body}.${createHmac('sha256', process.env.CUBEJS_API_SECRET).update(body).digest('base64url')}`;
+  cubeTokenCache = { token, renewAt: now + CUBE_TOKEN_TTL_S - 10 * 60 };
+  return token;
+}
+
+// A query Cube is still running answers "Continue wait": the same request is
+// sent again (as Cube's own clients do) until it's done, for up to 2 minutes
+const CUBE_CONTINUE_WAIT_MS = 2 * 60 * 1000;
+
 // Step 2: validated Cube query -> rows
 async function runCubeQuery(cubeQuery) {
-  const cubeResponse = await fetchWithRetry(
-    process.env.CUBE_API_URL || 'http://localhost:4000/cubejs-api/v1/load',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': process.env.CUBE_API_TOKEN || 'super_secret_key_change_me_later',
-      },
-      body: JSON.stringify({ query: cubeQuery }),
-    }
-  );
+  const giveUpAt = Date.now() + CUBE_CONTINUE_WAIT_MS;
+  for (;;) {
+    const cubeResponse = await fetchWithRetry(
+      CUBE_URL,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': cubeToken(),
+        },
+        body: JSON.stringify({ query: cubeQuery }),
+      }
+    );
 
-  const contentType = cubeResponse.headers.get('content-type') || '';
-  if (contentType.includes('text/html')) {
-    throw new Error('Cube.dev is still initializing its internal model registry. Try again in a few seconds.');
+    const contentType = cubeResponse.headers.get('content-type') || '';
+    if (contentType.includes('text/html')) {
+      throw new Error('Cube.dev is still initializing its internal model registry. Try again in a few seconds.');
+    }
+    const data = await cubeResponse.json();
+    if (data.error === 'Continue wait' && Date.now() < giveUpAt) {
+      await new Promise(res => setTimeout(res, 500));
+      continue;
+    }
+    if (data.error) throw new Error(`Cube Engine Error: ${data.error}`);
+    return data.data || [];
   }
-  const data = await cubeResponse.json();
-  if (data.error) throw new Error(`Cube Engine Error: ${data.error}`);
-  return data.data || [];
 }
 
 app.post('/api/query', async (req, res) => {
@@ -826,10 +893,10 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
     if (remembered) conversation.pendingNote = `it failed when run: ${error.message}`;
     if (error instanceof Anthropic.APIError) {
       console.error(`📋 Claude API error ${error.status}:`, error.message);
-      return reply.send(502, { error: `Claude API error (${error.status}): ${error.message}` });
+      return reply.send(502, { error: `Claude API error (${error.status}). Please try again.` });
     }
     console.error('📋 Execution Failure Context:', error);
-    reply.send(500, { error: `Server pipeline failed: ${error.message}` });
+    reply.send(500, { error: 'Something went wrong answering that. Please try again.' });
   }
 }
 
@@ -851,8 +918,8 @@ app.post('/api/tickets/search', async (req, res) => {
     if (record && result.found.length === 1) {
       // Without the full record the page still shows the ticket's summary row
       result.record = await ticketRecord(result.found[0].number, req.runQuery, {
-        cubeUrl: process.env.CUBE_API_URL || 'http://localhost:4000/cubejs-api/v1/load',
-        token: process.env.CUBE_API_TOKEN || 'super_secret_key_change_me_later',
+        cubeUrl: CUBE_URL,
+        token: cubeToken(),
       }).catch(error => {
         console.error(`🔎 Could not load the full record of ${result.found[0].number}:`, error.message);
         return null;
@@ -862,7 +929,7 @@ app.post('/api/tickets/search', async (req, res) => {
     res.json(result);
   } catch (error) {
     console.error('🔎 Ticket search failed:', error.message);
-    res.status(502).json({ error: `Could not search the tickets right now: ${error.message}` });
+    res.status(502).json({ error: `Could not search the tickets right now. Please try again.` });
   }
 });
 
@@ -972,7 +1039,7 @@ app.post('/api/tickets/related', async (req, res) => {
     res.json({ families });
   } catch (error) {
     console.error('🔗 Could not find related tickets:', error.message);
-    res.status(502).json({ error: `Could not look for related tickets right now: ${error.message}` });
+    res.status(502).json({ error: `Could not look for related tickets right now. Please try again.` });
   }
 });
 
@@ -1012,7 +1079,7 @@ function familyLookupTexts(kind, f, row) {
 
 function familiesFailed(res, error) {
   console.error('👪 Ticket families failed:', error.message);
-  res.status(502).json({ error: `The ticket families could not be loaded right now: ${error.message}` });
+  res.status(502).json({ error: `The ticket families could not be loaded right now. Please try again.` });
 }
 
 // -> { kinds: { kind: { families, tickets } } }
@@ -1367,7 +1434,7 @@ app.get('/api/charts/catalog', async (req, res) => {
     res.json(await chartCatalog(req.runQuery));
   } catch (error) {
     console.error('📊 Chart catalog failed:', error.message);
-    res.status(502).json({ error: `The chart options could not be loaded right now: ${error.message}` });
+    res.status(502).json({ error: `The chart options could not be loaded right now. Please try again.` });
   }
 });
 
@@ -1378,7 +1445,7 @@ app.post('/api/charts/data', async (req, res) => {
   } catch (error) {
     if (error instanceof ChartError) return res.status(400).json({ error: error.message });
     console.error('📊 Chart data failed:', error.message);
-    res.status(502).json({ error: `This chart could not be loaded right now: ${error.message}` });
+    res.status(502).json({ error: `This chart could not be loaded right now. Please try again.` });
   }
 });
 
@@ -1390,7 +1457,7 @@ app.post('/api/charts/tickets', async (req, res) => {
   } catch (error) {
     if (error instanceof ChartError) return res.status(400).json({ error: error.message });
     console.error('📊 Chart tickets failed:', error.message);
-    res.status(502).json({ error: `Those tickets could not be loaded right now: ${error.message}` });
+    res.status(502).json({ error: `Those tickets could not be loaded right now. Please try again.` });
   }
 });
 
@@ -1400,7 +1467,7 @@ app.get('/api/charts/teams', async (req, res) => {
     res.json({ values: await teamValues(req.runQuery) });
   } catch (error) {
     console.error('📊 Team list failed:', error.message);
-    res.status(502).json({ error: `The teams could not be loaded right now: ${error.message}` });
+    res.status(502).json({ error: `The teams could not be loaded right now. Please try again.` });
   }
 });
 
@@ -1457,7 +1524,7 @@ app.post('/api/charts/values', async (req, res) => {
   } catch (error) {
     if (error instanceof ChartError) return res.status(400).json({ error: error.message });
     console.error('📊 Filter values failed:', error.message);
-    res.status(502).json({ error: `The choices could not be loaded right now: ${error.message}` });
+    res.status(502).json({ error: `The choices could not be loaded right now. Please try again.` });
   }
 });
 
@@ -1736,7 +1803,7 @@ app.post('/api/export', async (req, res) => {
       return res.status(501).json({ error: error.message });
     }
     console.error('📥 Export failed:', error);
-    res.status(500).json({ error: `Could not create the ${req.body.format.toUpperCase()} file: ${error.message}` });
+    res.status(500).json({ error: `Could not create the ${req.body.format.toUpperCase()} file. Please try again.` });
   }
 });
 

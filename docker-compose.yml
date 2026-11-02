@@ -45,6 +45,7 @@ services:
       POSTGRES_USER: admin
       AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:?set AUTH_DB_PASSWORD in .env}
       METABASE_DB_PASSWORD: ${METABASE_DB_PASSWORD:-}
+      CUBE_DB_PASSWORD: ${CUBE_DB_PASSWORD:?set CUBE_DB_PASSWORD in .env}
     volumes:
       - ./db:/db:ro
     depends_on:
@@ -52,7 +53,6 @@ services:
         condition: service_healthy
 
   # 2. THE SEMANTIC LAYER (Cube.dev)
-   # 2. THE SEMANTIC LAYER (Cube.dev)
   cube:
     image: cubejs/cube:v0.35
     container_name: analytics_cube
@@ -60,30 +60,28 @@ services:
     # This computer only (the app reaches Cube inside Docker's network)
     ports:
       - "127.0.0.1:4000:4000"     # REST API
-      - "127.0.0.1:15432:15432"   # SQL API
     volumes:
-      - .:/cube/conf
-      # Keep Cube Store's RocksDB files out of the OneDrive-synced folder (prevents corruption)
-      - cubestore_data:/cube/conf/.cubestore
+      # Only the data model: Cube never sees .env, the CSVs or the code
+      - ./model:/cube/conf/model:ro
     environment:
       CUBEJS_DB_TYPE: postgres
       CUBEJS_DB_HOST: postgres
       CUBEJS_DB_NAME: analytics_db
-      CUBEJS_DB_USER: admin
-      CUBEJS_DB_PASS: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-      CUBEJS_DEV_MODE: "true"
+      # Read-only on the export's tables (db/init-reporting.sh creates it)
+      CUBEJS_DB_USER: cube_reader
+      CUBEJS_DB_PASS: ${CUBE_DB_PASSWORD:?set CUBE_DB_PASSWORD in .env}
+      # Production mode: every request needs a token signed with CUBEJS_API_SECRET
+      # (server.mjs signs its own), and there's no playground. Results are cached
+      # in Cube's memory (one Cube, so no Cube Store needed).
+      CUBEJS_DEV_MODE: "false"
+      CUBEJS_CACHE_AND_QUEUE_DRIVER: memory
       CUBEJS_API_SECRET: ${CUBEJS_API_SECRET:?set CUBEJS_API_SECRET in .env}
-      CUBEJS_PG_SQL_PORT: 15432
-      CUBEJS_SQL_USER: admin_cube
-      CUBEJS_SQL_PASSWORD: ${CUBEJS_SQL_PASSWORD:?set CUBEJS_SQL_PASSWORD in .env}
-      # 🎯 ADD THIS EXACT LINE HERE TO UNBLOCK THE CONNECTIONS:
       CUBEJS_BIND_ADDRESS: "0.0.0.0"
-      # Force Cube onto 4000 (the mounted .env must not hijack the port)
       CUBEJS_PORT: "4000"
       PORT: "4000"
-     # 👈 IMPORTANT: Allows outside connection loops
     depends_on:
-      - postgres
+      db-setup:
+        condition: service_completed_successfully
 
   # 3. THE VISUALIZATION LAYER (Metabase)
   metabase:
@@ -109,8 +107,10 @@ services:
     build: .
     container_name: analytics_node_app
     restart: always
+    # This computer only: people reach it through the Cloudflare tunnel (https),
+    # never over the local network in plain http
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - .:/app
       - /app/node_modules
@@ -119,7 +119,8 @@ services:
       # 🎯 TARGETS CUBE BY SERVICE NAME NATIVELY:
       CUBE_API_URL: http://cube:4000/cubejs-api/v1/load
       # Secrets come from the git-ignored .env file (never hard-code them here)
-      CUBE_API_TOKEN: ${CUBE_API_TOKEN:?set CUBE_API_TOKEN in .env}
+      # Signs the app's requests to Cube (server.mjs cubeToken)
+      CUBEJS_API_SECRET: ${CUBEJS_API_SECRET:?set CUBEJS_API_SECRET in .env}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       ANTHROPIC_WORKSPACE_ID: ${ANTHROPIC_WORKSPACE_ID:-}
       # Sign-in accounts: their own database and role (see auth.mjs, db/init-auth.sh)
@@ -171,4 +172,3 @@ services:
 volumes:
   pgdata:
   mbdata:
-  cubestore_data:

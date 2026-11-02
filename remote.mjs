@@ -6,8 +6,10 @@
 //
 // Needs only Node.js 18+ and `npm install`. No Docker, .env, CSVs or API key.
 //
-//   npm run remote -- https://<the-tunnel-link>     (from anywhere)
-//   npm run remote -- http://192.168.5.106:8000      (same network as the server)
+//   npm run remote -- https://onetouch.fyi
+//
+// (The server's port 8000 only answers on its own computer, so the address
+// is always its https Cloudflare link, never its network address.)
 //
 // The server address can also go in .env as ONETOUCH_SERVER=...
 // =====================================================================
@@ -22,8 +24,7 @@ const port = Number(process.env.REMOTE_PORT || 8000);
 
 if (!/^https?:\/\/[^/]+$/.test(target)) {
   console.error(`Give the OneTouch server's address, e.g.:
-  npm run remote -- https://example.trycloudflare.com
-  npm run remote -- http://192.168.5.106:8000
+  npm run remote -- https://onetouch.fyi
 (or set ONETOUCH_SERVER in .env). Ask whoever runs OneTouch for the current address.`);
   process.exit(1);
 }

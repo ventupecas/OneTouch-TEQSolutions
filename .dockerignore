@@ -1,0 +1,19 @@
+# What never goes into the app image. The running container mounts this folder
+# anyway (docker-compose.yml), so the image only needs the code and packages;
+# secrets, ticket data and account hashes stay out of its layers.
+.env
+.env.*
+!.env.example
+csv_data/
+*.csv
+db/accounts.json
+node_modules/
+servicenow-sync/node_modules/
+.git/
+.github/
+.claude/
+.cubestore/
+CLAUDE.local.md
+diag*.txt
+curl.txt
+files.txt

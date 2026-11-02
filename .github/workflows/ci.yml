@@ -18,6 +18,8 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+      # Fails on any high or critical advisory in what the app runs
+      - run: npm audit --omit=dev --audit-level=high
 
   # Rung 2: it is alive. onetouch.fyi is served from Ventura's computer through
   # the Cloudflare tunnel, so this fails whenever that computer or tunnel is off

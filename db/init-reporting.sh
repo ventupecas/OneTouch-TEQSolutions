@@ -1,7 +1,8 @@
 #!/bin/sh
-# Creates/updates the reporting views (db/reporting-views.sql) in analytics_db
-# and the read-only role Metabase connects as (metabase_reader). The role can
-# read the reporting views and nothing else.
+# Creates/updates the reporting views (db/reporting-views.sql) in analytics_db,
+# the read-only role Cube connects as (cube_reader), and the read-only role
+# Metabase connects as (metabase_reader), which can read the reporting views
+# and nothing else.
 #
 # Runs on every `docker compose up` through the db-setup service. Safe to repeat;
 # it also re-syncs metabase_reader's password with METABASE_DB_PASSWORD.
@@ -10,6 +11,23 @@ HERE=$(dirname "$0")
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname analytics_db -q -f "$HERE/reporting-views.sql"
 echo "init-reporting: reporting views are up to date"
+
+# The role Cube connects as (cube_reader): it can read the export's tables in
+# public and change nothing. Re-syncs its password with CUBE_DB_PASSWORD.
+if [ -z "$CUBE_DB_PASSWORD" ]; then
+  echo "init-reporting: CUBE_DB_PASSWORD is not set; add it to .env" >&2
+  exit 1
+fi
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname analytics_db -q -v pw="$CUBE_DB_PASSWORD" <<'EOSQL'
+SELECT 'CREATE ROLE cube_reader LOGIN'
+ WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'cube_reader') \gexec
+SELECT format('ALTER ROLE cube_reader WITH LOGIN PASSWORD %L', :'pw') \gexec
+GRANT CONNECT ON DATABASE analytics_db TO cube_reader;
+GRANT USAGE ON SCHEMA public TO cube_reader;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO cube_reader;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO cube_reader;
+EOSQL
+echo "init-reporting: cube_reader can read the export's tables"
 
 if [ -z "$METABASE_DB_PASSWORD" ]; then
   echo "init-reporting: METABASE_DB_PASSWORD not set; skipping the metabase_reader role"

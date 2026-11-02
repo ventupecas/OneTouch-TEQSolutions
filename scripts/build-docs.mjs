@@ -45,7 +45,7 @@ const FILES = [
   'servicenow-sync/src/processRecord.js', 'servicenow-sync/src/db/upsertRecord.js',
   'servicenow-sync/src/db/pending.js', 'servicenow-sync/src/families.js',
   'servicenow-sync/servicenow-blueprint.md',
-  'checks/ticket-order.mjs', '.github/workflows/ci.yml',
+  'checks/ticket-order.mjs', '.github/workflows/ci.yml', '.dockerignore',
 ];
 
 // Not copied in, and why (shown in the appendix)

@@ -42,8 +42,6 @@ and passes everything to the OneTouch server, where your account lives.
    ```
    npm run remote -- https://the-link-you-were-given.trycloudflare.com
    ```
-   On the same network as the server you can use its network address instead,
-   e.g. `npm run remote -- http://192.168.5.106:8000`.
 4. Open **http://localhost:8000** and sign in with your own username and password.
 
 Keep the terminal open while you use it, and press `Ctrl+C` to stop. You can put the
@@ -81,14 +79,11 @@ Needs Docker Desktop, the CSV export in `csv_data/`, and a `.env` file
 docker compose up -d
 ```
 
-The tool is at http://localhost:8000. Only port 8000 is reachable from other computers;
-Postgres, Cube and Metabase only accept connections from the server itself.
+The tool is at http://localhost:8000. Nothing is reachable from other computers: the app,
+Postgres, Cube and Metabase only accept connections from the server itself. Other people
+use the Cloudflare link (https).
 
 ### Sharing it
-
-**Same network (office Wi-Fi or VPN).** Others open `http://<server's IP address>:8000`
-(find the IP with `ipconfig`). There's nothing else to set up. Traffic is not encrypted,
-so use this only on a network you trust.
 
 **Over the internet.** Get permission first: this puts company data behind a public link.
 One command starts OneTouch if needed, starts a Cloudflare Tunnel, checks the link works,
@@ -1553,7 +1548,7 @@ This creates `node_modules/` and `package-lock.json`. The packages the code itse
 
 | Package | Used for |
 |---|---|
-| `express`, `cors` | the web server |
+| `express` | the web server (`cors` is installed but no longer used: only OneTouch's own page calls its API) |
 | `dotenv` | reading `.env` |
 | `@anthropic-ai/sdk` | calling Claude |
 | `pg` | the accounts database |
@@ -1581,8 +1576,7 @@ Fill in `.env`:
 |---|---|
 | `ANTHROPIC_API_KEY` | your key from step 2 |
 | `ANTHROPIC_WORKSPACE_ID` | your workspace ID, or leave the line empty |
-| `POSTGRES_PASSWORD`, `CUBEJS_API_SECRET`, `CUBEJS_SQL_PASSWORD`, `AUTH_DB_PASSWORD`, `METABASE_DB_PASSWORD` | long random values (see below) |
-| `CUBE_API_TOKEN` | any value; the app sends it to Cube |
+| `POSTGRES_PASSWORD`, `CUBEJS_API_SECRET`, `CUBE_DB_PASSWORD`, `AUTH_DB_PASSWORD`, `METABASE_DB_PASSWORD` | long random values (see below). The app signs its own Cube tokens with `CUBEJS_API_SECRET`; Cube reads the data as `cube_reader` with `CUBE_DB_PASSWORD` |
 | `METABASE_ADMIN_EMAIL`, `METABASE_ADMIN_PASSWORD` | the Metabase admin login to create (password at least 8 characters) |
 | `ASSUME_TODAY` | optional, e.g. `2026-09-02`, so "last month" falls inside the export (roughly 2026-06-01 to 2026-09-01) |
 | `CLAUDE_MODEL` | optional; empty means `claude-sonnet-5-5` |
@@ -1641,12 +1635,14 @@ add a column here, add it to the catalog there too.
 - `Dockerfile` ([B.16](#b16)): the app image. Node 24 on Alpine, plus the system 7-Zip
   (the one bundled in npm's `7zip-bin` doesn't run on Alpine).
 - `docker-compose.yml` ([B.17](#b17)): all the containers in the table at the top. Notes:
-  - Postgres, Cube and Metabase listen on `127.0.0.1` only. Other computers reach the
-    tool through port 8000 alone.
+  - Everything listens on `127.0.0.1` only, the app's port 8000 too: other people come
+    in through the Cloudflare tunnel (https), never over the network in plain http.
+  - Cube runs in production mode: every request needs a token signed with
+    `CUBEJS_API_SECRET` (the app signs its own, `cubeToken` in `server.mjs`), it reads
+    the tables as the read-only `cube_reader`, sees only `model/`, and keeps its cache
+    in memory. Its SQL interface is off.
   - The project folder is mounted into the app container (`.:/app`), so code changes
     need only a restart, not a rebuild. `node_modules` lives in its own anonymous volume.
-  - Cube Store's files go on a Docker volume, not the project folder, because a
-    OneDrive-synced folder corrupts them.
   - The two tunnel services only start when asked for (`--profile`).
 
 Check the file is valid: `docker compose config -q` prints nothing when all is well.
@@ -1667,8 +1663,9 @@ docker exec analytics_postgres psql -U admin -d analytics_db -c "SELECT count(*)
 
 That prints the incident row count (23,334 with the export this guide was built from; 0 if
 `csv_data/` was empty). Cube takes about half a minute to compile the model; check it with
-`docker logs --tail 20 analytics_cube`, and open http://localhost:4000, which shows Cube's
-developer playground.
+`docker logs --tail 20 analytics_cube`; it should end with "Cube API server … is listening
+on 4000". (Cube runs in production mode, so http://localhost:4000 only says so; there's no
+playground, and queries need a signed token.)
 
 If the counts are 0 but the CSVs are in place, the database was created before they were.
 Run `docker compose down -v` (this deletes the database) and start again.
@@ -1918,8 +1915,6 @@ use `REMOTE_PORT=8100`.
 
 ## Step 19: Sharing it with other people
 
-- **Same network:** others open `http://<server IP>:8000` (find the IP with `ipconfig`).
-  This isn't encrypted, so use it only on a trusted network.
 - **Over the internet (get permission first; it puts company data behind a public link):**
   create `scripts/share.mjs` ([B.39](#b39)) and run `npm run share`. It starts OneTouch
   if needed, starts the Cloudflare tunnel from `docker-compose.yml`, waits until the link
@@ -2042,7 +2037,7 @@ What `npm install` gave when this guide was generated. If something behaves diff
 | `@anthropic-ai/sdk` | `^0.131.0` | 0.131.0 |
 | `7zip-bin` | `^5.2.0` | 5.2.0 |
 | `accepts` | `^2.0.0` | 2.0.0 |
-| `body-parser` | `^2.3.0` | 2.3.0 |
+| `body-parser` | `^2.3.0` | 2.4.0 |
 | `bytes` | `^3.1.2` | 3.1.2 |
 | `call-bind-apply-helpers` | `^1.0.2` | 1.0.2 |
 | `call-bound` | `^1.0.4` | 1.0.4 |
@@ -2102,7 +2097,7 @@ What `npm install` gave when this guide was generated. If something behaves diff
 | `pdfmake` | `^0.2.23` | 0.2.23 |
 | `pg` | `^8.23.1` | 8.23.1 |
 | `proxy-addr` | `^2.0.8` | 2.0.8 |
-| `qs` | `^6.16.0` | 6.16.0 |
+| `qs` | `^6.16.0` | 6.17.1 |
 | `range-parser` | `^1.3.0` | 1.3.0 |
 | `raw-body` | `^3.0.2` | 3.0.2 |
 | `router` | `^2.2.0` | 2.2.0 |
@@ -2207,6 +2202,7 @@ Create each file at the path shown, with exactly this content. Files are in the 
 - [B.77 `servicenow-sync/servicenow-blueprint.md`](#b77)
 - [B.78 `checks/ticket-order.mjs`](#b78)
 - [B.79 `.github/workflows/ci.yml`](#b79)
+- [B.80 `.dockerignore`](#b80)
 
 <a id="b1"></a>
 ### B.1 `.gitignore`
@@ -2394,17 +2390,19 @@ APP_PORT=8000
 ANTHROPIC_API_KEY=your_anthropic_api_key_here
 ANTHROPIC_WORKSPACE_ID=your_anthropic_workspace_id_here
 CUBE_API_URL=http://localhost:4000/cubejs-api/v1/load
-CUBE_API_TOKEN=super_secret_key_change_me_later
 # Optional: pin "today" so relative dates ("last month", "this week") land inside the CSV export window.
 # Leave blank to use the real clock. The export covers roughly 2026-06-01 to 2026-09-01.
 ASSUME_TODAY=
 # Optional: override the Claude model used for translation (defaults to claude-sonnet-5-5).
 CLAUDE_MODEL=
 
-# Database / Cube secrets (docker-compose.yml reads these; it refuses to start without them)
-POSTGRES_PASSWORD=change_me
+# Database / Cube secrets (docker-compose.yml reads these; it refuses to start without them).
+# Long random values, e.g.: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+POSTGRES_PASSWORD=change_me_long_random_string
+# Cube checks a token signed with this on every request; the app signs its own
 CUBEJS_API_SECRET=change_me_long_random_string
-CUBEJS_SQL_PASSWORD=change_me
+# The read-only database role Cube connects as (cube_reader)
+CUBE_DB_PASSWORD=change_me_long_random_string
 
 # Sign-in account database (onetouch_auth): password for its onetouch_app role.
 # Use a long random value, e.g.: node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"
@@ -2695,9 +2693,10 @@ echo "init-auth: onetouch_auth database and onetouch_app role are ready"
 
 ```sh
 #!/bin/sh
-# Creates/updates the reporting views (db/reporting-views.sql) in analytics_db
-# and the read-only role Metabase connects as (metabase_reader). The role can
-# read the reporting views and nothing else.
+# Creates/updates the reporting views (db/reporting-views.sql) in analytics_db,
+# the read-only role Cube connects as (cube_reader), and the read-only role
+# Metabase connects as (metabase_reader), which can read the reporting views
+# and nothing else.
 #
 # Runs on every `docker compose up` through the db-setup service. Safe to repeat;
 # it also re-syncs metabase_reader's password with METABASE_DB_PASSWORD.
@@ -2706,6 +2705,23 @@ HERE=$(dirname "$0")
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname analytics_db -q -f "$HERE/reporting-views.sql"
 echo "init-reporting: reporting views are up to date"
+
+# The role Cube connects as (cube_reader): it can read the export's tables in
+# public and change nothing. Re-syncs its password with CUBE_DB_PASSWORD.
+if [ -z "$CUBE_DB_PASSWORD" ]; then
+  echo "init-reporting: CUBE_DB_PASSWORD is not set; add it to .env" >&2
+  exit 1
+fi
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname analytics_db -q -v pw="$CUBE_DB_PASSWORD" <<'EOSQL'
+SELECT 'CREATE ROLE cube_reader LOGIN'
+ WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'cube_reader') \gexec
+SELECT format('ALTER ROLE cube_reader WITH LOGIN PASSWORD %L', :'pw') \gexec
+GRANT CONNECT ON DATABASE analytics_db TO cube_reader;
+GRANT USAGE ON SCHEMA public TO cube_reader;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO cube_reader;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO cube_reader;
+EOSQL
+echo "init-reporting: cube_reader can read the export's tables"
 
 if [ -z "$METABASE_DB_PASSWORD" ]; then
   echo "init-reporting: METABASE_DB_PASSWORD not set; skipping the metabase_reader role"
@@ -3897,6 +3913,7 @@ services:
       POSTGRES_USER: admin
       AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:?set AUTH_DB_PASSWORD in .env}
       METABASE_DB_PASSWORD: ${METABASE_DB_PASSWORD:-}
+      CUBE_DB_PASSWORD: ${CUBE_DB_PASSWORD:?set CUBE_DB_PASSWORD in .env}
     volumes:
       - ./db:/db:ro
     depends_on:
@@ -3904,7 +3921,6 @@ services:
         condition: service_healthy
 
   # 2. THE SEMANTIC LAYER (Cube.dev)
-   # 2. THE SEMANTIC LAYER (Cube.dev)
   cube:
     image: cubejs/cube:v0.35
     container_name: analytics_cube
@@ -3912,30 +3928,28 @@ services:
     # This computer only (the app reaches Cube inside Docker's network)
     ports:
       - "127.0.0.1:4000:4000"     # REST API
-      - "127.0.0.1:15432:15432"   # SQL API
     volumes:
-      - .:/cube/conf
-      # Keep Cube Store's RocksDB files out of the OneDrive-synced folder (prevents corruption)
-      - cubestore_data:/cube/conf/.cubestore
+      # Only the data model: Cube never sees .env, the CSVs or the code
+      - ./model:/cube/conf/model:ro
     environment:
       CUBEJS_DB_TYPE: postgres
       CUBEJS_DB_HOST: postgres
       CUBEJS_DB_NAME: analytics_db
-      CUBEJS_DB_USER: admin
-      CUBEJS_DB_PASS: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-      CUBEJS_DEV_MODE: "true"
+      # Read-only on the export's tables (db/init-reporting.sh creates it)
+      CUBEJS_DB_USER: cube_reader
+      CUBEJS_DB_PASS: ${CUBE_DB_PASSWORD:?set CUBE_DB_PASSWORD in .env}
+      # Production mode: every request needs a token signed with CUBEJS_API_SECRET
+      # (server.mjs signs its own), and there's no playground. Results are cached
+      # in Cube's memory (one Cube, so no Cube Store needed).
+      CUBEJS_DEV_MODE: "false"
+      CUBEJS_CACHE_AND_QUEUE_DRIVER: memory
       CUBEJS_API_SECRET: ${CUBEJS_API_SECRET:?set CUBEJS_API_SECRET in .env}
-      CUBEJS_PG_SQL_PORT: 15432
-      CUBEJS_SQL_USER: admin_cube
-      CUBEJS_SQL_PASSWORD: ${CUBEJS_SQL_PASSWORD:?set CUBEJS_SQL_PASSWORD in .env}
-      # 🎯 ADD THIS EXACT LINE HERE TO UNBLOCK THE CONNECTIONS:
       CUBEJS_BIND_ADDRESS: "0.0.0.0"
-      # Force Cube onto 4000 (the mounted .env must not hijack the port)
       CUBEJS_PORT: "4000"
       PORT: "4000"
-     # 👈 IMPORTANT: Allows outside connection loops
     depends_on:
-      - postgres
+      db-setup:
+        condition: service_completed_successfully
 
   # 3. THE VISUALIZATION LAYER (Metabase)
   metabase:
@@ -3961,8 +3975,10 @@ services:
     build: .
     container_name: analytics_node_app
     restart: always
+    # This computer only: people reach it through the Cloudflare tunnel (https),
+    # never over the local network in plain http
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - .:/app
       - /app/node_modules
@@ -3971,7 +3987,8 @@ services:
       # 🎯 TARGETS CUBE BY SERVICE NAME NATIVELY:
       CUBE_API_URL: http://cube:4000/cubejs-api/v1/load
       # Secrets come from the git-ignored .env file (never hard-code them here)
-      CUBE_API_TOKEN: ${CUBE_API_TOKEN:?set CUBE_API_TOKEN in .env}
+      # Signs the app's requests to Cube (server.mjs cubeToken)
+      CUBEJS_API_SECRET: ${CUBEJS_API_SECRET:?set CUBEJS_API_SECRET in .env}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       ANTHROPIC_WORKSPACE_ID: ${ANTHROPIC_WORKSPACE_ID:-}
       # Sign-in accounts: their own database and role (see auth.mjs, db/init-auth.sh)
@@ -4023,7 +4040,6 @@ services:
 volumes:
   pgdata:
   mbdata:
-  cubestore_data:
 ```
 
 <a id="b18"></a>
@@ -5212,9 +5228,12 @@ export function exportFileName(payload) {
 // CSV
 // ---------------------------------------------------------------------
 
+// A cell starting with = + - @ (or a tab / carriage return) would run as a
+// formula when the CSV is opened in Excel, and anyone can put that in a
+// ServiceNow summary; a leading ' keeps it text
 function csvField(value) {
   if (value === null || value === undefined) return '';
-  const s = String(value);
+  const s = /^[=+\-@\t\r]/.test(String(value)) && !/^-?\d+(\.\d+)?$/.test(String(value)) ? `'${value}` : String(value);
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
@@ -6254,7 +6273,6 @@ import dns from 'node:dns/promises';
 import { createHash, createHmac } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import express from 'express';
-import cors from 'cors';
 import dotenv from 'dotenv';
 import Anthropic from '@anthropic-ai/sdk';
 import {
@@ -6285,8 +6303,9 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 8000;
 
-// Content-Disposition is exposed so the browser can read the download's file name
-app.use(cors({ origin: '*', exposedHeaders: ['Content-Disposition'] }));
+// No CORS headers: only OneTouch's own page calls its API (remote mode
+// passes requests through its own server, not the browser)
+app.disable('x-powered-by');
 
 // =====================================================================
 // METABASE DASHBOARDS: Metabase only listens on this computer, so its
@@ -6309,10 +6328,21 @@ const EMBED_TTL_S = 12 * 60 * 60;
 const METABASE_RESPONSE_HEADERS = ['content-type', 'cache-control', 'etag', 'last-modified',
   'content-security-policy', 'x-frame-options', 'location'];
 
+// The address passed to Metabase, or null. Checked after "../" (and its
+// %2e%2e spelling) is resolved, since fetch resolves it too: "/embed/../api/…"
+// would otherwise reach any of Metabase's API.
+function metabaseTarget(req) {
+  if (!['GET', 'HEAD'].includes(req.method) || !METABASE_PATHS.test(req.path)) return null;
+  if (/\.\.|%2e|\\|%5c/i.test(req.originalUrl.split('?')[0])) return null;
+  const target = new URL(req.originalUrl, METABASE_URL);
+  return target.origin === new URL(METABASE_URL).origin && METABASE_PATHS.test(target.pathname) ? target : null;
+}
+
 app.use(async (req, res, next) => {
-  if (!METABASE_PATHS.test(req.path) || !['GET', 'HEAD'].includes(req.method)) return next();
+  const target = metabaseTarget(req);
+  if (!target) return next();
   try {
-    const upstream = await fetch(METABASE_URL + req.originalUrl, {
+    const upstream = await fetch(target, {
       method: req.method,
       headers: { accept: req.get('accept') || '*/*', 'accept-language': req.get('accept-language') || 'en' },
       redirect: 'manual',
@@ -6329,6 +6359,36 @@ app.use(async (req, res, next) => {
     res.status(502).send('Metabase is not reachable right now.');
   }
 });
+// Security headers on everything OneTouch serves itself (Metabase's pages
+// above keep Metabase's own). Nothing loads from, or sends to, another site;
+// the page can only be framed by itself. Scripts still allow inline code,
+// because index.html and the page scripts use onclick="…" handlers.
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  "frame-src 'self'",
+  "frame-ancestors 'self'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'self'",
+].join('; ');
+app.use((req, res, next) => {
+  res.set({
+    'Content-Security-Policy': CONTENT_SECURITY_POLICY,
+    'X-Frame-Options': 'SAMEORIGIN',
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'same-origin',
+    'Strict-Transport-Security': 'max-age=31536000',
+    'Cross-Origin-Opener-Policy': 'same-origin',
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()',
+  });
+  next();
+});
+
 // A click inside a dashboard that opens another page lands here
 // (/onetouch/dashboard/<page>?filters): the link can't hold each person's
 // signed address, so the page around the frame swaps it in (app.js,
@@ -6862,27 +6922,53 @@ function describeResults(sections) {
     .join('; ') + '.';
 }
 
+// Cube checks a token signed with CUBEJS_API_SECRET on every request; this
+// server signs its own, good for an hour, and makes a new one before then
+const CUBE_URL = process.env.CUBE_API_URL || 'http://localhost:4000/cubejs-api/v1/load';
+const CUBE_TOKEN_TTL_S = 60 * 60;
+let cubeTokenCache = { token: null, renewAt: 0 };
+function cubeToken() {
+  const now = Math.floor(Date.now() / 1000);
+  if (cubeTokenCache.token && now < cubeTokenCache.renewAt) return cubeTokenCache.token;
+  if (!process.env.CUBEJS_API_SECRET) throw new Error('CUBEJS_API_SECRET is not set, so Cube cannot be asked anything');
+  const body = `${base64url({ alg: 'HS256', typ: 'JWT' })}.${base64url({ iat: now, exp: now + CUBE_TOKEN_TTL_S })}`;
+  const token = `${body}.${createHmac('sha256', process.env.CUBEJS_API_SECRET).update(body).digest('base64url')}`;
+  cubeTokenCache = { token, renewAt: now + CUBE_TOKEN_TTL_S - 10 * 60 };
+  return token;
+}
+
+// A query Cube is still running answers "Continue wait": the same request is
+// sent again (as Cube's own clients do) until it's done, for up to 2 minutes
+const CUBE_CONTINUE_WAIT_MS = 2 * 60 * 1000;
+
 // Step 2: validated Cube query -> rows
 async function runCubeQuery(cubeQuery) {
-  const cubeResponse = await fetchWithRetry(
-    process.env.CUBE_API_URL || 'http://localhost:4000/cubejs-api/v1/load',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': process.env.CUBE_API_TOKEN || 'super_secret_key_change_me_later',
-      },
-      body: JSON.stringify({ query: cubeQuery }),
-    }
-  );
+  const giveUpAt = Date.now() + CUBE_CONTINUE_WAIT_MS;
+  for (;;) {
+    const cubeResponse = await fetchWithRetry(
+      CUBE_URL,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': cubeToken(),
+        },
+        body: JSON.stringify({ query: cubeQuery }),
+      }
+    );
 
-  const contentType = cubeResponse.headers.get('content-type') || '';
-  if (contentType.includes('text/html')) {
-    throw new Error('Cube.dev is still initializing its internal model registry. Try again in a few seconds.');
+    const contentType = cubeResponse.headers.get('content-type') || '';
+    if (contentType.includes('text/html')) {
+      throw new Error('Cube.dev is still initializing its internal model registry. Try again in a few seconds.');
+    }
+    const data = await cubeResponse.json();
+    if (data.error === 'Continue wait' && Date.now() < giveUpAt) {
+      await new Promise(res => setTimeout(res, 500));
+      continue;
+    }
+    if (data.error) throw new Error(`Cube Engine Error: ${data.error}`);
+    return data.data || [];
   }
-  const data = await cubeResponse.json();
-  if (data.error) throw new Error(`Cube Engine Error: ${data.error}`);
-  return data.data || [];
 }
 
 app.post('/api/query', async (req, res) => {
@@ -7078,10 +7164,10 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
     if (remembered) conversation.pendingNote = `it failed when run: ${error.message}`;
     if (error instanceof Anthropic.APIError) {
       console.error(`📋 Claude API error ${error.status}:`, error.message);
-      return reply.send(502, { error: `Claude API error (${error.status}): ${error.message}` });
+      return reply.send(502, { error: `Claude API error (${error.status}). Please try again.` });
     }
     console.error('📋 Execution Failure Context:', error);
-    reply.send(500, { error: `Server pipeline failed: ${error.message}` });
+    reply.send(500, { error: 'Something went wrong answering that. Please try again.' });
   }
 }
 
@@ -7103,8 +7189,8 @@ app.post('/api/tickets/search', async (req, res) => {
     if (record && result.found.length === 1) {
       // Without the full record the page still shows the ticket's summary row
       result.record = await ticketRecord(result.found[0].number, req.runQuery, {
-        cubeUrl: process.env.CUBE_API_URL || 'http://localhost:4000/cubejs-api/v1/load',
-        token: process.env.CUBE_API_TOKEN || 'super_secret_key_change_me_later',
+        cubeUrl: CUBE_URL,
+        token: cubeToken(),
       }).catch(error => {
         console.error(`🔎 Could not load the full record of ${result.found[0].number}:`, error.message);
         return null;
@@ -7114,7 +7200,7 @@ app.post('/api/tickets/search', async (req, res) => {
     res.json(result);
   } catch (error) {
     console.error('🔎 Ticket search failed:', error.message);
-    res.status(502).json({ error: `Could not search the tickets right now: ${error.message}` });
+    res.status(502).json({ error: `Could not search the tickets right now. Please try again.` });
   }
 });
 
@@ -7224,7 +7310,7 @@ app.post('/api/tickets/related', async (req, res) => {
     res.json({ families });
   } catch (error) {
     console.error('🔗 Could not find related tickets:', error.message);
-    res.status(502).json({ error: `Could not look for related tickets right now: ${error.message}` });
+    res.status(502).json({ error: `Could not look for related tickets right now. Please try again.` });
   }
 });
 
@@ -7264,7 +7350,7 @@ function familyLookupTexts(kind, f, row) {
 
 function familiesFailed(res, error) {
   console.error('👪 Ticket families failed:', error.message);
-  res.status(502).json({ error: `The ticket families could not be loaded right now: ${error.message}` });
+  res.status(502).json({ error: `The ticket families could not be loaded right now. Please try again.` });
 }
 
 // -> { kinds: { kind: { families, tickets } } }
@@ -7619,7 +7705,7 @@ app.get('/api/charts/catalog', async (req, res) => {
     res.json(await chartCatalog(req.runQuery));
   } catch (error) {
     console.error('📊 Chart catalog failed:', error.message);
-    res.status(502).json({ error: `The chart options could not be loaded right now: ${error.message}` });
+    res.status(502).json({ error: `The chart options could not be loaded right now. Please try again.` });
   }
 });
 
@@ -7630,7 +7716,7 @@ app.post('/api/charts/data', async (req, res) => {
   } catch (error) {
     if (error instanceof ChartError) return res.status(400).json({ error: error.message });
     console.error('📊 Chart data failed:', error.message);
-    res.status(502).json({ error: `This chart could not be loaded right now: ${error.message}` });
+    res.status(502).json({ error: `This chart could not be loaded right now. Please try again.` });
   }
 });
 
@@ -7642,7 +7728,7 @@ app.post('/api/charts/tickets', async (req, res) => {
   } catch (error) {
     if (error instanceof ChartError) return res.status(400).json({ error: error.message });
     console.error('📊 Chart tickets failed:', error.message);
-    res.status(502).json({ error: `Those tickets could not be loaded right now: ${error.message}` });
+    res.status(502).json({ error: `Those tickets could not be loaded right now. Please try again.` });
   }
 });
 
@@ -7652,7 +7738,7 @@ app.get('/api/charts/teams', async (req, res) => {
     res.json({ values: await teamValues(req.runQuery) });
   } catch (error) {
     console.error('📊 Team list failed:', error.message);
-    res.status(502).json({ error: `The teams could not be loaded right now: ${error.message}` });
+    res.status(502).json({ error: `The teams could not be loaded right now. Please try again.` });
   }
 });
 
@@ -7709,7 +7795,7 @@ app.post('/api/charts/values', async (req, res) => {
   } catch (error) {
     if (error instanceof ChartError) return res.status(400).json({ error: error.message });
     console.error('📊 Filter values failed:', error.message);
-    res.status(502).json({ error: `The choices could not be loaded right now: ${error.message}` });
+    res.status(502).json({ error: `The choices could not be loaded right now. Please try again.` });
   }
 });
 
@@ -7988,7 +8074,7 @@ app.post('/api/export', async (req, res) => {
       return res.status(501).json({ error: error.message });
     }
     console.error('📥 Export failed:', error);
-    res.status(500).json({ error: `Could not create the ${req.body.format.toUpperCase()} file: ${error.message}` });
+    res.status(500).json({ error: `Could not create the ${req.body.format.toUpperCase()} file. Please try again.` });
   }
 });
 
@@ -16644,8 +16730,10 @@ try {
 //
 // Needs only Node.js 18+ and `npm install`. No Docker, .env, CSVs or API key.
 //
-//   npm run remote -- https://<the-tunnel-link>     (from anywhere)
-//   npm run remote -- http://192.168.5.106:8000      (same network as the server)
+//   npm run remote -- https://onetouch.fyi
+//
+// (The server's port 8000 only answers on its own computer, so the address
+// is always its https Cloudflare link, never its network address.)
 //
 // The server address can also go in .env as ONETOUCH_SERVER=...
 // =====================================================================
@@ -16660,8 +16748,7 @@ const port = Number(process.env.REMOTE_PORT || 8000);
 
 if (!/^https?:\/\/[^/]+$/.test(target)) {
   console.error(`Give the OneTouch server's address, e.g.:
-  npm run remote -- https://example.trycloudflare.com
-  npm run remote -- http://192.168.5.106:8000
+  npm run remote -- https://onetouch.fyi
 (or set ONETOUCH_SERVER in .env). Ask whoever runs OneTouch for the current address.`);
   process.exit(1);
 }
@@ -16960,7 +17047,7 @@ const FILES = [
   'servicenow-sync/src/processRecord.js', 'servicenow-sync/src/db/upsertRecord.js',
   'servicenow-sync/src/db/pending.js', 'servicenow-sync/src/families.js',
   'servicenow-sync/servicenow-blueprint.md',
-  'checks/ticket-order.mjs', '.github/workflows/ci.yml',
+  'checks/ticket-order.mjs', '.github/workflows/ci.yml', '.dockerignore',
 ];
 
 // Not copied in, and why (shown in the appendix)
@@ -27865,6 +27952,8 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+      # Fails on any high or critical advisory in what the app runs
+      - run: npm audit --omit=dev --audit-level=high
 
   # Rung 2: it is alive. onetouch.fyi is served from Ventura's computer through
   # the Cloudflare tunnel, so this fails whenever that computer or tunnel is off
@@ -27879,6 +27968,31 @@ jobs:
           echo "$BODY" | grep -q "Sign in to OneTouch" \
             || { echo "::error::The URL responded but the page is not our app."; exit 1; }
           echo "Alive, and it is ours."
+```
+
+<a id="b80"></a>
+### B.80 `.dockerignore`
+
+```
+# What never goes into the app image. The running container mounts this folder
+# anyway (docker-compose.yml), so the image only needs the code and packages;
+# secrets, ticket data and account hashes stay out of its layers.
+.env
+.env.*
+!.env.example
+csv_data/
+*.csv
+db/accounts.json
+node_modules/
+servicenow-sync/node_modules/
+.git/
+.github/
+.claude/
+.cubestore/
+CLAUDE.local.md
+diag*.txt
+curl.txt
+files.txt
 ```
 
 ## Appendix C: images
