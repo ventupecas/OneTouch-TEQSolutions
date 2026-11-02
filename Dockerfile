@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:24-alpine
 # 7-Zip builds the .zip / .7z downloads (the binary bundled in npm's
 # 7zip-bin is built for glibc and does not run on Alpine)
 RUN apk add --no-cache 7zip

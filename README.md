@@ -1494,7 +1494,7 @@ browser ──► app (Node/Express, port 8000) ──► Claude API: question �
 | `db-setup` | `postgres:16-alpine` | Runs on every start, creates the accounts database, reporting views and read-only Metabase user, then exits |
 | `analytics_cube` | `cubejs/cube:v0.35` | Turns JSON queries into SQL over the CSV tables |
 | `analytics_metabase` | `metabase/metabase:v0.50.4` | Dashboards |
-| `analytics_node_app` | built from `Dockerfile` (`node:20-alpine`) | The website, sign-in, the Claude calls, downloads |
+| `analytics_node_app` | built from `Dockerfile` (`node:24-alpine`) | The website, sign-in, the Claude calls, downloads |
 | `onetouch_tunnel` (optional) | `cloudflare/cloudflared:2026.9.3` | A public https link for people outside the network |
 
 ---
@@ -1503,7 +1503,7 @@ browser ──► app (Node/Express, port 8000) ──► Claude API: question �
 
 1. **Docker Desktop** (Windows or Mac), or Docker Engine with the Compose plugin (Linux).
    Start it and check: `docker --version` and `docker compose version` both print a version.
-2. **Node.js 20** (18 or newer works) from https://nodejs.org. Check: `node --version`.
+2. **Node.js 24** (what the Docker image and CI use) from https://nodejs.org. Check: `node --version`.
    The containers bring their own Node; you need it locally for `npm install`, the
    checks, and remote mode.
 3. **Git** from https://git-scm.com. Check: `git --version`.
@@ -1638,7 +1638,7 @@ add a column here, add it to the catalog there too.
 
 ## Step 9: The Docker files
 
-- `Dockerfile` ([B.16](#b16)): the app image. Node 20 on Alpine, plus the system 7-Zip
+- `Dockerfile` ([B.16](#b16)): the app image. Node 24 on Alpine, plus the system 7-Zip
   (the one bundled in npm's `7zip-bin` doesn't run on Alpine).
 - `docker-compose.yml` ([B.17](#b17)): all the containers in the table at the top. Notes:
   - Postgres, Cube and Metabase listen on `127.0.0.1` only. Other computers reach the
@@ -3833,7 +3833,7 @@ cubes:
 ### B.16 `Dockerfile`
 
 ```dockerfile
-FROM node:20-alpine
+FROM node:24-alpine
 # 7-Zip builds the .zip / .7z downloads (the binary bundled in npm's
 # 7zip-bin is built for glibc and does not run on Alpine)
 RUN apk add --no-cache 7zip
@@ -26815,7 +26815,7 @@ COMMIT;
   "type": "module",
   "main": "src/app.js",
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   },
   "scripts": {
     "start": "node --env-file=.env src/app.js",
@@ -27857,10 +27857,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          node-version: '24'
           cache: npm
       - run: npm ci
       - run: npm run build
