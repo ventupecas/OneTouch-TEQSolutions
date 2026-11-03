@@ -1077,7 +1077,8 @@ tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
     color: var(--text);
     line-height: 1.5;
 }
-.ai-msg > .result-restricted:first-child { margin: 0; }
+/* first-of-type: an answer's 🔊 Read button (accessibility.js) comes before it */
+.ai-msg > .result-restricted:first-of-type { margin: 0; }
 .result-caption { font-size: 0.8rem; color: var(--muted); margin-bottom: 4px; }
 .result-empty { margin: 4px 0; color: var(--text-2); }
 /* Why a question found nothing (dates covered, which condition emptied it) */
@@ -2671,6 +2672,10 @@ html.a11y-readable p,
 html.a11y-readable li,
 html.a11y-readable td,
 html.a11y-readable .msg { line-height: 1.75 !important; }
+
+/* Bold word beginnings: the <b> in each word (accessibility.js wraps them) */
+.a11y-bionic b { font-weight: 700; }
+.access-indent { margin: 0 0 4px 26px; }
 
 /* Underlined links (and the ticket-number buttons, which work like links) */
 html.a11y-underline a,

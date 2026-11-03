@@ -125,13 +125,16 @@ const cleanTour = (t = {}) => ({ done: t.done === true, dashboards: t.dashboards
 // name, how fast it reads, and on/off switches (public/accessibility.js)
 const TEXT_SIZES = [100, 115, 130, 150, 175];
 const MAGNIFY = [2, 3, 4];
-const ACCESS_SWITCHES = ['contrast', 'readable', 'underline', 'focus', 'cursor', 'guide', 'motion',
+// Bold word beginnings: how much of each word (1 light, 2 medium, 3 strong)
+const BIONIC_LEVELS = [1, 2, 3];
+const ACCESS_SWITCHES = ['contrast', 'readable', 'bionic', 'underline', 'focus', 'cursor', 'guide', 'motion',
   'magnifier', 'selectRead', 'speakHover', 'speakAnswers', 'autoSend'];
 function cleanAccess(a = {}) {
   const rate = Number(a.rate);
   return {
     textSize: TEXT_SIZES.includes(a.textSize) ? a.textSize : 100,
     magnify: MAGNIFY.includes(a.magnify) ? a.magnify : 2,
+    bionicLevel: BIONIC_LEVELS.includes(a.bionicLevel) ? a.bionicLevel : 2,
     voice: typeof a.voice === 'string' ? a.voice.slice(0, 120) : '',
     rate: Number.isFinite(rate) ? Math.min(2, Math.max(0.5, Math.round(rate * 10) / 10)) : 1,
     ...Object.fromEntries(ACCESS_SWITCHES.map(k => [k, a[k] === true])),

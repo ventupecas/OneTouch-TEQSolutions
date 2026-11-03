@@ -128,7 +128,9 @@ Every full ticket number in the chat (typed questions, answers, answer tables, f
 under an answer) is a button that opens that ticket (`linkTicketsHtml` in `app.js`).
 
 **♿ Accessibility** (`public/accessibility.js`, the ♿ in the header and on the sign-in page,
-Alt+A): text size, high contrast, easier-to-read text, underlined links, a strong focus
+Alt+A): text size, high contrast, easier-to-read text, bold word beginnings (like Bionic
+Reading: each text node wrapped in `span.a11y-bionic` with a `<b>` per word, text unchanged,
+new text wrapped as it arrives), underlined links, a strong focus
 outline, a big pointer, a reading guide and less motion; a 🔍 magnifier for the text under
 the pointer; 🔊 read aloud (Alt+R, a 🔊 Read on every answer, optionally answers as they
 arrive, selected text or what's pointed at); 🎤 dictation by the Ask bar and the chat, or

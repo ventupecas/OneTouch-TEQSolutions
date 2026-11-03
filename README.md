@@ -588,7 +588,10 @@ computer. **↺ Default settings** puts everything back.
 - **Text size:** 100%, 115%, 130%, 150% or 175% for every page.
 - **Seeing the page:** high contrast (black on white, or white on black in dark mode),
   easier-to-read text (a plainer typeface with more space between letters, words and
-  lines), underlined links and ticket numbers, a strong yellow-and-black focus outline, a
+  lines), bold word beginnings (like Bionic Reading: the first part of every word in bold,
+  light, medium or strong; ticket numbers, codes like P1, text boxes, menus and charts are
+  left as they are, and the page's text itself never changes, so copying, searching and
+  read-aloud work as before), underlined links and ticket numbers, a strong yellow-and-black focus outline, a
   big mouse pointer, a reading guide (a band across the page that follows the pointer),
   and less motion.
 - **🔍 Magnifier:** the text under the pointer shown large beside it (2×, 3× or 4×); with
@@ -8414,6 +8417,8 @@ listenForTicketChanges();
             <div class="access-switches">
                 <label class="access-switch"><input type="checkbox" data-key="contrast"><span>High contrast<small>Black on white (white on black in dark mode), with strong lines</small></span></label>
                 <label class="access-switch"><input type="checkbox" data-key="readable"><span>Easier-to-read text<small>A plainer typeface, with more space between letters, words and lines</small></span></label>
+                <label class="access-switch"><input type="checkbox" data-key="bionic"><span>Bold word beginnings (like Bionic Reading)<small>The first part of every word in bold, so your eyes move from word to word. Screen reader users may prefer it off.</small></span></label>
+                <div class="choice-row access-row access-indent" id="access-bionic-levels" aria-label="How much of each word is bold"></div>
                 <label class="access-switch"><input type="checkbox" data-key="underline"><span>Underline links and ticket numbers</span></label>
                 <label class="access-switch"><input type="checkbox" data-key="focus"><span>Strong focus outline<small>A thick yellow ring around whatever the keyboard is on</small></span></label>
                 <label class="access-switch"><input type="checkbox" data-key="cursor"><span>Big mouse pointer</span></label>
@@ -9978,7 +9983,8 @@ tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
     color: var(--text);
     line-height: 1.5;
 }
-.ai-msg > .result-restricted:first-child { margin: 0; }
+/* first-of-type: an answer's 🔊 Read button (accessibility.js) comes before it */
+.ai-msg > .result-restricted:first-of-type { margin: 0; }
 .result-caption { font-size: 0.8rem; color: var(--muted); margin-bottom: 4px; }
 .result-empty { margin: 4px 0; color: var(--text-2); }
 /* Why a question found nothing (dates covered, which condition emptied it) */
@@ -11572,6 +11578,10 @@ html.a11y-readable p,
 html.a11y-readable li,
 html.a11y-readable td,
 html.a11y-readable .msg { line-height: 1.75 !important; }
+
+/* Bold word beginnings: the <b> in each word (accessibility.js wraps them) */
+.a11y-bionic b { font-weight: 700; }
+.access-indent { margin: 0 0 4px 26px; }
 
 /* Underlined links (and the ticket-number buttons, which work like links) */
 html.a11y-underline a,
@@ -19397,13 +19407,16 @@ const cleanTour = (t = {}) => ({ done: t.done === true, dashboards: t.dashboards
 // name, how fast it reads, and on/off switches (public/accessibility.js)
 const TEXT_SIZES = [100, 115, 130, 150, 175];
 const MAGNIFY = [2, 3, 4];
-const ACCESS_SWITCHES = ['contrast', 'readable', 'underline', 'focus', 'cursor', 'guide', 'motion',
+// Bold word beginnings: how much of each word (1 light, 2 medium, 3 strong)
+const BIONIC_LEVELS = [1, 2, 3];
+const ACCESS_SWITCHES = ['contrast', 'readable', 'bionic', 'underline', 'focus', 'cursor', 'guide', 'motion',
   'magnifier', 'selectRead', 'speakHover', 'speakAnswers', 'autoSend'];
 function cleanAccess(a = {}) {
   const rate = Number(a.rate);
   return {
     textSize: TEXT_SIZES.includes(a.textSize) ? a.textSize : 100,
     magnify: MAGNIFY.includes(a.magnify) ? a.magnify : 2,
+    bionicLevel: BIONIC_LEVELS.includes(a.bionicLevel) ? a.bionicLevel : 2,
     voice: typeof a.voice === 'string' ? a.voice.slice(0, 120) : '',
     rate: Number.isFinite(rate) ? Math.min(2, Math.max(0.5, Math.round(rate * 10) / 10)) : 1,
     ...Object.fromEntries(ACCESS_SWITCHES.map(k => [k, a[k] === true])),
@@ -25338,7 +25351,9 @@ Every full ticket number in the chat (typed questions, answers, answer tables, f
 under an answer) is a button that opens that ticket (`linkTicketsHtml` in `app.js`).
 
 **♿ Accessibility** (`public/accessibility.js`, the ♿ in the header and on the sign-in page,
-Alt+A): text size, high contrast, easier-to-read text, underlined links, a strong focus
+Alt+A): text size, high contrast, easier-to-read text, bold word beginnings (like Bionic
+Reading: each text node wrapped in `span.a11y-bionic` with a `<b>` per word, text unchanged,
+new text wrapped as it arrives), underlined links, a strong focus
 outline, a big pointer, a reading guide and less motion; a 🔍 magnifier for the text under
 the pointer; 🔊 read aloud (Alt+R, a 🔊 Read on every answer, optionally answers as they
 arrive, selected text or what's pointed at); 🎤 dictation by the Ask bar and the chat, or
@@ -28456,8 +28471,9 @@ files.txt
 // =====================================================================
 // ♿ ACCESSIBILITY: settings that make OneTouch easier to see, read, hear
 // and use, from the ♿ button in the header (and on the sign-in page):
-//   - see: text size, high contrast, easier-to-read text, underlined links,
-//     a strong focus outline, a big pointer, a reading guide, less motion
+//   - see: text size, high contrast, easier-to-read text, bold word
+//     beginnings (like Bionic Reading), underlined links, a strong focus
+//     outline, a big pointer, a reading guide, less motion
 //   - 🔍 the magnifier: the text under the pointer (or the focused box), large
 //   - 🔊 read aloud: selected text, Claude's answers, or what's pointed at
 //   - 🎤 dictation: speak into the Ask bar, the chat, or any text box
@@ -28471,12 +28487,14 @@ files.txt
 
 (() => {
     const DEFAULTS = {
-        textSize: 100, magnify: 2, voice: '', rate: 1,
-        contrast: false, readable: false, underline: false, focus: false, cursor: false, guide: false, motion: false,
+        textSize: 100, magnify: 2, voice: '', rate: 1, bionicLevel: 2,
+        contrast: false, readable: false, bionic: false, underline: false, focus: false, cursor: false, guide: false, motion: false,
         magnifier: false, selectRead: false, speakHover: false, speakAnswers: false, autoSend: false,
     };
     const TEXT_SIZES = [100, 115, 130, 150, 175];
     const MAGNIFY = [2, 3, 4];
+    // How much of each word is bold: 1 light, 2 medium, 3 strong
+    const BIONIC_LEVELS = [[1, 'Light'], [2, 'Medium'], [3, 'Strong']];
     // On/off settings that are only a class on <html> (style.css)
     const LOOKS = ['contrast', 'readable', 'underline', 'focus', 'cursor', 'motion'];
     const STORE_KEY = 'onetouch-access';
@@ -28505,6 +28523,7 @@ files.txt
         // style.css sizes text in rem, so the root's size scales all of it
         root.style.fontSize = settings.textSize === 100 ? '' : `${settings.textSize}%`;
         guide.hidden = !settings.guide;
+        bionicSet(settings.bionic ? settings.bionicLevel : 0);
         if (!settings.magnifier) hideLens();
         if (!settings.selectRead) readBubble.hidden = true;
         document.querySelectorAll('.mic-btn').forEach(b => { b.hidden = !Recognition; });
@@ -28566,10 +28585,13 @@ files.txt
             `<label class="choice-pill"><input type="radio" name="a11y-size" value="${size}"><span>${size}%</span></label>`).join('');
         document.getElementById('access-magnify').innerHTML = MAGNIFY.map(n =>
             `<label class="choice-pill"><input type="radio" name="a11y-magnify" value="${n}"><span>${n}×</span></label>`).join('');
+        document.getElementById('access-bionic-levels').innerHTML = BIONIC_LEVELS.map(([n, label]) =>
+            `<label class="choice-pill"><input type="radio" name="a11y-bionic-level" value="${n}"><span>${label}</span></label>`).join('');
         panel.addEventListener('change', e => {
             const t = e.target;
             if (t.name === 'a11y-size') change({ textSize: Number(t.value) });
             else if (t.name === 'a11y-magnify') change({ magnify: Number(t.value) });
+            else if (t.name === 'a11y-bionic-level') change({ bionicLevel: Number(t.value) });
             else if (t.id === 'access-voice') change({ voice: t.value });
             else if (t.dataset.key) change({ [t.dataset.key]: t.checked });
         });
@@ -28602,6 +28624,7 @@ files.txt
         if (!panel) return;
         panel.querySelectorAll('input[name="a11y-size"]').forEach(r => { r.checked = Number(r.value) === settings.textSize; });
         panel.querySelectorAll('input[name="a11y-magnify"]').forEach(r => { r.checked = Number(r.value) === settings.magnify; });
+        panel.querySelectorAll('input[name="a11y-bionic-level"]').forEach(r => { r.checked = Number(r.value) === settings.bionicLevel; });
         panel.querySelectorAll('input[data-key]').forEach(c => { c.checked = settings[c.dataset.key] === true; });
         const rate = document.getElementById('access-rate');
         rate.value = settings.rate;
@@ -28722,6 +28745,108 @@ files.txt
         lens.style.top = `${top}px`;
     }
     function hideLens() { lens.hidden = true; }
+
+    // -----------------------------------------------------------------
+    // Bold word beginnings (like Bionic Reading): the first part of each
+    // word in bold, so the eye moves from word to word. Each text node is
+    // wrapped where it is (<span class="a11y-bionic"> with <b>s inside), so
+    // the page's text (textContent) stays the same for the code that reads
+    // it, copying and read-aloud. Text that arrives later is wrapped as it
+    // comes, a little at a time; switching off puts the plain text back.
+    // -----------------------------------------------------------------
+
+    // The share of each word in bold, per level
+    const BIONIC_SHARE = { 1: 0.3, 2: 0.45, 3: 0.6 };
+    // Not inside these: boxes and menus can't hold bold, charts are drawn as
+    // pictures (svg), and the rest isn't text for reading
+    const BIONIC_SKIP = 'script, style, noscript, textarea, input, select, option, svg, iframe, canvas, code, pre, kbd, ' +
+        '.a11y-ui, .a11y-bionic, .picture-host, [contenteditable="true"]';
+    // A word: letters only, so ticket numbers (INC1234567) and codes (P1) stay as they are
+    const BIONIC_WORD = /(?<![\p{L}\p{N}])\p{L}[\p{L}\p{M}'’]*(?![\p{L}\p{N}])/gu;
+    let bionicLevel = 0; // what the page is wrapped at now; 0 when off
+    let bionicQueue = [];
+    let bionicNext = 0;
+    let bionicTimer = null;
+    let bionicObserver = null;
+
+    function bionicFragment(text, share) {
+        const frag = document.createDocumentFragment();
+        let at = 0;
+        for (const m of text.matchAll(BIONIC_WORD)) {
+            const word = m[0];
+            if (word.length < 2) continue;
+            const bold = Math.max(1, Math.round(word.length * share));
+            if (m.index > at) frag.append(text.slice(at, m.index));
+            const b = document.createElement('b');
+            b.textContent = word.slice(0, bold);
+            frag.append(b, word.slice(bold));
+            at = m.index + word.length;
+        }
+        if (!at) return null;
+        if (at < text.length) frag.append(text.slice(at));
+        return frag;
+    }
+
+    function bionicWrap(node, share) {
+        const parent = node.parentElement;
+        if (!node.isConnected || !parent || parent.closest(BIONIC_SKIP)) return;
+        const frag = bionicFragment(node.data, share);
+        if (!frag) return;
+        const span = document.createElement('span');
+        span.className = 'a11y-bionic';
+        span.append(frag);
+        node.replaceWith(span);
+    }
+
+    // Every text node in root, leaving out whole BIONIC_SKIP parts
+    function bionicCollect(root) {
+        if (root.nodeType === Node.TEXT_NODE) {
+            if (/\p{L}{2}/u.test(root.data)) bionicQueue.push(root);
+            return;
+        }
+        if (root.nodeType !== Node.ELEMENT_NODE || root.closest(BIONIC_SKIP)) return;
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+            acceptNode: n => n.nodeType === Node.ELEMENT_NODE
+                ? (n.matches(BIONIC_SKIP) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_SKIP)
+                : (/\p{L}{2}/u.test(n.data) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP),
+        });
+        for (let n = walker.nextNode(); n; n = walker.nextNode()) bionicQueue.push(n);
+    }
+
+    // A few milliseconds at a time, so a long table never freezes the page
+    function bionicRun() {
+        bionicTimer = null;
+        const share = BIONIC_SHARE[bionicLevel];
+        if (!share) { bionicQueue = []; bionicNext = 0; return; }
+        const until = performance.now() + 8;
+        while (bionicNext < bionicQueue.length && performance.now() < until) bionicWrap(bionicQueue[bionicNext++], share);
+        if (bionicNext < bionicQueue.length) bionicTimer = setTimeout(bionicRun, 0);
+        else { bionicQueue = []; bionicNext = 0; }
+    }
+    const bionicSchedule = () => { if (!bionicTimer && bionicQueue.length) bionicTimer = setTimeout(bionicRun, 0); };
+
+    function bionicSet(level) {
+        if (level === bionicLevel) return;
+        // Putting the plain text back mustn't be seen as new text to wrap
+        bionicObserver?.disconnect();
+        clearTimeout(bionicTimer);
+        bionicTimer = null;
+        bionicQueue = [];
+        bionicNext = 0;
+        document.querySelectorAll('span.a11y-bionic').forEach(span => span.replaceWith(span.textContent));
+        bionicLevel = level;
+        if (!level) return;
+        bionicCollect(document.body);
+        bionicSchedule();
+        bionicObserver ||= new MutationObserver(changes => {
+            for (const c of changes) {
+                if (c.type === 'characterData') bionicCollect(c.target);
+                else c.addedNodes.forEach(n => { if (!n.classList?.contains('a11y-bionic')) bionicCollect(n); });
+            }
+            bionicSchedule();
+        });
+        bionicObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+    }
 
     // -----------------------------------------------------------------
     // The reading guide: a band across the page that follows the pointer
