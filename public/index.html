@@ -24,9 +24,25 @@
                 if (/^#[0-9a-f]{6}$/i.test(saved.onAccent)) root.style.setProperty('--on-accent', saved.onAccent);
             }
         } catch (e) { /* the default colors, until the account's arrive */ }
+        // ♿ This browser's accessibility settings, before anything is drawn
+        // (signed in or not; accessibility.js keeps the copy current)
+        try {
+            var access = JSON.parse(localStorage.getItem('onetouch-access') || 'null');
+            if (access) {
+                ['contrast', 'readable', 'underline', 'focus', 'cursor', 'motion'].forEach(function (k) {
+                    if (access[k] === true) document.documentElement.classList.add('a11y-' + k);
+                });
+                if ([115, 130, 150, 175].indexOf(access.textSize) >= 0) document.documentElement.style.fontSize = access.textSize + '%';
+            }
+        } catch (e) { /* the defaults, until accessibility.js starts */ }
     </script>
 </head>
 <body class="signed-out">
+    <!-- For keyboard users: the first Tab goes here, and Enter skips the header -->
+    <a class="skip-link" href="#main-content">Skip to the page</a>
+    <!-- ♿ on the sign-in page (signed in, it's in the header) -->
+    <button type="button" class="login-access-btn access-btn" onclick="toggleAccessPanel()"
+            aria-controls="access-panel" aria-expanded="false" title="Accessibility (Alt+A)">♿ Accessibility</button>
     <!-- SIGN-IN PAGE: shown until the user signs in -->
     <div id="login-view" class="login-page">
         <img src="molsoncoorslogo.png" alt="Molson Coors" class="login-brand">
@@ -75,6 +91,8 @@
             <form class="nav-ask" id="nav-ask" role="search" aria-label="Ask Claude about the data" onsubmit="event.preventDefault(); askFromHeader();">
                 <input type="search" id="nav-ask-input" placeholder="Ask Claude about the data…" autocomplete="off" enterkeyhint="send"
                        aria-label="Ask Claude a question about the data" aria-controls="assistant-panel" aria-expanded="false" maxlength="2000">
+                <button type="button" class="mic-btn" data-mic-for="nav-ask-input" aria-pressed="false"
+                        aria-label="Speak your question" title="Speak your question (Alt+M)">🎤</button>
                 <button type="submit" class="nav-ask-btn" id="nav-ask-btn" title="Ask Claude. With nothing typed, this opens the chat">
                     💬 Ask<span class="nav-ask-count" id="nav-ask-count" hidden></span>
                 </button>
@@ -83,6 +101,8 @@
         <div class="header-right">
             <button type="button" class="header-btn notify-btn" id="notify-btn" onclick="toggleNotifications()"
                     aria-controls="notify-panel" aria-expanded="false" aria-label="Notifications">🔔<span class="notify-count" id="notify-count" hidden></span></button>
+            <button type="button" class="header-btn access-btn" onclick="toggleAccessPanel()"
+                    aria-controls="access-panel" aria-expanded="false" aria-label="Accessibility" title="Accessibility (Alt+A)">♿</button>
             <button type="button" class="header-btn" id="theme-btn" onclick="toggleThemePanel()"
                     aria-controls="theme-panel" aria-expanded="false" aria-label="Colors">🎨<span class="header-btn-text"> Colors</span></button>
             <button class="sign-out-btn" type="button" onclick="signOut()">Sign out</button>
@@ -136,7 +156,81 @@
         </div>
     </section>
 
-    <main class="app-content">
+    <!-- ♿ Accessibility: how OneTouch looks, reads aloud and listens, saved to this browser and the account (accessibility.js) -->
+    <section class="theme-panel access-panel" id="access-panel" role="dialog" aria-label="Accessibility" hidden>
+        <div class="theme-panel-head">
+            <span>♿ Accessibility</span>
+            <button type="button" class="drawer-close" onclick="toggleAccessPanel(false)" aria-label="Close">✕</button>
+        </div>
+        <fieldset>
+            <legend>Text size</legend>
+            <div class="choice-row" id="access-sizes"></div>
+        </fieldset>
+        <fieldset>
+            <legend>Seeing the page</legend>
+            <div class="access-switches">
+                <label class="access-switch"><input type="checkbox" data-key="contrast"><span>High contrast<small>Black on white (white on black in dark mode), with strong lines</small></span></label>
+                <label class="access-switch"><input type="checkbox" data-key="readable"><span>Easier-to-read text<small>A plainer typeface, with more space between letters, words and lines</small></span></label>
+                <label class="access-switch"><input type="checkbox" data-key="underline"><span>Underline links and ticket numbers</span></label>
+                <label class="access-switch"><input type="checkbox" data-key="focus"><span>Strong focus outline<small>A thick yellow ring around whatever the keyboard is on</small></span></label>
+                <label class="access-switch"><input type="checkbox" data-key="cursor"><span>Big mouse pointer</span></label>
+                <label class="access-switch"><input type="checkbox" data-key="guide"><span>Reading guide<small>A band across the page that follows the pointer, to keep your place</small></span></label>
+                <label class="access-switch"><input type="checkbox" data-key="motion"><span>Less motion<small>No animations or sliding</small></span></label>
+            </div>
+        </fieldset>
+        <fieldset>
+            <legend>🔍 Magnifier</legend>
+            <div class="access-switches">
+                <label class="access-switch"><input type="checkbox" data-key="magnifier"><span>Show the text under the pointer, large<small>With the keyboard, the box or button you're on</small></span></label>
+            </div>
+            <div class="choice-row access-row" id="access-magnify" aria-label="How much larger"></div>
+        </fieldset>
+        <fieldset>
+            <legend>🔊 Read aloud</legend>
+            <div class="access-switches">
+                <label class="access-switch"><input type="checkbox" data-key="selectRead" data-needs="speech"><span>A 🔊 Read button when I select text</span></label>
+                <label class="access-switch"><input type="checkbox" data-key="speakAnswers" data-needs="speech"><span>Read Claude's answers to me<small>Every answer also has its own 🔊 Read button</small></span></label>
+                <label class="access-switch"><input type="checkbox" data-key="speakHover" data-needs="speech"><span>Read what I point at<small>Rest the pointer on any text for a moment</small></span></label>
+            </div>
+            <div class="access-row">
+                <label for="access-voice">Voice</label>
+                <select id="access-voice" data-needs="speech"></select>
+            </div>
+            <div class="access-row">
+                <label for="access-rate">Speed</label>
+                <input type="range" id="access-rate" min="0.5" max="2" step="0.1" data-needs="speech">
+                <span id="access-rate-value">1.0×</span>
+                <button type="button" class="home-action" id="access-try" data-needs="speech">▶ Try it</button>
+            </div>
+            <p class="access-note warn" id="access-speech-none" hidden>This browser can't read aloud. Edge, Chrome and Safari can.</p>
+        </fieldset>
+        <fieldset>
+            <legend>🎤 Speak instead of typing</legend>
+            <div class="access-switches">
+                <label class="access-switch"><input type="checkbox" data-key="autoSend" data-needs="dictation"><span>Ask Claude as soon as I stop talking<small>In the Ask bar and the chat; otherwise you press Enter</small></span></label>
+            </div>
+            <p class="access-note">Press 🎤 by the Ask bar or the chat, or <kbd>Alt</kbd>+<kbd>M</kbd> in any text box. Your browser turns the speech into text (Edge uses Microsoft's service, Chrome uses Google's), so it needs the internet and your permission for the microphone.</p>
+            <p class="access-note warn" id="access-dictation-none" hidden>This browser can't take dictation. Use Edge or Chrome.</p>
+        </fieldset>
+        <fieldset>
+            <legend>⌨️ Keyboard shortcuts</legend>
+            <ul class="access-keys">
+                <li><kbd>/</kbd> the Ask bar</li>
+                <li><kbd>Alt</kbd>+<kbd>A</kbd> this panel</li>
+                <li><kbd>Alt</kbd>+<kbd>R</kbd> read aloud what's selected, pointed at or focused (again to stop)</li>
+                <li><kbd>Alt</kbd>+<kbd>M</kbd> speak into the text box you're in</li>
+                <li><kbd>Esc</kbd> stop reading or listening, close a panel</li>
+                <li><kbd>Tab</kbd> first thing on the page: skip to the page itself</li>
+            </ul>
+        </fieldset>
+        <p class="access-status" id="access-status" role="status"></p>
+        <div class="theme-panel-foot">
+            <span class="theme-note">Kept in this browser and saved to your account.</span>
+            <button type="button" class="home-action" onclick="resetAccess()">↺ Default settings</button>
+        </div>
+    </section>
+
+    <main class="app-content" id="main-content" tabindex="-1">
         <!-- HOME: welcome, then each person's sections and charts in their order (customize.js) -->
         <section id="home-view" class="view-panel active">
             <div class="home" id="home">
@@ -354,7 +448,9 @@
                     <div class="msg system-msg" id="welcome-msg">Hello!</div>
                 </div>
                 <div class="chat-input-area">
-                    <input type="text" id="user-prompt" placeholder="Ask a data question..." onkeydown="if(event.key === 'Enter') sendPrompt()">
+                    <input type="text" id="user-prompt" placeholder="Ask a data question..." aria-label="Ask a data question" onkeydown="if(event.key === 'Enter') sendPrompt()">
+                    <button type="button" class="mic-btn" data-mic-for="user-prompt" aria-pressed="false"
+                            aria-label="Speak your question" title="Speak your question (Alt+M)">🎤</button>
                     <button id="send-btn" onclick="sendPrompt()">Ask Claude</button>
                     <button id="new-chat-btn" type="button" onclick="newChat()" title="Start a fresh chat (this one is kept under Chat History)">New chat</button>
                 </div>
@@ -550,6 +646,7 @@
     <script src="families.js"></script>
     <script src="teams.js"></script>
     <script src="notifications.js"></script>
+    <script src="accessibility.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

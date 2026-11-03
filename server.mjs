@@ -113,7 +113,8 @@ app.use((req, res, next) => {
     'Referrer-Policy': 'same-origin',
     'Strict-Transport-Security': 'max-age=31536000',
     'Cross-Origin-Opener-Policy': 'same-origin',
-    'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()',
+    // The microphone for ♿ dictation (public/accessibility.js), on this site only
+    'Permissions-Policy': 'camera=(), microphone=(self), geolocation=(), payment=()',
   });
   next();
 });

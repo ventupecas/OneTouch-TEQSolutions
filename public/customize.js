@@ -23,7 +23,7 @@ let prefsReady = Promise.resolve();
 // When loading failed, saving is off: it would replace what's saved with the defaults
 let prefsLoadFailed = false;
 
-const PART_NAMES = { theme: 'colors', home: 'Home page', dashboards: 'dashboards', tour: 'tour' };
+const PART_NAMES = { theme: 'colors', home: 'Home page', dashboards: 'dashboards', tour: 'tour', access: 'accessibility settings' };
 
 function loadPreferences() {
     const token = sessionTokenValue;
@@ -44,6 +44,8 @@ function loadPreferences() {
                 ? { ...saved.home, blocks: saved.home.blocks.filter(b => b?.type === 'chart' || HOME_SECTIONS[b?.type]) } : defaultHome();
             prefs.dashboards = { ...defaultDashboards(), ...saved.dashboards };
             prefs.tour = { done: saved.tour?.done === true, dashboards: saved.tour?.dashboards === true };
+            // ♿ Accessibility keeps its own copy (accessibility.js); prefs.access is what's saved
+            window.a11yAccountLoaded?.(saved.access);
         } catch (err) {
             prefsLoadFailed = true;
             console.error('Could not load the saved layout and colors:', err);
@@ -122,6 +124,8 @@ function resetCustomizing() {
     prefs.home = defaultHome();
     prefs.dashboards = defaultDashboards();
     prefs.tour = defaultTour();
+    // ♿ settings stay with this browser (the sign-in page uses them too); only reading and dictation stop
+    window.a11ySignedOut?.();
     prefsReady = Promise.resolve();
     prefsLoadFailed = false;
     teamValuesLoading = null; // the Team filter's choices come from this person's tickets

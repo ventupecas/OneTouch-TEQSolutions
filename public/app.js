@@ -450,9 +450,10 @@ function updateChatControls() {
 
 // A click anywhere outside the open chat closes it, the header included (its
 // buttons still do their job in the same click). A window opened over the chat
-// (a ticket, a chart's tickets) and the tour don't count as outside.
+// (a ticket, a chart's tickets) and the tour don't count as outside, nor do
+// ♿ Accessibility's panel, 🎤 buttons and read-aloud controls (accessibility.js).
 document.addEventListener('pointerdown', e => {
-    if (!assistantOpen() || e.target.closest?.('#assistant-panel, dialog, #tour')) return;
+    if (!assistantOpen() || e.target.closest?.('#assistant-panel, dialog, #tour, #access-panel, .mic-btn, .a11y-ui')) return;
     toggleAssistant(false, { refocus: false });
 }, true);
 
@@ -862,6 +863,8 @@ async function sendPrompt() {
 // One answer in the chat. replay: drawn again from a saved chat, so it
 // doesn't tell Claude about related tickets again or add to Ticket results.
 function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
+    // A new answer (not a saved chat drawn again): ♿ can read it aloud (accessibility.js)
+    if (!replay) setTimeout(() => document.dispatchEvent(new CustomEvent('onetouch:answer')));
     if (data.memoryReset) {
         appendMessage('system-msg', 'This conversation got long, so Claude started fresh. Earlier questions are no longer remembered.');
     }

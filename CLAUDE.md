@@ -127,6 +127,15 @@ header (right of 👥 Team) on every page; a click anywhere outside the chat clo
 Every full ticket number in the chat (typed questions, answers, answer tables, family notes
 under an answer) is a button that opens that ticket (`linkTicketsHtml` in `app.js`).
 
+**♿ Accessibility** (`public/accessibility.js`, the ♿ in the header and on the sign-in page,
+Alt+A): text size, high contrast, easier-to-read text, underlined links, a strong focus
+outline, a big pointer, a reading guide and less motion; a 🔍 magnifier for the text under
+the pointer; 🔊 read aloud (Alt+R, a 🔊 Read on every answer, optionally answers as they
+arrive, selected text or what's pointed at); 🎤 dictation by the Ask bar and the chat, or
+Alt+M in any text box (the browser's speech service, so `microphone=(self)` in the
+Permissions-Policy). Kept in the browser and saved as the `access` preference. The file is
+one function, so its names can't clash with the other page scripts.
+
 **Notifications** (`notifications.mjs`, the 🔔 in the header, checked every
 minute). Each one is saved in the same transaction as the change it reports:
 

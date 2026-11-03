@@ -2417,3 +2417,289 @@ body:not(.signed-out) .login-page { display: none; }
     animation: none !important;
   }
 }
+
+/* =====================================================================
+   ♿ ACCESSIBILITY (accessibility.js): the panel, the magnifier, the
+   reading guide, read-aloud and dictation controls, and the looks each
+   setting turns on (a class on <html>)
+   ===================================================================== */
+
+/* "Skip to the page": the first thing Tab reaches, shown only then */
+.skip-link {
+    position: fixed;
+    left: 12px;
+    top: -60px;
+    z-index: 100;
+    padding: 8px 14px;
+    border-radius: 6px;
+    background: var(--accent);
+    color: var(--on-accent);
+    font-weight: 700;
+    text-decoration: none;
+}
+.skip-link:focus { top: 12px; }
+body.signed-out .skip-link { display: none; }
+#main-content:focus { outline: none; }
+
+/* The ♿ button on the sign-in page (the header has its own) */
+.login-access-btn {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 5;
+    padding: 8px 14px;
+    border: 1px solid #d1d5db;
+    border-radius: 999px;
+    background: #ffffff;
+    color: #111827;
+    font: inherit;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+}
+.login-access-btn:hover { border-color: #6b7280; }
+body:not(.signed-out) .login-access-btn { display: none; }
+
+/* The panel: a Colors-style panel, a little wider, over the sign-in page too */
+.access-panel { width: min(420px, calc(100vw - 32px)); z-index: 60; }
+body.signed-out .access-panel { top: 16px; }
+.access-switches { display: grid; gap: 6px; }
+.access-switch {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 0.9rem;
+    line-height: 1.35;
+    cursor: pointer;
+}
+.access-switch input { margin-top: 2px; flex-shrink: 0; width: 1.05rem; height: 1.05rem; accent-color: var(--accent); }
+.access-switch small { display: block; color: var(--muted); font-size: 0.8rem; }
+.access-switch:has(input:disabled) { opacity: 0.55; cursor: not-allowed; }
+.access-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; font-size: 0.88rem; }
+.access-row select { max-width: 100%; flex: 1 1 200px; padding: 4px 6px; font: inherit; font-size: 0.85rem; }
+.access-row input[type="range"] { flex: 1 1 120px; accent-color: var(--accent); }
+.access-note { margin: 6px 0 0; font-size: 0.8rem; line-height: 1.45; color: var(--muted); }
+.access-note.warn { color: var(--warn-ink); }
+.access-keys { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 0.85rem; }
+.access-keys kbd {
+    display: inline-block;
+    min-width: 1.4em;
+    padding: 1px 6px;
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: var(--surface-2);
+    font: inherit;
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-align: center;
+}
+.access-status { font-size: 0.85rem; color: var(--accent-ink); min-height: 1.2em; margin: 4px 0 0; }
+
+/* 🔍 The magnifier: the text under the pointer, large, beside it */
+.a11y-lens {
+    position: fixed;
+    z-index: 200;
+    max-width: min(90vw, 34em);
+    padding: 0.25em 0.5em;
+    border: 3px solid #1a202c;
+    border-radius: 10px;
+    background: #fffef2;
+    color: #000000;
+    font-weight: 600;
+    line-height: 1.25;
+    white-space: pre-wrap;
+    /* Lines break between words; only a word wider than the box is split */
+    overflow-wrap: break-word;
+    pointer-events: none;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+.a11y-lens[hidden] { display: none; }
+
+/* The reading guide: a band across the page at the pointer */
+.a11y-guide {
+    position: fixed;
+    left: 0;
+    right: 0;
+    height: 2.2em;
+    transform: translateY(-50%);
+    z-index: 190;
+    pointer-events: none;
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    border-top: 2px solid var(--accent);
+    border-bottom: 2px solid var(--accent);
+}
+.a11y-guide[hidden] { display: none; }
+
+/* "🔊 Reading aloud… ⏹ Stop" and "🎤 Listening… ⏹ Stop", bottom left */
+.a11y-pill {
+    position: fixed;
+    left: 16px;
+    bottom: 16px;
+    z-index: 210;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px 8px 14px;
+    border-radius: 999px;
+    background: var(--toast-bg);
+    color: var(--toast-text);
+    font-size: 0.9rem;
+    font-weight: 600;
+    box-shadow: 0 8px 24px var(--shadow-strong);
+}
+.a11y-pill[hidden] { display: none; }
+.a11y-pill-listening { bottom: 64px; }
+.a11y-pill-btn {
+    padding: 4px 10px;
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+/* 🔊 Read by selected text */
+.a11y-read-bubble {
+    position: fixed;
+    z-index: 205;
+    padding: 4px 10px;
+    border: 1px solid var(--accent);
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--on-accent);
+    font-size: 0.85rem;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 4px 14px var(--shadow-strong);
+}
+.a11y-read-bubble[hidden] { display: none; }
+
+/* 🔊 Read on each of Claude's answers, top right */
+.msg-read-btn {
+    float: right;
+    margin: -4px -6px 4px 10px;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--panel-bg);
+    color: var(--text-2);
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.msg-read-btn:hover { border-color: var(--accent); color: var(--accent-ink); }
+
+/* 🎤 in the Ask bar (between the box and Ask) and by the chat's box */
+.mic-btn[hidden] { display: none; }
+.nav-ask .mic-btn {
+    padding: 5px 9px;
+    border: 1px solid var(--header-line);
+    border-left: none;
+    border-right: none;
+    background: color-mix(in srgb, var(--header-strong) 7%, transparent);
+    color: var(--header-strong);
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+.nav-ask .mic-btn:hover { background: color-mix(in srgb, var(--header-strong) 16%, transparent); }
+.chat-input-area .mic-btn {
+    padding: 0 14px;
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    font-size: 1.05rem;
+}
+.mic-btn.listening { background: var(--danger) !important; color: #ffffff !important; animation: a11y-pulse 1.2s ease-in-out infinite; }
+@keyframes a11y-pulse { 50% { filter: brightness(1.25); } }
+@media (prefers-reduced-motion: reduce) {
+    .mic-btn.listening { animation: none; }
+}
+
+/* ---- The looks ---- */
+
+/* High contrast: black on white (or white on black in dark mode), black lines */
+html.a11y-contrast {
+    --bg-primary: #ffffff;
+    --panel-bg: #ffffff;
+    --surface-2: #ffffff;
+    --surface-3: #eeeeee;
+    --zebra: #f2f2f2;
+    --text: #000000;
+    --text-2: #000000;
+    --muted: #1f1f1f;
+    --faint: #3d3d3d;
+    --border: #000000;
+    --link: #0000c8;
+    --header-bg: #000000;
+    --header-text: #ffffff;
+    --header-strong: #ffffff;
+    --header-line: #ffffff;
+    --header-line-hover: #ffff00;
+}
+html.a11y-contrast[data-theme="dark"] {
+    --bg-primary: #000000;
+    --panel-bg: #000000;
+    --surface-2: #000000;
+    --surface-3: #161616;
+    --zebra: #0d0d0d;
+    --text: #ffffff;
+    --text-2: #ffffff;
+    --muted: #eeeeee;
+    --faint: #cccccc;
+    --border: #ffffff;
+    --link: #99ccff;
+}
+html.a11y-contrast input,
+html.a11y-contrast select,
+html.a11y-contrast textarea { border-color: var(--border) !important; }
+html.a11y-contrast ::placeholder { color: var(--muted) !important; opacity: 1; }
+
+/* Easier-to-read text: a plainer typeface, more space between letters, words and lines */
+html.a11y-readable body,
+html.a11y-readable button,
+html.a11y-readable input,
+html.a11y-readable select,
+html.a11y-readable textarea {
+    font-family: Verdana, Tahoma, "Segoe UI", Arial, sans-serif !important;
+    letter-spacing: 0.03em;
+    word-spacing: 0.12em;
+}
+html.a11y-readable p,
+html.a11y-readable li,
+html.a11y-readable td,
+html.a11y-readable .msg { line-height: 1.75 !important; }
+
+/* Underlined links (and the ticket-number buttons, which work like links) */
+html.a11y-underline a,
+html.a11y-underline .ticket-link { text-decoration: underline !important; text-underline-offset: 3px; }
+
+/* A focus outline anyone can see: yellow on black */
+html.a11y-focus :focus-visible {
+    outline: 3px solid #ffbf00 !important;
+    outline-offset: 2px !important;
+    box-shadow: 0 0 0 6px #000000 !important;
+}
+
+/* A big pointer, and a big hand over things to click */
+html.a11y-cursor,
+html.a11y-cursor * {
+    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Cpath d='M4 2 L4 32 L12 25 L18 38 L24 35 L18 23 L29 23 Z' fill='%23000' stroke='%23fff' stroke-width='2.5' stroke-linejoin='round'/%3E%3C/svg%3E") 4 2, auto !important;
+}
+html.a11y-cursor :is(a, button, label, select, summary, [role="button"], [onclick]),
+html.a11y-cursor :is(a, button, label, select, summary, [role="button"], [onclick]) * {
+    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Cpath d='M14 4 a3 3 0 0 1 6 0 V17 l1-1 a3 3 0 0 1 5 2 l1-1 a3 3 0 0 1 5 2 l1 0 a3 3 0 0 1 4 3 V28 c0 6-4 10-10 10 h-4 c-4 0-6-2-9-5 L5 25 a3 3 0 0 1 4-4 l5 4 Z' fill='%23000' stroke='%23fff' stroke-width='2.2' stroke-linejoin='round'/%3E%3C/svg%3E") 15 2, pointer !important;
+}
+html.a11y-cursor :is(input:not([type="checkbox"]):not([type="radio"]), textarea) { cursor: text !important; }
+
+/* Less motion: no animations or slides */
+html.a11y-motion *,
+html.a11y-motion *::before,
+html.a11y-motion *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+}

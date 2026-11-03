@@ -578,6 +578,41 @@ dashboards count a catalog task as open by its *active* flag instead, so they sh
 open catalog tasks (824 against 830): 6 tasks are marked Pending or Work in Progress but
 no longer active.
 
+### Accessibility (♿)
+
+The ♿ button in the header (and **♿ Accessibility** at the bottom right of the sign-in
+page, or **Alt+A** anywhere) opens a panel of settings. They're kept in the browser, so the
+sign-in page uses them too, and saved to the account, so they follow the person to any
+computer. **↺ Default settings** puts everything back.
+
+- **Text size:** 100%, 115%, 130%, 150% or 175% for every page.
+- **Seeing the page:** high contrast (black on white, or white on black in dark mode),
+  easier-to-read text (a plainer typeface with more space between letters, words and
+  lines), underlined links and ticket numbers, a strong yellow-and-black focus outline, a
+  big mouse pointer, a reading guide (a band across the page that follows the pointer),
+  and less motion.
+- **🔍 Magnifier:** the text under the pointer shown large beside it (2×, 3× or 4×); with
+  the keyboard, the box or button that has focus. A password box only says it's one.
+- **🔊 Read aloud** (the browser's own voices): **Alt+R** reads what's selected, pointed at
+  or focused (Alt+R again or Esc stops). Optional: a 🔊 Read button by selected text, Claude's
+  answers read as they arrive, and reading whatever the pointer rests on. Every answer in
+  the chat has its own **🔊 Read**; a table is read as its number of rows and its columns,
+  and ticket numbers as their type and digits ("incident 1 2 3 4 5 6 7"). A voice and a
+  speed can be picked, with **▶ Try it**.
+- **🎤 Speak instead of typing:** 🎤 by the Ask bar and by the chat's box, or **Alt+M** in
+  any text box (including the sign-in page's). What's said is typed where the cursor is;
+  with **Ask Claude as soon as I stop talking**, the question is asked when they stop.
+  The browser turns speech into text online (Edge through Microsoft, Chrome through Google),
+  so it needs the internet and the person's permission for the microphone
+  (`Permissions-Policy: microphone=(self)` in `server.mjs`). Firefox can't take dictation;
+  the 🎤 buttons are hidden there and the panel says so.
+- **Keyboard:** the first Tab on a page shows **Skip to the page**; `/` the Ask bar, Alt+A
+  the panel, Alt+R read, Alt+M dictate, Esc stops reading or listening.
+
+All of it is `public/accessibility.js` (one function, so none of its names can clash with
+the other page scripts) and the "♿ ACCESSIBILITY" part of `style.css`; the settings are the
+`access` part of the person's preferences (`prefs.mjs`, `cleanAccess`).
+
 ### Ticket families (Dashboards)
 
 **☰ Dashboards → Built into OneTouch → 👪 Ticket families** lists every family of tickets in
@@ -2203,6 +2238,7 @@ Create each file at the path shown, with exactly this content. Files are in the 
 - [B.78 `checks/ticket-order.mjs`](#b78)
 - [B.79 `.github/workflows/ci.yml`](#b79)
 - [B.80 `.dockerignore`](#b80)
+- [B.81 `public/accessibility.js`](#b81)
 
 <a id="b1"></a>
 ### B.1 `.gitignore`
@@ -6384,7 +6420,8 @@ app.use((req, res, next) => {
     'Referrer-Policy': 'same-origin',
     'Strict-Transport-Security': 'max-age=31536000',
     'Cross-Origin-Opener-Policy': 'same-origin',
-    'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()',
+    // The microphone for ♿ dictation (public/accessibility.js), on this site only
+    'Permissions-Policy': 'camera=(), microphone=(self), geolocation=(), payment=()',
   });
   next();
 });
@@ -8230,9 +8267,25 @@ listenForTicketChanges();
                 if (/^#[0-9a-f]{6}$/i.test(saved.onAccent)) root.style.setProperty('--on-accent', saved.onAccent);
             }
         } catch (e) { /* the default colors, until the account's arrive */ }
+        // ♿ This browser's accessibility settings, before anything is drawn
+        // (signed in or not; accessibility.js keeps the copy current)
+        try {
+            var access = JSON.parse(localStorage.getItem('onetouch-access') || 'null');
+            if (access) {
+                ['contrast', 'readable', 'underline', 'focus', 'cursor', 'motion'].forEach(function (k) {
+                    if (access[k] === true) document.documentElement.classList.add('a11y-' + k);
+                });
+                if ([115, 130, 150, 175].indexOf(access.textSize) >= 0) document.documentElement.style.fontSize = access.textSize + '%';
+            }
+        } catch (e) { /* the defaults, until accessibility.js starts */ }
     </script>
 </head>
 <body class="signed-out">
+    <!-- For keyboard users: the first Tab goes here, and Enter skips the header -->
+    <a class="skip-link" href="#main-content">Skip to the page</a>
+    <!-- ♿ on the sign-in page (signed in, it's in the header) -->
+    <button type="button" class="login-access-btn access-btn" onclick="toggleAccessPanel()"
+            aria-controls="access-panel" aria-expanded="false" title="Accessibility (Alt+A)">♿ Accessibility</button>
     <!-- SIGN-IN PAGE: shown until the user signs in -->
     <div id="login-view" class="login-page">
         <img src="molsoncoorslogo.png" alt="Molson Coors" class="login-brand">
@@ -8281,6 +8334,8 @@ listenForTicketChanges();
             <form class="nav-ask" id="nav-ask" role="search" aria-label="Ask Claude about the data" onsubmit="event.preventDefault(); askFromHeader();">
                 <input type="search" id="nav-ask-input" placeholder="Ask Claude about the data…" autocomplete="off" enterkeyhint="send"
                        aria-label="Ask Claude a question about the data" aria-controls="assistant-panel" aria-expanded="false" maxlength="2000">
+                <button type="button" class="mic-btn" data-mic-for="nav-ask-input" aria-pressed="false"
+                        aria-label="Speak your question" title="Speak your question (Alt+M)">🎤</button>
                 <button type="submit" class="nav-ask-btn" id="nav-ask-btn" title="Ask Claude. With nothing typed, this opens the chat">
                     💬 Ask<span class="nav-ask-count" id="nav-ask-count" hidden></span>
                 </button>
@@ -8289,6 +8344,8 @@ listenForTicketChanges();
         <div class="header-right">
             <button type="button" class="header-btn notify-btn" id="notify-btn" onclick="toggleNotifications()"
                     aria-controls="notify-panel" aria-expanded="false" aria-label="Notifications">🔔<span class="notify-count" id="notify-count" hidden></span></button>
+            <button type="button" class="header-btn access-btn" onclick="toggleAccessPanel()"
+                    aria-controls="access-panel" aria-expanded="false" aria-label="Accessibility" title="Accessibility (Alt+A)">♿</button>
             <button type="button" class="header-btn" id="theme-btn" onclick="toggleThemePanel()"
                     aria-controls="theme-panel" aria-expanded="false" aria-label="Colors">🎨<span class="header-btn-text"> Colors</span></button>
             <button class="sign-out-btn" type="button" onclick="signOut()">Sign out</button>
@@ -8342,7 +8399,81 @@ listenForTicketChanges();
         </div>
     </section>
 
-    <main class="app-content">
+    <!-- ♿ Accessibility: how OneTouch looks, reads aloud and listens, saved to this browser and the account (accessibility.js) -->
+    <section class="theme-panel access-panel" id="access-panel" role="dialog" aria-label="Accessibility" hidden>
+        <div class="theme-panel-head">
+            <span>♿ Accessibility</span>
+            <button type="button" class="drawer-close" onclick="toggleAccessPanel(false)" aria-label="Close">✕</button>
+        </div>
+        <fieldset>
+            <legend>Text size</legend>
+            <div class="choice-row" id="access-sizes"></div>
+        </fieldset>
+        <fieldset>
+            <legend>Seeing the page</legend>
+            <div class="access-switches">
+                <label class="access-switch"><input type="checkbox" data-key="contrast"><span>High contrast<small>Black on white (white on black in dark mode), with strong lines</small></span></label>
+                <label class="access-switch"><input type="checkbox" data-key="readable"><span>Easier-to-read text<small>A plainer typeface, with more space between letters, words and lines</small></span></label>
+                <label class="access-switch"><input type="checkbox" data-key="underline"><span>Underline links and ticket numbers</span></label>
+                <label class="access-switch"><input type="checkbox" data-key="focus"><span>Strong focus outline<small>A thick yellow ring around whatever the keyboard is on</small></span></label>
+                <label class="access-switch"><input type="checkbox" data-key="cursor"><span>Big mouse pointer</span></label>
+                <label class="access-switch"><input type="checkbox" data-key="guide"><span>Reading guide<small>A band across the page that follows the pointer, to keep your place</small></span></label>
+                <label class="access-switch"><input type="checkbox" data-key="motion"><span>Less motion<small>No animations or sliding</small></span></label>
+            </div>
+        </fieldset>
+        <fieldset>
+            <legend>🔍 Magnifier</legend>
+            <div class="access-switches">
+                <label class="access-switch"><input type="checkbox" data-key="magnifier"><span>Show the text under the pointer, large<small>With the keyboard, the box or button you're on</small></span></label>
+            </div>
+            <div class="choice-row access-row" id="access-magnify" aria-label="How much larger"></div>
+        </fieldset>
+        <fieldset>
+            <legend>🔊 Read aloud</legend>
+            <div class="access-switches">
+                <label class="access-switch"><input type="checkbox" data-key="selectRead" data-needs="speech"><span>A 🔊 Read button when I select text</span></label>
+                <label class="access-switch"><input type="checkbox" data-key="speakAnswers" data-needs="speech"><span>Read Claude's answers to me<small>Every answer also has its own 🔊 Read button</small></span></label>
+                <label class="access-switch"><input type="checkbox" data-key="speakHover" data-needs="speech"><span>Read what I point at<small>Rest the pointer on any text for a moment</small></span></label>
+            </div>
+            <div class="access-row">
+                <label for="access-voice">Voice</label>
+                <select id="access-voice" data-needs="speech"></select>
+            </div>
+            <div class="access-row">
+                <label for="access-rate">Speed</label>
+                <input type="range" id="access-rate" min="0.5" max="2" step="0.1" data-needs="speech">
+                <span id="access-rate-value">1.0×</span>
+                <button type="button" class="home-action" id="access-try" data-needs="speech">▶ Try it</button>
+            </div>
+            <p class="access-note warn" id="access-speech-none" hidden>This browser can't read aloud. Edge, Chrome and Safari can.</p>
+        </fieldset>
+        <fieldset>
+            <legend>🎤 Speak instead of typing</legend>
+            <div class="access-switches">
+                <label class="access-switch"><input type="checkbox" data-key="autoSend" data-needs="dictation"><span>Ask Claude as soon as I stop talking<small>In the Ask bar and the chat; otherwise you press Enter</small></span></label>
+            </div>
+            <p class="access-note">Press 🎤 by the Ask bar or the chat, or <kbd>Alt</kbd>+<kbd>M</kbd> in any text box. Your browser turns the speech into text (Edge uses Microsoft's service, Chrome uses Google's), so it needs the internet and your permission for the microphone.</p>
+            <p class="access-note warn" id="access-dictation-none" hidden>This browser can't take dictation. Use Edge or Chrome.</p>
+        </fieldset>
+        <fieldset>
+            <legend>⌨️ Keyboard shortcuts</legend>
+            <ul class="access-keys">
+                <li><kbd>/</kbd> the Ask bar</li>
+                <li><kbd>Alt</kbd>+<kbd>A</kbd> this panel</li>
+                <li><kbd>Alt</kbd>+<kbd>R</kbd> read aloud what's selected, pointed at or focused (again to stop)</li>
+                <li><kbd>Alt</kbd>+<kbd>M</kbd> speak into the text box you're in</li>
+                <li><kbd>Esc</kbd> stop reading or listening, close a panel</li>
+                <li><kbd>Tab</kbd> first thing on the page: skip to the page itself</li>
+            </ul>
+        </fieldset>
+        <p class="access-status" id="access-status" role="status"></p>
+        <div class="theme-panel-foot">
+            <span class="theme-note">Kept in this browser and saved to your account.</span>
+            <button type="button" class="home-action" onclick="resetAccess()">↺ Default settings</button>
+        </div>
+    </section>
+
+    <main class="app-content" id="main-content" tabindex="-1">
         <!-- HOME: welcome, then each person's sections and charts in their order (customize.js) -->
         <section id="home-view" class="view-panel active">
             <div class="home" id="home">
@@ -8560,7 +8691,9 @@ listenForTicketChanges();
                     <div class="msg system-msg" id="welcome-msg">Hello!</div>
                 </div>
                 <div class="chat-input-area">
-                    <input type="text" id="user-prompt" placeholder="Ask a data question..." onkeydown="if(event.key === 'Enter') sendPrompt()">
+                    <input type="text" id="user-prompt" placeholder="Ask a data question..." aria-label="Ask a data question" onkeydown="if(event.key === 'Enter') sendPrompt()">
+                    <button type="button" class="mic-btn" data-mic-for="user-prompt" aria-pressed="false"
+                            aria-label="Speak your question" title="Speak your question (Alt+M)">🎤</button>
                     <button id="send-btn" onclick="sendPrompt()">Ask Claude</button>
                     <button id="new-chat-btn" type="button" onclick="newChat()" title="Start a fresh chat (this one is kept under Chat History)">New chat</button>
                 </div>
@@ -8756,6 +8889,7 @@ listenForTicketChanges();
     <script src="families.js"></script>
     <script src="teams.js"></script>
     <script src="notifications.js"></script>
+    <script src="accessibility.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
@@ -11184,6 +11318,292 @@ body:not(.signed-out) .login-page { display: none; }
     animation: none !important;
   }
 }
+
+/* =====================================================================
+   ♿ ACCESSIBILITY (accessibility.js): the panel, the magnifier, the
+   reading guide, read-aloud and dictation controls, and the looks each
+   setting turns on (a class on <html>)
+   ===================================================================== */
+
+/* "Skip to the page": the first thing Tab reaches, shown only then */
+.skip-link {
+    position: fixed;
+    left: 12px;
+    top: -60px;
+    z-index: 100;
+    padding: 8px 14px;
+    border-radius: 6px;
+    background: var(--accent);
+    color: var(--on-accent);
+    font-weight: 700;
+    text-decoration: none;
+}
+.skip-link:focus { top: 12px; }
+body.signed-out .skip-link { display: none; }
+#main-content:focus { outline: none; }
+
+/* The ♿ button on the sign-in page (the header has its own) */
+.login-access-btn {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 5;
+    padding: 8px 14px;
+    border: 1px solid #d1d5db;
+    border-radius: 999px;
+    background: #ffffff;
+    color: #111827;
+    font: inherit;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+}
+.login-access-btn:hover { border-color: #6b7280; }
+body:not(.signed-out) .login-access-btn { display: none; }
+
+/* The panel: a Colors-style panel, a little wider, over the sign-in page too */
+.access-panel { width: min(420px, calc(100vw - 32px)); z-index: 60; }
+body.signed-out .access-panel { top: 16px; }
+.access-switches { display: grid; gap: 6px; }
+.access-switch {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 0.9rem;
+    line-height: 1.35;
+    cursor: pointer;
+}
+.access-switch input { margin-top: 2px; flex-shrink: 0; width: 1.05rem; height: 1.05rem; accent-color: var(--accent); }
+.access-switch small { display: block; color: var(--muted); font-size: 0.8rem; }
+.access-switch:has(input:disabled) { opacity: 0.55; cursor: not-allowed; }
+.access-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; font-size: 0.88rem; }
+.access-row select { max-width: 100%; flex: 1 1 200px; padding: 4px 6px; font: inherit; font-size: 0.85rem; }
+.access-row input[type="range"] { flex: 1 1 120px; accent-color: var(--accent); }
+.access-note { margin: 6px 0 0; font-size: 0.8rem; line-height: 1.45; color: var(--muted); }
+.access-note.warn { color: var(--warn-ink); }
+.access-keys { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 0.85rem; }
+.access-keys kbd {
+    display: inline-block;
+    min-width: 1.4em;
+    padding: 1px 6px;
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: var(--surface-2);
+    font: inherit;
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-align: center;
+}
+.access-status { font-size: 0.85rem; color: var(--accent-ink); min-height: 1.2em; margin: 4px 0 0; }
+
+/* 🔍 The magnifier: the text under the pointer, large, beside it */
+.a11y-lens {
+    position: fixed;
+    z-index: 200;
+    max-width: min(90vw, 34em);
+    padding: 0.25em 0.5em;
+    border: 3px solid #1a202c;
+    border-radius: 10px;
+    background: #fffef2;
+    color: #000000;
+    font-weight: 600;
+    line-height: 1.25;
+    white-space: pre-wrap;
+    /* Lines break between words; only a word wider than the box is split */
+    overflow-wrap: break-word;
+    pointer-events: none;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+.a11y-lens[hidden] { display: none; }
+
+/* The reading guide: a band across the page at the pointer */
+.a11y-guide {
+    position: fixed;
+    left: 0;
+    right: 0;
+    height: 2.2em;
+    transform: translateY(-50%);
+    z-index: 190;
+    pointer-events: none;
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    border-top: 2px solid var(--accent);
+    border-bottom: 2px solid var(--accent);
+}
+.a11y-guide[hidden] { display: none; }
+
+/* "🔊 Reading aloud… ⏹ Stop" and "🎤 Listening… ⏹ Stop", bottom left */
+.a11y-pill {
+    position: fixed;
+    left: 16px;
+    bottom: 16px;
+    z-index: 210;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px 8px 14px;
+    border-radius: 999px;
+    background: var(--toast-bg);
+    color: var(--toast-text);
+    font-size: 0.9rem;
+    font-weight: 600;
+    box-shadow: 0 8px 24px var(--shadow-strong);
+}
+.a11y-pill[hidden] { display: none; }
+.a11y-pill-listening { bottom: 64px; }
+.a11y-pill-btn {
+    padding: 4px 10px;
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+/* 🔊 Read by selected text */
+.a11y-read-bubble {
+    position: fixed;
+    z-index: 205;
+    padding: 4px 10px;
+    border: 1px solid var(--accent);
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--on-accent);
+    font-size: 0.85rem;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 4px 14px var(--shadow-strong);
+}
+.a11y-read-bubble[hidden] { display: none; }
+
+/* 🔊 Read on each of Claude's answers, top right */
+.msg-read-btn {
+    float: right;
+    margin: -4px -6px 4px 10px;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--panel-bg);
+    color: var(--text-2);
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.msg-read-btn:hover { border-color: var(--accent); color: var(--accent-ink); }
+
+/* 🎤 in the Ask bar (between the box and Ask) and by the chat's box */
+.mic-btn[hidden] { display: none; }
+.nav-ask .mic-btn {
+    padding: 5px 9px;
+    border: 1px solid var(--header-line);
+    border-left: none;
+    border-right: none;
+    background: color-mix(in srgb, var(--header-strong) 7%, transparent);
+    color: var(--header-strong);
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+.nav-ask .mic-btn:hover { background: color-mix(in srgb, var(--header-strong) 16%, transparent); }
+.chat-input-area .mic-btn {
+    padding: 0 14px;
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    font-size: 1.05rem;
+}
+.mic-btn.listening { background: var(--danger) !important; color: #ffffff !important; animation: a11y-pulse 1.2s ease-in-out infinite; }
+@keyframes a11y-pulse { 50% { filter: brightness(1.25); } }
+@media (prefers-reduced-motion: reduce) {
+    .mic-btn.listening { animation: none; }
+}
+
+/* ---- The looks ---- */
+
+/* High contrast: black on white (or white on black in dark mode), black lines */
+html.a11y-contrast {
+    --bg-primary: #ffffff;
+    --panel-bg: #ffffff;
+    --surface-2: #ffffff;
+    --surface-3: #eeeeee;
+    --zebra: #f2f2f2;
+    --text: #000000;
+    --text-2: #000000;
+    --muted: #1f1f1f;
+    --faint: #3d3d3d;
+    --border: #000000;
+    --link: #0000c8;
+    --header-bg: #000000;
+    --header-text: #ffffff;
+    --header-strong: #ffffff;
+    --header-line: #ffffff;
+    --header-line-hover: #ffff00;
+}
+html.a11y-contrast[data-theme="dark"] {
+    --bg-primary: #000000;
+    --panel-bg: #000000;
+    --surface-2: #000000;
+    --surface-3: #161616;
+    --zebra: #0d0d0d;
+    --text: #ffffff;
+    --text-2: #ffffff;
+    --muted: #eeeeee;
+    --faint: #cccccc;
+    --border: #ffffff;
+    --link: #99ccff;
+}
+html.a11y-contrast input,
+html.a11y-contrast select,
+html.a11y-contrast textarea { border-color: var(--border) !important; }
+html.a11y-contrast ::placeholder { color: var(--muted) !important; opacity: 1; }
+
+/* Easier-to-read text: a plainer typeface, more space between letters, words and lines */
+html.a11y-readable body,
+html.a11y-readable button,
+html.a11y-readable input,
+html.a11y-readable select,
+html.a11y-readable textarea {
+    font-family: Verdana, Tahoma, "Segoe UI", Arial, sans-serif !important;
+    letter-spacing: 0.03em;
+    word-spacing: 0.12em;
+}
+html.a11y-readable p,
+html.a11y-readable li,
+html.a11y-readable td,
+html.a11y-readable .msg { line-height: 1.75 !important; }
+
+/* Underlined links (and the ticket-number buttons, which work like links) */
+html.a11y-underline a,
+html.a11y-underline .ticket-link { text-decoration: underline !important; text-underline-offset: 3px; }
+
+/* A focus outline anyone can see: yellow on black */
+html.a11y-focus :focus-visible {
+    outline: 3px solid #ffbf00 !important;
+    outline-offset: 2px !important;
+    box-shadow: 0 0 0 6px #000000 !important;
+}
+
+/* A big pointer, and a big hand over things to click */
+html.a11y-cursor,
+html.a11y-cursor * {
+    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Cpath d='M4 2 L4 32 L12 25 L18 38 L24 35 L18 23 L29 23 Z' fill='%23000' stroke='%23fff' stroke-width='2.5' stroke-linejoin='round'/%3E%3C/svg%3E") 4 2, auto !important;
+}
+html.a11y-cursor :is(a, button, label, select, summary, [role="button"], [onclick]),
+html.a11y-cursor :is(a, button, label, select, summary, [role="button"], [onclick]) * {
+    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Cpath d='M14 4 a3 3 0 0 1 6 0 V17 l1-1 a3 3 0 0 1 5 2 l1-1 a3 3 0 0 1 5 2 l1 0 a3 3 0 0 1 4 3 V28 c0 6-4 10-10 10 h-4 c-4 0-6-2-9-5 L5 25 a3 3 0 0 1 4-4 l5 4 Z' fill='%23000' stroke='%23fff' stroke-width='2.2' stroke-linejoin='round'/%3E%3C/svg%3E") 15 2, pointer !important;
+}
+html.a11y-cursor :is(input:not([type="checkbox"]):not([type="radio"]), textarea) { cursor: text !important; }
+
+/* Less motion: no animations or slides */
+html.a11y-motion *,
+html.a11y-motion *::before,
+html.a11y-motion *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+}
 ```
 
 <a id="b27"></a>
@@ -11642,9 +12062,10 @@ function updateChatControls() {
 
 // A click anywhere outside the open chat closes it, the header included (its
 // buttons still do their job in the same click). A window opened over the chat
-// (a ticket, a chart's tickets) and the tour don't count as outside.
+// (a ticket, a chart's tickets) and the tour don't count as outside, nor do
+// ♿ Accessibility's panel, 🎤 buttons and read-aloud controls (accessibility.js).
 document.addEventListener('pointerdown', e => {
-    if (!assistantOpen() || e.target.closest?.('#assistant-panel, dialog, #tour')) return;
+    if (!assistantOpen() || e.target.closest?.('#assistant-panel, dialog, #tour, #access-panel, .mic-btn, .a11y-ui')) return;
     toggleAssistant(false, { refocus: false });
 }, true);
 
@@ -12054,6 +12475,8 @@ async function sendPrompt() {
 // One answer in the chat. replay: drawn again from a saved chat, so it
 // doesn't tell Claude about related tickets again or add to Ticket results.
 function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
+    // A new answer (not a saved chat drawn again): ♿ can read it aloud (accessibility.js)
+    if (!replay) setTimeout(() => document.dispatchEvent(new CustomEvent('onetouch:answer')));
     if (data.memoryReset) {
         appendMessage('system-msg', 'This conversation got long, so Claude started fresh. Earlier questions are no longer remembered.');
     }
@@ -17047,7 +17470,7 @@ const FILES = [
   'servicenow-sync/src/processRecord.js', 'servicenow-sync/src/db/upsertRecord.js',
   'servicenow-sync/src/db/pending.js', 'servicenow-sync/src/families.js',
   'servicenow-sync/servicenow-blueprint.md',
-  'checks/ticket-order.mjs', '.github/workflows/ci.yml', '.dockerignore',
+  'checks/ticket-order.mjs', '.github/workflows/ci.yml', '.dockerignore', 'public/accessibility.js',
 ];
 
 // Not copied in, and why (shown in the appendix)
@@ -18859,7 +19282,8 @@ import { sanitizeChart, sanitizeScope, newId } from './charts.mjs';
 
 // Saved separately, so changing colors never overwrites a dashboard.
 // tour: which tours have been seen (Home's, and the Dashboards page's).
-export const PARTS = ['theme', 'home', 'dashboards', 'tour'];
+// access: the ♿ Accessibility settings (public/accessibility.js).
+export const PARTS = ['theme', 'home', 'dashboards', 'tour', 'access'];
 
 export const MAX_BOARDS = 20;
 export const MAX_BOARD_CHARTS = 30;
@@ -18969,7 +19393,24 @@ function cleanDashboards(d = {}) {
 // done: Home's tour has been seen; dashboards: the Dashboards page's
 const cleanTour = (t = {}) => ({ done: t.done === true, dashboards: t.dashboards === true });
 
-const CLEANERS = { theme: cleanTheme, home: cleanHome, dashboards: cleanDashboards, tour: cleanTour };
+// ♿ Accessibility: text size (%), how much the magnifier enlarges, a voice's
+// name, how fast it reads, and on/off switches (public/accessibility.js)
+const TEXT_SIZES = [100, 115, 130, 150, 175];
+const MAGNIFY = [2, 3, 4];
+const ACCESS_SWITCHES = ['contrast', 'readable', 'underline', 'focus', 'cursor', 'guide', 'motion',
+  'magnifier', 'selectRead', 'speakHover', 'speakAnswers', 'autoSend'];
+function cleanAccess(a = {}) {
+  const rate = Number(a.rate);
+  return {
+    textSize: TEXT_SIZES.includes(a.textSize) ? a.textSize : 100,
+    magnify: MAGNIFY.includes(a.magnify) ? a.magnify : 2,
+    voice: typeof a.voice === 'string' ? a.voice.slice(0, 120) : '',
+    rate: Number.isFinite(rate) ? Math.min(2, Math.max(0.5, Math.round(rate * 10) / 10)) : 1,
+    ...Object.fromEntries(ACCESS_SWITCHES.map(k => [k, a[k] === true])),
+  };
+}
+
+const CLEANERS = { theme: cleanTheme, home: cleanHome, dashboards: cleanDashboards, tour: cleanTour, access: cleanAccess };
 
 export function cleanPreference(part, value) {
   if (!PARTS.includes(part)) throw new PreferenceError('Unknown setting.');
@@ -20463,7 +20904,7 @@ let prefsReady = Promise.resolve();
 // When loading failed, saving is off: it would replace what's saved with the defaults
 let prefsLoadFailed = false;
 
-const PART_NAMES = { theme: 'colors', home: 'Home page', dashboards: 'dashboards', tour: 'tour' };
+const PART_NAMES = { theme: 'colors', home: 'Home page', dashboards: 'dashboards', tour: 'tour', access: 'accessibility settings' };
 
 function loadPreferences() {
     const token = sessionTokenValue;
@@ -20484,6 +20925,8 @@ function loadPreferences() {
                 ? { ...saved.home, blocks: saved.home.blocks.filter(b => b?.type === 'chart' || HOME_SECTIONS[b?.type]) } : defaultHome();
             prefs.dashboards = { ...defaultDashboards(), ...saved.dashboards };
             prefs.tour = { done: saved.tour?.done === true, dashboards: saved.tour?.dashboards === true };
+            // ♿ Accessibility keeps its own copy (accessibility.js); prefs.access is what's saved
+            window.a11yAccountLoaded?.(saved.access);
         } catch (err) {
             prefsLoadFailed = true;
             console.error('Could not load the saved layout and colors:', err);
@@ -20562,6 +21005,8 @@ function resetCustomizing() {
     prefs.home = defaultHome();
     prefs.dashboards = defaultDashboards();
     prefs.tour = defaultTour();
+    // ♿ settings stay with this browser (the sign-in page uses them too); only reading and dictation stop
+    window.a11ySignedOut?.();
     prefsReady = Promise.resolve();
     prefsLoadFailed = false;
     teamValuesLoading = null; // the Team filter's choices come from this person's tickets
@@ -24892,6 +25337,15 @@ header (right of 👥 Team) on every page; a click anywhere outside the chat clo
 Every full ticket number in the chat (typed questions, answers, answer tables, family notes
 under an answer) is a button that opens that ticket (`linkTicketsHtml` in `app.js`).
 
+**♿ Accessibility** (`public/accessibility.js`, the ♿ in the header and on the sign-in page,
+Alt+A): text size, high contrast, easier-to-read text, underlined links, a strong focus
+outline, a big pointer, a reading guide and less motion; a 🔍 magnifier for the text under
+the pointer; 🔊 read aloud (Alt+R, a 🔊 Read on every answer, optionally answers as they
+arrive, selected text or what's pointed at); 🎤 dictation by the Ask bar and the chat, or
+Alt+M in any text box (the browser's speech service, so `microphone=(self)` in the
+Permissions-Policy). Kept in the browser and saved as the `access` preference. The file is
+one function, so its names can't clash with the other page scripts.
+
 **Notifications** (`notifications.mjs`, the 🔔 in the header, checked every
 minute). Each one is saved in the same transaction as the change it reports:
 
@@ -27993,6 +28447,625 @@ CLAUDE.local.md
 diag*.txt
 curl.txt
 files.txt
+```
+
+<a id="b81"></a>
+### B.81 `public/accessibility.js`
+
+```js
+// =====================================================================
+// ♿ ACCESSIBILITY: settings that make OneTouch easier to see, read, hear
+// and use, from the ♿ button in the header (and on the sign-in page):
+//   - see: text size, high contrast, easier-to-read text, underlined links,
+//     a strong focus outline, a big pointer, a reading guide, less motion
+//   - 🔍 the magnifier: the text under the pointer (or the focused box), large
+//   - 🔊 read aloud: selected text, Claude's answers, or what's pointed at
+//   - 🎤 dictation: speak into the Ask bar, the chat, or any text box
+// Kept in this browser (so the sign-in page uses them too) and saved to the
+// account (prefs.mjs, part "access"), so they follow the person anywhere.
+//
+// Everything here is inside one function, so its names can't clash with the
+// other page scripts (they share one global scope); the page calls only the
+// few put on window at the end.
+// =====================================================================
+
+(() => {
+    const DEFAULTS = {
+        textSize: 100, magnify: 2, voice: '', rate: 1,
+        contrast: false, readable: false, underline: false, focus: false, cursor: false, guide: false, motion: false,
+        magnifier: false, selectRead: false, speakHover: false, speakAnswers: false, autoSend: false,
+    };
+    const TEXT_SIZES = [100, 115, 130, 150, 175];
+    const MAGNIFY = [2, 3, 4];
+    // On/off settings that are only a class on <html> (style.css)
+    const LOOKS = ['contrast', 'readable', 'underline', 'focus', 'cursor', 'motion'];
+    const STORE_KEY = 'onetouch-access';
+
+    const synth = window.speechSynthesis || null;
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+
+    let settings = { ...DEFAULTS, ...readStored() };
+
+    function readStored() {
+        try { return JSON.parse(localStorage.getItem(STORE_KEY) || '{}') || {}; } catch { return {}; }
+    }
+    function store() {
+        try { localStorage.setItem(STORE_KEY, JSON.stringify(settings)); } catch { /* this browser forgets them; the account doesn't */ }
+    }
+    const isDefault = s => Object.keys(DEFAULTS).every(k => s[k] === DEFAULTS[k]);
+    const signedIn = () => !document.body.classList.contains('signed-out') && typeof sessionTokenValue !== 'undefined' && sessionTokenValue;
+
+    // -----------------------------------------------------------------
+    // Applying the settings
+    // -----------------------------------------------------------------
+
+    function apply() {
+        const root = document.documentElement;
+        for (const key of LOOKS) root.classList.toggle(`a11y-${key}`, settings[key]);
+        // style.css sizes text in rem, so the root's size scales all of it
+        root.style.fontSize = settings.textSize === 100 ? '' : `${settings.textSize}%`;
+        guide.hidden = !settings.guide;
+        if (!settings.magnifier) hideLens();
+        if (!settings.selectRead) readBubble.hidden = true;
+        document.querySelectorAll('.mic-btn').forEach(b => { b.hidden = !Recognition; });
+        paintPanel();
+    }
+
+    function change(update, { quiet = false } = {}) {
+        settings = { ...settings, ...update };
+        store();
+        apply();
+        if (signedIn() && typeof savePreference === 'function') {
+            prefs.access = { ...settings };
+            if (quiet) savePreferenceSoon('access'); else savePreference('access');
+        }
+    }
+
+    // At sign-in (customize.js): the account's settings win. An account with
+    // none saved keeps what this browser has, and saves it.
+    function accountLoaded(saved) {
+        if (saved && typeof saved === 'object') {
+            settings = { ...DEFAULTS, ...saved };
+            store();
+            apply();
+        } else if (!isDefault(settings)) {
+            change({});
+        }
+    }
+
+    function signedOut() {
+        stopSpeaking();
+        stopDictation();
+        hideLens();
+        readBubble.hidden = true;
+        toggleAccessPanel(false);
+    }
+
+    function resetAccess() {
+        stopSpeaking();
+        change({ ...DEFAULTS });
+        say('Accessibility settings are back to the default');
+    }
+
+    // A message: the page's toast when it's there (signed in), else the panel's status line
+    function say(message) {
+        if (signedIn() && typeof showToast === 'function') showToast(message);
+        else {
+            const line = document.getElementById('access-status');
+            if (line) line.textContent = message;
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // The ♿ panel
+    // -----------------------------------------------------------------
+
+    function buildPanel() {
+        const panel = document.getElementById('access-panel');
+        document.getElementById('access-sizes').innerHTML = TEXT_SIZES.map(size =>
+            `<label class="choice-pill"><input type="radio" name="a11y-size" value="${size}"><span>${size}%</span></label>`).join('');
+        document.getElementById('access-magnify').innerHTML = MAGNIFY.map(n =>
+            `<label class="choice-pill"><input type="radio" name="a11y-magnify" value="${n}"><span>${n}×</span></label>`).join('');
+        panel.addEventListener('change', e => {
+            const t = e.target;
+            if (t.name === 'a11y-size') change({ textSize: Number(t.value) });
+            else if (t.name === 'a11y-magnify') change({ magnify: Number(t.value) });
+            else if (t.id === 'access-voice') change({ voice: t.value });
+            else if (t.dataset.key) change({ [t.dataset.key]: t.checked });
+        });
+        document.getElementById('access-rate').addEventListener('input', e => change({ rate: Number(e.target.value) }, { quiet: true }));
+        document.getElementById('access-try').addEventListener('click', () =>
+            speak('This is how OneTouch reads to you. Select any text and press Alt R to hear it.'));
+        if (!synth) document.getElementById('access-speech-none').hidden = false;
+        if (!Recognition) document.getElementById('access-dictation-none').hidden = false;
+        panel.querySelectorAll('[data-needs="speech"]').forEach(el => { el.disabled = !synth; });
+        panel.querySelectorAll('[data-needs="dictation"]').forEach(el => { el.disabled = !Recognition; });
+        fillVoices();
+        synth?.addEventListener?.('voiceschanged', fillVoices);
+        paintPanel();
+    }
+
+    function fillVoices() {
+        const select = document.getElementById('access-voice');
+        if (!select || !synth) return;
+        const voices = synth.getVoices();
+        // The page's language first, then the rest
+        const lang = (navigator.language || 'en').slice(0, 2);
+        const sorted = [...voices].sort((a, b) => (b.lang.startsWith(lang) - a.lang.startsWith(lang)) || a.name.localeCompare(b.name));
+        select.innerHTML = '<option value="">The browser\'s usual voice</option>' + sorted.map(v =>
+            `<option value="${escapeAttr(v.name)}">${escapeAttr(v.name)} (${escapeAttr(v.lang)})</option>`).join('');
+        select.value = voices.some(v => v.name === settings.voice) ? settings.voice : '';
+    }
+
+    function paintPanel() {
+        const panel = document.getElementById('access-panel');
+        if (!panel) return;
+        panel.querySelectorAll('input[name="a11y-size"]').forEach(r => { r.checked = Number(r.value) === settings.textSize; });
+        panel.querySelectorAll('input[name="a11y-magnify"]').forEach(r => { r.checked = Number(r.value) === settings.magnify; });
+        panel.querySelectorAll('input[data-key]').forEach(c => { c.checked = settings[c.dataset.key] === true; });
+        const rate = document.getElementById('access-rate');
+        rate.value = settings.rate;
+        document.getElementById('access-rate-value').textContent = `${settings.rate.toFixed(1)}×`;
+        const voice = document.getElementById('access-voice');
+        if (voice && [...voice.options].some(o => o.value === settings.voice)) voice.value = settings.voice;
+    }
+
+    function toggleAccessPanel(open) {
+        const panel = document.getElementById('access-panel');
+        if (!panel) return;
+        const willOpen = typeof open === 'boolean' ? open : panel.hidden;
+        panel.hidden = !willOpen;
+        document.querySelectorAll('.access-btn').forEach(b => b.setAttribute('aria-expanded', String(willOpen)));
+        if (willOpen) {
+            document.getElementById('access-status').textContent = '';
+            panel.querySelector('input:checked, input')?.focus();
+        } else if (panel.contains(document.activeElement)) {
+            // The header's ♿ signed in, the sign-in page's otherwise (the other isn't shown)
+            [...document.querySelectorAll('.access-btn')].find(b => b.getClientRects().length > 0)?.focus();
+        }
+    }
+
+    // A click outside the panel closes it
+    document.addEventListener('pointerdown', e => {
+        const panel = document.getElementById('access-panel');
+        if (panel && !panel.hidden && !panel.contains(e.target) && !e.target.closest('.access-btn')) toggleAccessPanel(false);
+    });
+
+    const escapeAttr = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+    // -----------------------------------------------------------------
+    // What a place on the page says: the text under the pointer, a box's
+    // label and value (never a password), a picture's description
+    // -----------------------------------------------------------------
+
+    const MAX_TEXT = 400;
+
+    function fieldText(el) {
+        const label = el.labels?.[0]?.innerText.trim() || el.getAttribute('aria-label') || el.placeholder || el.title || '';
+        if (el.type === 'password') return label ? `${label} (password box)` : 'Password box';
+        if (el.tagName === 'SELECT') return [label, el.selectedOptions[0]?.text].filter(Boolean).join(': ');
+        if (['checkbox', 'radio'].includes(el.type)) {
+            const name = el.closest('label')?.innerText.trim() || label;
+            return `${name}: ${el.checked ? 'on' : 'off'}`;
+        }
+        if (['button', 'submit'].includes(el.type)) return el.value || label;
+        const value = el.value.trim();
+        return value ? (label && label !== value ? `${label}: ${value}` : value) : label;
+    }
+
+    function elementText(el) {
+        if (!el || el.closest('.a11y-lens, iframe')) return null;
+        if (el.matches('input, textarea, select')) return fieldText(el);
+        if (el.matches('img')) return el.alt || null;
+        const named = el.closest('[aria-label], [title]');
+        const own = el.innerText?.trim();
+        if (own && own.length <= MAX_TEXT) return own;
+        return named?.getAttribute('aria-label') || named?.title || null;
+    }
+
+    // -> { text, el } for the point (x, y), or null
+    function textAt(x, y) {
+        const el = document.elementFromPoint(x, y);
+        if (!el || el.closest('.a11y-ui, iframe')) return null;
+        if (el.matches('input, textarea, select, img')) return { text: elementText(el), el };
+        const node = caretNode(x, y);
+        if (node?.nodeType === Node.TEXT_NODE && node.textContent.trim() && el.contains(node) && pointOnText(node, x, y)) {
+            const host = node.parentElement;
+            // The whole label, cell, line or button the words belong to, when it's short
+            const block = host.closest('button, a, label, th, td, li, p, h1, h2, h3, h4, legend, summary, option, .msg, div, section') || host;
+            // textContent first: it's cheap, and innerText of a big table on every move isn't
+            const blockText = block.textContent.length <= MAX_TEXT * 2 ? block.innerText?.trim() : '';
+            const text = blockText && blockText.length <= MAX_TEXT ? blockText : node.textContent.trim().slice(0, MAX_TEXT);
+            return { text, el: block };
+        }
+        // A button with only an icon still has a name
+        const named = el.closest('button, a, [role="button"], [aria-label]');
+        const name = named && (named.getAttribute('aria-label') || named.title || named.innerText?.trim());
+        return name ? { text: name.slice(0, MAX_TEXT), el: named } : null;
+    }
+
+    function caretNode(x, y) {
+        if (document.caretPositionFromPoint) return document.caretPositionFromPoint(x, y)?.offsetNode || null;
+        if (document.caretRangeFromPoint) return document.caretRangeFromPoint(x, y)?.startContainer || null;
+        return null;
+    }
+
+    // The caret functions find the nearest text; only text actually under the pointer counts
+    function pointOnText(node, x, y) {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        return [...range.getClientRects()].some(r => x >= r.left - 2 && x <= r.right + 2 && y >= r.top - 2 && y <= r.bottom + 2);
+    }
+
+    // -----------------------------------------------------------------
+    // 🔍 The magnifier: a box beside the pointer with that text, large.
+    // With the keyboard, the focused box or button's text.
+    // -----------------------------------------------------------------
+
+    const lens = document.createElement('div');
+    lens.className = 'a11y-lens a11y-ui';
+    lens.setAttribute('aria-hidden', 'true'); // screen readers already read the page itself
+    lens.hidden = true;
+
+    function showLens(text, x, y) {
+        if (!text) return hideLens();
+        lens.textContent = text;
+        lens.style.fontSize = `${settings.magnify}rem`;
+        lens.hidden = false;
+        const gap = 18;
+        const { width, height } = lens.getBoundingClientRect();
+        let left = x + gap;
+        let top = y + gap + 6;
+        if (left + width > innerWidth - 8) left = Math.max(8, x - gap - width);
+        if (top + height > innerHeight - 8) top = Math.max(8, y - gap - height);
+        lens.style.left = `${left}px`;
+        lens.style.top = `${top}px`;
+    }
+    function hideLens() { lens.hidden = true; }
+
+    // -----------------------------------------------------------------
+    // The reading guide: a band across the page that follows the pointer
+    // -----------------------------------------------------------------
+
+    const guide = document.createElement('div');
+    guide.className = 'a11y-guide a11y-ui';
+    guide.setAttribute('aria-hidden', 'true');
+    guide.hidden = true;
+
+    // -----------------------------------------------------------------
+    // Following the pointer: the magnifier, the guide and reading what's
+    // pointed at all look at the same spot, once per frame
+    // -----------------------------------------------------------------
+
+    let pointer = null;
+    let framePending = false;
+    let hover = { text: null, since: 0, spoken: null };
+    const HOVER_READ_MS = 700;
+
+    document.addEventListener('pointermove', e => {
+        if (e.pointerType === 'touch') return;
+        pointer = { x: e.clientX, y: e.clientY };
+        if (!framePending) { framePending = true; requestAnimationFrame(followPointer); }
+    }, { passive: true });
+    document.addEventListener('pointerleave', () => { hideLens(); pointer = null; });
+    document.addEventListener('scroll', () => { if (settings.magnifier && pointer) requestAnimationFrame(followPointer); }, { passive: true, capture: true });
+
+    function followPointer() {
+        framePending = false;
+        if (!pointer) return;
+        if (settings.guide) guide.style.top = `${pointer.y}px`;
+        if (!settings.magnifier && !settings.speakHover) return;
+        const found = textAt(pointer.x, pointer.y);
+        if (settings.magnifier) {
+            if (found?.text) showLens(found.text, pointer.x, pointer.y);
+            else hideLens();
+        }
+        if (settings.speakHover) {
+            const text = found?.text || null;
+            if (text !== hover.text) hover = { text, since: Date.now(), spoken: hover.spoken };
+            clearTimeout(hoverTimer);
+            if (text && text !== hover.spoken) hoverTimer = setTimeout(() => {
+                if (hover.text === text) { hover.spoken = text; speak(text); }
+            }, HOVER_READ_MS);
+        }
+    }
+    let hoverTimer = null;
+
+    // The magnifier for keyboard users: the focused element's text, by it
+    document.addEventListener('focusin', e => {
+        if (!settings.magnifier || e.target.closest?.('.a11y-ui') || !e.target.getBoundingClientRect) return;
+        const text = elementText(e.target);
+        const r = e.target.getBoundingClientRect();
+        if (text) showLens(text, r.left, r.bottom);
+    });
+
+    // -----------------------------------------------------------------
+    // 🔊 Reading aloud (the browser's own voices, speechSynthesis)
+    // -----------------------------------------------------------------
+
+    // Ticket numbers read as what they are, digit by digit, not as millions
+    const TICKET_WORDS = { INC: 'incident', CHG: 'change', RITM: 'request item', SCTASK: 'catalog task', REQ: 'request', PRB: 'problem' };
+    function speakable(text) {
+        return String(text)
+            .replace(/\b(INC|CHG|RITM|SCTASK|REQ|PRB)(\d{7})\b/gi, (m, p, d) => `${TICKET_WORDS[p.toUpperCase()]} ${d.split('').join(' ')}`)
+            .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, ' ') // emoji are read out by name otherwise
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    // Long text in sentence-sized pieces: some browsers stop a single long one partway
+    function pieces(text, size = 220) {
+        const out = [];
+        let rest = text;
+        while (rest.length > size) {
+            const cut = Math.max(rest.lastIndexOf('. ', size), rest.lastIndexOf(', ', size), rest.lastIndexOf(' ', size));
+            const at = cut > 40 ? cut + 1 : size;
+            out.push(rest.slice(0, at));
+            rest = rest.slice(at).trim();
+        }
+        if (rest) out.push(rest);
+        return out;
+    }
+
+    let speakingId = 0;
+    function speak(text) {
+        if (!synth) { say('This browser can\'t read aloud. Edge, Chrome and Safari can.'); return; }
+        const words = speakable(text);
+        if (!words) return;
+        stopSpeaking();
+        const id = ++speakingId;
+        const voice = synth.getVoices().find(v => v.name === settings.voice);
+        const parts = pieces(words);
+        // Starting straight after cancel() is sometimes dropped, so give it a moment
+        setTimeout(() => {
+            if (id !== speakingId) return;
+            parts.forEach((part, i) => {
+                const u = new SpeechSynthesisUtterance(part);
+                if (voice) u.voice = voice;
+                u.lang = voice?.lang || navigator.language || 'en-US';
+                u.rate = settings.rate;
+                if (i === parts.length - 1) u.onend = u.onerror = () => { if (id === speakingId) speakingPill.hidden = true; };
+                synth.speak(u);
+            });
+            speakingPill.hidden = false;
+        }, 60);
+    }
+
+    function stopSpeaking() {
+        speakingId++;
+        if (synth && (synth.speaking || synth.pending)) synth.cancel();
+        speakingPill.hidden = true;
+    }
+
+    // "🔊 Reading… ⏹ Stop", while it reads
+    const speakingPill = document.createElement('div');
+    speakingPill.className = 'a11y-pill a11y-ui';
+    speakingPill.setAttribute('role', 'status');
+    speakingPill.hidden = true;
+    speakingPill.innerHTML = '<span>🔊 Reading aloud…</span><button type="button" class="a11y-pill-btn">⏹ Stop</button>';
+    speakingPill.querySelector('button').addEventListener('click', stopSpeaking);
+
+    // An answer in the chat, as it's best heard: its words, and each table
+    // as how many rows and which columns (a whole table read cell by cell is
+    // too long to follow; selecting cells reads them)
+    function answerSpeech(msg) {
+        const copy = msg.cloneNode(true);
+        copy.querySelectorAll('.msg-read-btn, .download-bar, [hidden], script, style').forEach(n => n.remove());
+        copy.querySelectorAll('table').forEach(table => {
+            const rows = table.tBodies[0]?.rows.length ?? Math.max(0, table.rows.length - 1);
+            const columns = [...table.querySelectorAll('thead th')].map(th => th.textContent.trim()).filter(Boolean);
+            table.replaceWith(document.createTextNode(
+                ` A table with ${rows.toLocaleString()} ${rows === 1 ? 'row' : 'rows'}${columns.length ? `. Its columns are ${columns.join(', ')}` : ''}. `));
+        });
+        // Blocks end in a pause, so words from two lines don't run together
+        copy.querySelectorAll('div, p, li, summary, h1, h2, h3, h4').forEach(n => n.append('. '));
+        return copy.textContent.replace(/(\.\s*){2,}/g, '. ');
+    }
+
+    // 🔊 Read on each of Claude's answers
+    function addReadButtons(root) {
+        if (!synth) return;
+        const messages = root.matches?.('.msg.ai-msg') ? [root] : [...(root.querySelectorAll?.('.msg.ai-msg') || [])];
+        for (const msg of messages) {
+            if (msg.classList.contains('query-progress') || msg.querySelector(':scope > .msg-read-btn')) continue;
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'msg-read-btn a11y-ui';
+            button.textContent = '🔊 Read';
+            button.setAttribute('aria-label', 'Read this answer aloud');
+            button.addEventListener('click', () => speak(answerSpeech(msg)));
+            msg.prepend(button);
+        }
+    }
+
+    // A new answer read by itself, when asked for
+    document.addEventListener('onetouch:answer', () => {
+        if (!settings.speakAnswers) return;
+        const last = [...document.querySelectorAll('#chat-log .msg.ai-msg:not(.query-progress)')].pop();
+        if (last) speak(answerSpeech(last));
+    });
+
+    // Selected text gets a "🔊 Read" button by it
+    const readBubble = document.createElement('button');
+    readBubble.type = 'button';
+    readBubble.className = 'a11y-read-bubble a11y-ui';
+    readBubble.textContent = '🔊 Read';
+    readBubble.setAttribute('aria-label', 'Read the selected text aloud');
+    readBubble.hidden = true;
+    readBubble.addEventListener('pointerdown', e => e.preventDefault()); // keeps the selection
+    readBubble.addEventListener('click', () => { speak(selectedText()); readBubble.hidden = true; });
+
+    function selectedText() {
+        const field = document.activeElement;
+        if (field?.matches?.('textarea, input:not([type="password"])') && field.selectionStart !== field.selectionEnd) {
+            return field.value.slice(field.selectionStart, field.selectionEnd);
+        }
+        return String(window.getSelection() || '');
+    }
+
+    let bubbleTimer = null;
+    document.addEventListener('selectionchange', () => {
+        clearTimeout(bubbleTimer);
+        bubbleTimer = setTimeout(placeBubble, 250);
+    });
+    function placeBubble() {
+        const sel = window.getSelection();
+        if (!settings.selectRead || !synth || !sel || sel.isCollapsed || sel.toString().trim().length < 2) { readBubble.hidden = true; return; }
+        const rects = sel.getRangeAt(0).getClientRects();
+        const last = rects[rects.length - 1];
+        if (!last) { readBubble.hidden = true; return; }
+        readBubble.hidden = false;
+        const { width } = readBubble.getBoundingClientRect();
+        readBubble.style.left = `${Math.min(innerWidth - width - 8, Math.max(8, last.right - width / 2))}px`;
+        readBubble.style.top = `${Math.min(innerHeight - 40, last.bottom + 8)}px`;
+    }
+
+    // -----------------------------------------------------------------
+    // 🎤 Dictation (the browser's speech recognition): into the Ask bar,
+    // the chat's box, or whichever text box has the cursor
+    // -----------------------------------------------------------------
+
+    // Boxes that ask Claude when dictation ends, with "Ask as soon as I stop talking"
+    const SENDERS = {
+        'nav-ask-input': () => typeof askFromHeader === 'function' && askFromHeader(),
+        'user-prompt': () => typeof sendPrompt === 'function' && sendPrompt(),
+    };
+    const isTextBox = el => el?.matches?.('textarea, input:not([type]), input[type="text"], input[type="search"], input[type="email"]') && !el.disabled && !el.readOnly;
+
+    let dictation = null; // { rec, field, button }
+
+    function startDictation(target, button = null) {
+        if (!Recognition) { say('This browser can\'t take dictation. Use Edge or Chrome.'); return; }
+        if (dictation) { stopDictation(); return; }
+        let field = typeof target === 'string' ? document.getElementById(target) : target;
+        if (!isTextBox(field)) field = isTextBox(document.activeElement) ? document.activeElement : document.getElementById(signedIn() ? 'nav-ask-input' : 'login-email');
+        if (!isTextBox(field)) { say('Click in a text box first, then press Alt M.'); return; }
+        stopSpeaking();
+        field.focus();
+
+        const start = field.selectionStart ?? field.value.length;
+        const end = field.selectionEnd ?? field.value.length;
+        const before = field.value.slice(0, start);
+        const after = field.value.slice(end);
+        const joiner = before && !/\s$/.test(before) ? ' ' : '';
+        const max = field.maxLength > 0 ? field.maxLength : Infinity;
+        const send = settings.autoSend ? SENDERS[field.id] : null;
+
+        const rec = new Recognition();
+        rec.lang = navigator.language || 'en-US';
+        rec.interimResults = true;
+        // Asking when they stop: one phrase. Otherwise it listens until stopped.
+        rec.continuous = !send;
+        let heard = '';
+        rec.onresult = e => {
+            let text = '';
+            for (const result of e.results) text += result[0].transcript;
+            heard = text.trim();
+            field.value = (before + joiner + heard + after).slice(0, max);
+            const caret = Math.min(max, (before + joiner + heard).length);
+            field.setSelectionRange?.(caret, caret);
+            field.dispatchEvent(new Event('input', { bubbles: true }));
+        };
+        rec.onerror = e => {
+            const why = {
+                'not-allowed': 'The microphone isn\'t allowed. Allow it for this site (the 🔒 or 🎤 by the address), then try again.',
+                'service-not-allowed': 'The microphone isn\'t allowed. Allow it for this site (the 🔒 or 🎤 by the address), then try again.',
+                'no-speech': 'Nothing was heard. Press 🎤 and speak.',
+                'audio-capture': 'No microphone was found.',
+                'network': 'Dictation needs the internet: the browser turns speech into text online.',
+            }[e.error];
+            if (why) say(why);
+        };
+        rec.onend = () => {
+            const wasThis = dictation?.rec === rec;
+            if (wasThis) endDictationUi();
+            if (wasThis && send && heard) send();
+        };
+        dictation = { rec, field, button: button || document.querySelector(`.mic-btn[data-mic-for="${field.id}"]`) };
+        dictation.button?.classList.add('listening');
+        dictation.button?.setAttribute('aria-pressed', 'true');
+        listeningPill.hidden = false;
+        try { rec.start(); } catch { endDictationUi(); }
+    }
+
+    function stopDictation() {
+        if (!dictation) return;
+        try { dictation.rec.stop(); } catch { /* already stopped */ }
+        endDictationUi();
+    }
+
+    function endDictationUi() {
+        dictation?.button?.classList.remove('listening');
+        dictation?.button?.setAttribute('aria-pressed', 'false');
+        dictation = null;
+        listeningPill.hidden = true;
+    }
+
+    const listeningPill = document.createElement('div');
+    listeningPill.className = 'a11y-pill a11y-pill-listening a11y-ui';
+    listeningPill.setAttribute('role', 'status');
+    listeningPill.hidden = true;
+    listeningPill.innerHTML = '<span>🎤 Listening… speak now</span><button type="button" class="a11y-pill-btn">⏹ Stop</button>';
+    listeningPill.querySelector('button').addEventListener('click', stopDictation);
+
+    // 🎤 buttons: <button class="mic-btn" data-mic-for="the box's id">
+    document.addEventListener('click', e => {
+        const mic = e.target.closest?.('.mic-btn');
+        if (!mic) return;
+        e.preventDefault();
+        startDictation(mic.dataset.micFor, mic);
+    });
+    // Pressing 🎤 mustn't take the cursor out of the box being dictated into
+    document.addEventListener('pointerdown', e => { if (e.target.closest?.('.mic-btn')) e.preventDefault(); });
+
+    // -----------------------------------------------------------------
+    // Keyboard: Alt+A the panel, Alt+R read, Alt+M dictate, Esc stops
+    // -----------------------------------------------------------------
+
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') {
+            if (dictation) stopDictation();
+            if (synth?.speaking) stopSpeaking();
+            hideLens();
+            const panel = document.getElementById('access-panel');
+            if (panel && !panel.hidden) toggleAccessPanel(false);
+            return;
+        }
+        if (!e.altKey || e.ctrlKey || e.metaKey) return;
+        if (e.code === 'KeyA') { e.preventDefault(); toggleAccessPanel(); }
+        else if (e.code === 'KeyR') {
+            e.preventDefault();
+            if (synth?.speaking) return stopSpeaking();
+            const text = selectedText().trim()
+                || (pointer && textAt(pointer.x, pointer.y)?.text)
+                || elementText(document.activeElement);
+            if (text) speak(text); else say('Select some text (or point at it), then press Alt R.');
+        } else if (e.code === 'KeyM') { e.preventDefault(); startDictation(document.activeElement); }
+    });
+
+    // -----------------------------------------------------------------
+    // Start
+    // -----------------------------------------------------------------
+
+    function start() {
+        document.body.append(lens, guide, speakingPill, listeningPill, readBubble);
+        buildPanel();
+        apply();
+        const log = document.getElementById('chat-log');
+        if (log) {
+            addReadButtons(log);
+            new MutationObserver(changes => changes.forEach(c => c.addedNodes.forEach(n => n.nodeType === 1 && addReadButtons(n))))
+                .observe(log, { childList: true });
+        }
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+    else start();
+
+    Object.assign(window, {
+        toggleAccessPanel, resetAccess,
+        a11yAccountLoaded: accountLoaded, a11ySignedOut: signedOut,
+    });
+})();
 ```
 
 ## Appendix C: images

@@ -10,7 +10,8 @@ import { sanitizeChart, sanitizeScope, newId } from './charts.mjs';
 
 // Saved separately, so changing colors never overwrites a dashboard.
 // tour: which tours have been seen (Home's, and the Dashboards page's).
-export const PARTS = ['theme', 'home', 'dashboards', 'tour'];
+// access: the ♿ Accessibility settings (public/accessibility.js).
+export const PARTS = ['theme', 'home', 'dashboards', 'tour', 'access'];
 
 export const MAX_BOARDS = 20;
 export const MAX_BOARD_CHARTS = 30;
@@ -120,7 +121,24 @@ function cleanDashboards(d = {}) {
 // done: Home's tour has been seen; dashboards: the Dashboards page's
 const cleanTour = (t = {}) => ({ done: t.done === true, dashboards: t.dashboards === true });
 
-const CLEANERS = { theme: cleanTheme, home: cleanHome, dashboards: cleanDashboards, tour: cleanTour };
+// ♿ Accessibility: text size (%), how much the magnifier enlarges, a voice's
+// name, how fast it reads, and on/off switches (public/accessibility.js)
+const TEXT_SIZES = [100, 115, 130, 150, 175];
+const MAGNIFY = [2, 3, 4];
+const ACCESS_SWITCHES = ['contrast', 'readable', 'underline', 'focus', 'cursor', 'guide', 'motion',
+  'magnifier', 'selectRead', 'speakHover', 'speakAnswers', 'autoSend'];
+function cleanAccess(a = {}) {
+  const rate = Number(a.rate);
+  return {
+    textSize: TEXT_SIZES.includes(a.textSize) ? a.textSize : 100,
+    magnify: MAGNIFY.includes(a.magnify) ? a.magnify : 2,
+    voice: typeof a.voice === 'string' ? a.voice.slice(0, 120) : '',
+    rate: Number.isFinite(rate) ? Math.min(2, Math.max(0.5, Math.round(rate * 10) / 10)) : 1,
+    ...Object.fromEntries(ACCESS_SWITCHES.map(k => [k, a[k] === true])),
+  };
+}
+
+const CLEANERS = { theme: cleanTheme, home: cleanHome, dashboards: cleanDashboards, tour: cleanTour, access: cleanAccess };
 
 export function cleanPreference(part, value) {
   if (!PARTS.includes(part)) throw new PreferenceError('Unknown setting.');
