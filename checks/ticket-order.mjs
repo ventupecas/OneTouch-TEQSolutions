@@ -54,7 +54,7 @@ expect('Assigned to me: P1s (oldest first), High-risk change, P3, P4 and Low ris
   ['INC0000003', 'INC0000002', 'CHG0000001', 'INC0000001', 'INC0000004', 'CHG0000002', 'RITM0000001', 'SCTASK0000001']);
 
 expect('Assigned to me: 5 of the 8 are open',
-  sorted.filter(t => t.open).length, 6);
+  sorted.filter(t => t.open).length, 5);
 
 expect('a column sorts P2 before P10, and blanks come last',
   sortRows(['P10', '', 'P2', null, 'P1'], v => v),
