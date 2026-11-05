@@ -6,6 +6,7 @@
 //   assigned   someone gave you tickets
 //   family     a family was moved to the team you're the project manager of
 //   report     someone on your team says they resolved or closed a ticket
+//   issue      someone reported a problem with OneTouch (to admins; issues.mjs)
 //
 // An outbox: notify() saves each notification in the same transaction as
 // the change it reports, as 'pending', and every MAIL_INTERVAL this sends the
@@ -81,6 +82,10 @@ export function emailFor(n, cfg = mailConfig()) {
   } else if (n.kind === 'report') {
     what = `${who} says they ${d.status} ${n.numbers[0]}`;
     where = `${d.note ? 'They left you a note. ' : ''}See it on the Team tab, under the ticket's state. The ticket itself doesn't change in OneTouch.`;
+  } else if (n.kind === 'issue') {
+    // The kind of problem only: what they wrote stays behind the sign-in
+    what = `${who} reported a problem with OneTouch: ${d.label}`;
+    where = 'Read it and mark it resolved in OneTouch, on the 🧊 Architecture page, under 📣 Reports.';
   } else {
     what = `${who} sent you a notification`;
     where = 'See it under the 🔔 in OneTouch.';

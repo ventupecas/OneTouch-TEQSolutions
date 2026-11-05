@@ -6,6 +6,7 @@
 //   assigned   someone gave you tickets
 //   family     a family was moved to the team you're the project manager of
 //   report     someone on your team says they resolved or closed a ticket
+//   issue      someone reported a problem with OneTouch (to admins; issues.mjs)
 //
 // Each one keeps who did it, the tickets (up to MAX_NUMBERS of them) and a
 // few details; the page words them. Each is also emailed (mail.mjs): its
@@ -17,7 +18,7 @@
 
 import { pool } from './auth.mjs';
 
-export const KINDS = ['assigned', 'family', 'report'];
+export const KINDS = ['assigned', 'family', 'report', 'issue'];
 const MAX_NUMBERS = 100;
 // The newest this many are listed (the unread count covers them all)
 const LIST_LIMIT = 50;
@@ -36,6 +37,10 @@ export async function ensureNotificationsSchema() {
       read_at     timestamptz
     );
     CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, id DESC);
+
+    -- A table from before the newest kind only allows the older ones
+    ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_kind_check;
+    ALTER TABLE notifications ADD CONSTRAINT notifications_kind_check CHECK (kind IN (${KINDS.map(k => `'${k}'`).join(', ')}));
 
     -- Email (mail.mjs). The notifications already here when this column arrives
     -- are 'before', so they're never emailed; every later one starts 'pending'.

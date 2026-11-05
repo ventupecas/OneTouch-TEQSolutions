@@ -11,6 +11,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { architectureMap, composeImages, FLOWS, LAYERS, LINKS, NODES, SERVICENOW } from '../architecture.mjs';
+import { buildChecks, makeHealth, noteResponse } from '../health.mjs';
 
 const problems = [];
 const check = (ok, message) => { if (!ok) problems.push(message); };
@@ -78,6 +79,35 @@ const page = readFileSync('public/architecture.js', 'utf8') + readFileSync('publ
 for (const fact of ['cube_reader', 'x_onetouch.webhook_secret', 'onetouch_tickets_changed', 'analytics_node_app', 'ticket_access']) {
   check(!page.includes(fact), `public/ holds "${fact}": the map's content belongs in architecture.mjs, behind the admin check`);
 }
+
+// The health report: every check points at a real block; a failure, a choice to
+// leave something off, and a hang are each told apart; secrets stay out of it
+const healthy = {
+  db: async sql => (sql.includes('notifications') ? [{ failed: 0, stuck: 0 }] : [{ teams: 6 }]),
+  cubeQuery: async () => [{ 'incident.count': '5' }],
+  fetch: async () => ({ ok: true, status: 200 }),
+  listClaudeModels: async () => ({}),
+  hasClaudeKey: true, mailEnabled: true, publicUrl: 'https://example.test', metabaseUrl: 'http://metabase.test',
+  dashboardsReady: () => true, listening: () => true,
+};
+for (const c of buildChecks(healthy)) check(ids.has(c.node), `Health check ${c.id} points at "${c.node}", which isn't a block`);
+const stateOf = async (tools, id) => (await makeHealth({ ...healthy, ...tools })()).checks.find(c => c.id === id);
+assert.ok((await makeHealth(healthy)()).checks.every(c => c.state === 'ok'), 'All well: nothing reported');
+assert.equal((await stateOf({ cubeQuery: async () => { throw new Error('fetch failed'); } }, 'tickets')).state, 'problem');
+assert.equal((await stateOf({ db: async () => { throw new Error('connection refused'); } }, 'accounts')).state, 'problem');
+assert.equal((await stateOf({ fetch: async () => ({ ok: false, status: 502 }) }, 'dashboards')).state, 'problem');
+assert.equal((await stateOf({ listClaudeModels: async () => { throw new Error('401'); } }, 'claude')).state, 'problem');
+assert.equal((await stateOf({ listening: () => false }, 'changes')).state, 'problem');
+assert.match((await stateOf({ cubeQuery: async () => { throw new Error('fetch failed'); } }, 'tickets')).text, /Cube/, 'A failure says what failed');
+assert.equal((await stateOf({ mailEnabled: false }, 'email')).state, 'off', 'No key is a choice, not a fault');
+assert.equal((await stateOf({ db: async () => [{ failed: 2, stuck: 0 }] }, 'email')).state, 'problem');
+assert.equal((await stateOf({}, 'errors')).state, 'ok');
+noteResponse('/api/teams/7/tickets', 500);
+noteResponse('/api/teams', 404);
+const errors = await stateOf({}, 'errors');
+assert.equal(errors.state, 'problem');
+assert.match(errors.text, /1 request/);
+assert.equal(errors.detail, '/api/teams: 1', 'Only the start of the path, and only server errors');
 
 if (problems.length) {
   console.error(`The architecture map is out of step with the repo:\n- ${problems.join('\n- ')}`);

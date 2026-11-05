@@ -120,13 +120,13 @@ export const NODES = [
   {
     id: 'notify', name: 'Notifications and email', layer: 'app', shape: 'module', pos: [-6.6, 12, 2.2],
     tech: 'notifications.mjs and mail.mjs',
-    what: 'The 🔔 in the header, and the same notification by email. Each is saved in the same transaction as the change it reports, and emails go out from that outbox after the change commits.',
+    what: 'The 🔔 in the header, the same notification by email, and the 🚩 problem reports people send the admins. Each is saved in the same transaction as the change it reports, and emails go out from that outbox after the change commits.',
     facts: [
       ['Outbox', 'Checked every 30 seconds, retried up to 5 times, never sent if older than an hour'],
       ['An email holds', 'Who did what and the ticket numbers, never summaries or notes'],
     ],
     secure: 'Test and service accounts are never emailed. MAIL_ONLY_TO limits who gets email while trying it out.',
-    files: ['notifications.mjs', 'mail.mjs', 'public/notifications.js'],
+    files: ['notifications.mjs', 'mail.mjs', 'issues.mjs', 'public/notifications.js'],
   },
   {
     id: 'tickets', name: 'Tickets, KPIs and charts', layer: 'app', shape: 'module', pos: [-1.9, 12, 4.3],
@@ -409,6 +409,19 @@ export const FLOWS = [
         text: 'mail.mjs reads the outbox every 30 seconds. An email holds who did what and the ticket numbers, never summaries or notes.' },
       { path: ['onetouch_auth', 'notify', 'express', 'tunnel', 'browser'], title: 'The 🔔 lights up',
         text: 'The page checks for notifications every minute, and the new assignee sees the ticket in Assigned to me.' },
+    ],
+  },
+  {
+    id: 'issue', icon: '🚩', name: 'Someone reports a problem',
+    steps: [
+      { path: ['browser', 'tunnel', 'express'], title: 'The report reaches the server',
+        text: 'Anyone signed in can send one with the 🚩 in the header: POST /api/issues, with the kind of problem and what happened. One person can send 5 in 10 minutes.' },
+      { path: ['express', 'notify', 'onetouch_auth'], title: 'The report and the notifications are saved together',
+        text: 'One transaction: the report, and a notification for every other admin, so nobody is told about a report that wasn\'t saved.' },
+      { path: ['onetouch_auth', 'notify', 'brevo'], title: 'The admins are emailed',
+        text: 'Through the usual outbox. The email says who reported what kind of problem. What they wrote stays behind the sign-in.' },
+      { path: ['onetouch_auth', 'notify', 'express', 'tunnel', 'browser'], title: 'It shows up here',
+        text: 'Under the admins\' 🔔, and in the banner and the 📣 Reports tab of this page, where an admin marks it resolved.' },
     ],
   },
   {

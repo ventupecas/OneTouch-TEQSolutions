@@ -2749,7 +2749,7 @@ html.a11y-motion *::after {
 .arch-stage canvas:active { cursor: grabbing; }
 .arch-hint {
     position: absolute;
-    left: 262px;
+    left: var(--arch-left);
     right: 372px;
     bottom: 4px;
     margin: 0 !important;
@@ -2829,7 +2829,7 @@ html.a11y-motion *::after {
 }
 .arch-status {
     top: 12px;
-    left: 262px;
+    left: var(--arch-left);
     right: 372px;
     display: flex;
     flex-wrap: wrap;
@@ -2986,7 +2986,7 @@ html.a11y-motion *::after {
 .arch-stack-version { white-space: nowrap; font-weight: 600; color: var(--accent-ink); }
 
 .arch-step {
-    left: 262px;
+    left: var(--arch-left);
     right: 372px;
     bottom: 26px;
     max-width: 620px;
@@ -3004,7 +3004,7 @@ html.a11y-motion *::after {
 /* 📝 List: the same content, no scene. The rail stays beside it; the page scrolls */
 .arch.arch-is-list {
     display: grid;
-    grid-template-columns: 262px minmax(0, 1fr);
+    grid-template-columns: var(--arch-left) minmax(0, 1fr);
     grid-template-rows: auto 1fr;
     align-items: start;
     overflow: auto;
@@ -3041,4 +3041,46 @@ html.a11y-motion *::after {
 }
 @media (prefers-reduced-motion: reduce) {
     .arch-tag, .arch-layer-tag { transition: none; }
+}
+
+/* The left side bar minimized: the banner, the card and the list move over into its room */
+.arch { --arch-left: 262px; }
+.arch.arch-rail-min { --arch-left: 62px; }
+.arch-rail.arch-rail-closed { width: 38px; bottom: auto; padding: 4px; overflow: hidden; }
+.arch-is-list .arch-rail.arch-rail-closed { width: auto; }
+.arch-rail-toggle { width: 100%; padding: 6px 0; font: inherit; color: var(--text); background: none; border: none; border-radius: 6px; cursor: pointer; }
+.arch-rail-toggle:hover { background: var(--surface-2); }
+.arch-rail-toggle-text { display: none; }
+.arch-mode .arch-btn[data-do="rail"] { flex: 0 0 auto; padding-left: 7px; padding-right: 7px; }
+.arch-mode .arch-btn { min-width: 0; padding-left: 6px; padding-right: 6px; }
+
+/* What isn't working */
+.arch-status { max-height: 34vh; overflow-y: auto; }
+.arch-status-row { display: flex; flex: 1 1 100%; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.arch-status-problems { padding-bottom: 6px; border-bottom: 1px solid var(--danger-line); }
+.arch-status.arch-status-bad { background: var(--danger-soft); border-color: var(--danger-line); }
+.arch-notice-bad { color: var(--danger); background: var(--danger-soft); border-color: var(--danger-line); }
+.arch-checks { margin: 0 0 10px; padding: 0; list-style: none; font-size: 0.8rem; }
+.arch-check { margin-bottom: 8px; padding: 7px 9px; line-height: 1.4; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; }
+.arch-check-problem { background: var(--danger-soft); border-color: var(--danger-line); }
+.arch-tag.arch-tag-bad { border-color: var(--danger); border-left-color: var(--danger); background: var(--danger-soft); }
+.arch-tab { font-size: 0.72rem; }
+@media (max-width: 1100px) {
+    .arch-status { max-height: none; }
+    .arch-rail.arch-rail-closed { width: auto; }
+    .arch-rail-toggle-text { display: inline; }
+}
+
+/* 📣 Reports on the Architecture page */
+.arch-tabs { flex-wrap: wrap; }
+.arch-tab { flex: 1 1 auto; padding-left: 6px; padding-right: 6px; white-space: nowrap; }
+.arch-report { margin-bottom: 8px; padding: 8px 10px; font-size: 0.8rem; line-height: 1.4; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; }
+.arch-report-kind { font-weight: 700; }
+.arch-report-message { margin: 5px 0 !important; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
+.arch-report-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; margin-top: 6px; }
+.arch-reports-done { margin-top: 12px; font-size: 0.8rem; }
+.arch-reports-done summary { cursor: pointer; color: var(--text-2); margin-bottom: 8px; }
+/* Under the widest screens, 🎨 without its word makes room for the 🚩 */
+@media (max-width: 1700px) {
+    .header-btn-text { display: none; }
 }

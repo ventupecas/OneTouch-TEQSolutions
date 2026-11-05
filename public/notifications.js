@@ -179,6 +179,7 @@ function notificationText(n, html = false) {
             : `${who} moved a family of ${count.toLocaleString()} linked tickets to ${text(d.team)}. They aren't assigned to anyone yet.`;
     }
     if (n.kind === 'report') return `${who} says they ${text(d.status)} ${ticket(n.numbers[0])}.`;
+    if (n.kind === 'issue') return `${who} reported a problem: ${text(d.label)}.`;
     return `${who} sent you a notification.`;
 }
 
@@ -202,7 +203,8 @@ function renderNotifications() {
                 `<button type="button" class="link-btn" data-ticket="${escapeHtml(number)}">${escapeHtml(number)}</button>`).join(', ')}` +
                 (more > 0 ? ` and ${more.toLocaleString()} more` : '') + '</div>' : '') +
             `<div class="notify-foot"><span>${escapeHtml(formatShownAt(n.at))}</span><span class="notify-foot-actions">` +
-            (n.kind === 'report' ? '' : '<button type="button" class="link-btn" data-notify-team>Open the Team tab</button>') +
+            (n.kind === 'issue' ? '<button type="button" class="link-btn" data-notify-reports>See the reports</button>'
+                : n.kind === 'report' ? '' : '<button type="button" class="link-btn" data-notify-team>Open the Team tab</button>') +
             `<button type="button" class="notify-clear" data-notify-clear="${n.id}" aria-label="Clear this notification">Clear</button>` +
             '</span></div></li>';
     }).join('') + '</ul>';
@@ -254,6 +256,11 @@ document.getElementById('notify-panel').addEventListener('click', e => {
     }
     // A ticket number: app.js's click listener opens it; the list gets out of the way
     if (e.target.closest('[data-ticket]')) { toggleNotifications(false); return; }
+    if (e.target.closest('[data-notify-reports]')) {
+        toggleNotifications(false);
+        showArchitectureReports();
+        return;
+    }
     if (e.target.closest('[data-notify-team]')) {
         toggleNotifications(false);
         switchTab('teams');
@@ -333,4 +340,44 @@ document.querySelector('#report-dialog form').addEventListener('submit', async e
 document.addEventListener('click', e => {
     const report = e.target.closest('[data-report]');
     if (report) openReportDialog(report.dataset.report);
+});
+
+// ---------------------------------------------------------------------
+// 🚩 Reporting a problem to the admins (issues.mjs on the server). They're
+// told under the 🔔 and by email, and read it on the 🧊 Architecture page.
+// ---------------------------------------------------------------------
+
+function openIssueDialog() {
+    document.getElementById('issue-category').value = 'broken';
+    document.getElementById('issue-message').value = '';
+    document.getElementById('issue-error').hidden = true;
+    document.getElementById('issue-dialog').showModal();
+    document.getElementById('issue-category').focus();
+}
+
+document.querySelector('#issue-dialog form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const send = document.getElementById('issue-send');
+    const error = document.getElementById('issue-error');
+    // Which page they were on when it went wrong; the chat opens over the others
+    const page = assistantOpen() ? 'chat' : (document.querySelector('.view-panel.active')?.id || '').replace(/-view$/, '');
+    send.disabled = true;
+    error.hidden = true;
+    try {
+        const response = await fetch(`${API_BASE}/api/issues`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ category: document.getElementById('issue-category').value, message: document.getElementById('issue-message').value, page }),
+        });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'That didn\'t send. Please try again.');
+        document.getElementById('issue-dialog').close();
+        showToast('✓ Your report went to the admins. Thank you.');
+    } catch (err) {
+        error.textContent = `❌ ${err.message}`;
+        error.hidden = false;
+    } finally {
+        send.disabled = false;
+    }
 });

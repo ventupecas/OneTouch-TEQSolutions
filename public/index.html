@@ -101,12 +101,14 @@
             </form>
         </div>
         <div class="header-right">
+            <!-- Anyone signed in: tell the admins something's wrong (notifications.js) -->
+            <button type="button" class="header-btn" id="issue-btn" onclick="openIssueDialog()" aria-label="Report a problem" title="Report a problem">🚩</button>
             <button type="button" class="header-btn notify-btn" id="notify-btn" onclick="toggleNotifications()"
                     aria-controls="notify-panel" aria-expanded="false" aria-label="Notifications">🔔<span class="notify-count" id="notify-count" hidden></span></button>
             <button type="button" class="header-btn access-btn" onclick="toggleAccessPanel()"
                     aria-controls="access-panel" aria-expanded="false" aria-label="Accessibility" title="Accessibility (Alt+A)">♿</button>
             <button type="button" class="header-btn" id="theme-btn" onclick="toggleThemePanel()"
-                    aria-controls="theme-panel" aria-expanded="false" aria-label="Colors">🎨<span class="header-btn-text"> Colors</span></button>
+                    aria-controls="theme-panel" aria-expanded="false" aria-label="Colors" title="Colors">🎨<span class="header-btn-text"> Colors</span></button>
             <button class="sign-out-btn" type="button" onclick="signOut()">Sign out</button>
         </div>
     </header>
@@ -574,6 +576,32 @@
             <div class="builder-foot">
                 <button type="button" class="home-action" onclick="this.closest('dialog').close('cancel')">Cancel</button>
                 <button type="submit" class="primary-btn" id="report-send" value="ok">Send</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Reporting a problem to the admins (notifications.js, issues.mjs) -->
+    <dialog class="ask-dialog report-dialog" id="issue-dialog" aria-labelledby="issue-title">
+        <form method="dialog">
+            <h2 id="issue-title">🚩 Report a problem</h2>
+            <p class="report-ticket">Tell the admins what went wrong. They get a notification and an email straight away.</p>
+            <label class="field-label">What kind of problem is it?
+                <select id="issue-category">
+                    <option value="broken">Something isn't working</option>
+                    <option value="data">The data looks wrong</option>
+                    <option value="access">I can't see or do something I should</option>
+                    <option value="slow">It's very slow</option>
+                    <option value="other">Something else</option>
+                </select>
+            </label>
+            <label class="field-label">What happened?
+                <textarea id="issue-message" rows="5" maxlength="2000" required placeholder="e.g. The Incidents dashboard stays blank since this morning"></textarea>
+            </label>
+            <p class="theme-note report-hint">Sent with your name, the page you're on and your browser. Please leave out passwords. What you write stays in OneTouch: the email only says what kind of problem it is.</p>
+            <p class="home-status error" id="issue-error" role="alert" hidden></p>
+            <div class="builder-foot">
+                <button type="button" class="home-action" onclick="this.closest('dialog').close('cancel')">Cancel</button>
+                <button type="submit" class="primary-btn" id="issue-send" value="ok">Send to the admins</button>
             </div>
         </form>
     </dialog>

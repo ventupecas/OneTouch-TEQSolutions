@@ -90,7 +90,7 @@
     "wrappy": "^1.0.2"
   },
   "scripts": {
-    "test": "node checks/ticket-order.mjs && node checks/architecture.mjs",
+    "test": "node checks/ticket-order.mjs && node checks/architecture.mjs && node checks/issues.mjs",
     "build": "node scripts/check.mjs",
     "check": "node scripts/check.mjs",
     "docs": "node scripts/build-docs.mjs",

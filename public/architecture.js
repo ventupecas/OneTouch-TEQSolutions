@@ -29,6 +29,14 @@
     let selected = null;   // a block's id
     let focusLayer = null; // a layer's id
     let pollTimer = null;
+    let health = null;     // the last health report (GET /api/architecture/health)
+    let healthError = null;// why there isn't a fresh one
+    let healthErrorSince = null;
+    let issues = null;     // what people have reported: { openCount, open, resolved }
+    let sideShown = null;  // the tab the side panel last drew, so a redraw keeps its place
+    const RAIL_KEY = 'onetouch-arch-rail-min';
+    let railMin = false;   // the left side bar minimized
+    try { railMin = localStorage.getItem(RAIL_KEY) === '1'; } catch { /* Open, then */ }
     const player = { flow: null, index: 0, playing: false, elapsed: 0, hold: 0 };
 
     const $ = id => document.getElementById(id);
@@ -60,7 +68,84 @@
             <aside class="arch-side" id="arch-side" aria-label="Details"></aside>`;
     }
 
+    // What isn't working right now: the health report, or the server not answering at all
+    function problems() {
+        if (healthError) return [{ id: 'server', name: 'OneTouch server', text: healthError, effect: 'What this page shows may be out of date.', since: healthErrorSince }];
+        return (health?.checks || []).filter(c => c.state === 'problem');
+    }
+
     function statusHtml() {
+        const list = problems();
+        const shown = list.slice(0, 3);
+        const bad = !list.length ? '' : `<div class="arch-status-row arch-status-problems">
+                <span class="arch-chip arch-chip-stop">⚠️ ${list.length} problem${list.length === 1 ? '' : 's'}</span>
+                <span class="arch-status-text">${shown.map(p => `<b>${esc(p.name)}:</b> ${esc(p.text)}`).join('<br>')}${list.length > shown.length ? `<br>and ${list.length - shown.length} more` : ''}</span>
+                <button type="button" class="arch-btn" data-side="health">See what's wrong</button>
+            </div>`;
+        const open = issues?.openCount || 0;
+        const latest = issues?.open[0];
+        const reported = !open ? '' : `<div class="arch-status-row arch-status-problems">
+                <span class="arch-chip arch-chip-warn">📣 ${open} open report${open === 1 ? '' : 's'}</span>
+                <span class="arch-status-text">${latest ? `<b>Latest, from ${esc(latest.reporter)}:</b> ${esc(latest.label)}` : ''}</span>
+                <button type="button" class="arch-btn" data-side="reports">See the reports</button>
+            </div>`;
+        return `${bad}${reported}<div class="arch-status-row">${pushStatusHtml()}</div>`;
+    }
+
+    // One report. Someone's own words, so escaped like everything else here.
+    function reportHtml(r, resolved) {
+        const where = r.page ? ` · on ${esc(r.page)}` : '';
+        const done = resolved ? `<br><span class="arch-small">Resolved ${esc(when(r.resolvedAt))}${r.resolver ? ` by ${esc(r.resolver)}` : ''}.</span>` : '';
+        return `<li class="arch-report">
+                <span class="arch-report-kind">${esc(r.label)}</span>
+                <p class="arch-report-message">${esc(r.message)}</p>
+                <span class="arch-small"><b>${esc(r.reporter)}</b> · ${esc(when(r.at))}${where}</span>${done}
+                ${r.browser ? `<br><span class="arch-small">${esc(r.browser)}</span>` : ''}
+                <div class="arch-report-foot">
+                    <button type="button" class="arch-btn" data-issue="${esc(r.id)}" data-issue-status="${resolved ? 'open' : 'resolved'}">${resolved ? '↩ Reopen' : '✓ Mark resolved'}</button>
+                </div>
+            </li>`;
+    }
+
+    // What people have told the admins (the 🚩 in the header)
+    function reportsHtml(Heading = 'h3') {
+        const title = `<${Heading} class="arch-node-name">📣 Problems people reported</${Heading}>`;
+        if (!issues) return `${title}<p>Loading the reports…</p>`;
+        const open = issues.open.length
+            ? `<ul class="arch-checks">${issues.open.map(r => reportHtml(r, false)).join('')}</ul>`
+            : '<p class="arch-notice arch-notice-good"><b>✅ No open reports.</b></p>';
+        const resolved = issues.resolved.length
+            ? `<details class="arch-reports-done"><summary>Resolved lately (${issues.resolved.length})</summary>
+                <ul class="arch-checks">${issues.resolved.map(r => reportHtml(r, true)).join('')}</ul></details>` : '';
+        return `${title}${open}${resolved}
+            <p class="arch-small">Anyone signed in can send one with the 🚩 in the header. Admins are told under the 🔔 and by email.</p>`;
+    }
+
+    // Every check: what's wrong first, then what's working
+    function healthHtml(Heading = 'h3') {
+        const rank = { problem: 0, off: 1, ok: 2 };
+        const checks = [...(health?.checks || [])].sort((a, b) => rank[a.state] - rank[b.state]);
+        const list = problems();
+        const icon = { problem: '⚠️', off: '⚪', ok: '✅' };
+        const summary = list.length
+            ? `<p class="arch-notice arch-notice-bad"><b>⚠️ ${list.length} problem${list.length === 1 ? '' : 's'} right now.</b></p>`
+            : health ? '<p class="arch-notice arch-notice-good"><b>✅ Everything checked is working.</b></p>' : '<p>Checking…</p>';
+        const server = healthError ? `<li class="arch-check arch-check-problem"><b>⚠️ OneTouch server</b><br>${esc(healthError)}<br><span class="arch-small">Noticed ${esc(when(healthErrorSince))}. These results are from the last answer.</span></li>` : '';
+        return `
+            <${Heading} class="arch-node-name">🩺 Is everything working?</${Heading}>
+            ${summary}
+            <ul class="arch-checks">${server}${checks.map(c => `
+                <li class="arch-check arch-check-${esc(c.state)}">
+                    <b>${icon[c.state] || ''} ${c.node ? `<button type="button" class="arch-link" data-node="${esc(c.node)}">${esc(c.name)}</button>` : esc(c.name)}</b><br>
+                    ${esc(c.text)}
+                    ${c.effect ? `<br><b>What this means:</b> ${esc(c.effect)}` : ''}
+                    ${c.state === 'problem' && c.detail && c.detail !== c.text ? `<br><span class="arch-small">${esc(c.detail)}</span>` : ''}
+                    <br><span class="arch-small">${c.since ? `Since ${esc(when(c.since))}. ` : ''}Checked ${esc(when(c.checkedAt))}.</span>
+                </li>`).join('')}</ul>
+            <p class="arch-small">Each check really tries the thing, while this page is open, every 30 seconds or so. Outside services are asked less often. ServiceNow's authentication is listed in the banner, and in its own tab.</p>`;
+    }
+
+    function pushStatusHtml() {
         const push = map.push;
         const s = map.servicenow;
         if (receiving()) {
@@ -77,6 +162,9 @@
     }
 
     function railHtml() {
+        if (railMin) {
+            return `<button type="button" class="arch-rail-toggle" data-do="rail" aria-expanded="false" aria-label="Show the views and layers" title="Show the views and layers">▶<span class="arch-rail-toggle-text"> Views and layers</span></button>`;
+        }
         const flows = map.flows.map(f => `<button type="button" class="arch-rail-btn${f.pending ? ' arch-rail-pending' : ''}${player.flow?.id === f.id ? ' is-on' : ''}"
                 data-flow="${esc(f.id)}" aria-pressed="${player.flow?.id === f.id}">
                 <span aria-hidden="true">${esc(f.icon)}</span> ${esc(f.name)}${f.pending && !receiving() ? ' <span class="arch-lock" title="Needs ServiceNow authentication">🔒</span>' : ''}</button>`).join('');
@@ -88,6 +176,7 @@
                 <button type="button" class="arch-btn${mode === '3d' ? ' is-on' : ''}" data-do="3d" aria-pressed="${mode === '3d'}"${world ? '' : ' disabled title="This browser can\'t draw 3D here"'}>🧊 3D</button>
                 <button type="button" class="arch-btn${mode === 'list' ? ' is-on' : ''}" data-do="list" aria-pressed="${mode === 'list'}">📝 List</button>
                 <button type="button" class="arch-btn" data-do="reset" title="Back to the whole map"${mode === '3d' && world ? '' : ' disabled'}>↺</button>
+                <button type="button" class="arch-btn" data-do="rail" aria-expanded="true" aria-label="Hide the views and layers" title="Hide the views and layers">◀</button>
             </div>
             <h3 class="arch-rail-head">What happens when…</h3>
             <div class="arch-rail-group">${flows}</div>
@@ -183,8 +272,15 @@
         const side = $('arch-side');
         if (!side) return;
         const node = selected && nodeById(selected);
-        const tabs = [['details', '🧩 Details'], ['stack', '📚 Tech stack'], ['servicenow', '🔌 ServiceNow']];
-        const body = sideTab === 'stack' ? stackHtml()
+        const count = problems().length;
+        const reported = issues?.openCount || 0;
+        const tabs = [['details', '🧩 Details'], ['stack', '📚 Stack'], ['health', `🩺 Health${count ? ` (${count})` : ''}`],
+            ['reports', `📣 Reports${reported ? ` (${reported})` : ''}`], ['servicenow', '🔌 ServiceNow']];
+        // A redraw of the same tab stays where the person had scrolled to
+        const scrolled = sideShown === sideTab ? side.querySelector('.arch-side-body')?.scrollTop || 0 : 0;
+        const body = sideTab === 'health' ? healthHtml()
+            : sideTab === 'reports' ? reportsHtml()
+            : sideTab === 'stack' ? stackHtml()
             : sideTab === 'servicenow' ? servicenowHtml()
             : node ? nodeHtml(node) : overviewHtml();
         side.innerHTML = `
@@ -192,6 +288,8 @@
                 <button type="button" role="tab" class="arch-tab${sideTab === id ? ' is-on' : ''}" aria-selected="${sideTab === id}" data-side="${id}">${label}</button>`).join('')}
             </div>
             <div class="arch-side-body" role="tabpanel" tabindex="0">${body}</div>`;
+        side.querySelector('.arch-side-body').scrollTop = scrolled;
+        sideShown = sideTab;
     }
 
     function renderStep() {
@@ -240,6 +338,8 @@
         }).join('');
         list.innerHTML = `${note}
             <section class="arch-list-layer"><h2>🧊 Architecture</h2><p>${esc(map.overview)}</p></section>
+            <section class="arch-list-layer arch-item" id="arch-list-health" tabindex="-1">${healthHtml('h3')}</section>
+            <section class="arch-list-layer arch-item" id="arch-list-reports" tabindex="-1">${reportsHtml('h3')}</section>
             <section class="arch-list-layer arch-item" id="arch-list-servicenow" tabindex="-1">${servicenowHtml('h3')}</section>
             <section class="arch-list-layer"><h3>Tech stack</h3>${stackHtml()}</section>
             <section class="arch-list-layer"><h3>What happens when…</h3>${flows}</section>
@@ -353,9 +453,11 @@
     // Every button on the page, in one place
     function onClick(event) {
         // A name over a block, or anything else that's a button on this page
-        const el = event.target.closest('[data-node], [data-flow], [data-layer], [data-side], [data-do]');
+        const el = event.target.closest('[data-issue], [data-node], [data-flow], [data-layer], [data-side], [data-do]');
         if (!el || !$('architecture').contains(el)) return;
-        if (el.dataset.node) {
+        if (el.dataset.issue) {
+            setIssue(el, el.dataset.issue, el.dataset.issueStatus);
+        } else if (el.dataset.node) {
             if (player.flow) stopFlow();
             select(el.dataset.node);
         } else if (el.dataset.flow) {
@@ -366,13 +468,16 @@
             sideTab = el.dataset.side;
             renderSide();
             if (mode === 'list' && sideTab === 'servicenow') goToInList('arch-list-servicenow');
+            if (mode === 'list' && sideTab === 'health') goToInList('arch-list-health');
+            if (mode === 'list' && sideTab === 'reports') goToInList('arch-list-reports');
         } else {
             act(el.dataset.do);
         }
     }
 
     function act(what) {
-        if (what === '3d' || what === 'list') setMode(what);
+        if (what === 'rail') setRailMin(!railMin);
+        else if (what === '3d' || what === 'list') setMode(what);
         else if (what === 'reset') resetView();
         else if (what === 'close') { stopFlow(); $('arch-rail').innerHTML = railHtml(); world?.showFocus(true); }
         else if (what === 'back' && player.flow && player.index > 0) goToStep(player.index - 1);
@@ -383,6 +488,20 @@
             if (player.playing && player.index === player.flow.steps.length - 1) goToStep(0);
             else renderStep();
         }
+    }
+
+    // The left side bar, in to the side and back; this browser remembers which
+    function setRailMin(min) {
+        railMin = min;
+        try { localStorage.setItem(RAIL_KEY, min ? '1' : '0'); } catch { /* Just for this visit */ }
+        paintRail();
+        $('arch-rail').querySelector('[data-do="rail"]')?.focus();
+    }
+    function paintRail() {
+        $('architecture').classList.toggle('arch-rail-min', railMin);
+        $('arch-rail').classList.toggle('arch-rail-closed', railMin);
+        $('arch-rail').innerHTML = railHtml();
+        if (mode === '3d') world?.resize();
     }
 
     function resetView() {
@@ -401,11 +520,16 @@
     function paintPush(before) {
         const status = $('arch-status');
         if (!status || !map) return;
-        const key = `${map.push.state}:${map.push.heard}`;
+        const list = problems();
+        const key = `${map.push.state}:${map.push.heard}:${list.map(p => `${p.id}=${p.text}`).join('|')}:${issues?.openCount || 0}:${issues?.open[0]?.id || 0}`;
         if (status.dataset.key !== key) {
             status.dataset.key = key;
             status.innerHTML = statusHtml();
-            status.classList.toggle('arch-status-good', receiving());
+            status.classList.toggle('arch-status-good', receiving() && !list.length);
+            status.classList.toggle('arch-status-bad', list.length > 0);
+            // The banner's height may have changed, and the scene is centered below it
+            if (mode === '3d') world?.resize();
+            world?.setProblems(list.map(p => p.node).filter(Boolean));
         }
         world?.setPushState(receiving());
         if (before !== undefined && map.push.heard > before) world?.pulse(map.servicenow.arrives);
@@ -419,7 +543,78 @@
         return data;
     }
 
+    // The health report. Not getting one is itself a problem to report: a server
+    // that can't reach its database, or isn't answering, can't say so any other way.
+    async function pollHealth() {
+        if (!active || !map) return;
+        const session = opening;
+        const before = JSON.stringify(health?.checks.map(c => [c.id, c.state, c.text])) + healthError;
+        try {
+            const response = await fetch(`${API_BASE}/api/architecture/health`, { headers: authHeaders() });
+            if (handleUnauthorized(response) || session !== opening) return;
+            const data = await response.json().catch(() => ({}));
+            if (session !== opening) return;
+            if (!response.ok) throw new Error(data.error || `The server answered with an error (${response.status}).`);
+            health = data;
+            healthError = null;
+            healthErrorSince = null;
+        } catch (error) {
+            if (session !== opening) return;
+            healthError = error instanceof TypeError ? 'This page can\'t reach the server.' : error.message;
+            healthErrorSince ||= new Date().toISOString();
+        }
+        paintPush();
+        if (before !== JSON.stringify(health?.checks.map(c => [c.id, c.state, c.text])) + healthError) {
+            renderSide();
+            if (mode === 'list') renderList();
+        } else if (sideTab === 'health' && !$('arch-side')?.contains(document.activeElement)) {
+            // Only the "Checked at" times moved: not worth taking the keys from someone
+            renderSide();
+        }
+    }
+
+    // What people have reported. If this fails, the health report says why.
+    async function pollIssues() {
+        if (!active || !map) return;
+        const session = opening;
+        try {
+            const response = await fetch(`${API_BASE}/api/architecture/issues`, { headers: authHeaders() });
+            if (handleUnauthorized(response) || !response.ok) return;
+            const data = await response.json();
+            if (session !== opening || !map) return;
+            const changed = JSON.stringify(data) !== JSON.stringify(issues);
+            issues = data;
+            if (!changed) return;
+            paintPush();
+            renderSide();
+            if (mode === 'list') renderList();
+        } catch { /* Tried again shortly */ }
+    }
+
+    // Resolved, or back on the list
+    async function setIssue(button, id, status) {
+        button.disabled = true;
+        try {
+            const response = await fetch(`${API_BASE}/api/architecture/issues/${encodeURIComponent(id)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                body: JSON.stringify({ status }),
+            });
+            if (handleUnauthorized(response)) return;
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || 'That could not be changed right now.');
+            await pollIssues();
+            // The button has gone with its report: the keys go to the list it was in
+            document.querySelector('.arch-side-body')?.focus({ preventScroll: true });
+        } catch (error) {
+            button.disabled = false;
+            showToast(`❌ ${error.message}`);
+        }
+    }
+
     async function pollPush() {
+        pollHealth();
+        pollIssues();
         if (!active || !map) return;
         const session = opening;
         try {
@@ -492,8 +687,11 @@
             }
         }
         renderSide();
+        paintRail();
         paintPush();
         setMode(world ? '3d' : 'list');
+        pollHealth();
+        pollIssues();
     }
 
     function hideArchitecture() {
@@ -513,6 +711,11 @@
         world?.dispose();
         world = null;
         map = null;
+        health = null;
+        healthError = null;
+        healthErrorSince = null;
+        issues = null;
+        sideShown = null;
         mode = '3d';
         sideTab = 'details';
         selected = null;
@@ -1569,10 +1772,29 @@
         applyCamera();
         showFocus(false);
 
-        return { resize, wake, sleep, dispose, home, showFocus, playStep, endStep, pulse, setPushState };
+        // Blocks with a problem get a red name, which stays showing
+        function setProblems(ids) {
+            for (const [id, node] of nodes) {
+                const bad = ids.includes(id);
+                node.tag.el.classList.toggle('arch-tag-bad', bad);
+                node.tag.baseRank ??= node.tag.rank;
+                node.tag.rank = bad ? 15 : node.tag.baseRank;
+            }
+            dirty = true;
+        }
+
+        return { resize, wake, sleep, dispose, home, showFocus, playStep, endStep, pulse, setPushState, setProblems };
     }
 
     window.showArchitecture = showArchitecture;
     window.hideArchitecture = hideArchitecture;
     window.resetArchitecture = resetArchitecture;
+    // From a 🔔 about a report (notifications.js): the page, on its reports
+    window.showArchitectureReports = () => {
+        sideTab = 'reports';
+        switchTab('architecture');
+        if (!map || loading) return;
+        renderSide();
+        if (mode === 'list') goToInList('arch-list-reports');
+    };
 })();

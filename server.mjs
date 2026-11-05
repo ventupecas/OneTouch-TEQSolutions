@@ -27,6 +27,8 @@ import { startMail, mailEnabled } from './mail.mjs';
 import * as kpis from './kpis.mjs';
 import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
 import { architectureMap, pushState } from './architecture.mjs';
+import { makeHealth, noteResponse } from './health.mjs';
+import * as issues from './issues.mjs';
 
 dotenv.config();
 
@@ -67,6 +69,12 @@ function metabaseTarget(req) {
   const target = new URL(req.originalUrl, METABASE_URL);
   return target.origin === new URL(METABASE_URL).origin && METABASE_PATHS.test(target.pathname) ? target : null;
 }
+
+// Every error answer is counted, for 🧊 Architecture's health report (health.mjs)
+app.use((req, res, next) => {
+  res.on('finish', () => noteResponse(req.path, res.statusCode));
+  next();
+});
 
 app.use(async (req, res, next) => {
   const target = metabaseTarget(req);
@@ -335,7 +343,7 @@ function scopedRunner(scope) {
   return run;
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families', '/api/notifications', '/api/my-tickets', '/api/kpis', '/api/ticket-statuses', '/api/demo-tickets', '/api/architecture'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families', '/api/notifications', '/api/my-tickets', '/api/kpis', '/api/ticket-statuses', '/api/demo-tickets', '/api/architecture', '/api/issues'], requireLogin);
 
 // 🧊 Architecture (architecture.mjs): admins only, for everything under this
 // path. The page's script holds no facts, so this is the whole lock.
@@ -351,6 +359,65 @@ const servicenowPush = { listening: false, heard: 0, lastAt: null, last: null, s
 
 app.get('/api/architecture', (req, res) => {
   res.json(architectureMap({ model: CLAUDE_MODEL, push: servicenowPush }));
+});
+
+// Is everything working? Made on first use, since what it needs is defined further down
+let health = null;
+app.get('/api/architecture/health', async (req, res) => {
+  health ||= makeHealth({
+    db: async sql => (await auth.pool.query(sql)).rows,
+    cubeQuery: async query => {
+      const data = await runCubeQuery(query);
+      return data?.data ?? data;
+    },
+    fetch,
+    listClaudeModels: () => anthropic.models.list({ limit: 1 }),
+    hasClaudeKey: Boolean(process.env.ANTHROPIC_API_KEY),
+    mailEnabled: mailEnabled(),
+    publicUrl: (process.env.ONETOUCH_PUBLIC_URL || process.env.APP_URL || '').replace(/\/+$/, ''),
+    metabaseUrl: METABASE_URL,
+    dashboardsReady: () => existsSync(METABASE_DASHBOARDS_FILE) && /^[0-9a-f]{64}$/.test(process.env.METABASE_EMBEDDING_SECRET || ''),
+    listening: () => servicenowPush.listening,
+  });
+  res.json(await health());
+});
+
+function issuesFailed(res, error, what) {
+  if (error instanceof issues.IssueError) return res.status(error.status).json({ error: error.message });
+  console.error(`🚩 ${what} failed:`, error.message);
+  res.status(503).json({ error: `${what} could not be done right now. Please try again shortly.` });
+}
+
+// Problem reports, for admins (the admin check above covers these) -> { openCount, open, resolved }
+app.get('/api/architecture/issues', async (req, res) => {
+  try {
+    res.json(await issues.listIssues());
+  } catch (error) {
+    issuesFailed(res, error, 'Loading the reports');
+  }
+});
+
+// { status: resolved|open } -> { id, status }
+app.put('/api/architecture/issues/:id', async (req, res) => {
+  try {
+    const done = await issues.setIssueStatus(req.params.id, req.body?.status, req.user.id);
+    console.log(`🚩 ${req.user.username} marked report ${done.id} ${done.status}`);
+    res.json(done);
+  } catch (error) {
+    issuesFailed(res, error, 'Changing that report');
+  }
+});
+
+// Anyone signed in, the 🚩 in the header: { category, message, page } -> { id, told }.
+// Only who and which report go in the log, not what they wrote.
+app.post('/api/issues', async (req, res) => {
+  try {
+    const done = await issues.reportIssue(req.user, req.body, req.get('user-agent'));
+    console.log(`🚩 ${req.user.username} sent report ${done.id}; ${done.told} admin(s) told`);
+    res.json(done);
+  } catch (error) {
+    issuesFailed(res, error, 'Sending your report');
+  }
 });
 
 // Just the push's status: the open page asks for it every so often
@@ -1847,6 +1914,7 @@ async function prepareAccounts(attempt = 1) {
     await chats.ensureChatsSchema();
     await teams.ensureTeamsSchema();
     await notifications.ensureNotificationsSchema();
+    await issues.ensureIssuesSchema();
   } catch (error) {
     const wait = Math.min(attempt * 2, 15);
     console.error(`🔐 Account database not reachable yet (${error.message}); retrying in ${wait}s`);

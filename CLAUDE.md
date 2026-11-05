@@ -154,6 +154,14 @@ dashed amber path that stops at a locked gate, and a "What happens when…" that
 `server.mjs`, counted from `onetouch_tickets_changed`, `GET /api/architecture/push`, read
 every 20 s while the map is open); then it turns green and its words move on. The count is
 in memory, so after a restart it says "needs authentication" until the next record arrives.
+The page also reports **anything else that stops working** (`health.mjs`,
+`GET /api/architecture/health`, admins only): real checks of the account database, a query
+through Cube, Metabase, the Claude API (listing models, no tokens), the email outbox, the
+public address and the ticket-change channel, plus any 5xx answer in the last 15 minutes.
+They run only while the page is open, and answers are kept 30 s or more. A problem shows in
+the banner, the 🩺 Health tab and on its block; if the report itself can't be had, the page
+says so. **Something new that can break gets a check in `buildChecks`.** The left side bar
+minimizes with ◀ (remembered in this browser).
 
 **Notifications** (`notifications.mjs`, the 🔔 in the header, checked every
 minute). Each one is saved in the same transaction as the change it reports:
@@ -176,6 +184,14 @@ Each one can be cleared off the person's list ("Clear" on it, or "Clear all"
 up to the newest shown; `POST /api/notifications/clear`,
 `notifications.clearNotifications`). Clearing sets `cleared_at` and keeps the
 row, so the email outbox is unaffected; only the person's own can be cleared.
+
+**🚩 Problem reports** (`issues.mjs`, the 🚩 in the header, `POST /api/issues`; the dialog is in
+`public/notifications.js`): anyone signed in can report a problem (5 per person per 10 minutes).
+The report (`issue_reports`) and a kind `issue` notification for every other admin are saved in one
+transaction. The email only says who reported what kind of problem; what they wrote shows under
+the admins' 🔔 and on 🧊 Architecture (the banner and 📣 Reports, `GET` and `PUT
+/api/architecture/issues`), where an admin marks it resolved or reopens it. **Never send a test
+report on the live server: it emails the real admins.**
 
 **Each notification is also emailed** (`mail.mjs`, through Brevo's API, from
 `notifications@onetouch.fyi`): an outbox on the `notifications` table, sent after the

@@ -655,10 +655,29 @@ The map says "needs authentication" until this server really hears a record, the
 green and shows how many have arrived. That count starts again whenever the server restarts,
 and a test call with `curl` and the right secret counts too.
 
+**Anything else that stops working is reported there too.** The banner lists each problem above
+the ServiceNow notice, the block turns red, and **🩺 Health** shows every check, what a failure
+means for people and how long it's been going on: sign-in and teams, ticket data through Cube,
+Metabase, the Claude API, emails, the public address, the ticket-change channel, and any request
+the server answered with an error in the last 15 minutes. Checks run only while the page is open
+(`health.mjs`). **◀** minimizes the left side bar to the side, and **▶** brings it back.
+
 What the map says is in `architecture.mjs`, because `public/` can be read without signing in.
 `public/architecture.js` only draws it, with three.js kept unchanged in `public/vendor/`.
 `npm test` fails if the map falls behind the repo: a file it names is gone, or a container in
 `docker-compose.yml` isn't on it.
+
+### Reporting a problem (🚩)
+
+Anyone signed in can press **🚩** in the header, pick what kind of problem it is and say what
+happened. Every admin is told straight away, under the 🔔 and by email (if they have an address on
+file and haven't turned email off). The report goes with the person's name, the page they were on
+and their browser. Someone can send 5 reports in 10 minutes.
+
+The email only says who reported what kind of problem, like every OneTouch email: what they wrote
+may name tickets or people, so it stays behind the sign-in, under the admins' 🔔 and on the
+**🧊 Architecture** page. There the banner counts the open reports, and **📣 Reports** lists them for
+an admin to mark resolved, or reopen. The sign-in page has no 🚩: reporting needs a sign-in.
 
 ### Ticket families (Dashboards)
 
@@ -1517,7 +1536,8 @@ inside the data. Leave it empty to use the real date.
 - **`npm test`** (`checks/ticket-order.mjs`, [B.78](#b78)): the order of Assigned to me
   and its open count, from made-up tickets through a stand-in for Cube (no database). Then
   `checks/architecture.mjs`: the 🧊 Architecture map against the repo, and that none of its
-  content is in `public/`.
+  content is in `public/`. Then `checks/issues.mjs`: what a problem report may hold, and that its
+  words stay out of the email.
 - **`npm run build`**: the same as `npm run check`; GitHub's CI runs it, then `npm test`,
   then a check that the live site is up (`.github/workflows/ci.yml`, [B.79](#b79)).
 - **Claude Code agents:** `onetouch-developer` and `onetouch-reviewer` (see Part 1).
@@ -2292,6 +2312,9 @@ Create each file at the path shown, with exactly this content. Files are in the 
 - [B.82 `architecture.mjs`](#b82)
 - [B.83 `public/architecture.js`](#b83)
 - [B.84 `checks/architecture.mjs`](#b84)
+- [B.85 `health.mjs`](#b85)
+- [B.86 `issues.mjs`](#b86)
+- [B.87 `checks/issues.mjs`](#b87)
 
 <a id="b1"></a>
 ### B.1 `.gitignore`
@@ -2447,7 +2470,7 @@ public/vendor/** -text
     "wrappy": "^1.0.2"
   },
   "scripts": {
-    "test": "node checks/ticket-order.mjs && node checks/architecture.mjs",
+    "test": "node checks/ticket-order.mjs && node checks/architecture.mjs && node checks/issues.mjs",
     "build": "node scripts/check.mjs",
     "check": "node scripts/check.mjs",
     "docs": "node scripts/build-docs.mjs",
@@ -6389,6 +6412,8 @@ import { startMail, mailEnabled } from './mail.mjs';
 import * as kpis from './kpis.mjs';
 import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
 import { architectureMap, pushState } from './architecture.mjs';
+import { makeHealth, noteResponse } from './health.mjs';
+import * as issues from './issues.mjs';
 
 dotenv.config();
 
@@ -6429,6 +6454,12 @@ function metabaseTarget(req) {
   const target = new URL(req.originalUrl, METABASE_URL);
   return target.origin === new URL(METABASE_URL).origin && METABASE_PATHS.test(target.pathname) ? target : null;
 }
+
+// Every error answer is counted, for 🧊 Architecture's health report (health.mjs)
+app.use((req, res, next) => {
+  res.on('finish', () => noteResponse(req.path, res.statusCode));
+  next();
+});
 
 app.use(async (req, res, next) => {
   const target = metabaseTarget(req);
@@ -6697,7 +6728,7 @@ function scopedRunner(scope) {
   return run;
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families', '/api/notifications', '/api/my-tickets', '/api/kpis', '/api/ticket-statuses', '/api/demo-tickets', '/api/architecture'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families', '/api/notifications', '/api/my-tickets', '/api/kpis', '/api/ticket-statuses', '/api/demo-tickets', '/api/architecture', '/api/issues'], requireLogin);
 
 // 🧊 Architecture (architecture.mjs): admins only, for everything under this
 // path. The page's script holds no facts, so this is the whole lock.
@@ -6713,6 +6744,65 @@ const servicenowPush = { listening: false, heard: 0, lastAt: null, last: null, s
 
 app.get('/api/architecture', (req, res) => {
   res.json(architectureMap({ model: CLAUDE_MODEL, push: servicenowPush }));
+});
+
+// Is everything working? Made on first use, since what it needs is defined further down
+let health = null;
+app.get('/api/architecture/health', async (req, res) => {
+  health ||= makeHealth({
+    db: async sql => (await auth.pool.query(sql)).rows,
+    cubeQuery: async query => {
+      const data = await runCubeQuery(query);
+      return data?.data ?? data;
+    },
+    fetch,
+    listClaudeModels: () => anthropic.models.list({ limit: 1 }),
+    hasClaudeKey: Boolean(process.env.ANTHROPIC_API_KEY),
+    mailEnabled: mailEnabled(),
+    publicUrl: (process.env.ONETOUCH_PUBLIC_URL || process.env.APP_URL || '').replace(/\/+$/, ''),
+    metabaseUrl: METABASE_URL,
+    dashboardsReady: () => existsSync(METABASE_DASHBOARDS_FILE) && /^[0-9a-f]{64}$/.test(process.env.METABASE_EMBEDDING_SECRET || ''),
+    listening: () => servicenowPush.listening,
+  });
+  res.json(await health());
+});
+
+function issuesFailed(res, error, what) {
+  if (error instanceof issues.IssueError) return res.status(error.status).json({ error: error.message });
+  console.error(`🚩 ${what} failed:`, error.message);
+  res.status(503).json({ error: `${what} could not be done right now. Please try again shortly.` });
+}
+
+// Problem reports, for admins (the admin check above covers these) -> { openCount, open, resolved }
+app.get('/api/architecture/issues', async (req, res) => {
+  try {
+    res.json(await issues.listIssues());
+  } catch (error) {
+    issuesFailed(res, error, 'Loading the reports');
+  }
+});
+
+// { status: resolved|open } -> { id, status }
+app.put('/api/architecture/issues/:id', async (req, res) => {
+  try {
+    const done = await issues.setIssueStatus(req.params.id, req.body?.status, req.user.id);
+    console.log(`🚩 ${req.user.username} marked report ${done.id} ${done.status}`);
+    res.json(done);
+  } catch (error) {
+    issuesFailed(res, error, 'Changing that report');
+  }
+});
+
+// Anyone signed in, the 🚩 in the header: { category, message, page } -> { id, told }.
+// Only who and which report go in the log, not what they wrote.
+app.post('/api/issues', async (req, res) => {
+  try {
+    const done = await issues.reportIssue(req.user, req.body, req.get('user-agent'));
+    console.log(`🚩 ${req.user.username} sent report ${done.id}; ${done.told} admin(s) told`);
+    res.json(done);
+  } catch (error) {
+    issuesFailed(res, error, 'Sending your report');
+  }
 });
 
 // Just the push's status: the open page asks for it every so often
@@ -8209,6 +8299,7 @@ async function prepareAccounts(attempt = 1) {
     await chats.ensureChatsSchema();
     await teams.ensureTeamsSchema();
     await notifications.ensureNotificationsSchema();
+    await issues.ensureIssuesSchema();
   } catch (error) {
     const wait = Math.min(attempt * 2, 15);
     console.error(`🔐 Account database not reachable yet (${error.message}); retrying in ${wait}s`);
@@ -8429,12 +8520,14 @@ listenForTicketChanges();
             </form>
         </div>
         <div class="header-right">
+            <!-- Anyone signed in: tell the admins something's wrong (notifications.js) -->
+            <button type="button" class="header-btn" id="issue-btn" onclick="openIssueDialog()" aria-label="Report a problem" title="Report a problem">🚩</button>
             <button type="button" class="header-btn notify-btn" id="notify-btn" onclick="toggleNotifications()"
                     aria-controls="notify-panel" aria-expanded="false" aria-label="Notifications">🔔<span class="notify-count" id="notify-count" hidden></span></button>
             <button type="button" class="header-btn access-btn" onclick="toggleAccessPanel()"
                     aria-controls="access-panel" aria-expanded="false" aria-label="Accessibility" title="Accessibility (Alt+A)">♿</button>
             <button type="button" class="header-btn" id="theme-btn" onclick="toggleThemePanel()"
-                    aria-controls="theme-panel" aria-expanded="false" aria-label="Colors">🎨<span class="header-btn-text"> Colors</span></button>
+                    aria-controls="theme-panel" aria-expanded="false" aria-label="Colors" title="Colors">🎨<span class="header-btn-text"> Colors</span></button>
             <button class="sign-out-btn" type="button" onclick="signOut()">Sign out</button>
         </div>
     </header>
@@ -8902,6 +8995,32 @@ listenForTicketChanges();
             <div class="builder-foot">
                 <button type="button" class="home-action" onclick="this.closest('dialog').close('cancel')">Cancel</button>
                 <button type="submit" class="primary-btn" id="report-send" value="ok">Send</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Reporting a problem to the admins (notifications.js, issues.mjs) -->
+    <dialog class="ask-dialog report-dialog" id="issue-dialog" aria-labelledby="issue-title">
+        <form method="dialog">
+            <h2 id="issue-title">🚩 Report a problem</h2>
+            <p class="report-ticket">Tell the admins what went wrong. They get a notification and an email straight away.</p>
+            <label class="field-label">What kind of problem is it?
+                <select id="issue-category">
+                    <option value="broken">Something isn't working</option>
+                    <option value="data">The data looks wrong</option>
+                    <option value="access">I can't see or do something I should</option>
+                    <option value="slow">It's very slow</option>
+                    <option value="other">Something else</option>
+                </select>
+            </label>
+            <label class="field-label">What happened?
+                <textarea id="issue-message" rows="5" maxlength="2000" required placeholder="e.g. The Incidents dashboard stays blank since this morning"></textarea>
+            </label>
+            <p class="theme-note report-hint">Sent with your name, the page you're on and your browser. Please leave out passwords. What you write stays in OneTouch: the email only says what kind of problem it is.</p>
+            <p class="home-status error" id="issue-error" role="alert" hidden></p>
+            <div class="builder-foot">
+                <button type="button" class="home-action" onclick="this.closest('dialog').close('cancel')">Cancel</button>
+                <button type="submit" class="primary-btn" id="issue-send" value="ok">Send to the admins</button>
             </div>
         </form>
     </dialog>
@@ -11745,7 +11864,7 @@ html.a11y-motion *::after {
 .arch-stage canvas:active { cursor: grabbing; }
 .arch-hint {
     position: absolute;
-    left: 262px;
+    left: var(--arch-left);
     right: 372px;
     bottom: 4px;
     margin: 0 !important;
@@ -11825,7 +11944,7 @@ html.a11y-motion *::after {
 }
 .arch-status {
     top: 12px;
-    left: 262px;
+    left: var(--arch-left);
     right: 372px;
     display: flex;
     flex-wrap: wrap;
@@ -11982,7 +12101,7 @@ html.a11y-motion *::after {
 .arch-stack-version { white-space: nowrap; font-weight: 600; color: var(--accent-ink); }
 
 .arch-step {
-    left: 262px;
+    left: var(--arch-left);
     right: 372px;
     bottom: 26px;
     max-width: 620px;
@@ -12000,7 +12119,7 @@ html.a11y-motion *::after {
 /* 📝 List: the same content, no scene. The rail stays beside it; the page scrolls */
 .arch.arch-is-list {
     display: grid;
-    grid-template-columns: 262px minmax(0, 1fr);
+    grid-template-columns: var(--arch-left) minmax(0, 1fr);
     grid-template-rows: auto 1fr;
     align-items: start;
     overflow: auto;
@@ -12037,6 +12156,48 @@ html.a11y-motion *::after {
 }
 @media (prefers-reduced-motion: reduce) {
     .arch-tag, .arch-layer-tag { transition: none; }
+}
+
+/* The left side bar minimized: the banner, the card and the list move over into its room */
+.arch { --arch-left: 262px; }
+.arch.arch-rail-min { --arch-left: 62px; }
+.arch-rail.arch-rail-closed { width: 38px; bottom: auto; padding: 4px; overflow: hidden; }
+.arch-is-list .arch-rail.arch-rail-closed { width: auto; }
+.arch-rail-toggle { width: 100%; padding: 6px 0; font: inherit; color: var(--text); background: none; border: none; border-radius: 6px; cursor: pointer; }
+.arch-rail-toggle:hover { background: var(--surface-2); }
+.arch-rail-toggle-text { display: none; }
+.arch-mode .arch-btn[data-do="rail"] { flex: 0 0 auto; padding-left: 7px; padding-right: 7px; }
+.arch-mode .arch-btn { min-width: 0; padding-left: 6px; padding-right: 6px; }
+
+/* What isn't working */
+.arch-status { max-height: 34vh; overflow-y: auto; }
+.arch-status-row { display: flex; flex: 1 1 100%; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.arch-status-problems { padding-bottom: 6px; border-bottom: 1px solid var(--danger-line); }
+.arch-status.arch-status-bad { background: var(--danger-soft); border-color: var(--danger-line); }
+.arch-notice-bad { color: var(--danger); background: var(--danger-soft); border-color: var(--danger-line); }
+.arch-checks { margin: 0 0 10px; padding: 0; list-style: none; font-size: 0.8rem; }
+.arch-check { margin-bottom: 8px; padding: 7px 9px; line-height: 1.4; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; }
+.arch-check-problem { background: var(--danger-soft); border-color: var(--danger-line); }
+.arch-tag.arch-tag-bad { border-color: var(--danger); border-left-color: var(--danger); background: var(--danger-soft); }
+.arch-tab { font-size: 0.72rem; }
+@media (max-width: 1100px) {
+    .arch-status { max-height: none; }
+    .arch-rail.arch-rail-closed { width: auto; }
+    .arch-rail-toggle-text { display: inline; }
+}
+
+/* 📣 Reports on the Architecture page */
+.arch-tabs { flex-wrap: wrap; }
+.arch-tab { flex: 1 1 auto; padding-left: 6px; padding-right: 6px; white-space: nowrap; }
+.arch-report { margin-bottom: 8px; padding: 8px 10px; font-size: 0.8rem; line-height: 1.4; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; }
+.arch-report-kind { font-weight: 700; }
+.arch-report-message { margin: 5px 0 !important; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
+.arch-report-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; margin-top: 6px; }
+.arch-reports-done { margin-top: 12px; font-size: 0.8rem; }
+.arch-reports-done summary { cursor: pointer; color: var(--text-2); margin-bottom: 8px; }
+/* Under the widest screens, 🎨 without its word makes room for the 🚩 */
+@media (max-width: 1700px) {
+    .header-btn-text { display: none; }
 }
 ```
 
@@ -17914,7 +18075,7 @@ const FILES = [
   'servicenow-sync/src/db/pending.js', 'servicenow-sync/src/families.js',
   'servicenow-sync/servicenow-blueprint.md',
   'checks/ticket-order.mjs', '.github/workflows/ci.yml', '.dockerignore', 'public/accessibility.js',
-  'architecture.mjs', 'public/architecture.js', 'checks/architecture.mjs',
+  'architecture.mjs', 'public/architecture.js', 'checks/architecture.mjs', 'health.mjs', 'issues.mjs', 'checks/issues.mjs',
 ];
 
 // Not copied in, and why (shown in the appendix)
@@ -25814,6 +25975,14 @@ dashed amber path that stops at a locked gate, and a "What happens when…" that
 `server.mjs`, counted from `onetouch_tickets_changed`, `GET /api/architecture/push`, read
 every 20 s while the map is open); then it turns green and its words move on. The count is
 in memory, so after a restart it says "needs authentication" until the next record arrives.
+The page also reports **anything else that stops working** (`health.mjs`,
+`GET /api/architecture/health`, admins only): real checks of the account database, a query
+through Cube, Metabase, the Claude API (listing models, no tokens), the email outbox, the
+public address and the ticket-change channel, plus any 5xx answer in the last 15 minutes.
+They run only while the page is open, and answers are kept 30 s or more. A problem shows in
+the banner, the 🩺 Health tab and on its block; if the report itself can't be had, the page
+says so. **Something new that can break gets a check in `buildChecks`.** The left side bar
+minimizes with ◀ (remembered in this browser).
 
 **Notifications** (`notifications.mjs`, the 🔔 in the header, checked every
 minute). Each one is saved in the same transaction as the change it reports:
@@ -25836,6 +26005,14 @@ Each one can be cleared off the person's list ("Clear" on it, or "Clear all"
 up to the newest shown; `POST /api/notifications/clear`,
 `notifications.clearNotifications`). Clearing sets `cleared_at` and keeps the
 row, so the email outbox is unaffected; only the person's own can be cleared.
+
+**🚩 Problem reports** (`issues.mjs`, the 🚩 in the header, `POST /api/issues`; the dialog is in
+`public/notifications.js`): anyone signed in can report a problem (5 per person per 10 minutes).
+The report (`issue_reports`) and a kind `issue` notification for every other admin are saved in one
+transaction. The email only says who reported what kind of problem; what they wrote shows under
+the admins' 🔔 and on 🧊 Architecture (the banner and 📣 Reports, `GET` and `PUT
+/api/architecture/issues`), where an admin marks it resolved or reopens it. **Never send a test
+report on the live server: it emails the real admins.**
 
 **Each notification is also emailed** (`mail.mjs`, through Brevo's API, from
 `notifications@onetouch.fyi`): an outbox on the `notifications` table, sent after the
@@ -25989,6 +26166,7 @@ makes sure the fix is scheduled (usually as a change).
 //   assigned   someone gave you tickets
 //   family     a family was moved to the team you're the project manager of
 //   report     someone on your team says they resolved or closed a ticket
+//   issue      someone reported a problem with OneTouch (to admins; issues.mjs)
 //
 // Each one keeps who did it, the tickets (up to MAX_NUMBERS of them) and a
 // few details; the page words them. Each is also emailed (mail.mjs): its
@@ -26000,7 +26178,7 @@ makes sure the fix is scheduled (usually as a change).
 
 import { pool } from './auth.mjs';
 
-export const KINDS = ['assigned', 'family', 'report'];
+export const KINDS = ['assigned', 'family', 'report', 'issue'];
 const MAX_NUMBERS = 100;
 // The newest this many are listed (the unread count covers them all)
 const LIST_LIMIT = 50;
@@ -26019,6 +26197,10 @@ export async function ensureNotificationsSchema() {
       read_at     timestamptz
     );
     CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, id DESC);
+
+    -- A table from before the newest kind only allows the older ones
+    ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_kind_check;
+    ALTER TABLE notifications ADD CONSTRAINT notifications_kind_check CHECK (kind IN (${KINDS.map(k => `'${k}'`).join(', ')}));
 
     -- Email (mail.mjs). The notifications already here when this column arrives
     -- are 'before', so they're never emailed; every later one starts 'pending'.
@@ -26272,6 +26454,7 @@ function notificationText(n, html = false) {
             : `${who} moved a family of ${count.toLocaleString()} linked tickets to ${text(d.team)}. They aren't assigned to anyone yet.`;
     }
     if (n.kind === 'report') return `${who} says they ${text(d.status)} ${ticket(n.numbers[0])}.`;
+    if (n.kind === 'issue') return `${who} reported a problem: ${text(d.label)}.`;
     return `${who} sent you a notification.`;
 }
 
@@ -26295,7 +26478,8 @@ function renderNotifications() {
                 `<button type="button" class="link-btn" data-ticket="${escapeHtml(number)}">${escapeHtml(number)}</button>`).join(', ')}` +
                 (more > 0 ? ` and ${more.toLocaleString()} more` : '') + '</div>' : '') +
             `<div class="notify-foot"><span>${escapeHtml(formatShownAt(n.at))}</span><span class="notify-foot-actions">` +
-            (n.kind === 'report' ? '' : '<button type="button" class="link-btn" data-notify-team>Open the Team tab</button>') +
+            (n.kind === 'issue' ? '<button type="button" class="link-btn" data-notify-reports>See the reports</button>'
+                : n.kind === 'report' ? '' : '<button type="button" class="link-btn" data-notify-team>Open the Team tab</button>') +
             `<button type="button" class="notify-clear" data-notify-clear="${n.id}" aria-label="Clear this notification">Clear</button>` +
             '</span></div></li>';
     }).join('') + '</ul>';
@@ -26347,6 +26531,11 @@ document.getElementById('notify-panel').addEventListener('click', e => {
     }
     // A ticket number: app.js's click listener opens it; the list gets out of the way
     if (e.target.closest('[data-ticket]')) { toggleNotifications(false); return; }
+    if (e.target.closest('[data-notify-reports]')) {
+        toggleNotifications(false);
+        showArchitectureReports();
+        return;
+    }
     if (e.target.closest('[data-notify-team]')) {
         toggleNotifications(false);
         switchTab('teams');
@@ -26426,6 +26615,46 @@ document.querySelector('#report-dialog form').addEventListener('submit', async e
 document.addEventListener('click', e => {
     const report = e.target.closest('[data-report]');
     if (report) openReportDialog(report.dataset.report);
+});
+
+// ---------------------------------------------------------------------
+// 🚩 Reporting a problem to the admins (issues.mjs on the server). They're
+// told under the 🔔 and by email, and read it on the 🧊 Architecture page.
+// ---------------------------------------------------------------------
+
+function openIssueDialog() {
+    document.getElementById('issue-category').value = 'broken';
+    document.getElementById('issue-message').value = '';
+    document.getElementById('issue-error').hidden = true;
+    document.getElementById('issue-dialog').showModal();
+    document.getElementById('issue-category').focus();
+}
+
+document.querySelector('#issue-dialog form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const send = document.getElementById('issue-send');
+    const error = document.getElementById('issue-error');
+    // Which page they were on when it went wrong; the chat opens over the others
+    const page = assistantOpen() ? 'chat' : (document.querySelector('.view-panel.active')?.id || '').replace(/-view$/, '');
+    send.disabled = true;
+    error.hidden = true;
+    try {
+        const response = await fetch(`${API_BASE}/api/issues`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ category: document.getElementById('issue-category').value, message: document.getElementById('issue-message').value, page }),
+        });
+        if (handleUnauthorized(response)) return;
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'That didn\'t send. Please try again.');
+        document.getElementById('issue-dialog').close();
+        showToast('✓ Your report went to the admins. Thank you.');
+    } catch (err) {
+        error.textContent = `❌ ${err.message}`;
+        error.hidden = false;
+    } finally {
+        send.disabled = false;
+    }
 });
 ```
 
@@ -27420,6 +27649,7 @@ document.addEventListener('keydown', e => {
 //   assigned   someone gave you tickets
 //   family     a family was moved to the team you're the project manager of
 //   report     someone on your team says they resolved or closed a ticket
+//   issue      someone reported a problem with OneTouch (to admins; issues.mjs)
 //
 // An outbox: notify() saves each notification in the same transaction as
 // the change it reports, as 'pending', and every MAIL_INTERVAL this sends the
@@ -27495,6 +27725,10 @@ export function emailFor(n, cfg = mailConfig()) {
   } else if (n.kind === 'report') {
     what = `${who} says they ${d.status} ${n.numbers[0]}`;
     where = `${d.note ? 'They left you a note. ' : ''}See it on the Team tab, under the ticket's state. The ticket itself doesn't change in OneTouch.`;
+  } else if (n.kind === 'issue') {
+    // The kind of problem only: what they wrote stays behind the sign-in
+    what = `${who} reported a problem with OneTouch: ${d.label}`;
+    where = 'Read it and mark it resolved in OneTouch, on the 🧊 Architecture page, under 📣 Reports.';
   } else {
     what = `${who} sent you a notification`;
     where = 'See it under the 🔔 in OneTouch.';
@@ -29773,13 +30007,13 @@ export const NODES = [
   {
     id: 'notify', name: 'Notifications and email', layer: 'app', shape: 'module', pos: [-6.6, 12, 2.2],
     tech: 'notifications.mjs and mail.mjs',
-    what: 'The 🔔 in the header, and the same notification by email. Each is saved in the same transaction as the change it reports, and emails go out from that outbox after the change commits.',
+    what: 'The 🔔 in the header, the same notification by email, and the 🚩 problem reports people send the admins. Each is saved in the same transaction as the change it reports, and emails go out from that outbox after the change commits.',
     facts: [
       ['Outbox', 'Checked every 30 seconds, retried up to 5 times, never sent if older than an hour'],
       ['An email holds', 'Who did what and the ticket numbers, never summaries or notes'],
     ],
     secure: 'Test and service accounts are never emailed. MAIL_ONLY_TO limits who gets email while trying it out.',
-    files: ['notifications.mjs', 'mail.mjs', 'public/notifications.js'],
+    files: ['notifications.mjs', 'mail.mjs', 'issues.mjs', 'public/notifications.js'],
   },
   {
     id: 'tickets', name: 'Tickets, KPIs and charts', layer: 'app', shape: 'module', pos: [-1.9, 12, 4.3],
@@ -30065,6 +30299,19 @@ export const FLOWS = [
     ],
   },
   {
+    id: 'issue', icon: '🚩', name: 'Someone reports a problem',
+    steps: [
+      { path: ['browser', 'tunnel', 'express'], title: 'The report reaches the server',
+        text: 'Anyone signed in can send one with the 🚩 in the header: POST /api/issues, with the kind of problem and what happened. One person can send 5 in 10 minutes.' },
+      { path: ['express', 'notify', 'onetouch_auth'], title: 'The report and the notifications are saved together',
+        text: 'One transaction: the report, and a notification for every other admin, so nobody is told about a report that wasn\'t saved.' },
+      { path: ['onetouch_auth', 'notify', 'brevo'], title: 'The admins are emailed',
+        text: 'Through the usual outbox. The email says who reported what kind of problem. What they wrote stays behind the sign-in.' },
+      { path: ['onetouch_auth', 'notify', 'express', 'tunnel', 'browser'], title: 'It shows up here',
+        text: 'Under the admins\' 🔔, and in the banner and the 📣 Reports tab of this page, where an admin marks it resolved.' },
+    ],
+  },
+  {
     id: 'servicenow', icon: '🔌', name: 'ServiceNow live push', pending: true,
     steps: [
       { path: ['servicenow'], phase: 'needs', title: 'A ticket is saved in ServiceNow',
@@ -30295,6 +30542,14 @@ export function architectureMap({ model = null, push = {} } = {}) {
     let selected = null;   // a block's id
     let focusLayer = null; // a layer's id
     let pollTimer = null;
+    let health = null;     // the last health report (GET /api/architecture/health)
+    let healthError = null;// why there isn't a fresh one
+    let healthErrorSince = null;
+    let issues = null;     // what people have reported: { openCount, open, resolved }
+    let sideShown = null;  // the tab the side panel last drew, so a redraw keeps its place
+    const RAIL_KEY = 'onetouch-arch-rail-min';
+    let railMin = false;   // the left side bar minimized
+    try { railMin = localStorage.getItem(RAIL_KEY) === '1'; } catch { /* Open, then */ }
     const player = { flow: null, index: 0, playing: false, elapsed: 0, hold: 0 };
 
     const $ = id => document.getElementById(id);
@@ -30326,7 +30581,84 @@ export function architectureMap({ model = null, push = {} } = {}) {
             <aside class="arch-side" id="arch-side" aria-label="Details"></aside>`;
     }
 
+    // What isn't working right now: the health report, or the server not answering at all
+    function problems() {
+        if (healthError) return [{ id: 'server', name: 'OneTouch server', text: healthError, effect: 'What this page shows may be out of date.', since: healthErrorSince }];
+        return (health?.checks || []).filter(c => c.state === 'problem');
+    }
+
     function statusHtml() {
+        const list = problems();
+        const shown = list.slice(0, 3);
+        const bad = !list.length ? '' : `<div class="arch-status-row arch-status-problems">
+                <span class="arch-chip arch-chip-stop">⚠️ ${list.length} problem${list.length === 1 ? '' : 's'}</span>
+                <span class="arch-status-text">${shown.map(p => `<b>${esc(p.name)}:</b> ${esc(p.text)}`).join('<br>')}${list.length > shown.length ? `<br>and ${list.length - shown.length} more` : ''}</span>
+                <button type="button" class="arch-btn" data-side="health">See what's wrong</button>
+            </div>`;
+        const open = issues?.openCount || 0;
+        const latest = issues?.open[0];
+        const reported = !open ? '' : `<div class="arch-status-row arch-status-problems">
+                <span class="arch-chip arch-chip-warn">📣 ${open} open report${open === 1 ? '' : 's'}</span>
+                <span class="arch-status-text">${latest ? `<b>Latest, from ${esc(latest.reporter)}:</b> ${esc(latest.label)}` : ''}</span>
+                <button type="button" class="arch-btn" data-side="reports">See the reports</button>
+            </div>`;
+        return `${bad}${reported}<div class="arch-status-row">${pushStatusHtml()}</div>`;
+    }
+
+    // One report. Someone's own words, so escaped like everything else here.
+    function reportHtml(r, resolved) {
+        const where = r.page ? ` · on ${esc(r.page)}` : '';
+        const done = resolved ? `<br><span class="arch-small">Resolved ${esc(when(r.resolvedAt))}${r.resolver ? ` by ${esc(r.resolver)}` : ''}.</span>` : '';
+        return `<li class="arch-report">
+                <span class="arch-report-kind">${esc(r.label)}</span>
+                <p class="arch-report-message">${esc(r.message)}</p>
+                <span class="arch-small"><b>${esc(r.reporter)}</b> · ${esc(when(r.at))}${where}</span>${done}
+                ${r.browser ? `<br><span class="arch-small">${esc(r.browser)}</span>` : ''}
+                <div class="arch-report-foot">
+                    <button type="button" class="arch-btn" data-issue="${esc(r.id)}" data-issue-status="${resolved ? 'open' : 'resolved'}">${resolved ? '↩ Reopen' : '✓ Mark resolved'}</button>
+                </div>
+            </li>`;
+    }
+
+    // What people have told the admins (the 🚩 in the header)
+    function reportsHtml(Heading = 'h3') {
+        const title = `<${Heading} class="arch-node-name">📣 Problems people reported</${Heading}>`;
+        if (!issues) return `${title}<p>Loading the reports…</p>`;
+        const open = issues.open.length
+            ? `<ul class="arch-checks">${issues.open.map(r => reportHtml(r, false)).join('')}</ul>`
+            : '<p class="arch-notice arch-notice-good"><b>✅ No open reports.</b></p>';
+        const resolved = issues.resolved.length
+            ? `<details class="arch-reports-done"><summary>Resolved lately (${issues.resolved.length})</summary>
+                <ul class="arch-checks">${issues.resolved.map(r => reportHtml(r, true)).join('')}</ul></details>` : '';
+        return `${title}${open}${resolved}
+            <p class="arch-small">Anyone signed in can send one with the 🚩 in the header. Admins are told under the 🔔 and by email.</p>`;
+    }
+
+    // Every check: what's wrong first, then what's working
+    function healthHtml(Heading = 'h3') {
+        const rank = { problem: 0, off: 1, ok: 2 };
+        const checks = [...(health?.checks || [])].sort((a, b) => rank[a.state] - rank[b.state]);
+        const list = problems();
+        const icon = { problem: '⚠️', off: '⚪', ok: '✅' };
+        const summary = list.length
+            ? `<p class="arch-notice arch-notice-bad"><b>⚠️ ${list.length} problem${list.length === 1 ? '' : 's'} right now.</b></p>`
+            : health ? '<p class="arch-notice arch-notice-good"><b>✅ Everything checked is working.</b></p>' : '<p>Checking…</p>';
+        const server = healthError ? `<li class="arch-check arch-check-problem"><b>⚠️ OneTouch server</b><br>${esc(healthError)}<br><span class="arch-small">Noticed ${esc(when(healthErrorSince))}. These results are from the last answer.</span></li>` : '';
+        return `
+            <${Heading} class="arch-node-name">🩺 Is everything working?</${Heading}>
+            ${summary}
+            <ul class="arch-checks">${server}${checks.map(c => `
+                <li class="arch-check arch-check-${esc(c.state)}">
+                    <b>${icon[c.state] || ''} ${c.node ? `<button type="button" class="arch-link" data-node="${esc(c.node)}">${esc(c.name)}</button>` : esc(c.name)}</b><br>
+                    ${esc(c.text)}
+                    ${c.effect ? `<br><b>What this means:</b> ${esc(c.effect)}` : ''}
+                    ${c.state === 'problem' && c.detail && c.detail !== c.text ? `<br><span class="arch-small">${esc(c.detail)}</span>` : ''}
+                    <br><span class="arch-small">${c.since ? `Since ${esc(when(c.since))}. ` : ''}Checked ${esc(when(c.checkedAt))}.</span>
+                </li>`).join('')}</ul>
+            <p class="arch-small">Each check really tries the thing, while this page is open, every 30 seconds or so. Outside services are asked less often. ServiceNow's authentication is listed in the banner, and in its own tab.</p>`;
+    }
+
+    function pushStatusHtml() {
         const push = map.push;
         const s = map.servicenow;
         if (receiving()) {
@@ -30343,6 +30675,9 @@ export function architectureMap({ model = null, push = {} } = {}) {
     }
 
     function railHtml() {
+        if (railMin) {
+            return `<button type="button" class="arch-rail-toggle" data-do="rail" aria-expanded="false" aria-label="Show the views and layers" title="Show the views and layers">▶<span class="arch-rail-toggle-text"> Views and layers</span></button>`;
+        }
         const flows = map.flows.map(f => `<button type="button" class="arch-rail-btn${f.pending ? ' arch-rail-pending' : ''}${player.flow?.id === f.id ? ' is-on' : ''}"
                 data-flow="${esc(f.id)}" aria-pressed="${player.flow?.id === f.id}">
                 <span aria-hidden="true">${esc(f.icon)}</span> ${esc(f.name)}${f.pending && !receiving() ? ' <span class="arch-lock" title="Needs ServiceNow authentication">🔒</span>' : ''}</button>`).join('');
@@ -30354,6 +30689,7 @@ export function architectureMap({ model = null, push = {} } = {}) {
                 <button type="button" class="arch-btn${mode === '3d' ? ' is-on' : ''}" data-do="3d" aria-pressed="${mode === '3d'}"${world ? '' : ' disabled title="This browser can\'t draw 3D here"'}>🧊 3D</button>
                 <button type="button" class="arch-btn${mode === 'list' ? ' is-on' : ''}" data-do="list" aria-pressed="${mode === 'list'}">📝 List</button>
                 <button type="button" class="arch-btn" data-do="reset" title="Back to the whole map"${mode === '3d' && world ? '' : ' disabled'}>↺</button>
+                <button type="button" class="arch-btn" data-do="rail" aria-expanded="true" aria-label="Hide the views and layers" title="Hide the views and layers">◀</button>
             </div>
             <h3 class="arch-rail-head">What happens when…</h3>
             <div class="arch-rail-group">${flows}</div>
@@ -30449,8 +30785,15 @@ export function architectureMap({ model = null, push = {} } = {}) {
         const side = $('arch-side');
         if (!side) return;
         const node = selected && nodeById(selected);
-        const tabs = [['details', '🧩 Details'], ['stack', '📚 Tech stack'], ['servicenow', '🔌 ServiceNow']];
-        const body = sideTab === 'stack' ? stackHtml()
+        const count = problems().length;
+        const reported = issues?.openCount || 0;
+        const tabs = [['details', '🧩 Details'], ['stack', '📚 Stack'], ['health', `🩺 Health${count ? ` (${count})` : ''}`],
+            ['reports', `📣 Reports${reported ? ` (${reported})` : ''}`], ['servicenow', '🔌 ServiceNow']];
+        // A redraw of the same tab stays where the person had scrolled to
+        const scrolled = sideShown === sideTab ? side.querySelector('.arch-side-body')?.scrollTop || 0 : 0;
+        const body = sideTab === 'health' ? healthHtml()
+            : sideTab === 'reports' ? reportsHtml()
+            : sideTab === 'stack' ? stackHtml()
             : sideTab === 'servicenow' ? servicenowHtml()
             : node ? nodeHtml(node) : overviewHtml();
         side.innerHTML = `
@@ -30458,6 +30801,8 @@ export function architectureMap({ model = null, push = {} } = {}) {
                 <button type="button" role="tab" class="arch-tab${sideTab === id ? ' is-on' : ''}" aria-selected="${sideTab === id}" data-side="${id}">${label}</button>`).join('')}
             </div>
             <div class="arch-side-body" role="tabpanel" tabindex="0">${body}</div>`;
+        side.querySelector('.arch-side-body').scrollTop = scrolled;
+        sideShown = sideTab;
     }
 
     function renderStep() {
@@ -30506,6 +30851,8 @@ export function architectureMap({ model = null, push = {} } = {}) {
         }).join('');
         list.innerHTML = `${note}
             <section class="arch-list-layer"><h2>🧊 Architecture</h2><p>${esc(map.overview)}</p></section>
+            <section class="arch-list-layer arch-item" id="arch-list-health" tabindex="-1">${healthHtml('h3')}</section>
+            <section class="arch-list-layer arch-item" id="arch-list-reports" tabindex="-1">${reportsHtml('h3')}</section>
             <section class="arch-list-layer arch-item" id="arch-list-servicenow" tabindex="-1">${servicenowHtml('h3')}</section>
             <section class="arch-list-layer"><h3>Tech stack</h3>${stackHtml()}</section>
             <section class="arch-list-layer"><h3>What happens when…</h3>${flows}</section>
@@ -30619,9 +30966,11 @@ export function architectureMap({ model = null, push = {} } = {}) {
     // Every button on the page, in one place
     function onClick(event) {
         // A name over a block, or anything else that's a button on this page
-        const el = event.target.closest('[data-node], [data-flow], [data-layer], [data-side], [data-do]');
+        const el = event.target.closest('[data-issue], [data-node], [data-flow], [data-layer], [data-side], [data-do]');
         if (!el || !$('architecture').contains(el)) return;
-        if (el.dataset.node) {
+        if (el.dataset.issue) {
+            setIssue(el, el.dataset.issue, el.dataset.issueStatus);
+        } else if (el.dataset.node) {
             if (player.flow) stopFlow();
             select(el.dataset.node);
         } else if (el.dataset.flow) {
@@ -30632,13 +30981,16 @@ export function architectureMap({ model = null, push = {} } = {}) {
             sideTab = el.dataset.side;
             renderSide();
             if (mode === 'list' && sideTab === 'servicenow') goToInList('arch-list-servicenow');
+            if (mode === 'list' && sideTab === 'health') goToInList('arch-list-health');
+            if (mode === 'list' && sideTab === 'reports') goToInList('arch-list-reports');
         } else {
             act(el.dataset.do);
         }
     }
 
     function act(what) {
-        if (what === '3d' || what === 'list') setMode(what);
+        if (what === 'rail') setRailMin(!railMin);
+        else if (what === '3d' || what === 'list') setMode(what);
         else if (what === 'reset') resetView();
         else if (what === 'close') { stopFlow(); $('arch-rail').innerHTML = railHtml(); world?.showFocus(true); }
         else if (what === 'back' && player.flow && player.index > 0) goToStep(player.index - 1);
@@ -30649,6 +31001,20 @@ export function architectureMap({ model = null, push = {} } = {}) {
             if (player.playing && player.index === player.flow.steps.length - 1) goToStep(0);
             else renderStep();
         }
+    }
+
+    // The left side bar, in to the side and back; this browser remembers which
+    function setRailMin(min) {
+        railMin = min;
+        try { localStorage.setItem(RAIL_KEY, min ? '1' : '0'); } catch { /* Just for this visit */ }
+        paintRail();
+        $('arch-rail').querySelector('[data-do="rail"]')?.focus();
+    }
+    function paintRail() {
+        $('architecture').classList.toggle('arch-rail-min', railMin);
+        $('arch-rail').classList.toggle('arch-rail-closed', railMin);
+        $('arch-rail').innerHTML = railHtml();
+        if (mode === '3d') world?.resize();
     }
 
     function resetView() {
@@ -30667,11 +31033,16 @@ export function architectureMap({ model = null, push = {} } = {}) {
     function paintPush(before) {
         const status = $('arch-status');
         if (!status || !map) return;
-        const key = `${map.push.state}:${map.push.heard}`;
+        const list = problems();
+        const key = `${map.push.state}:${map.push.heard}:${list.map(p => `${p.id}=${p.text}`).join('|')}:${issues?.openCount || 0}:${issues?.open[0]?.id || 0}`;
         if (status.dataset.key !== key) {
             status.dataset.key = key;
             status.innerHTML = statusHtml();
-            status.classList.toggle('arch-status-good', receiving());
+            status.classList.toggle('arch-status-good', receiving() && !list.length);
+            status.classList.toggle('arch-status-bad', list.length > 0);
+            // The banner's height may have changed, and the scene is centered below it
+            if (mode === '3d') world?.resize();
+            world?.setProblems(list.map(p => p.node).filter(Boolean));
         }
         world?.setPushState(receiving());
         if (before !== undefined && map.push.heard > before) world?.pulse(map.servicenow.arrives);
@@ -30685,7 +31056,78 @@ export function architectureMap({ model = null, push = {} } = {}) {
         return data;
     }
 
+    // The health report. Not getting one is itself a problem to report: a server
+    // that can't reach its database, or isn't answering, can't say so any other way.
+    async function pollHealth() {
+        if (!active || !map) return;
+        const session = opening;
+        const before = JSON.stringify(health?.checks.map(c => [c.id, c.state, c.text])) + healthError;
+        try {
+            const response = await fetch(`${API_BASE}/api/architecture/health`, { headers: authHeaders() });
+            if (handleUnauthorized(response) || session !== opening) return;
+            const data = await response.json().catch(() => ({}));
+            if (session !== opening) return;
+            if (!response.ok) throw new Error(data.error || `The server answered with an error (${response.status}).`);
+            health = data;
+            healthError = null;
+            healthErrorSince = null;
+        } catch (error) {
+            if (session !== opening) return;
+            healthError = error instanceof TypeError ? 'This page can\'t reach the server.' : error.message;
+            healthErrorSince ||= new Date().toISOString();
+        }
+        paintPush();
+        if (before !== JSON.stringify(health?.checks.map(c => [c.id, c.state, c.text])) + healthError) {
+            renderSide();
+            if (mode === 'list') renderList();
+        } else if (sideTab === 'health' && !$('arch-side')?.contains(document.activeElement)) {
+            // Only the "Checked at" times moved: not worth taking the keys from someone
+            renderSide();
+        }
+    }
+
+    // What people have reported. If this fails, the health report says why.
+    async function pollIssues() {
+        if (!active || !map) return;
+        const session = opening;
+        try {
+            const response = await fetch(`${API_BASE}/api/architecture/issues`, { headers: authHeaders() });
+            if (handleUnauthorized(response) || !response.ok) return;
+            const data = await response.json();
+            if (session !== opening || !map) return;
+            const changed = JSON.stringify(data) !== JSON.stringify(issues);
+            issues = data;
+            if (!changed) return;
+            paintPush();
+            renderSide();
+            if (mode === 'list') renderList();
+        } catch { /* Tried again shortly */ }
+    }
+
+    // Resolved, or back on the list
+    async function setIssue(button, id, status) {
+        button.disabled = true;
+        try {
+            const response = await fetch(`${API_BASE}/api/architecture/issues/${encodeURIComponent(id)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                body: JSON.stringify({ status }),
+            });
+            if (handleUnauthorized(response)) return;
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || 'That could not be changed right now.');
+            await pollIssues();
+            // The button has gone with its report: the keys go to the list it was in
+            document.querySelector('.arch-side-body')?.focus({ preventScroll: true });
+        } catch (error) {
+            button.disabled = false;
+            showToast(`❌ ${error.message}`);
+        }
+    }
+
     async function pollPush() {
+        pollHealth();
+        pollIssues();
         if (!active || !map) return;
         const session = opening;
         try {
@@ -30758,8 +31200,11 @@ export function architectureMap({ model = null, push = {} } = {}) {
             }
         }
         renderSide();
+        paintRail();
         paintPush();
         setMode(world ? '3d' : 'list');
+        pollHealth();
+        pollIssues();
     }
 
     function hideArchitecture() {
@@ -30779,6 +31224,11 @@ export function architectureMap({ model = null, push = {} } = {}) {
         world?.dispose();
         world = null;
         map = null;
+        health = null;
+        healthError = null;
+        healthErrorSince = null;
+        issues = null;
+        sideShown = null;
         mode = '3d';
         sideTab = 'details';
         selected = null;
@@ -31835,12 +32285,31 @@ export function architectureMap({ model = null, push = {} } = {}) {
         applyCamera();
         showFocus(false);
 
-        return { resize, wake, sleep, dispose, home, showFocus, playStep, endStep, pulse, setPushState };
+        // Blocks with a problem get a red name, which stays showing
+        function setProblems(ids) {
+            for (const [id, node] of nodes) {
+                const bad = ids.includes(id);
+                node.tag.el.classList.toggle('arch-tag-bad', bad);
+                node.tag.baseRank ??= node.tag.rank;
+                node.tag.rank = bad ? 15 : node.tag.baseRank;
+            }
+            dirty = true;
+        }
+
+        return { resize, wake, sleep, dispose, home, showFocus, playStep, endStep, pulse, setPushState, setProblems };
     }
 
     window.showArchitecture = showArchitecture;
     window.hideArchitecture = hideArchitecture;
     window.resetArchitecture = resetArchitecture;
+    // From a 🔔 about a report (notifications.js): the page, on its reports
+    window.showArchitectureReports = () => {
+        sideTab = 'reports';
+        switchTab('architecture');
+        if (!map || loading) return;
+        renderSide();
+        if (mode === 'list') goToInList('arch-list-reports');
+    };
 })();
 ```
 
@@ -31861,6 +32330,7 @@ export function architectureMap({ model = null, push = {} } = {}) {
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { architectureMap, composeImages, FLOWS, LAYERS, LINKS, NODES, SERVICENOW } from '../architecture.mjs';
+import { buildChecks, makeHealth, noteResponse } from '../health.mjs';
 
 const problems = [];
 const check = (ok, message) => { if (!ok) problems.push(message); };
@@ -31929,11 +32399,415 @@ for (const fact of ['cube_reader', 'x_onetouch.webhook_secret', 'onetouch_ticket
   check(!page.includes(fact), `public/ holds "${fact}": the map's content belongs in architecture.mjs, behind the admin check`);
 }
 
+// The health report: every check points at a real block; a failure, a choice to
+// leave something off, and a hang are each told apart; secrets stay out of it
+const healthy = {
+  db: async sql => (sql.includes('notifications') ? [{ failed: 0, stuck: 0 }] : [{ teams: 6 }]),
+  cubeQuery: async () => [{ 'incident.count': '5' }],
+  fetch: async () => ({ ok: true, status: 200 }),
+  listClaudeModels: async () => ({}),
+  hasClaudeKey: true, mailEnabled: true, publicUrl: 'https://example.test', metabaseUrl: 'http://metabase.test',
+  dashboardsReady: () => true, listening: () => true,
+};
+for (const c of buildChecks(healthy)) check(ids.has(c.node), `Health check ${c.id} points at "${c.node}", which isn't a block`);
+const stateOf = async (tools, id) => (await makeHealth({ ...healthy, ...tools })()).checks.find(c => c.id === id);
+assert.ok((await makeHealth(healthy)()).checks.every(c => c.state === 'ok'), 'All well: nothing reported');
+assert.equal((await stateOf({ cubeQuery: async () => { throw new Error('fetch failed'); } }, 'tickets')).state, 'problem');
+assert.equal((await stateOf({ db: async () => { throw new Error('connection refused'); } }, 'accounts')).state, 'problem');
+assert.equal((await stateOf({ fetch: async () => ({ ok: false, status: 502 }) }, 'dashboards')).state, 'problem');
+assert.equal((await stateOf({ listClaudeModels: async () => { throw new Error('401'); } }, 'claude')).state, 'problem');
+assert.equal((await stateOf({ listening: () => false }, 'changes')).state, 'problem');
+assert.match((await stateOf({ cubeQuery: async () => { throw new Error('fetch failed'); } }, 'tickets')).text, /Cube/, 'A failure says what failed');
+assert.equal((await stateOf({ mailEnabled: false }, 'email')).state, 'off', 'No key is a choice, not a fault');
+assert.equal((await stateOf({ db: async () => [{ failed: 2, stuck: 0 }] }, 'email')).state, 'problem');
+assert.equal((await stateOf({}, 'errors')).state, 'ok');
+noteResponse('/api/teams/7/tickets', 500);
+noteResponse('/api/teams', 404);
+const errors = await stateOf({}, 'errors');
+assert.equal(errors.state, 'problem');
+assert.match(errors.text, /1 request/);
+assert.equal(errors.detail, '/api/teams: 1', 'Only the start of the path, and only server errors');
+
 if (problems.length) {
   console.error(`The architecture map is out of step with the repo:\n- ${problems.join('\n- ')}`);
   process.exit(1);
 }
 console.log(`Architecture map: ${NODES.length} blocks, ${LINKS.length} links and ${FLOWS.length} flows all match the repo.`);
+```
+
+<a id="b85"></a>
+### B.85 `health.mjs`
+
+```js
+// =====================================================================
+// IS EVERYTHING WORKING? What the 🧊 Architecture page reports (admins only,
+// GET /api/architecture/health). Each check really tries the thing: a small
+// query through Cube to the ticket data, a read of the account database, a
+// call to Metabase, Claude and the public address. Nothing here costs Claude
+// tokens: Claude's check only lists models.
+//
+// Checks only run while an admin has the page open, and their answers are
+// kept for a while, so any number of open pages adds almost no load.
+//
+// A check's state: 'ok', 'problem', or 'off' (not set up here, which is a
+// choice rather than a fault, such as email with no key).
+// =====================================================================
+
+const KEEP_MS = 30 * 1000;
+const KEEP_OUTSIDE_MS = 5 * 60 * 1000; // what's paid for or far away is asked less often
+const CHECK_TIMEOUT_MS = 20 * 1000;
+const ERROR_WINDOW_MS = 15 * 60 * 1000;
+const MAX_ERRORS = 500;
+
+// ---- Requests the server answered with an error: this catches what no check names ----
+
+const failures = [];
+
+// Called for every response. Only the start of the path: no ids or ticket numbers.
+export function noteResponse(path, status, now = Date.now()) {
+  if (status < 500) return;
+  failures.push({ at: now, where: String(path).split('/').slice(0, 3).join('/') || '/' });
+  if (failures.length > MAX_ERRORS) failures.shift();
+}
+
+export function recentFailures(now = Date.now()) {
+  while (failures.length && now - failures[0].at > ERROR_WINDOW_MS) failures.shift();
+  const counts = new Map();
+  for (const f of failures) counts.set(f.where, (counts.get(f.where) || 0) + 1);
+  return [...counts].map(([where, count]) => ({ where, count })).sort((a, b) => b.count - a.count);
+}
+
+// ---- The checks ----
+
+const fail = (text, detail) => {
+  const problem = new Error(text);
+  problem.detail = detail;
+  problem.isOurs = true;
+  return problem;
+};
+
+// tools: { db(sql) -> rows, cubeQuery(query), fetch, listClaudeModels(), hasClaudeKey,
+//          mailEnabled, publicUrl, metabaseUrl, dashboardsReady(), listening() }
+// Each check returns a sentence when all is well, or { off: sentence }, or throws.
+export function buildChecks(tools) {
+  const answered = async (url, what) => {
+    let response;
+    try {
+      response = await tools.fetch(url, { signal: AbortSignal.timeout(CHECK_TIMEOUT_MS - 2000), redirect: 'manual' });
+    } catch (error) {
+      throw fail(`${what} isn't answering.`, error.message);
+    }
+    if (response.status >= 500) throw fail(`${what} answered with an error.`, `HTTP ${response.status}`);
+    return response;
+  };
+
+  return [
+    {
+      id: 'accounts', node: 'onetouch_auth', name: 'Sign-in and teams', failText: 'The account database isn\'t answering.',
+      effect: 'Nobody can sign in, and assignments and notifications stop.',
+      async run() {
+        const [{ teams }] = await tools.db('SELECT count(*)::int AS teams FROM teams');
+        if (!teams) throw fail('No teams are set up, so nobody but admins sees tickets.', 'The first start builds them from Cube.');
+        return `The account database answers, with ${teams} teams.`;
+      },
+    },
+    {
+      id: 'tickets', node: 'cube', name: 'Ticket data (Cube and analytics_db)', failText: 'Cube or the ticket data isn\'t answering.',
+      effect: 'Search, charts, KPIs and the AI assistant\'s answers stop.',
+      async run() {
+        const result = await tools.cubeQuery({ measures: ['incident.count'], limit: 1 });
+        const count = Number(result?.[0]?.['incident.count']);
+        if (!count) throw fail('Cube answers, but finds no incidents in the data.');
+        return `Cube reads the data: ${count.toLocaleString('en-US')} incidents.`;
+      },
+    },
+    {
+      id: 'dashboards', node: 'metabase', name: 'Dashboards (Metabase)',
+      effect: 'The Dashboards tab stops showing its charts.',
+      async run() {
+        const response = await answered(`${tools.metabaseUrl}/api/health`, 'Metabase');
+        if (!response.ok) throw fail('Metabase says it isn\'t healthy.', `HTTP ${response.status}`);
+        if (!tools.dashboardsReady()) throw fail('Metabase is up, but the dashboards can\'t be signed.', 'Needs METABASE_EMBEDDING_SECRET and a run of scripts/metabase-setup.mjs.');
+        return 'Metabase answers, and dashboard links can be signed.';
+      },
+    },
+    {
+      id: 'claude', node: 'claude', name: 'AI assistant (Claude API)', keepMs: KEEP_OUTSIDE_MS, failText: 'The Claude API refused this server\'s key or didn\'t answer.',
+      effect: 'New questions can\'t be answered. Repeated ones still can.',
+      async run() {
+        if (!tools.hasClaudeKey) throw fail('No ANTHROPIC_API_KEY is set.');
+        await tools.listClaudeModels();
+        return 'The Claude API accepts this server\'s key.';
+      },
+    },
+    {
+      id: 'email', node: 'brevo', name: 'Notification emails (Brevo)', failText: 'The email outbox can\'t be read.',
+      effect: 'People stop being emailed. The 🔔 still works.',
+      async run() {
+        if (!tools.mailEnabled) return { off: 'Email is off: there is no BREVO_API_KEY.' };
+        const [{ failed, stuck }] = await tools.db(
+          `SELECT count(*) FILTER (WHERE email_state = 'failed' AND created_at > now() - interval '24 hours')::int AS failed,
+                  count(*) FILTER (WHERE email_state = 'pending' AND created_at < now() - interval '15 minutes')::int AS stuck
+             FROM notifications`);
+        if (failed) throw fail(`${failed} email${failed === 1 ? '' : 's'} could not be sent in the last 24 hours.`);
+        if (stuck) throw fail(`${stuck} email${stuck === 1 ? ' is' : 's are'} still waiting after 15 minutes.`);
+        return 'Emails are going out.';
+      },
+    },
+    {
+      id: 'public', node: 'tunnel', name: 'Public address (Cloudflare Tunnel)', keepMs: 60 * 1000,
+      effect: 'People outside this computer can\'t reach OneTouch.',
+      async run() {
+        if (!tools.publicUrl) return { off: 'No public address is set for this server.' };
+        await answered(tools.publicUrl, 'The public address');
+        return `${tools.publicUrl} answers.`;
+      },
+    },
+    {
+      id: 'changes', node: 'express', name: 'Listening for new tickets',
+      effect: 'New tickets from ServiceNow wouldn\'t reach the page until a restart.',
+      async run() {
+        if (!tools.listening()) throw fail('The server has lost its channel for ticket changes. It keeps trying again.');
+        return 'The server is listening for ticket changes.';
+      },
+    },
+    {
+      id: 'errors', node: 'express', name: 'Errors people are getting',
+      effect: 'Some pages or actions are failing for people right now.',
+      async run() {
+        const recent = recentFailures();
+        if (!recent.length) return 'No errors in the last 15 minutes.';
+        const total = recent.reduce((sum, r) => sum + r.count, 0);
+        throw fail(`The server answered ${total} request${total === 1 ? '' : 's'} with an error in the last 15 minutes.`,
+          recent.slice(0, 5).map(r => `${r.where}: ${r.count}`).join(', '));
+      },
+    },
+  ];
+}
+
+// Keeps each check's answer, and when its problem began
+export function makeHealth(tools, now = () => Date.now()) {
+  const checks = buildChecks(tools).map(check => ({ ...check, result: null, at: 0, running: null, since: null }));
+
+  async function runOne(check) {
+    let result;
+    try {
+      const answer = await Promise.race([
+        check.run(),
+        new Promise((_, reject) => { setTimeout(() => reject(fail('This check got no answer in time.')), CHECK_TIMEOUT_MS).unref?.(); }),
+      ]);
+      result = answer?.off ? { state: 'off', text: answer.off } : { state: 'ok', text: answer };
+    } catch (error) {
+      result = { state: 'problem', text: error.isOurs ? error.message : check.failText || 'This check failed.', detail: String(error.detail ?? (error.isOurs ? '' : error.message)).slice(0, 200) };
+    }
+    check.since = result.state === 'problem' ? check.since || now() : null;
+    check.result = result;
+    check.at = now();
+  }
+
+  return async function health() {
+    await Promise.all(checks.map(check => {
+      if (check.running) return check.running;
+      if (check.result && now() - check.at < (check.keepMs || KEEP_MS)) return null;
+      check.running = runOne(check).finally(() => { check.running = null; });
+      return check.running;
+    }));
+    return {
+      checkedAt: new Date(now()).toISOString(),
+      checks: checks.map(({ id, node, name, effect, result, at, since }) => ({
+        id, node, name, ...result, effect: result.state === 'problem' ? effect : undefined,
+        checkedAt: new Date(at).toISOString(), since: since ? new Date(since).toISOString() : null,
+      })),
+    };
+  };
+}
+```
+
+<a id="b86"></a>
+### B.86 `issues.mjs`
+
+```js
+// =====================================================================
+// PROBLEM REPORTS: anyone signed in can tell the admins something's wrong
+// (the 🚩 in the header, POST /api/issues). Each report is saved here, in
+// onetouch_auth, in the same transaction as a notification for every admin,
+// which also goes out by email through the usual outbox (mail.mjs). Admins
+// read them and mark them resolved on the 🧊 Architecture page
+// (GET and PUT /api/architecture/issues).
+//
+// As with every OneTouch email, what someone wrote stays behind the sign-in:
+// it may name tickets or people, so the email only says who reported what
+// kind of problem. It does show under the admins' 🔔.
+//
+// Someone's words are data: the page escapes them wherever they're shown.
+// =====================================================================
+
+import { pool } from './auth.mjs';
+import { notify } from './notifications.mjs';
+import { ADMIN_USERNAMES } from './teams.mjs';
+
+export const CATEGORIES = {
+  broken: 'Something isn\'t working',
+  data: 'The data looks wrong',
+  access: 'I can\'t see or do something I should',
+  slow: 'It\'s very slow',
+  other: 'Something else',
+};
+const PAGES = { home: 'Home', dashboard: 'Dashboards', teams: 'Team', architecture: 'Architecture', chat: 'AI assistant' };
+
+export const MAX_MESSAGE = 2000;
+const MIN_MESSAGE = 5;
+const NOTE_LENGTH = 280; // how much of it shows under the 🔔
+const LIMIT = 5;         // reports one person can send...
+const LIMIT_MINUTES = 10; // ...in this long, so a stuck key can't flood every admin's inbox
+const OPEN_LISTED = 200;
+const RESOLVED_LISTED = 30;
+
+// What the person is told, with the status to answer with
+export class IssueError extends Error {
+  constructor(message, status = 400) {
+    super(message);
+    this.status = status;
+  }
+}
+
+// Safe to run every start (after the notifications table)
+export async function ensureIssuesSchema() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS issue_reports (
+      id          serial PRIMARY KEY,
+      reporter_id integer REFERENCES users(id) ON DELETE SET NULL,
+      category    text NOT NULL,
+      message     text NOT NULL,
+      page        text,
+      browser     text,
+      created_at  timestamptz NOT NULL DEFAULT now(),
+      resolved_at timestamptz,
+      resolved_by integer REFERENCES users(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS issue_reports_recent_idx ON issue_reports (reporter_id, created_at);
+  `);
+}
+
+const noControls = text => String(text ?? '').replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim();
+
+// What someone sent -> what's saved, or an IssueError saying what to fix
+export function cleanReport(body) {
+  const category = Object.hasOwn(CATEGORIES, body?.category) ? body.category : null;
+  if (!category) throw new IssueError('Please pick what kind of problem it is.');
+  const message = noControls(body?.message);
+  if (message.length < MIN_MESSAGE) throw new IssueError('Please say what happened, so the admins can look into it.');
+  if (message.length > MAX_MESSAGE) throw new IssueError(`Please keep it under ${MAX_MESSAGE.toLocaleString('en-US')} characters.`);
+  const page = Object.hasOwn(PAGES, body?.page) ? PAGES[body.page] : null;
+  return { category, message, page };
+}
+
+// user: who's reporting -> { id, told }: how many admins were told
+export async function reportIssue(user, body, browser = '') {
+  const { category, message, page } = cleanReport(body);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [{ recent }] } = await client.query(
+      `SELECT count(*)::int AS recent FROM issue_reports
+        WHERE reporter_id = $1 AND created_at > now() - make_interval(mins => $2)`, [user.id, LIMIT_MINUTES]);
+    if (recent >= LIMIT) throw new IssueError(`You've sent ${LIMIT} reports in the last ${LIMIT_MINUTES} minutes. Please wait a little before sending another.`, 429);
+    const { rows: [{ id }] } = await client.query(
+      'INSERT INTO issue_reports (reporter_id, category, message, page, browser) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+      [user.id, category, message, page, noControls(browser).slice(0, 200) || null]);
+    // Every other admin: someone reporting a problem already knows about it
+    const { rows: admins } = await client.query(
+      'SELECT id FROM users WHERE username = ANY($1::text[]) AND is_active AND id <> $2', [ADMIN_USERNAMES, user.id]);
+    await notify(client, admins.map(a => a.id), {
+      kind: 'issue',
+      actorId: user.id,
+      detail: {
+        issue: id, label: CATEGORIES[category], page,
+        note: message.length > NOTE_LENGTH ? `${message.slice(0, NOTE_LENGTH)}…` : message,
+      },
+    });
+    await client.query('COMMIT');
+    return { id, told: admins.length };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+const REPORT_COLUMNS = `i.id, i.category, i.message, i.page, i.browser, i.created_at, i.resolved_at,
+  coalesce(r.display_name, r.username, 'A removed account') AS reporter, coalesce(a.display_name, a.username) AS resolver
+  FROM issue_reports i LEFT JOIN users r ON r.id = i.reporter_id LEFT JOIN users a ON a.id = i.resolved_by`;
+
+const toReport = r => ({
+  id: r.id, label: CATEGORIES[r.category] || r.category, message: r.message, page: r.page, browser: r.browser,
+  reporter: r.reporter, at: r.created_at, resolvedAt: r.resolved_at, resolver: r.resolver,
+});
+
+// For admins -> { openCount, open: newest first, resolved: the latest few }
+export async function listIssues() {
+  const { rows: open } = await pool.query(`SELECT ${REPORT_COLUMNS} WHERE i.resolved_at IS NULL ORDER BY i.id DESC LIMIT ${OPEN_LISTED}`);
+  const { rows: resolved } = await pool.query(`SELECT ${REPORT_COLUMNS} WHERE i.resolved_at IS NOT NULL ORDER BY i.resolved_at DESC LIMIT ${RESOLVED_LISTED}`);
+  const { rows: [{ count }] } = await pool.query('SELECT count(*)::int AS count FROM issue_reports WHERE resolved_at IS NULL');
+  return { openCount: count, open: open.map(toReport), resolved: resolved.map(toReport) };
+}
+
+// status: 'resolved' or 'open' (back on the list). userId: the admin doing it
+export async function setIssueStatus(id, status, userId) {
+  if (!/^\d{1,9}$/.test(String(id))) throw new IssueError('There\'s no such report.', 404);
+  if (status !== 'resolved' && status !== 'open') throw new IssueError('A report is either resolved or open.');
+  const resolved = status === 'resolved';
+  const { rowCount } = await pool.query(
+    'UPDATE issue_reports SET resolved_at = CASE WHEN $2 THEN now() END, resolved_by = CASE WHEN $2 THEN $3::int END WHERE id = $1',
+    [Number(id), resolved, userId]);
+  if (!rowCount) throw new IssueError('There\'s no such report.', 404);
+  return { id: Number(id), status };
+}
+```
+
+<a id="b87"></a>
+### B.87 `checks/issues.mjs`
+
+```js
+// Problem reports, without a database: what's accepted, and that someone's
+// words stay out of the email to admins.
+//
+//   npm test        (CI runs it on every push)
+
+import assert from 'node:assert/strict';
+import { CATEGORIES, cleanReport, IssueError, MAX_MESSAGE } from '../issues.mjs';
+import { emailFor } from '../mail.mjs';
+
+const refused = body => assert.throws(() => cleanReport(body), IssueError);
+
+refused(null);
+refused({ message: 'The charts will not load' });
+refused({ category: 'nonsense', message: 'The charts will not load' });
+refused({ category: 'constructor', message: 'The charts will not load' });
+refused({ category: 'broken' });
+refused({ category: 'broken', message: '  hi  ' });
+refused({ category: 'broken', message: 'x'.repeat(MAX_MESSAGE + 1) });
+
+const good = cleanReport({ category: 'broken', message: '  Charts\r\nwon\u0007t load  ', page: 'dashboard' });
+assert.deepEqual(good, { category: 'broken', message: 'Charts\nwont load', page: 'Dashboards' });
+assert.equal(cleanReport({ category: 'other', message: 'Something odd', page: '<script>' }).page, null, 'Only pages OneTouch has');
+
+const SECRET_WORDS = 'INC1234567 is about the payroll outage';
+const cfg = { appUrl: 'https://onetouch.test' };
+const mail = emailFor({
+  kind: 'issue', numbers: [], actor: 'Sam <b>Lee</b>', display_name: 'Ada Admin', username: 'aadmin',
+  detail: { issue: 7, label: CATEGORIES.broken, page: 'Home', note: SECRET_WORDS },
+}, cfg);
+for (const part of [mail.subject, mail.text, mail.html]) {
+  assert.ok(part.includes('reported a problem'), 'The email says what happened');
+  assert.ok(!part.includes('payroll') && !part.includes('INC1234567'), 'Someone\'s words stay behind the sign-in');
+}
+assert.ok(mail.text.includes(CATEGORIES.broken), 'It says what kind of problem');
+assert.ok(mail.html.includes('Sam &lt;b&gt;Lee&lt;/b&gt;') && !mail.html.includes('<b>Lee'), 'Names are escaped');
+
+console.log('Problem reports: what is accepted, and what stays out of the email, are as they should be.');
+process.exit(0);
 ```
 
 ## Appendix C: images
