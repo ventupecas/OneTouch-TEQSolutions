@@ -154,6 +154,8 @@ dashed amber path that stops at a locked gate, and a "What happens when…" that
 `server.mjs`, counted from `onetouch_tickets_changed`, `GET /api/architecture/push`, read
 every 20 s while the map is open); then it turns green and its words move on. The count is
 in memory, so after a restart it says "needs authentication" until the next record arrives.
+The notice's ✕ hides only that notice, in that browser (`onetouch-arch-push-bar-hidden`), until
+a ServiceNow button in the left side bar brings it back or records start arriving.
 The page also reports **anything else that stops working** (`health.mjs`,
 `GET /api/architecture/health`, admins only): real checks of the account database, a query
 through Cube, Metabase, the Claude API (listing models, no tokens), the email outbox, the

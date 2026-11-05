@@ -653,7 +653,10 @@ that stops at a locked gate. No data can arrive until:
 
 The map says "needs authentication" until this server really hears a record, then it turns
 green and shows how many have arrived. That count starts again whenever the server restarts,
-and a test call with `curl` and the right secret counts too.
+and a test call with `curl` and the right secret counts too. The **✕** on the yellow bar hides
+the notice in this browser, and either **ServiceNow live push** button on the left brings it back.
+Real problems and open reports stay in the banner, and the bar returns by itself, in green, if
+records start arriving.
 
 **Anything else that stops working is reported there too.** The banner lists each problem above
 the ServiceNow notice, the block turns red, and **🩺 Health** shows every check, what a failure
@@ -12199,6 +12202,28 @@ html.a11y-motion *::after {
 @media (max-width: 1700px) {
     .header-btn-text { display: none; }
 }
+
+/* The ✕ on the "needs authentication" notice, at the top right of its row */
+.arch-status-push { position: relative; }
+.arch-status-push:has(.arch-status-close) { padding-right: 28px; }
+.arch-status-close {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    font: inherit;
+    font-size: 0.85rem;
+    line-height: 1;
+    color: var(--text-2);
+    background: none;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+.arch-status-close:hover { color: var(--text); background: var(--warn-soft-hover); }
+.arch-status-row:last-child { padding-bottom: 0; border-bottom: none; }
 ```
 
 <a id="b27"></a>
@@ -25975,6 +26000,8 @@ dashed amber path that stops at a locked gate, and a "What happens when…" that
 `server.mjs`, counted from `onetouch_tickets_changed`, `GET /api/architecture/push`, read
 every 20 s while the map is open); then it turns green and its words move on. The count is
 in memory, so after a restart it says "needs authentication" until the next record arrives.
+The notice's ✕ hides only that notice, in that browser (`onetouch-arch-push-bar-hidden`), until
+a ServiceNow button in the left side bar brings it back or records start arriving.
 The page also reports **anything else that stops working** (`health.mjs`,
 `GET /api/architecture/health`, admins only): real checks of the account database, a query
 through Cube, Metabase, the Claude API (listing models, no tokens), the email outbox, the
@@ -30550,6 +30577,9 @@ export function architectureMap({ model = null, push = {} } = {}) {
     const RAIL_KEY = 'onetouch-arch-rail-min';
     let railMin = false;   // the left side bar minimized
     try { railMin = localStorage.getItem(RAIL_KEY) === '1'; } catch { /* Open, then */ }
+    const PUSH_BAR_KEY = 'onetouch-arch-push-bar-hidden';
+    let pushBarOff = false; // someone closed the "needs authentication" bar
+    try { pushBarOff = localStorage.getItem(PUSH_BAR_KEY) === '1'; } catch { /* Showing, then */ }
     const player = { flow: null, index: 0, playing: false, elapsed: 0, hold: 0 };
 
     const $ = id => document.getElementById(id);
@@ -30602,7 +30632,34 @@ export function architectureMap({ model = null, push = {} } = {}) {
                 <span class="arch-status-text">${latest ? `<b>Latest, from ${esc(latest.reporter)}:</b> ${esc(latest.label)}` : ''}</span>
                 <button type="button" class="arch-btn" data-side="reports">See the reports</button>
             </div>`;
-        return `${bad}${reported}<div class="arch-status-row">${pushStatusHtml()}</div>`;
+        const push = pushBarHidden() ? '' : `<div class="arch-status-row arch-status-push">${pushStatusHtml()}</div>`;
+        return `${bad}${reported}${push}`;
+    }
+
+    // Only the "needs authentication" notice can be closed. Real problems and
+    // reports always show, and so does the news when records start arriving.
+    const pushBarHidden = () => pushBarOff && !receiving();
+
+    function setPushBar(off) {
+        pushBarOff = off;
+        try { localStorage.setItem(PUSH_BAR_KEY, off ? '1' : '0'); } catch { /* Just for this visit */ }
+        paintPush();
+    }
+
+    function hidePushBar() {
+        setPushBar(true);
+        showToast(`The ServiceNow notice is hidden. ${railMin ? 'Open the side bar and press' : 'Press'} ServiceNow live push on the left to bring it back.`);
+        // The ✕ has gone: the keys go to the button that brings it back
+        // (or, with the side bar minimized, to the one that opens it)
+        const rail = $('arch-rail');
+        (rail.querySelector('.arch-rail-pending') || rail.querySelector('[data-do="rail"]'))?.focus();
+    }
+
+    // One of the side bar's ServiceNow buttons: its flow, or its layer
+    function isPushButton(el) {
+        if (!el.closest('#arch-rail')) return false;
+        if (el.dataset.flow) return Boolean(map.flows.find(f => f.id === el.dataset.flow)?.pending);
+        return Boolean(el.dataset.layer) && map.nodes.some(n => n.layer === el.dataset.layer && n.pending);
     }
 
     // One report. Someone's own words, so escaped like everything else here.
@@ -30666,7 +30723,9 @@ export function architectureMap({ model = null, push = {} } = {}) {
                 <span class="arch-status-text"><b>ServiceNow live push:</b> ${push.heard.toLocaleString()} record${push.heard === 1 ? '' : 's'} since this server started, the last at ${esc(when(push.lastAt))}.</span>
                 <button type="button" class="arch-btn" data-side="servicenow">Details</button>`;
         }
-        return `<span class="arch-chip arch-chip-warn">🔒 Needs ServiceNow authentication</span>
+        return `<button type="button" class="arch-status-close" data-do="hide-push-bar" aria-label="Hide this ServiceNow notice"
+                title="Hide this. ServiceNow live push on the left brings it back.">✕</button>
+            <span class="arch-chip arch-chip-warn">🔒 Needs ServiceNow authentication</span>
             <span class="arch-status-text"><b>${esc(s.headline)}</b> No data can arrive until then.</span>
             <span class="arch-status-actions">
                 <button type="button" class="arch-btn" data-side="servicenow">What it needs</button>
@@ -30968,6 +31027,8 @@ export function architectureMap({ model = null, push = {} } = {}) {
         // A name over a block, or anything else that's a button on this page
         const el = event.target.closest('[data-issue], [data-node], [data-flow], [data-layer], [data-side], [data-do]');
         if (!el || !$('architecture').contains(el)) return;
+        // First, so the camera frames what comes next around the bar being back
+        if (pushBarOff && isPushButton(el)) setPushBar(false);
         if (el.dataset.issue) {
             setIssue(el, el.dataset.issue, el.dataset.issueStatus);
         } else if (el.dataset.node) {
@@ -30990,6 +31051,7 @@ export function architectureMap({ model = null, push = {} } = {}) {
 
     function act(what) {
         if (what === 'rail') setRailMin(!railMin);
+        else if (what === 'hide-push-bar') hidePushBar();
         else if (what === '3d' || what === 'list') setMode(what);
         else if (what === 'reset') resetView();
         else if (what === 'close') { stopFlow(); $('arch-rail').innerHTML = railHtml(); world?.showFocus(true); }
@@ -31034,10 +31096,12 @@ export function architectureMap({ model = null, push = {} } = {}) {
         const status = $('arch-status');
         if (!status || !map) return;
         const list = problems();
-        const key = `${map.push.state}:${map.push.heard}:${list.map(p => `${p.id}=${p.text}`).join('|')}:${issues?.openCount || 0}:${issues?.open[0]?.id || 0}`;
+        const key = `${map.push.state}:${map.push.heard}:${list.map(p => `${p.id}=${p.text}`).join('|')}:${issues?.openCount || 0}:${issues?.open[0]?.id || 0}:${pushBarHidden()}`;
         if (status.dataset.key !== key) {
             status.dataset.key = key;
             status.innerHTML = statusHtml();
+            // Nothing left to say: no empty bar
+            status.hidden = !status.innerHTML.trim();
             status.classList.toggle('arch-status-good', receiving() && !list.length);
             status.classList.toggle('arch-status-bad', list.length > 0);
             // The banner's height may have changed, and the scene is centered below it
@@ -31769,7 +31833,8 @@ export function architectureMap({ model = null, push = {} } = {}) {
             if (stacked) return { w: size.w, h: size.h, left: 0, right: 0, top: 0, bottom: 0 };
             const left = $('arch-rail').getBoundingClientRect().right - rect.left;
             const right = rect.right - $('arch-side').getBoundingClientRect().left;
-            const top = $('arch-status').getBoundingClientRect().bottom - rect.top;
+            const status = $('arch-status');
+            const top = status.hidden ? 12 : status.getBoundingClientRect().bottom - rect.top;
             const bottom = 26;
             return { w: size.w - left - right, h: size.h - top - bottom, left, right, top, bottom };
         }

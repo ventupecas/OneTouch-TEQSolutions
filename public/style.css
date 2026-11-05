@@ -3084,3 +3084,25 @@ html.a11y-motion *::after {
 @media (max-width: 1700px) {
     .header-btn-text { display: none; }
 }
+
+/* The ✕ on the "needs authentication" notice, at the top right of its row */
+.arch-status-push { position: relative; }
+.arch-status-push:has(.arch-status-close) { padding-right: 28px; }
+.arch-status-close {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    font: inherit;
+    font-size: 0.85rem;
+    line-height: 1;
+    color: var(--text-2);
+    background: none;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+.arch-status-close:hover { color: var(--text); background: var(--warn-soft-hover); }
+.arch-status-row:last-child { padding-bottom: 0; border-bottom: none; }
