@@ -78,7 +78,7 @@ async function loadTeams() {
         }
         renderTeams();
     } catch (err) {
-        box.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        box.innerHTML = `<p class="home-status error">${escapeHtml(err.message)}</p>`;
         console.error(err);
     }
 }
@@ -108,7 +108,7 @@ async function refreshTeamCounts() {
 
 function youLine(team) {
     if (currentAccess.admin) return 'You\'re an admin: you see every team and every ticket, put people on teams, and move families between them. ' +
-        '📥 Not assigned yet shows every ticket nobody has, on a team or on none.';
+        'Not assigned yet shows every ticket nobody has, on a team or on none.';
     if (!team) return 'You\'re not on a team yet, so no tickets are assigned to you. An admin can add you to one.';
     if (currentAccess.role === 'project_manager') return `You're the project manager of ${team.name}: you see all of its tickets, hand them out, and see who's working on what.`;
     return `You're on ${team.name} as ${roleName(currentAccess.role).toLowerCase()}. You see the tickets assigned to you, ` +
@@ -119,9 +119,9 @@ function renderTeams() {
     const { data } = teamsView;
     const team = currentTeam();
     const box = document.getElementById('teams');
-    let html = `<div class="home-head"><h2 class="home-welcome">👥 ${currentAccess.admin ? 'Teams' : escapeHtml(team?.name || 'Your team')}</h2></div>` +
+    let html = `<div class="home-head"><h2 class="home-welcome">${currentAccess.admin ? 'Teams' : escapeHtml(team?.name || 'Your team')}</h2></div>` +
         `<p class="home-status">${escapeHtml(youLine(team))}</p>`;
-    if (canSeeStatuses()) html += '<section class="team-card" id="ticket-statuses"><h3>✅ Resolved or closed</h3><p class="home-status">Loading…</p></section>';
+    if (canSeeStatuses()) html += '<section class="team-card" id="ticket-statuses"><h3>Resolved or closed</h3><p class="home-status">Loading…</p></section>';
     if (currentAccess.admin) html += `<div class="team-picker" id="team-picker">${teamPickerHtml()}</div>`;
     if (showingUnassigned()) {
         html += unassignedCardHtml();
@@ -243,7 +243,7 @@ async function loadTeamTickets(quiet = false) {
         const all = document.querySelector('#teams .team-select-all');
         if (all) all.checked = false;
     } catch (err) {
-        if (run === teamsView.run) out.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        if (run === teamsView.run) out.innerHTML = `<p class="home-status error">${escapeHtml(err.message)}</p>`;
         console.error(err);
     }
 }
@@ -313,7 +313,7 @@ function teamTicketsHtml(team, data) {
 function reportLineHtml(report) {
     if (!report) return '';
     const note = String(report.note || '');
-    return `<div class="team-report"${note ? ` title="${escapeHtml(note)}"` : ''}>✅ ` +
+    return `<div class="team-report"${note ? ` title="${escapeHtml(note)}"` : ''}>` +
         // An admin or project manager who set the status themselves (Resolved or closed)
         (report.mine ? (canSeeStatuses() ? `You set it to ${escapeHtml(report.status)}` : `You told your project manager you ${escapeHtml(report.status)} it`)
             : `${escapeHtml(report.by || 'Someone')} says it's ${escapeHtml(report.status)}`) +
@@ -391,7 +391,7 @@ async function findFamily(number) {
                 personPickerHtml(f.team.id, undefined, `Give the family to someone on ${f.team.name}`,
                     { placeholder: 'Type a name…', attrs: `data-family="${escapeHtml(f.id)}" data-family-size="${f.size}"` }) + '</div>' : '');
     } catch (err) {
-        out.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        out.innerHTML = `<p class="home-status error">${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -431,7 +431,7 @@ function unassignedCardHtml() {
     const f = teamsView.filter.team;
     const teamOptions = `<option value=""${f ? '' : ' selected'}>Any team, or none</option><option value="none"${f === 'none' ? ' selected' : ''}>No team</option>` +
         teamsView.data.teams.map(t => `<option value="${t.id}"${String(t.id) === f ? ' selected' : ''}>${escapeHtml(t.name)}</option>`).join('');
-    return `<section class="team-card"><h3>📥 Not assigned yet</h3>` +
+    return `<section class="team-card"><h3>Not assigned yet</h3>` +
         `<p class="home-status" id="unassigned-summary">${unassignedSummaryHtml()}</p>` +
         `<div class="team-filters"><label>Team <select id="team-filter-team">${teamOptions}</select></label>${kindFilterHtml()}</div>` +
         // Any of the list's columns; the server looks through every ticket nobody has
@@ -461,7 +461,7 @@ function familyGroupHtml(f) {
             .map(t => `<option value="${t.id}">${escapeHtml(t.name)}${t.test ? ' (test team)' : ''}</option>`).join('') +
         `</select></label><button type="button" class="home-action" data-group-move="${id}" data-family-size="${f.size}" data-family-unassigned="${f.unassigned}">Move</button>`;
     return `<tr class="family-group"><td colspan="7"><div class="family-group-head">` +
-        `<div class="family-group-what"><span>👪 <button type="button" class="ticket-link" data-ticket="${id}" title="Open ${id}: its record and family">${id}</button>` +
+        `<div class="family-group-what"><span><button type="button" class="ticket-link" data-ticket="${id}" title="Open ${id}: its record and family">${id}</button>` +
         (f.size > 1 && f.summary ? ` <span class="family-group-summary">${escapeHtml(f.summary.length > 90 ? `${f.summary.slice(0, 87)}…` : f.summary)}</span>` : '') + '</span>' +
         `<span class="family-group-meta">${what} · ${nobody} · ${f.team ? `on ${escapeHtml(f.team.name)}` : '<strong>on no team</strong>'}</span></div>` +
         `<div class="family-group-do">${give}${move}</div></div></td></tr>`;
@@ -550,7 +550,7 @@ async function loadTicketStatuses() {
         restoreSorts(box);
         applyLookups(box);
     } catch (err) {
-        if (box.isConnected) box.innerHTML = `<h3>✅ Resolved or closed</h3><p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        if (box.isConnected) box.innerHTML = `<h3>Resolved or closed</h3><p class="home-status error">${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -558,7 +558,7 @@ function ticketStatusesHtml(tickets) {
     const admin = currentAccess.admin;
     const heads = STATUS_HEADS.filter(h => admin || h !== 'Team');
     const where = admin ? 'on every team' : `on ${escapeHtml(currentAccess.team?.name || 'your team')}`;
-    let html = '<h3>✅ Resolved or closed</h3><p class="home-status">' + (tickets.length
+    let html = '<h3>Resolved or closed</h3><p class="home-status">' + (tickets.length
         ? `${howMany(tickets.length, 'ticket', 'tickets')} ${where} that someone said they resolved or closed, newest first. Change one's status with its menu; ` +
           '"Open" takes the status away. Only OneTouch\'s record changes, never the ticket\'s data.'
         : `Nobody has said they resolved or closed a ticket ${where} yet. When someone does, it shows here.`) + '</p>';
@@ -572,7 +572,7 @@ function ticketStatusesHtml(tickets) {
             `<td>${escapeHtml(t.type || capitalize(KIND_NOUNS[blank.kind]?.[0] || 'ticket'))}</td>` +
             `<td>${t.summary ? escapeHtml(t.summary) : blankHtml('Summary', blank)}</td>` +
             `<td>${t.state ? escapeHtml(t.state) : blankHtml('State', blank)}</td>` +
-            `<td><span class="status-tag">✅ ${STATUS_NAMES[t.status]}</span>` +
+            `<td><span class="status-tag">${STATUS_NAMES[t.status]}</span>` +
             (t.note ? `<span class="team-report-note">“${escapeHtml(t.note)}”</span>` : '') + '</td>' +
             `<td>${escapeHtml(t.by || 'Someone')}</td>` +
             `<td data-sort="${escapeHtml(t.at)}">${escapeHtml(formatShownAt(t.at))}</td>` +
@@ -600,12 +600,12 @@ async function changeTicketStatus(select) {
     try {
         const data = await teamsFetch(`/api/ticket-statuses/${encodeURIComponent(number)}`, { method: 'PUT', body: JSON.stringify({ status }) });
         if (!data) return;
-        showToast(status === 'open' ? `↩ ${number} is open again` : `✅ ${number} is ${STATUS_NAMES[status].toLowerCase()} now`);
+        showToast(status === 'open' ? `${number} is open again` : `${number} is ${STATUS_NAMES[status].toLowerCase()} now`);
         afterStatusChange();
     } catch (err) {
         select.value = before;
         select.disabled = false;
-        showToast(`❌ ${err.message}`);
+        showToast(`${err.message}`, 'error');
     }
 }
 
@@ -630,7 +630,7 @@ function presentationHtml() {
         : d.onTeam || d.assigned ? `${howMany(d.tickets, '[Demo] ticket', '[Demo] tickets')}: ${d.onTeam.toLocaleString()} on a team, ${d.assigned.toLocaleString()} assigned to someone.`
             : `The ${howMany(d.tickets, '[Demo] ticket is', '[Demo] tickets are')} on no team and assigned to nobody, ready to hand out.`;
     const statuses = p.statuses ? `${howMany(p.statuses, 'ticket has', 'tickets have')} a status (someone said they resolved or closed it).` : 'No ticket has a status.';
-    return '<h3>🎬 Before a presentation</h3>' +
+    return '<h3>Before a presentation</h3>' +
         '<p class="home-status">Puts things back the way a presentation starts. Every real ticket stays on its team, by family, as it is now.</p>' +
         '<ul class="presentation-steps">' +
         `<li><span>${escapeHtml(statuses)}</span><button type="button" class="home-action danger" data-undo-statuses="${p.statuses}"${p.statuses ? '' : ' disabled'}>↩ Undo every status</button></li>` +
@@ -640,14 +640,14 @@ function presentationHtml() {
 
 async function undoAllStatuses(count) {
     if (!confirm(`Undo every status? The ${howMany(count, 'ticket', 'tickets')} someone said they resolved or closed go back to having no status, ` +
-        'and the 🔔 notifications that told project managers about them go too. This can\'t be undone.')) return;
+        'and the notifications that told project managers about them go too. This can\'t be undone.')) return;
     try {
         const data = await teamsFetch('/api/ticket-statuses/undo-all', { method: 'POST', body: '{}' });
         if (!data) return;
-        showToast(`↩ Undid the status of ${howMany(data.tickets, 'ticket', 'tickets')}`);
+        showToast(`Undid the status of ${howMany(data.tickets, 'ticket', 'tickets')}`);
         afterStatusChange();
     } catch (err) {
-        showToast(`❌ ${err.message}`);
+        showToast(`${err.message}`, 'error');
     }
 }
 
@@ -657,10 +657,10 @@ async function resetDemoTickets(count) {
     try {
         const data = await teamsFetch('/api/demo-tickets/reset', { method: 'POST', body: '{}' });
         if (!data) return;
-        showToast(`🧹 The ${howMany(data.tickets, '[Demo] ticket is', '[Demo] tickets are')} back on no team, assigned to nobody`);
+        showToast(`The ${howMany(data.tickets, '[Demo] ticket is', '[Demo] tickets are')} back on no team, assigned to nobody`);
         loadTeams();
     } catch (err) {
-        showToast(`❌ ${err.message}`);
+        showToast(`${err.message}`, 'error');
     }
 }
 

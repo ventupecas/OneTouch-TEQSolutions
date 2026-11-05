@@ -305,7 +305,7 @@ async function loadChatHistory() {
                 </div>`).join('')
             : '<p class="home-status">No saved chats yet. Each chat is saved here after its first answer.</p>';
     } catch (err) {
-        list.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        list.innerHTML = `<p class="home-status error">${escapeHtml(err.message)}</p>`;
         console.error(err);
     }
 }
@@ -861,7 +861,7 @@ async function sendPrompt() {
     } catch (err) {
         progress.finish();
         if (epoch !== chatEpoch) return;
-        appendMessage('ai-msg', `❌ Could not reach the OneTouch server, or the answer was cut off. Please try again.`);
+        appendMessage('ai-msg', `Could not reach the OneTouch server, or the answer was cut off. Please try again.`);
         console.error(err);
     }
 }
@@ -876,13 +876,13 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
     }
 
     if (data.error) {
-        appendMessage('ai-msg', `❌ Error: ${linkTicketsHtml(data.error)}`);
+        appendMessage('ai-msg', `Error: ${linkTicketsHtml(data.error)}`);
         return;
     }
 
     // About tickets they don't have permission to see: not answered (server.mjs)
     if (data.intent === 'denied') {
-        appendMessage('ai-msg', `<div class="result-restricted">🔒 ${linkTicketsHtml(data.message)}</div>` + answerTimingHtml(seconds, data.fromCache));
+        appendMessage('ai-msg', `<div class="result-restricted">${linkTicketsHtml(data.message)}</div>` + answerTimingHtml(seconds, data.fromCache));
         return;
     }
 
@@ -890,7 +890,7 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
     if (data.intent === 'clarify' || data.intent === 'unsupported') {
         const message = data.message || 'I need a little more detail to run that.';
         const download = downloadBarHtml(registerExport({ title: 'OneTouch answer', question: userPromptText, tables: buildExportTables(data, message) }));
-        appendMessage('ai-msg', `🙋 ${linkTicketsHtml(message)}` + download + answerTimingHtml(seconds, data.fromCache));
+        appendMessage('ai-msg', `${linkTicketsHtml(message)}` + download + answerTimingHtml(seconds, data.fromCache));
         return;
     }
 
@@ -898,7 +898,7 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
     // and tuck the assumptions into a collapsible note underneath
     let html = `<div class="result-title">${linkTicketsHtml(data.message || 'Here is what I found:')}</div>`;
     // Not the full report: tickets they don't have permission to see match too
-    if (data.restricted) html += `<div class="result-restricted">🔒 ${linkTicketsHtml(data.restricted)}</div>`;
+    if (data.restricted) html += `<div class="result-restricted">${linkTicketsHtml(data.restricted)}</div>`;
     // Nothing found anywhere: the server's explanation replaces the empty tables
     const explanationHtml = data.explanation
         ? `<div class="result-explanation">${linkTicketsHtml(data.explanation)}</div>` : '';
@@ -933,7 +933,7 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
     }
 
     // Not an admin: which tickets the answer could see (teams.mjs)
-    if (data.visibility && !(data.explanation && data.allEmpty)) html += `<div class="result-visibility">👥 ${escapeHtml(data.visibility)}</div>`;
+    if (data.visibility && !(data.explanation && data.allEmpty)) html += `<div class="result-visibility">${escapeHtml(data.visibility)}</div>`;
 
     // Star every ticket the answer lists, or all of one type
     html += starAllHtml(answerTicketNumbers(data));
@@ -969,11 +969,11 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
 
 // [while it runs, once it's done]
 const QUERY_STEPS = {
-    sending: ['📨 Sending your question…', 'Sent your question'],
-    understanding: ['🧠 Understanding your question…', 'Understood your question'],
-    cached: ['⚡ Asked before: reusing that answer…', 'Reused the earlier answer (no AI wait)'],
-    querying: ['📊 Getting the data…', 'Got the data'],
-    explaining: ['🔎 Nothing matched; working out why…', 'Worked out why'],
+    sending: ['Sending your question…', 'Sent your question'],
+    understanding: ['Understanding your question…', 'Understood your question'],
+    cached: ['Asked before: reusing that answer…', 'Reused the earlier answer (no AI wait)'],
+    querying: ['Getting the data…', 'Got the data'],
+    explaining: ['Nothing matched; working out why…', 'Worked out why'],
 };
 
 // A chat bubble listing finished steps (with how long each took) and the
@@ -1044,13 +1044,13 @@ async function readQueryResponse(response, onStep) {
     return result;
 }
 
-// "Answered in 2.8 s", or for a repeated question "⚡ Answered in 0.2 s …"
+// "Answered in 2.8 s", or for a repeated question "Answered in 0.2 s …"
 // (nothing for a saved answer whose time wasn't kept)
 function answerTimingHtml(seconds, fromCache) {
     if (seconds == null) return '';
     const time = `${seconds.toFixed(1)} s`;
     return fromCache
-        ? `<div class="result-timing">⚡ Answered in ${time}: this question was asked before, so the AI step was skipped</div>`
+        ? `<div class="result-timing">Answered in ${time}: this question was asked before, so the AI step was skipped</div>`
         : `<div class="result-timing">Answered in ${time}</div>`;
 }
 
@@ -1719,7 +1719,7 @@ async function downloadExport(exportId) {
         status.textContent = `Downloaded ${fileName}`;
     } catch (err) {
         status.className = 'download-status error';
-        status.textContent = `❌ ${err.message}`;
+        status.textContent = `${err.message}`;
         console.error(err);
     } finally {
         button.disabled = false;
@@ -1882,12 +1882,12 @@ async function starMany(numbers, what) {
         for (const n of leftOut) starredTickets.delete(n);
         refreshStarButtons();
         showToast(leftOut.length
-            ? `★ Starred ${(toAdd.length - leftOut.length).toLocaleString()}; ${leftOut.length.toLocaleString()} more would pass the limit of 2,000 starred tickets. Unstar some first.`
-            : `★ Starred ${what}`);
+            ? `Starred ${(toAdd.length - leftOut.length).toLocaleString()}; ${leftOut.length.toLocaleString()} more would pass the limit of 2,000 starred tickets. Unstar some first.`
+            : `Starred ${what}`);
     } catch (err) {
         for (const n of toAdd) starredTickets.delete(n);
         refreshStarButtons();
-        showToast(`❌ ${err.message}`);
+        showToast(`${err.message}`, 'error');
     }
 }
 
@@ -1928,14 +1928,14 @@ async function setStarred(number, on) {
         if (on) starredTickets.delete(number);
         else starredTickets.set(number, before);
         refreshStarButtons();
-        showToast(`❌ ${err.message}`);
+        showToast(`${err.message}`, 'error');
         return false;
     }
 }
 
-// A short message at the bottom of the screen
+// A short message at the bottom of the screen; kind 'error' marks it as a failure
 let toastTimer = null;
-function showToast(message) {
+function showToast(message, kind) {
     let toast = document.getElementById('toast');
     if (!toast) {
         toast = document.createElement('div');
@@ -1945,6 +1945,9 @@ function showToast(message) {
         document.body.appendChild(toast);
     }
     toast.textContent = message;
+    const isError = kind === 'error';
+    toast.classList.toggle('toast-error', isError);
+    toast.setAttribute('role', isError ? 'alert' : 'status');
     toast.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => toast.classList.remove('show'), 4000);
@@ -2253,7 +2256,7 @@ async function runHomeSearch(mode, outId, work, quiet = false) {
         applyLookups(out);
     } catch (err) {
         if (run !== homeRuns[mode]) return;
-        out.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        out.innerHTML = `<p class="home-status error">${escapeHtml(err.message)}</p>`;
         console.error(err);
     }
     forgetRemovedExports();
@@ -2345,7 +2348,7 @@ function assignedHtml() {
           'Click any heading to sort by it. ';
     const head = '<div class="results-head">' +
         `<p class="home-status">${listed.length.toLocaleString()} ${which}${listed.length === 1 ? 'ticket' : 'tickets'} assigned to you, ${order}</p>` + filter + '</div>' +
-        (drill ? `<div class="drill-chip" role="status">📊 Only the ones in <b>${escapeHtml(drill.label)}</b>, from My charts ` +
+        (drill ? `<div class="drill-chip" role="status">Only the ones in <b>${escapeHtml(drill.label)}</b>, from My charts ` +
             '<button type="button" class="home-action" data-assigned-drill-clear>✕ Show them all</button></div>' : '');
     if (!listed.length) {
         return head + `<p class="home-status">${drill ? `None ${which}in ${escapeHtml(drill.label)}.` : `None ${status === 'open' ? 'open: you\'re all caught up.' : 'closed yet.'}`}</p>`;
@@ -2750,7 +2753,7 @@ async function toggleFamilyTickets(button) {
         Object.assign(box, { familyId: data.id, familyTickets: data.tickets, showAll: false });
         drawFamilyTickets(box);
     } catch (err) {
-        if (box.isConnected) box.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        if (box.isConnected) box.innerHTML = `<p class="home-status error">${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -2866,7 +2869,7 @@ function showTicketResults(quiet = false) {
 // noAccess: in the data, but not one this person may see), or not in the data
 function notOpenedText(number, noAccess) {
     return (noAccess || []).includes(number)
-        ? `🔒 You don't have permission to see ${number}. Only whoever it's assigned to, its team's project manager and admins can open it.`
+        ? `You don't have permission to see ${number}. Only whoever it's assigned to, its team's project manager and admins can open it.`
         : `${number} is not in the data.`;
 }
 
@@ -2972,7 +2975,7 @@ function relatedHtml(families, focus, inChat = false) {
             `Download all ${families.length} families as`)
         : '';
     const single = focus.size === 1 ? [...focus][0] : null;
-    const heading = single ? `👪 ${single}'s family: parent, children and other linked tickets` : '🔗 Related tickets';
+    const heading = single ? `${single}'s family: parent, children and other linked tickets` : 'Related tickets';
     return `<div class="related"><div class="related-title">${text(heading)}</div>` + all + families.map(f => {
         const facts = list => list.map(fact => `<span class="fact"><b>${escapeHtml(fact.field)}:</b> ${text(familyFact(fact))}</span>`).join('');
         const same = f.same.length
@@ -3036,7 +3039,7 @@ function familyRoleLine(f, number) {
 async function showRelated(container, numbers, conversation, before = null) {
     const slot = document.createElement('div');
     slot.className = 'related-slot';
-    slot.innerHTML = `<p class="related-loading">${before ? '👪 Looking for its parent, children and other linked tickets…' : '🔗 Looking for related tickets…'}</p>`;
+    slot.innerHTML = `<p class="related-loading">${before ? 'Looking for its parent, children and other linked tickets…' : 'Looking for related tickets…'}</p>`;
     if (before) before.before(slot); else container.appendChild(slot);
     try {
         const response = await fetch(`${API_BASE}/api/tickets/related`, {
@@ -3049,7 +3052,7 @@ async function showRelated(container, numbers, conversation, before = null) {
         if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
         if (!slot.isConnected) return; // the chat was cleared, or another record opened
         if (!data.families.length) {
-            if (before) slot.innerHTML = '<p class="related-none">👪 No parent, child or other linked tickets.</p>';
+            if (before) slot.innerHTML = '<p class="related-none">No parent, child or other linked tickets.</p>';
             else slot.remove();
             return;
         }
@@ -3083,7 +3086,7 @@ async function clearTicketResults(count) {
         await showTicketResults();
         showToast('Ticket results cleared');
     } catch (err) {
-        showToast(`❌ ${err.message}`);
+        showToast(`${err.message}`, 'error');
     }
 }
 
@@ -3093,7 +3096,7 @@ function ticketsShown(numbers) {
     latestShown = new Set(numbers);
     openedRecord = null;
     setHomeMode('results', true);
-    showToast(`🎫 ${numbers.length.toLocaleString()} ${numbers.length === 1 ? 'ticket' : 'tickets'} from this answer ${numbers.length === 1 ? 'is' : 'are'} now in Ticket results on Home`);
+    showToast(`${numbers.length.toLocaleString()} ${numbers.length === 1 ? 'ticket' : 'tickets'} from this answer ${numbers.length === 1 ? 'is' : 'are'} now in Ticket results on Home`);
 }
 
 // Newest star first. Unstarring here leaves the row (with an empty star) until
@@ -3115,7 +3118,7 @@ function showStarred(quiet = false) {
         }
         const columns = withLinks([STARRED_COLUMN]);
         const missing = (data.noAccess?.length
-            ? `<p class="home-status">🔒 You don't have permission to see these any more (they're no longer yours): ${escapeHtml(data.noAccess.join(', '))}</p>` : '') +
+            ? `<p class="home-status">You don't have permission to see these any more (they're no longer yours): ${escapeHtml(data.noAccess.join(', '))}</p>` : '') +
             (data.notFound.length ? `<p class="home-status">Not in the data any more: ${escapeHtml(data.notFound.join(', '))}</p>` : '');
         return '<div class="results-head">' +
             `<p class="home-status">${numbers.length.toLocaleString()} starred ${numbers.length === 1 ? 'ticket' : 'tickets'}, newest first. ` +
@@ -3340,7 +3343,7 @@ async function removeFromResults(numbers, { quiet = false } = {}) {
         showToast(`Removed ${numbers.length.toLocaleString()} ${numbers.length === 1 ? 'ticket' : 'tickets'} from Ticket results`);
         return true;
     } catch (err) {
-        showToast(`❌ ${err.message}`);
+        showToast(`${err.message}`, 'error');
         return false;
     }
 }
@@ -3382,7 +3385,7 @@ async function unstarMany(numbers, what, { quiet = false } = {}) {
     } catch (err) {
         for (const [n, at] of before) starredTickets.set(n, at);
         refreshStarButtons();
-        showToast(`❌ ${err.message}`);
+        showToast(`${err.message}`, 'error');
         return false;
     }
 }
@@ -3486,7 +3489,7 @@ async function loadTicketDetail(box, number) {
         box.innerHTML = ticketCardHtml(data.found[0], data.record);
         showRelated(box, [number], false, box.querySelector('.record-fields'));
     } catch (err) {
-        if (box.isConnected) box.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        if (box.isConnected) box.innerHTML = `<p class="home-status error">${escapeHtml(err.message)}</p>`;
         console.error(err);
     }
 }

@@ -492,12 +492,12 @@
         speakingPill.hidden = true;
     }
 
-    // "🔊 Reading… ⏹ Stop", while it reads
+    // "Reading… ⏹ Stop", while it reads
     const speakingPill = document.createElement('div');
     speakingPill.className = 'a11y-pill a11y-ui';
     speakingPill.setAttribute('role', 'status');
     speakingPill.hidden = true;
-    speakingPill.innerHTML = '<span>🔊 Reading aloud…</span><button type="button" class="a11y-pill-btn">⏹ Stop</button>';
+    speakingPill.innerHTML = '<span>Reading aloud…</span><button type="button" class="a11y-pill-btn">⏹ Stop</button>';
     speakingPill.querySelector('button').addEventListener('click', stopSpeaking);
 
     // An answer in the chat, as it's best heard: its words, and each table
@@ -660,7 +660,7 @@
     listeningPill.className = 'a11y-pill a11y-pill-listening a11y-ui';
     listeningPill.setAttribute('role', 'status');
     listeningPill.hidden = true;
-    listeningPill.innerHTML = '<span>🎤 Listening… speak now</span><button type="button" class="a11y-pill-btn">⏹ Stop</button>';
+    listeningPill.innerHTML = '<span>Listening… speak now</span><button type="button" class="a11y-pill-btn">⏹ Stop</button>';
     listeningPill.querySelector('button').addEventListener('click', stopDictation);
 
     // 🎤 buttons: <button class="mic-btn" data-mic-for="the box's id">

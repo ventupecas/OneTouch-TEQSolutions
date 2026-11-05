@@ -856,6 +856,14 @@ tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
     max-width: calc(100% - 32px);
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+/* Something failed: the thick edge says so as well as the color */
+.toast.toast-error {
+    background: var(--danger-soft);
+    color: var(--danger);
+    border: 1px solid var(--danger-line);
+    border-left: 5px solid var(--danger);
+    font-weight: 600;
+}
 
 @media (max-width: 700px) {
     .home { padding: 16px 16px 32px; }
@@ -2533,7 +2541,7 @@ body.signed-out .access-panel { top: 16px; }
 }
 .a11y-guide[hidden] { display: none; }
 
-/* "🔊 Reading aloud… ⏹ Stop" and "🎤 Listening… ⏹ Stop", bottom left */
+/* "Reading aloud… ⏹ Stop" and "Listening… ⏹ Stop", bottom left */
 .a11y-pill {
     position: fixed;
     left: 16px;
@@ -3106,3 +3114,146 @@ html.a11y-motion *::after {
 }
 .arch-status-close:hover { color: var(--text); background: var(--warn-soft-hover); }
 .arch-status-row:last-child { padding-bottom: 0; border-bottom: none; }
+
+/* 🗺️ The flat view: blocks and lines on one sheet, which drag and zoom move as a whole */
+.arch-plan { position: absolute; inset: 0; overflow: hidden; outline: none; touch-action: none; cursor: grab; user-select: none; }
+.arch-plan:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.arch-plan.is-moving { cursor: grabbing; }
+.arch-plan-sheet { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+
+.arch-band {
+    position: absolute;
+    background: color-mix(in srgb, var(--arch-c) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--arch-c) 38%, transparent);
+    border-radius: 10px;
+    transition: opacity 0.18s;
+}
+.arch-band-label { position: absolute; font-size: 10.5px; line-height: 1.25; color: var(--text-2); pointer-events: none; transition: opacity 0.18s; }
+.arch-band-label b { margin-right: 3px; color: var(--arch-c); letter-spacing: 0.03em; text-transform: uppercase; }
+.arch-band.is-dim, .arch-band-label.is-dim { opacity: 0.35; }
+.arch-plan-frame { position: absolute; border: 1.5px dashed var(--muted); border-radius: 14px; pointer-events: none; }
+.arch-plan-frame-label { position: absolute; font-size: 10.5px; line-height: 1.25; color: var(--muted); pointer-events: none; }
+
+.arch-card {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 4px 8px 4px 7px;
+    overflow: visible;
+    font: inherit;
+    line-height: 1.26;
+    text-align: left;
+    color: var(--text);
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--arch-c);
+    border-radius: 7px;
+    box-shadow: 0 1px 3px var(--shadow);
+    cursor: pointer;
+    transition: opacity 0.18s;
+}
+.arch-card:hover, .arch-card-on { z-index: 2; border-color: var(--accent); border-left-color: var(--arch-c); box-shadow: 0 0 0 2px var(--accent); }
+.arch-card:focus-visible { z-index: 2; outline: 3px solid var(--accent); outline-offset: 2px; }
+.arch-card-head { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.arch-card-icon { flex-shrink: 0; font-size: 12px; }
+.arch-card-name { min-width: 0; font-size: 13px; font-weight: 700; }
+.arch-card-tech { overflow: hidden; font-size: 10px; color: var(--muted); white-space: nowrap; text-overflow: ellipsis; }
+.arch-card-doing { font-size: 11.5px; color: var(--text-2); }
+.arch-card-dim { opacity: 0.25; }
+.arch-card-pending { background: color-mix(in srgb, var(--arch-c) 7%, var(--panel-bg)); border-style: dashed; border-color: var(--arch-c); }
+.arch-card-state { align-self: flex-start; padding: 0 5px; font-size: 10.5px; font-weight: 700; color: var(--warn-ink); background: var(--warn-soft); border-radius: 4px; }
+.arch-plan-open .arch-card-state { color: var(--same-ink); background: var(--same-bg); }
+.arch-card.arch-card-bad { z-index: 3; background: var(--danger-soft); border-color: var(--danger); border-left-color: var(--danger); }
+.arch-card-problem {
+    position: absolute;
+    left: -4px;
+    bottom: calc(100% + 3px);
+    width: max-content;
+    max-width: 280px;
+    padding: 2px 7px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--danger);
+    background: var(--panel-bg);
+    border: 1px solid var(--danger);
+    border-radius: 5px;
+    box-shadow: 0 1px 3px var(--shadow);
+}
+
+.arch-plan-lines, .arch-plan-movers, .arch-plan-labels { position: absolute; left: 0; top: 0; }
+.arch-plan-lines, .arch-plan-movers { overflow: visible; pointer-events: none; }
+.arch-plan-movers { z-index: 4; }
+.arch-mover { position: absolute; left: 0; top: 0; border-radius: 50%; will-change: transform; }
+.arch-line { --line: var(--muted); transition: opacity 0.18s; }
+.arch-line-inner { --line: var(--faint); }
+.arch-line-pending { --line: var(--warn); }
+.arch-plan-open .arch-line-pending { --line: var(--series-3); }
+.arch-line.is-hot { --line: var(--accent); }
+.arch-line.is-dim { opacity: 0.12; }
+.arch-line-path { fill: none; stroke: var(--line); stroke-width: 1.8; }
+.arch-line-inner .arch-line-path { stroke-width: 1.3; }
+.arch-line-pending .arch-line-path { stroke-width: 2.2; stroke-dasharray: 8 6; }
+.arch-line.is-hot .arch-line-path { stroke-width: 3; }
+.arch-line-arrow { fill: var(--line); }
+.arch-line-hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: default; }
+.arch-line-label {
+    position: absolute;
+    box-sizing: border-box;
+    width: max-content;
+    padding: 0 4px;
+    font-size: 10.5px;
+    line-height: 1.22;
+    text-align: center;
+    color: var(--text-2);
+    background: color-mix(in srgb, var(--panel-bg) 90%, transparent);
+    border-radius: 3px;
+    transform: translate(-50%, -50%);
+    cursor: default;
+    transition: opacity 0.18s;
+}
+.arch-line-label-pending { color: var(--warn-ink); }
+.arch-plan-open .arch-line-label-pending { color: var(--same-ink); }
+.arch-line-label.is-hot { z-index: 1; font-weight: 700; color: var(--text); background: var(--panel-bg); box-shadow: 0 0 0 1px var(--accent); }
+.arch-line-label.is-dim { opacity: 0.15; }
+.arch-plan-no-labels .arch-line-label:not(.is-hot) { display: none; }
+.arch-dot { background: var(--accent); opacity: 0.85; }
+.arch-traveller { background: var(--accent); }
+.arch-traveller-halo { background: var(--accent); opacity: 0.25; }
+
+.arch-plan-foot {
+    position: absolute;
+    left: var(--arch-left);
+    right: 372px;
+    bottom: 4px;
+    z-index: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 2px 14px;
+    padding: 3px 10px;
+    font-size: 0.72rem;
+    color: var(--muted);
+    background: color-mix(in srgb, var(--panel-bg) 88%, transparent);
+    border-radius: 8px;
+    cursor: default;
+}
+.arch-plan-key { display: flex; flex-wrap: wrap; gap: 2px 12px; margin: 0; padding: 0; list-style: none; }
+.arch-plan-key li { display: flex; align-items: center; gap: 5px; }
+.arch-key-line { display: inline-block; width: 22px; border-top: 2px solid var(--muted); }
+.arch-key-inner { border-top: 1px solid var(--faint); }
+.arch-key-pending { border-top: 2px dashed var(--warn); }
+.arch-plan-open .arch-key-pending { border-top-color: var(--series-3); }
+.arch-key-frame { display: inline-block; width: 16px; height: 10px; border: 1px dashed var(--muted); border-radius: 2px; }
+.arch-hint.arch-plan-hint { position: static; flex-basis: 100%; }
+@media (max-width: 1100px) {
+    .arch-plan { position: relative; inset: auto; flex: 0 0 62vh; min-height: 340px; order: 2; }
+    .arch-plan-foot { left: 8px; right: 8px; }
+}
+@media (max-width: 700px) {
+    .arch-plan { flex-basis: 50vh; min-height: 280px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .arch-band, .arch-band-label, .arch-card, .arch-line, .arch-line-label { transition: none; }
+}

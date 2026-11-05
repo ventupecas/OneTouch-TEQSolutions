@@ -10,7 +10,7 @@
 
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
-import { architectureMap, composeImages, FLOWS, LAYERS, LINKS, NODES, SERVICENOW } from '../architecture.mjs';
+import { architectureMap, composeImages, FLOWS, LAYERS, LINKS, NODES, PLAN, SERVICENOW } from '../architecture.mjs';
 import { buildChecks, makeHealth, noteResponse } from '../health.mjs';
 
 const problems = [];
@@ -48,6 +48,52 @@ SERVICENOW.arrives.forEach((id, i, path) => {
   if (i) check(linked(path[i - 1], id), `A record arrives from ${path[i - 1]} to ${id}, and they aren't linked`);
 });
 
+// The 2D view is the same map: every block is on the sheet with a sentence
+// saying what it does, in its own layer's band and on the same side of the
+// Docker Compose frame as in 3D; no two blocks overlap, and each line starts and
+// ends on its own blocks, in straight runs that go through no other block.
+const inside = ([x, y, w, h], [bx, by, bw, bh]) => x >= bx && y >= by && x + w <= bx + bw && y + h <= by + bh;
+const onSheet = rect => inside(rect, [0, 0, PLAN.w, PLAN.h]);
+const onEdge = ([px, py], [x, y, w, h]) => ((px === x || px === x + w) && py >= y && py <= y + h)
+  || ((py === y || py === y + h) && px >= x && px <= x + w);
+const compose = architectureMap().compose;
+for (const node of NODES) {
+  check(typeof node.doing === 'string' && node.doing.length > 0 && node.doing.length <= 120, `${node.id}: its sentence for the 2D view must be 1-120 characters`);
+  check(node.plan?.length === 4 && onSheet(node.plan), `${node.id}: its place in the 2D view is off the sheet`);
+  const layer = LAYERS.find(l => l.id === node.layer);
+  check(layer?.band && inside(node.plan, layer.band), `${node.id}: outside the ${node.layer} band in the 2D view`);
+  const in3d = node.pos[0] >= compose.min[0] && node.pos[0] <= compose.max[0] && node.pos[1] >= compose.min[1] && node.pos[1] <= compose.max[1];
+  check(in3d === inside(node.plan, compose.band), `${node.id}: on different sides of the Docker Compose frame in 2D and 3D`);
+}
+for (const layer of LAYERS) check(layer.band?.length === 4 && onSheet(layer.band) && layer.bandLabel?.length === 3, `${layer.id}: no band for the 2D view`);
+NODES.forEach((a, i) => {
+  for (const b of NODES.slice(i + 1)) {
+    const clear = a.plan[0] + a.plan[2] <= b.plan[0] || b.plan[0] + b.plan[2] <= a.plan[0]
+      || a.plan[1] + a.plan[3] <= b.plan[1] || b.plan[1] + b.plan[3] <= a.plan[1];
+    check(clear, `${a.id} and ${b.id} overlap in the 2D view`);
+  }
+});
+for (const link of LINKS) {
+  const name = `${link.from} to ${link.to}`;
+  const route = link.route || [];
+  const a = NODES.find(n => n.id === link.from);
+  const b = NODES.find(n => n.id === link.to);
+  check(route.length >= 2, `${name}: no line in the 2D view`);
+  check(link.labelAt?.length === 3 && onSheet([link.labelAt[0], link.labelAt[1], 0, 0]), `${name}: its label in the 2D view is off the sheet`);
+  if (route.length < 2 || !a || !b) continue;
+  check(onEdge(route[0], a.plan), `${name}: the 2D line doesn't start on the edge of ${a.id}`);
+  check(onEdge(route[route.length - 1], b.plan), `${name}: the 2D line doesn't end on the edge of ${b.id}`);
+  route.slice(1).forEach(([x2, y2], i) => {
+    const [x1, y1] = route[i];
+    check((x1 === x2) !== (y1 === y2), `${name}: the 2D line isn't a straight run at point ${i + 1}`);
+    for (const node of NODES) {
+      const [x, y, w, h] = node.plan;
+      const through = Math.max(x1, x2) > x && Math.min(x1, x2) < x + w && Math.max(y1, y2) > y && Math.min(y1, y2) < y + h;
+      check(!through, `${name}: the 2D line goes through ${node.id}`);
+    }
+  });
+}
+
 // Every container on the map, with the version docker-compose.yml gives it
 const onMap = new Set(NODES.map(n => n.image).filter(Boolean));
 for (const image of Object.keys(composeImages())) check(onMap.has(image), `docker-compose.yml runs ${image}, and the map doesn't show it`);
@@ -66,6 +112,8 @@ const open = architectureMap({ push: { heard: 1, lastAt: '2026-11-04T00:00:00.00
 assert.equal(open.push.state, 'receiving');
 assert.ok(!open.flows.find(f => f.id === 'servicenow').steps.some(s => s.stop || s.phase), 'Once records arrive, nothing says it stops at the gate');
 assert.ok(!/can't receive/.test(open.servicenow.summary), 'Once records arrive, the summary moves on');
+assert.ok(!/waiting/i.test(open.layers.find(l => l.id === 'push').hint), 'Once records arrive, the push\'s layer stops saying it\'s waiting');
+assert.ok(map.layers.every(l => !('openHint' in l)), 'The words for later stay on the server until then');
 
 // No setting's value ever reaches the map, only names
 const SECRET = 'not-a-real-secret-3f9a';

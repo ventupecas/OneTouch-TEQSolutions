@@ -7,7 +7,11 @@
 
 import { analytics } from '../config/db.js';
 
+// Looked for first: asking to create it is refused without the right to create
+// tables, even when it's already there, and db/schema.sql is the usual way it's made
 export async function ensurePendingTable() {
+  const { rows: [{ found }] } = await analytics.query(`SELECT to_regclass('servicenow_pending') IS NOT NULL AS found`);
+  if (found) return;
   await analytics.query(`
     CREATE TABLE IF NOT EXISTS servicenow_pending (
       id bigserial PRIMARY KEY, table_name text NOT NULL, record_key text NOT NULL, record jsonb NOT NULL,
