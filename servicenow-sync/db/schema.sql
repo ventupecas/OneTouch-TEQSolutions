@@ -24,6 +24,15 @@ CREATE TABLE IF NOT EXISTS servicenow_pending (
     UNIQUE (table_name, record_key)
 );
 
--- The account the listener uses needs, in analytics_db: SELECT, INSERT and
--- UPDATE on the six ticket tables, and all of these on servicenow_pending;
--- in onetouch_auth: what OneTouch's own account (onetouch_app) has.
+-- The account the listener uses (PGUSER in its .env). Nothing in this repo
+-- makes it, so make it first. Run these on analytics_db once this table exists,
+-- with the account's name in place of servicenow_sync if it's different:
+--
+--   GRANT SELECT, INSERT, UPDATE ON incident, change_request, sc_req_item, sc_task,
+--     change_approvals, ritm_approvals TO servicenow_sync;
+--   GRANT SELECT, INSERT, UPDATE, DELETE ON servicenow_pending TO servicenow_sync;
+--   GRANT USAGE ON SEQUENCE servicenow_pending_id_seq TO servicenow_sync;
+--
+-- DELETE is how a record stops waiting, and it runs after every record saved.
+-- USAGE is what lets a record start waiting (the table numbers its rows).
+-- In onetouch_auth it uses OneTouch's own account, onetouch_app (AUTH_DB_USER).

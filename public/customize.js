@@ -49,7 +49,7 @@ function loadPreferences() {
         } catch (err) {
             prefsLoadFailed = true;
             console.error('Could not load the saved layout and colors:', err);
-            showToast(`❌ ${err.message} Showing the defaults; refresh the page to try again.`);
+            showToast(`${err.message} Showing the defaults; refresh the page to try again.`, 'error');
         }
         applyTheme(prefs.theme);
         rememberTheme();
@@ -90,7 +90,7 @@ function savePreference(part) {
                 const data = await response.json().catch(() => ({}));
                 if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
             } catch (err) {
-                showToast(`❌ Your ${PART_NAMES[part]} could not be saved: ${err.message}`);
+                showToast(`Your ${PART_NAMES[part]} could not be saved: ${err.message}`, 'error');
                 return false;
             }
         } while (state.again);
@@ -352,7 +352,7 @@ async function fillTile(tile, chart, asTable = tile._asTable || false, scope = t
     } catch (err) {
         if (body._run !== run) return;
         body._drawn = null;
-        body.innerHTML = `<p class="chart-empty error">❌ ${escapeHtml(err.message)}</p>`;
+        body.innerHTML = `<p class="chart-empty error">${escapeHtml(err.message)}</p>`;
         console.error(err);
     } finally {
         if (body._run === run) body.classList.remove('refreshing');
@@ -458,7 +458,7 @@ function tileAction(tile, action) {
         prefs.home.blocks.push({ type: 'chart', chart: { ...structuredClone(chart), id: newChartId() } });
         renderHomeLayout();
         savePreference('home');
-        showToast(`📌 "${chartTitle(chart)}" is now on your Home page too`);
+        showToast(`"${chartTitle(chart)}" is now on your Home page too`);
     } else if (action === 'remove') {
         if (!confirm(`Remove the chart "${chartTitle(chart)}"?`)) return;
         list.splice(index, 1);
@@ -479,8 +479,8 @@ document.addEventListener('click', e => {
 // ---------------------------------------------------------------------
 
 const HOME_SECTIONS = {
-    tickets: '🎫 Your tickets',
-    shortcuts: '📊 Your dashboards',
+    tickets: 'Your tickets',
+    shortcuts: 'Your dashboards',
 };
 
 function renderHomeLayout() {
@@ -899,7 +899,7 @@ async function openBuilder({ chart = null, onSave, scope = null, destination = f
     try {
         if (!await loadChartCatalog()) return;
     } catch (err) {
-        showToast(`❌ ${err.message}`);
+        showToast(`${err.message}`, 'error');
         return;
     }
     const editing = Boolean(chart) && !destination;
@@ -1036,7 +1036,7 @@ async function paintFilterValues(i) {
             (!list.length ? '<p class="filter-more">Nothing matches that search.</p>' : '');
         paintFilterCount(i);
     } catch (err) {
-        box.innerHTML = `<p class="chart-empty error">❌ ${escapeHtml(err.message)}</p>`;
+        box.innerHTML = `<p class="chart-empty error">${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -1299,7 +1299,7 @@ async function paintTeamList() {
             (all.length > shown.length ? `<p class="filter-more">${(all.length - shown.length).toLocaleString()} more: search to find them</p>` : '') +
             (!all.length ? '<p class="filter-more">No team matches that search.</p>' : '');
     } catch (err) {
-        list.innerHTML = `<p class="chart-empty error">❌ ${escapeHtml(err.message)}</p>`;
+        list.innerHTML = `<p class="chart-empty error">${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -1338,7 +1338,7 @@ async function openDrill({ chart, scope = null, value = null, label = '' }) {
             'Click a ticket number to open it, with its parent, children and other linked tickets.</p>' +
             starAllHtml(tickets.map(t => t.number)) + ticketTableHtml(tickets) + ticketDownloadHtml(tickets, title);
     } catch (err) {
-        if (run === drillRun) body.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        if (run === drillRun) body.innerHTML = `<p class="home-status error">${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -1365,7 +1365,7 @@ async function saveChartTo(chart, dest) {
         prefs.home.blocks.push({ type: 'chart', chart });
         renderHomeLayout();
         savePreference('home');
-        showToast(`📌 "${chartTitle(chart)}" is saved on your Home page`);
+        showToast(`"${chartTitle(chart)}" is saved on your Home page`);
         return;
     }
     let board = prefs.dashboards.boards.find(b => b.id === dest);
@@ -1388,7 +1388,7 @@ async function saveChartTo(chart, dest) {
     if (currentBoardId === board.id) renderBoard();
     savePreference('dashboards');
     updateShareSoon(board);
-    showToast(`📌 "${chartTitle(chart)}" is saved on your dashboard "${board.name}"`);
+    showToast(`"${chartTitle(chart)}" is saved on your dashboard "${board.name}"`);
 }
 
 // ---------------------------------------------------------------------
@@ -1438,7 +1438,7 @@ async function putShare(board, quiet = false) {
         paintShareButton();
         return data.token;
     } catch (err) {
-        if (!quiet) showToast(`❌ ${err.message}`);
+        if (!quiet) showToast(`${err.message}`, 'error');
         return null;
     }
 }
@@ -1496,7 +1496,7 @@ async function stopSharing(board, quiet = false) {
         document.getElementById('share-dialog').close();
         if (!quiet) showToast(`"${board.name}" is no longer shared`);
     } catch (err) {
-        showToast(`❌ ${err.message}`);
+        showToast(`${err.message}`, 'error');
     }
 }
 
@@ -1528,7 +1528,7 @@ async function openSharedLink() {
         const scope = share.scope && (share.scope.dates?.preset !== 'all' || share.scope.teams?.length) ? share.scope : null;
         grid.querySelectorAll('.chart-tile').forEach((tile, i) => fillTile(tile, share.charts[i], false, scope));
     } catch (err) {
-        showToast(`❌ ${err.message}`);
+        showToast(`${err.message}`, 'error');
     }
     return true;
 }
@@ -1574,13 +1574,13 @@ const TOUR_STEPS = [
     { target: '#nav-ask', title: 'Ask anything about the data',
         text: 'Type a question in plain English here, on any page, like "How many open incidents are there by priority?", and press Enter. Claude answers in a chat over the page, with tables you can switch to a chart, download (also as a picture), or save to a dashboard. With nothing typed, the button opens your chat; a click anywhere outside the chat closes it. Press / to jump here.' },
     { target: '[data-block="tickets"]', title: 'Your tickets',
-        text: 'The tickets assigned to you, as a list and in charts (📊 My charts), and every ticket the AI assistant shows you in Ticket results. Click ☆ to star one. Every list has a 🔍 box to look up its tickets by any of its columns.' },
+        text: 'The tickets assigned to you, as a list and in charts (My charts), and every ticket the AI assistant shows you in Ticket results. Click ☆ to star one. Every list has a 🔍 box to look up its tickets by any of its columns.' },
     { target: '#customize-home-btn', title: 'Make Home yours',
         text: 'Move or hide these sections, and add charts of your own.' },
     { target: '.tab-btn[data-tab="dashboard"]', title: 'Dashboards: the team\'s and yours',
         text: 'The team dashboards, plus ones you build: ☰ Dashboards, then ＋ New dashboard. Click any bar or slice to see its tickets, filter a whole dashboard by team or date, and share it with a link. It has its own short tour the first time you open it.' },
     { target: '#theme-btn', title: 'Your colors',
-        text: 'Light or dark, your own accent color, and the header\'s color. "❔ Tour" on Home shows this tour again.' },
+        text: 'Light or dark, your own accent color, and the header\'s color. "Tour" on Home shows this tour again.' },
 ];
 
 // drawer: the step is inside the ☰ Dashboards drawer (open it) or not (close it).
@@ -1602,7 +1602,7 @@ const DASHBOARDS_TOUR_STEPS = [
     { target: '#board-view .board-bar', drawer: false, title: 'Your dashboard',
         text: 'Add charts, share it with a link, rename or delete it. Click a bar or slice to list its tickets.' },
     { target: '#dashboard-tour-btn', drawer: false, title: 'This tour again',
-        text: '❔ Tour shows this tour again any time. Home has its own, under ❔ Tour there.' },
+        text: 'Tour shows this tour again any time. Home has its own, under Tour there.' },
 ];
 
 // Each tour: its steps, its page, and its flag in prefs.tour

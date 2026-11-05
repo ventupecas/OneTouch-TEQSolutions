@@ -326,7 +326,10 @@ curl -i -X POST http://localhost:8090/api/v1/servicenow-webhook \
 ## Checklist for go-live
 
 - [ ] `db/schema.sql` run on analytics_db (or the listener allowed to make `servicenow_pending`)
-- [ ] An account for the listener with SELECT, INSERT and UPDATE on the six tables
+- [ ] An account for the listener, made by hand (nothing in this repo makes it), with
+      the rights at the end of `db/schema.sql`: SELECT, INSERT and UPDATE on the six
+      tables; those and DELETE on `servicenow_pending`; USAGE on its sequence
+- [ ] In the same `.env`, `AUTH_DB_*` set to OneTouch's own account (`onetouch_app`)
 - [ ] `.env` filled in on the listener's server (never committed)
 - [ ] The listener reachable from ServiceNow over HTTPS (ServiceNow's cloud
       can't reach `localhost`; use a public host or a tunnel, and a MID Server

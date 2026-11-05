@@ -116,7 +116,7 @@
     <!-- 🔔 Notifications: tickets given to you, families moved to your team, members' reports (notifications.js) -->
     <section class="theme-panel notify-panel" id="notify-panel" role="dialog" aria-label="Notifications" hidden>
         <div class="theme-panel-head">
-            <span>🔔 Notifications</span>
+            <span>Notifications</span>
             <span class="notify-head-actions">
                 <button type="button" class="notify-clear-all" id="notify-clear-all" onclick="clearAllNotifications()" hidden>Clear all</button>
                 <button type="button" class="drawer-close" onclick="toggleNotifications(false)" aria-label="Close">✕</button>
@@ -124,7 +124,7 @@
         </div>
         <!-- ✉️ These by email too (mail.mjs), for anyone with an address on file -->
         <div class="notify-email" id="notify-email" hidden>
-            <label><input type="checkbox" id="notify-email-on"> ✉️ Email me these too</label>
+            <label><input type="checkbox" id="notify-email-on"> Email me these too</label>
             <span class="notify-email-to" id="notify-email-to"></span>
         </div>
         <div id="notify-list"></div>
@@ -133,7 +133,7 @@
     <!-- 🎨 Colors: each person's color scheme, saved to their account (customize.js) -->
     <section class="theme-panel" id="theme-panel" role="dialog" aria-label="Your colors" hidden>
         <div class="theme-panel-head">
-            <span>🎨 Your colors</span>
+            <span>Your colors</span>
             <button type="button" class="drawer-close" onclick="toggleThemePanel(false)" aria-label="Close">✕</button>
         </div>
         <fieldset>
@@ -163,7 +163,7 @@
     <!-- ♿ Accessibility: how OneTouch looks, reads aloud and listens, saved to this browser and the account (accessibility.js) -->
     <section class="theme-panel access-panel" id="access-panel" role="dialog" aria-label="Accessibility" hidden>
         <div class="theme-panel-head">
-            <span>♿ Accessibility</span>
+            <span>Accessibility</span>
             <button type="button" class="drawer-close" onclick="toggleAccessPanel(false)" aria-label="Close">✕</button>
         </div>
         <fieldset>
@@ -185,17 +185,17 @@
             </div>
         </fieldset>
         <fieldset>
-            <legend>🔍 Magnifier</legend>
+            <legend>Magnifier</legend>
             <div class="access-switches">
                 <label class="access-switch"><input type="checkbox" data-key="magnifier"><span>Show the text under the pointer, large<small>With the keyboard, the box or button you're on</small></span></label>
             </div>
             <div class="choice-row access-row" id="access-magnify" aria-label="How much larger"></div>
         </fieldset>
         <fieldset>
-            <legend>🔊 Read aloud</legend>
+            <legend>Read aloud</legend>
             <div class="access-switches">
-                <label class="access-switch"><input type="checkbox" data-key="selectRead" data-needs="speech"><span>A 🔊 Read button when I select text</span></label>
-                <label class="access-switch"><input type="checkbox" data-key="speakAnswers" data-needs="speech"><span>Read Claude's answers to me<small>Every answer also has its own 🔊 Read button</small></span></label>
+                <label class="access-switch"><input type="checkbox" data-key="selectRead" data-needs="speech"><span>A Read button when I select text</span></label>
+                <label class="access-switch"><input type="checkbox" data-key="speakAnswers" data-needs="speech"><span>Read Claude's answers to me<small>Every answer also has its own Read button</small></span></label>
                 <label class="access-switch"><input type="checkbox" data-key="speakHover" data-needs="speech"><span>Read what I point at<small>Rest the pointer on any text for a moment</small></span></label>
             </div>
             <div class="access-row">
@@ -211,7 +211,7 @@
             <p class="access-note warn" id="access-speech-none" hidden>This browser can't read aloud. Edge, Chrome and Safari can.</p>
         </fieldset>
         <fieldset>
-            <legend>🎤 Speak instead of typing</legend>
+            <legend>Speak instead of typing</legend>
             <div class="access-switches">
                 <label class="access-switch"><input type="checkbox" data-key="autoSend" data-needs="dictation"><span>Ask Claude as soon as I stop talking<small>In the Ask bar and the chat; otherwise you press Enter</small></span></label>
             </div>
@@ -219,7 +219,7 @@
             <p class="access-note warn" id="access-dictation-none" hidden>This browser can't take dictation. Use Edge or Chrome.</p>
         </fieldset>
         <fieldset>
-            <legend>⌨️ Keyboard shortcuts</legend>
+            <legend>Keyboard shortcuts</legend>
             <ul class="access-keys">
                 <li><kbd>/</kbd> the Ask bar</li>
                 <li><kbd>Alt</kbd>+<kbd>A</kbd> this panel</li>
@@ -311,7 +311,7 @@
                     <!-- Your dashboards: shortcuts to the dashboards you built (hidden until added) -->
                     <section class="home-block" data-block="shortcuts" hidden>
                         <div class="guide-card shortcuts-card">
-                            <span class="guide-title">📊 Your dashboards</span>
+                            <span class="guide-title">Your dashboards</span>
                             <div class="shortcut-list" id="home-shortcuts"></div>
                         </div>
                     </section>
@@ -439,7 +439,7 @@
         <div class="assistant-backdrop" id="assistant-backdrop" onclick="toggleAssistant(false)"></div>
         <section class="assistant-panel" id="assistant-panel" aria-label="AI Assistant">
             <div class="assistant-head">
-                <span class="assistant-title">💬 AI Assistant</span>
+                <span class="assistant-title">AI Assistant</span>
                 <div class="assistant-head-actions">
                     <button type="button" class="assistant-minimize" id="chat-history-btn" onclick="toggleChatHistory()" aria-expanded="false" aria-controls="chat-history" title="Your saved chats: open one to see it again and carry on where you left off">Chat History</button>
                     <button type="button" class="assistant-delete" onclick="deleteChat()" title="Delete this conversation: its questions and answers disappear, it leaves Chat History, and the assistant forgets it">🗑 Delete chat</button>
@@ -583,7 +583,7 @@
     <!-- Reporting a problem to the admins (notifications.js, issues.mjs) -->
     <dialog class="ask-dialog report-dialog" id="issue-dialog" aria-labelledby="issue-title">
         <form method="dialog">
-            <h2 id="issue-title">🚩 Report a problem</h2>
+            <h2 id="issue-title">Report a problem</h2>
             <p class="report-ticket">Tell the admins what went wrong. They get a notification and an email straight away.</p>
             <label class="field-label">What kind of problem is it?
                 <select id="issue-category">

@@ -60,7 +60,7 @@ async function checkNotifications() {
             renderNotifications();
             markNotificationsRead();
         }
-        if (fresh.length) showToast(fresh.length === 1 ? `🔔 ${notificationText(fresh[0])}` : `🔔 ${fresh.length} new notifications`);
+        if (fresh.length) showToast(fresh.length === 1 ? `${notificationText(fresh[0])}` : `${fresh.length} new notifications`);
         // New tickets for them: Home's "Assigned to me" catches up if it's showing
         if (fresh.some(n => n.kind === 'assigned') && homeMode === 'assigned'
             && document.getElementById('home-view').classList.contains('active')) showAssigned(true);
@@ -148,10 +148,10 @@ document.getElementById('notify-email-on').addEventListener('change', async e =>
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
         paintEmailSetting(data.email);
-        showToast(on ? `✉️ Your notifications will be emailed to ${data.email.address} too` : '✉️ No more notification emails; they still show here');
+        showToast(on ? `Your notifications will be emailed to ${data.email.address} too` : 'No more notification emails; they still show here');
     } catch (err) {
         paintEmailSetting();
-        showToast(`❌ ${err.message}`);
+        showToast(`${err.message}`, 'error');
     }
 });
 
@@ -232,7 +232,7 @@ async function clearNotifications(ids) {
         if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
     } catch (err) {
         Object.assign(notifyState, before);
-        showToast(`❌ ${err.message}`);
+        showToast(`${err.message}`, 'error');
         checkNotifications(); // the list as the server has it
     }
 }
@@ -330,7 +330,7 @@ document.querySelector('#report-dialog form').addEventListener('submit', async e
         // The Team tab shows it next to the ticket
         if (document.getElementById('teams-view').classList.contains('active')) loadTeamTickets();
     } catch (err) {
-        error.textContent = `❌ ${err.message}`;
+        error.textContent = `${err.message}`;
         error.hidden = false;
     } finally {
         send.disabled = false;
@@ -375,7 +375,7 @@ document.querySelector('#issue-dialog form').addEventListener('submit', async e 
         document.getElementById('issue-dialog').close();
         showToast('✓ Your report went to the admins. Thank you.');
     } catch (err) {
-        error.textContent = `❌ ${err.message}`;
+        error.textContent = `${err.message}`;
         error.hidden = false;
     } finally {
         send.disabled = false;

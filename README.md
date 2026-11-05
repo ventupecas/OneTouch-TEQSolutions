@@ -230,7 +230,7 @@ which is why Metabase keeps each chart's result (see [Dashboards](#dashboards-me
    opens from Metabase's cache. It ends with a list of anything that failed, so it doubles
    as a final check that everything works.
 3. Demo with the questions in that file. Edit the file to add your own (one per line) and
-   run `npm run warmup` again; questions it has already asked come back instantly, marked ⚡.
+   run `npm run warmup` again; questions it has already asked come back instantly, and the answer says it was asked before.
 4. **Don't restart OneTouch afterwards.** A restart (including `docker compose up` after
    editing `.env`) forgets the remembered questions. They are also tied to the date
    Claude sees as "today", which is the real date in UTC unless `ASSUME_TODAY` is set, so
@@ -287,7 +287,7 @@ dashboard shortcuts with **✏️ Customize Home**.
   text of an answer's tables and in the family notes under an answer. A click (or Enter)
   opens that ticket's record and family on Home, like a ticket number in a table.
 - **A ticket that isn't yours** (another person's or another team's), clicked anywhere
-  (the chat, a table, the ticket window, the Families page), says "🔒 You don't have
+  (the chat, a table, the ticket window, the Families page), says "You don't have
   permission to see …" and who can open it; nothing else about it shows. A number that
   isn't in the data at all still says "… is not in the data". Starred tickets you can no
   longer see are listed under the Starred list the same way.
@@ -365,10 +365,10 @@ example).
   "Parent incident INC1813985 · 6", "Problem PRB0051839 · 96", "Order REQ0421352 · 18",
   "Change CHG1100098 · 2" (a change with the incident it fixes or the ones it caused),
   "Bundle request RITM0440455 · 3", "Request RITM0440498 and its tasks · 2". Click one to
-  open its parent (or anchor) ticket, with the whole family under 🔗 Related tickets.
+  open its parent (or anchor) ticket, with the whole family under Related tickets.
   Problem records themselves aren't in the export, so a problem isn't clickable.
 
-These come from the same links as 🔗 Related tickets below, and are in the downloads too.
+These come from the same links as Related tickets below, and are in the downloads too.
 They are worked out once per ticket and then kept (the data never changes): 500 tickets
 take about half a second the first time, a tenth of a second after that.
 
@@ -398,7 +398,7 @@ tickets the answer lists (its ticket-number column), not related numbers in othe
 such as a task's parent request. It is one request however many tickets there are, and the
 2,000-star limit still applies: anything past it is left unstarred and a note says so.
 
-**🔗 Related tickets.** Under an AI answer, and under a ticket's record on Home, OneTouch
+**Related tickets.** Under an AI answer, and under a ticket's record on Home, OneTouch
 lists the "families" those tickets belong to. These come from the links stored in the
 ServiceNow export; nothing is guessed:
 
@@ -437,7 +437,7 @@ its tickets share, so a long list isn't buried.
 **Opening a ticket shows its family first.** Whenever a ticket's record opens (a ticket
 number in Ticket results or Starred tickets, its Parent or Family, a row of an AI answer, a
 ticket in a family or in a chart's ticket list), its family comes right under its heading,
-above the full record, headed "👪 *ticket*'s family: parent, children and other linked
+above the full record, headed "*ticket*'s family: parent, children and other linked
 tickets". Each family starts with a line saying where the ticket sits, and lists the parent
 (or the order, request or change) on the first row:
 - a parent: "INC1813985 is the parent incident. Its 5 child incidents are listed under it."
@@ -486,8 +486,8 @@ match OneTouch's.
 
 **✏️ Customize Home** (next to the welcome) turns on editing:
 - Each section gets **▲ Move up**, **▼ Move down** and **Hide**. The sections are
-  **💬 AI assistant**, **🎫 Your tickets** (Ticket results and Starred tickets) and
-  **📊 Your dashboards**, which is hidden at first and has one-click shortcuts to the
+  **AI assistant**, **Your tickets** (Ticket results and Starred tickets) and
+  **Your dashboards**, which is hidden at first and has one-click shortcuts to the
   dashboards you built. Hidden sections come back with their **＋** button.
 - **＋ Add a chart** puts a chart of your own on Home (the same chart builder as below).
 - **↺ Reset Home** goes back to the default (it removes the charts you added to Home, not
@@ -594,15 +594,15 @@ computer. **↺ Default settings** puts everything back.
   read-aloud work as before), underlined links and ticket numbers, a strong yellow-and-black focus outline, a
   big mouse pointer, a reading guide (a band across the page that follows the pointer),
   and less motion.
-- **🔍 Magnifier:** the text under the pointer shown large beside it (2×, 3× or 4×); with
+- **Magnifier:** the text under the pointer shown large beside it (2×, 3× or 4×); with
   the keyboard, the box or button that has focus. A password box only says it's one.
-- **🔊 Read aloud** (the browser's own voices): **Alt+R** reads what's selected, pointed at
-  or focused (Alt+R again or Esc stops). Optional: a 🔊 Read button by selected text, Claude's
+- **Read aloud** (the browser's own voices): **Alt+R** reads what's selected, pointed at
+  or focused (Alt+R again or Esc stops). Optional: a Read button by selected text, Claude's
   answers read as they arrive, and reading whatever the pointer rests on. Every answer in
   the chat has its own **🔊 Read**; a table is read as its number of rows and its columns,
   and ticket numbers as their type and digits ("incident 1 2 3 4 5 6 7"). A voice and a
   speed can be picked, with **▶ Try it**.
-- **🎤 Speak instead of typing:** 🎤 by the Ask bar and by the chat's box, or **Alt+M** in
+- **Speak instead of typing:** 🎤 by the Ask bar and by the chat's box, or **Alt+M** in
   any text box (including the sign-in page's). What's said is typed where the cursor is;
   with **Ask Claude as soon as I stop talking**, the question is asked when they stop.
   The browser turns speech into text online (Edge through Microsoft, Chrome through Google),
@@ -630,13 +630,20 @@ is just the 🧊.
   services are outside it. Click a block for what it does, how it's protected, what it's
   connected to and where its code is.
 - **What happens when…** follows a real request step by step: signing in, asking Claude,
-  opening a dashboard, assigning a ticket, and the ServiceNow live push. The moving dots show
-  which way data goes. They aren't live traffic.
+  opening a dashboard, assigning a ticket, reporting a problem, and the ServiceNow live push.
+  The moving dots show which way data goes. They aren't live traffic.
 - **📚 Tech stack** lists every version, read from `package-lock.json` and
   `docker-compose.yml`, so they can't fall behind.
-- **📝 List** has the same content without the 3D, for screen readers and for a browser that
-  can't draw 3D (which gets the list by itself). Colors follow each person's scheme, and ♿
-  Less motion stops the dots, the slow turning and the camera moves.
+- **🗺️ 2D** is the same map on a flat sheet, with what it's doing written on every block and
+  line, and each layer's purpose on its band. Everything else works the same: click a block for
+  its details, pick a layer, follow a **What happens when…** (it stays on its step when you switch
+  between 2D and 3D). Drag to move, scroll or pinch to zoom, point at a line to trace it, **+**, **-**,
+  the arrow keys and **0** with the keyboard, and **🏷️ Hide line labels** for less on the sheet. A
+  block with a problem turns red and says what's wrong on the block. It needs no graphics card, and a
+  browser that can't draw 3D gets it by itself.
+- **📝 List** has the same content as plain text, for screen readers. The page opens on whichever
+  view this browser last used. Colors follow each person's scheme, and ♿ Less motion stops the
+  dots, the slow turning and the camera moves.
 
 **The ServiceNow live push is built, but it needs authentication from ServiceNow to work.**
 The listener in `servicenow-sync/` is finished, and the map shows it as a dashed amber path
@@ -668,7 +675,9 @@ the server answered with an error in the last 15 minutes. Checks run only while 
 What the map says is in `architecture.mjs`, because `public/` can be read without signing in.
 `public/architecture.js` only draws it, with three.js kept unchanged in `public/vendor/`.
 `npm test` fails if the map falls behind the repo: a file it names is gone, or a container in
-`docker-compose.yml` isn't on it.
+`docker-compose.yml` isn't on it. It also holds the 2D drawing to the same blocks and links: a block
+with no sentence or place on the sheet, two blocks overlapping, or a line that doesn't start and end on
+its own blocks or runs through another all fail it.
 
 ### Reporting a problem (🚩)
 
@@ -685,7 +694,7 @@ an admin to mark resolved, or reopen. The sign-in page has no 🚩: reporting ne
 ### Ticket families (Dashboards)
 
 **☰ Dashboards → Built into OneTouch → 👪 Ticket families** lists every family of tickets in
-the data, from the links ServiceNow stored (the same ones as 🔗 Related tickets). It is part
+the data, from the links ServiceNow stored (the same ones as Related tickets). It is part
 of OneTouch, not Metabase, so it works the same for everyone and opens where you left it.
 
 - **Six tabs**, each with how many families it has: **Parent incidents** (514, holding 2,080
@@ -721,7 +730,7 @@ works them out in advance.
 
 **On a ticket's record in a team dashboard** (an incident, change or request page, however
 it was opened), OneTouch shows the ticket's family in a band above the page: one line
-naming it ("👪 INC1813970's family: Parent incident INC1813985 and its 5 child incidents"),
+naming it ("INC1813970's family: Parent incident INC1813985 and its 5 child incidents"),
 then the same view as on this page, with the line saying who the parent is. The band
 scrolls on its own so the record keeps most of the height, and **Hide family** folds it to
 its one line (until you show it again). Click a ticket in it to open that ticket's record
@@ -797,7 +806,7 @@ team, each ticket is assigned to one person. What you see depends on your role:
 | Project team member | The tickets assigned to them | |
 
 This applies everywhere: the AI assistant (its counts are of the tickets you can see, and
-a 👥 line under each answer says so), ticket search, records, Ticket families, and your
+a line under each answer says so), ticket search, records, Ticket families, and your
 own dashboards. People on no team see no tickets.
 
 **The 👥 Team tab** shows who's on your team and in what role. A project manager also sees
@@ -825,7 +834,7 @@ also has its own name box. Families on no team come first. The Team and Type men
 and the column headings work as on a team's list (sorted by a heading, the family rows give way
 to a **Move…** and **Give all…** link on each ticket).
 
-**✅ Resolved or closed** (first on the Team tab, for admins and project managers) lists the
+**Resolved or closed** (first on the Team tab, for admins and project managers) lists the
 tickets someone said they resolved or closed, newest first: an admin sees every team's (with a
 Team column), a project manager their own team's. Each row has the ticket, its type, summary
 and state in the data, the status (with the member's note), who set it and when, who has the
@@ -833,9 +842,9 @@ ticket, and a **Change it to** menu: Resolved, Closed, or Open, which takes the 
 (after asking). The 🔍 box and the headings work as on every list. Only OneTouch's record
 changes; the ticket's data never does.
 
-**🎬 Before a presentation** (admins, at the bottom of the Team tab) puts things back the way
+**Before a presentation** (admins, at the bottom of the Team tab) puts things back the way
 a presentation starts, each after asking: **↩ Undo every status** takes away every status
-anyone set (and the 🔔 notifications that told project managers about them), and **🧹 Put the
+anyone set (and the notifications that told project managers about them), and **🧹 Put the
 demo tickets back** puts the 11 [Demo] tickets back on no team, assigned to nobody, with their
 statuses, notifications, stars and ticket results gone, ready to move to a team and hand out
 live. Every real ticket stays on its team, by family, with whoever has it. No restart needed.
@@ -851,7 +860,7 @@ email already on its way for one still goes out.
 however many tickets), a family is moved to a project manager's team, or a member says they
 resolved or closed a ticket. An email says who did what and which ticket numbers, with an
 **Open OneTouch** button; ticket summaries and a member's note stay behind the sign-in. Each
-person turns it on or off with **✉️ Email me these too** at the top of the 🔔 panel (on by
+person turns it on or off with **Email me these too** at the top of the 🔔 panel (on by
 default), which also shows the address. Addresses are set by an admin
 (`docker exec analytics_node_app npm run users -- email <username> <address>`, or many at once
 from a CSV with `emails -`) and live only in the database, never in `db/accounts.json`.
@@ -1050,20 +1059,20 @@ session always run in order.
 permission to see (an admin's answers cover everything):
 
 - **A question about tickets that aren't yours isn't answered.** "What is the state of
-  CHG1099789?" gets "🔒 You don't have permission to see CHG1099789, so I can't answer
+  CHG1099789?" gets "You don't have permission to see CHG1099789, so I can't answer
   questions about it", with no data. A question that names only such tickets isn't even
   sent to Claude; a follow-up that reaches one ("the second one") is caught once Claude
   has turned it into a query, and nothing is run.
 - **An answer that leaves tickets out says so.** When tickets you can't see also match,
-  a 🔒 note under the answer's first line says "You can't see the full report…" and what
+  a note under the answer's first line says "You can't see the full report…" and what
   it covers ("Only the 153 tickets assigned to you are included"), or names the ticket you
   asked about that was left out. When nothing of yours matches but other tickets do, it
   says that instead. Downloads of the answer carry the same note ("Not the full report").
   When every matching ticket is yours, the answer is the full report and has no note.
 
 **While it works**, a bubble shows each step as the server reaches it, with a running
-clock: "📨 Sending your question…", "🧠 Understanding your question…" (Claude), "📊 Getting
-the data…" (Cube), and for an empty result "🔎 Nothing matched; working out why…".
+clock: "Sending your question…", "Understanding your question…" (Claude), "Getting
+the data…" (Cube), and for an empty result "Nothing matched; working out why…".
 Finished steps stay listed with a ✓ and how long they took. Under each answer, a small line
 says how long it took ("Answered in 2.9 s"). A new question usually takes 2–5 seconds,
 almost all of it Claude; the data itself comes back in under a tenth of a second.
@@ -1071,7 +1080,7 @@ almost all of it Claude; the data itself comes back in under a tenth of a second
 **Repeated questions are instant.** The data never changes, so when a question that
 starts a conversation has been asked before, by anyone, OneTouch reuses Claude's earlier
 translation (and, for an empty result, its explanation) and answers in about 0.1 seconds.
-The bubble then shows "⚡ Asked before: reusing that answer…" and the answer says "⚡ Answered
+The bubble then shows "Asked before: reusing that answer…" and the answer says "Answered
 in 0.1 s: this question was asked before". "The same question" means the same words,
 ignoring capitals, spacing and a closing "?", asked about the same "today". Follow-up
 questions depend on the conversation, so they always go to Claude. The server keeps the
@@ -1110,8 +1119,8 @@ last 500 such questions in memory; restarting it starts the list over.
 | Intent | When | What you see |
 |---|---|---|
 | `query` | The question fits the data | The results (below) |
-| `clarify` | It can't be answered sensibly without one more detail, e.g. a person's real name (people are anonymized as "Individual 1234"), or a place that matches very different things | 🙋 and one short question back |
-| `unsupported` | It needs something the data model doesn't have: averages, durations, resolution times, SLA %, joins between tables, or a period with no data | 🙋, a plain explanation, and the nearest question it *can* answer |
+| `clarify` | It can't be answered sensibly without one more detail, e.g. a person's real name (people are anonymized as "Individual 1234"), or a place that matches very different things | One short question back |
+| `unsupported` | It needs something the data model doesn't have: averages, durations, resolution times, SLA %, joins between tables, or a period with no data | A plain explanation, and the nearest question it *can* answer |
 
 ### What a result looks like
 
@@ -1125,7 +1134,7 @@ last 500 such questions in memory; restarting it starts the list over.
   under it:
   - the ticket's **full record**: every field, ☆ Star, **Open in Dashboards** for incidents,
     changes and requests, and a download
-  - its **🔗 related tickets**: each family, with what the members share and where they
+  - its **related tickets**: each family, with what the members share and where they
     differ, and the family downloads
 
   Click the row again or **▴ Close** to fold it away. Several rows can be open at once.
@@ -1143,7 +1152,7 @@ last 500 such questions in memory; restarting it starts the list over.
 - **How I read your question:** a collapsible list of every assumption Claude made (what
   "open" meant, which ticket types were included and why others were dropped, the exact
   dates used, values that were corrected).
-- **🔗 Related tickets:** when the answer's tickets have parents, children or other linked
+- **Related tickets:** when the answer's tickets have parents, children or other linked
   tickets, the families they belong to, with what the members share and where they differ
   (see [Home page and the AI assistant](#home-page-and-the-ai-assistant)).
 - **Star all:** when the answer lists two or more tickets, buttons to star them all, or all
@@ -1301,7 +1310,7 @@ Files are named `one-touch-<the question>-<date>.<format>`, e.g.
 the file (e.g. "Oct 21, 2026, 9:11 PM CDT"), are in the downloader's own time zone, which
 the browser sends with the request; without one they're in UTC, labelled as such. The home
 page's ticket lists and a single ticket's record download the same way, and so does each
-family under **🔗 Related tickets** (its members and the same / different comparison). A result too large to export (over
+family under **Related tickets** (its members and the same / different comparison). A result too large to export (over
 2 million cells) is refused. While the file is being made, the button says "Preparing
 XLSX file…", then "Downloaded *file name*", or the error.
 
@@ -8538,7 +8547,7 @@ listenForTicketChanges();
     <!-- 🔔 Notifications: tickets given to you, families moved to your team, members' reports (notifications.js) -->
     <section class="theme-panel notify-panel" id="notify-panel" role="dialog" aria-label="Notifications" hidden>
         <div class="theme-panel-head">
-            <span>🔔 Notifications</span>
+            <span>Notifications</span>
             <span class="notify-head-actions">
                 <button type="button" class="notify-clear-all" id="notify-clear-all" onclick="clearAllNotifications()" hidden>Clear all</button>
                 <button type="button" class="drawer-close" onclick="toggleNotifications(false)" aria-label="Close">✕</button>
@@ -8546,7 +8555,7 @@ listenForTicketChanges();
         </div>
         <!-- ✉️ These by email too (mail.mjs), for anyone with an address on file -->
         <div class="notify-email" id="notify-email" hidden>
-            <label><input type="checkbox" id="notify-email-on"> ✉️ Email me these too</label>
+            <label><input type="checkbox" id="notify-email-on"> Email me these too</label>
             <span class="notify-email-to" id="notify-email-to"></span>
         </div>
         <div id="notify-list"></div>
@@ -8555,7 +8564,7 @@ listenForTicketChanges();
     <!-- 🎨 Colors: each person's color scheme, saved to their account (customize.js) -->
     <section class="theme-panel" id="theme-panel" role="dialog" aria-label="Your colors" hidden>
         <div class="theme-panel-head">
-            <span>🎨 Your colors</span>
+            <span>Your colors</span>
             <button type="button" class="drawer-close" onclick="toggleThemePanel(false)" aria-label="Close">✕</button>
         </div>
         <fieldset>
@@ -8585,7 +8594,7 @@ listenForTicketChanges();
     <!-- ♿ Accessibility: how OneTouch looks, reads aloud and listens, saved to this browser and the account (accessibility.js) -->
     <section class="theme-panel access-panel" id="access-panel" role="dialog" aria-label="Accessibility" hidden>
         <div class="theme-panel-head">
-            <span>♿ Accessibility</span>
+            <span>Accessibility</span>
             <button type="button" class="drawer-close" onclick="toggleAccessPanel(false)" aria-label="Close">✕</button>
         </div>
         <fieldset>
@@ -8607,17 +8616,17 @@ listenForTicketChanges();
             </div>
         </fieldset>
         <fieldset>
-            <legend>🔍 Magnifier</legend>
+            <legend>Magnifier</legend>
             <div class="access-switches">
                 <label class="access-switch"><input type="checkbox" data-key="magnifier"><span>Show the text under the pointer, large<small>With the keyboard, the box or button you're on</small></span></label>
             </div>
             <div class="choice-row access-row" id="access-magnify" aria-label="How much larger"></div>
         </fieldset>
         <fieldset>
-            <legend>🔊 Read aloud</legend>
+            <legend>Read aloud</legend>
             <div class="access-switches">
-                <label class="access-switch"><input type="checkbox" data-key="selectRead" data-needs="speech"><span>A 🔊 Read button when I select text</span></label>
-                <label class="access-switch"><input type="checkbox" data-key="speakAnswers" data-needs="speech"><span>Read Claude's answers to me<small>Every answer also has its own 🔊 Read button</small></span></label>
+                <label class="access-switch"><input type="checkbox" data-key="selectRead" data-needs="speech"><span>A Read button when I select text</span></label>
+                <label class="access-switch"><input type="checkbox" data-key="speakAnswers" data-needs="speech"><span>Read Claude's answers to me<small>Every answer also has its own Read button</small></span></label>
                 <label class="access-switch"><input type="checkbox" data-key="speakHover" data-needs="speech"><span>Read what I point at<small>Rest the pointer on any text for a moment</small></span></label>
             </div>
             <div class="access-row">
@@ -8633,7 +8642,7 @@ listenForTicketChanges();
             <p class="access-note warn" id="access-speech-none" hidden>This browser can't read aloud. Edge, Chrome and Safari can.</p>
         </fieldset>
         <fieldset>
-            <legend>🎤 Speak instead of typing</legend>
+            <legend>Speak instead of typing</legend>
             <div class="access-switches">
                 <label class="access-switch"><input type="checkbox" data-key="autoSend" data-needs="dictation"><span>Ask Claude as soon as I stop talking<small>In the Ask bar and the chat; otherwise you press Enter</small></span></label>
             </div>
@@ -8641,7 +8650,7 @@ listenForTicketChanges();
             <p class="access-note warn" id="access-dictation-none" hidden>This browser can't take dictation. Use Edge or Chrome.</p>
         </fieldset>
         <fieldset>
-            <legend>⌨️ Keyboard shortcuts</legend>
+            <legend>Keyboard shortcuts</legend>
             <ul class="access-keys">
                 <li><kbd>/</kbd> the Ask bar</li>
                 <li><kbd>Alt</kbd>+<kbd>A</kbd> this panel</li>
@@ -8733,7 +8742,7 @@ listenForTicketChanges();
                     <!-- Your dashboards: shortcuts to the dashboards you built (hidden until added) -->
                     <section class="home-block" data-block="shortcuts" hidden>
                         <div class="guide-card shortcuts-card">
-                            <span class="guide-title">📊 Your dashboards</span>
+                            <span class="guide-title">Your dashboards</span>
                             <div class="shortcut-list" id="home-shortcuts"></div>
                         </div>
                     </section>
@@ -8861,7 +8870,7 @@ listenForTicketChanges();
         <div class="assistant-backdrop" id="assistant-backdrop" onclick="toggleAssistant(false)"></div>
         <section class="assistant-panel" id="assistant-panel" aria-label="AI Assistant">
             <div class="assistant-head">
-                <span class="assistant-title">💬 AI Assistant</span>
+                <span class="assistant-title">AI Assistant</span>
                 <div class="assistant-head-actions">
                     <button type="button" class="assistant-minimize" id="chat-history-btn" onclick="toggleChatHistory()" aria-expanded="false" aria-controls="chat-history" title="Your saved chats: open one to see it again and carry on where you left off">Chat History</button>
                     <button type="button" class="assistant-delete" onclick="deleteChat()" title="Delete this conversation: its questions and answers disappear, it leaves Chat History, and the assistant forgets it">🗑 Delete chat</button>
@@ -9005,7 +9014,7 @@ listenForTicketChanges();
     <!-- Reporting a problem to the admins (notifications.js, issues.mjs) -->
     <dialog class="ask-dialog report-dialog" id="issue-dialog" aria-labelledby="issue-title">
         <form method="dialog">
-            <h2 id="issue-title">🚩 Report a problem</h2>
+            <h2 id="issue-title">Report a problem</h2>
             <p class="report-ticket">Tell the admins what went wrong. They get a notification and an email straight away.</p>
             <label class="field-label">What kind of problem is it?
                 <select id="issue-category">
@@ -9974,6 +9983,14 @@ tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
     max-width: calc(100% - 32px);
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+/* Something failed: the thick edge says so as well as the color */
+.toast.toast-error {
+    background: var(--danger-soft);
+    color: var(--danger);
+    border: 1px solid var(--danger-line);
+    border-left: 5px solid var(--danger);
+    font-weight: 600;
+}
 
 @media (max-width: 700px) {
     .home { padding: 16px 16px 32px; }
@@ -11651,7 +11668,7 @@ body.signed-out .access-panel { top: 16px; }
 }
 .a11y-guide[hidden] { display: none; }
 
-/* "🔊 Reading aloud… ⏹ Stop" and "🎤 Listening… ⏹ Stop", bottom left */
+/* "Reading aloud… ⏹ Stop" and "Listening… ⏹ Stop", bottom left */
 .a11y-pill {
     position: fixed;
     left: 16px;
@@ -12224,6 +12241,149 @@ html.a11y-motion *::after {
 }
 .arch-status-close:hover { color: var(--text); background: var(--warn-soft-hover); }
 .arch-status-row:last-child { padding-bottom: 0; border-bottom: none; }
+
+/* 🗺️ The flat view: blocks and lines on one sheet, which drag and zoom move as a whole */
+.arch-plan { position: absolute; inset: 0; overflow: hidden; outline: none; touch-action: none; cursor: grab; user-select: none; }
+.arch-plan:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.arch-plan.is-moving { cursor: grabbing; }
+.arch-plan-sheet { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+
+.arch-band {
+    position: absolute;
+    background: color-mix(in srgb, var(--arch-c) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--arch-c) 38%, transparent);
+    border-radius: 10px;
+    transition: opacity 0.18s;
+}
+.arch-band-label { position: absolute; font-size: 10.5px; line-height: 1.25; color: var(--text-2); pointer-events: none; transition: opacity 0.18s; }
+.arch-band-label b { margin-right: 3px; color: var(--arch-c); letter-spacing: 0.03em; text-transform: uppercase; }
+.arch-band.is-dim, .arch-band-label.is-dim { opacity: 0.35; }
+.arch-plan-frame { position: absolute; border: 1.5px dashed var(--muted); border-radius: 14px; pointer-events: none; }
+.arch-plan-frame-label { position: absolute; font-size: 10.5px; line-height: 1.25; color: var(--muted); pointer-events: none; }
+
+.arch-card {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 4px 8px 4px 7px;
+    overflow: visible;
+    font: inherit;
+    line-height: 1.26;
+    text-align: left;
+    color: var(--text);
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--arch-c);
+    border-radius: 7px;
+    box-shadow: 0 1px 3px var(--shadow);
+    cursor: pointer;
+    transition: opacity 0.18s;
+}
+.arch-card:hover, .arch-card-on { z-index: 2; border-color: var(--accent); border-left-color: var(--arch-c); box-shadow: 0 0 0 2px var(--accent); }
+.arch-card:focus-visible { z-index: 2; outline: 3px solid var(--accent); outline-offset: 2px; }
+.arch-card-head { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.arch-card-icon { flex-shrink: 0; font-size: 12px; }
+.arch-card-name { min-width: 0; font-size: 13px; font-weight: 700; }
+.arch-card-tech { overflow: hidden; font-size: 10px; color: var(--muted); white-space: nowrap; text-overflow: ellipsis; }
+.arch-card-doing { font-size: 11.5px; color: var(--text-2); }
+.arch-card-dim { opacity: 0.25; }
+.arch-card-pending { background: color-mix(in srgb, var(--arch-c) 7%, var(--panel-bg)); border-style: dashed; border-color: var(--arch-c); }
+.arch-card-state { align-self: flex-start; padding: 0 5px; font-size: 10.5px; font-weight: 700; color: var(--warn-ink); background: var(--warn-soft); border-radius: 4px; }
+.arch-plan-open .arch-card-state { color: var(--same-ink); background: var(--same-bg); }
+.arch-card.arch-card-bad { z-index: 3; background: var(--danger-soft); border-color: var(--danger); border-left-color: var(--danger); }
+.arch-card-problem {
+    position: absolute;
+    left: -4px;
+    bottom: calc(100% + 3px);
+    width: max-content;
+    max-width: 280px;
+    padding: 2px 7px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--danger);
+    background: var(--panel-bg);
+    border: 1px solid var(--danger);
+    border-radius: 5px;
+    box-shadow: 0 1px 3px var(--shadow);
+}
+
+.arch-plan-lines, .arch-plan-movers, .arch-plan-labels { position: absolute; left: 0; top: 0; }
+.arch-plan-lines, .arch-plan-movers { overflow: visible; pointer-events: none; }
+.arch-plan-movers { z-index: 4; }
+.arch-mover { position: absolute; left: 0; top: 0; border-radius: 50%; will-change: transform; }
+.arch-line { --line: var(--muted); transition: opacity 0.18s; }
+.arch-line-inner { --line: var(--faint); }
+.arch-line-pending { --line: var(--warn); }
+.arch-plan-open .arch-line-pending { --line: var(--series-3); }
+.arch-line.is-hot { --line: var(--accent); }
+.arch-line.is-dim { opacity: 0.12; }
+.arch-line-path { fill: none; stroke: var(--line); stroke-width: 1.8; }
+.arch-line-inner .arch-line-path { stroke-width: 1.3; }
+.arch-line-pending .arch-line-path { stroke-width: 2.2; stroke-dasharray: 8 6; }
+.arch-line.is-hot .arch-line-path { stroke-width: 3; }
+.arch-line-arrow { fill: var(--line); }
+.arch-line-hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: default; }
+.arch-line-label {
+    position: absolute;
+    box-sizing: border-box;
+    width: max-content;
+    padding: 0 4px;
+    font-size: 10.5px;
+    line-height: 1.22;
+    text-align: center;
+    color: var(--text-2);
+    background: color-mix(in srgb, var(--panel-bg) 90%, transparent);
+    border-radius: 3px;
+    transform: translate(-50%, -50%);
+    cursor: default;
+    transition: opacity 0.18s;
+}
+.arch-line-label-pending { color: var(--warn-ink); }
+.arch-plan-open .arch-line-label-pending { color: var(--same-ink); }
+.arch-line-label.is-hot { z-index: 1; font-weight: 700; color: var(--text); background: var(--panel-bg); box-shadow: 0 0 0 1px var(--accent); }
+.arch-line-label.is-dim { opacity: 0.15; }
+.arch-plan-no-labels .arch-line-label:not(.is-hot) { display: none; }
+.arch-dot { background: var(--accent); opacity: 0.85; }
+.arch-traveller { background: var(--accent); }
+.arch-traveller-halo { background: var(--accent); opacity: 0.25; }
+
+.arch-plan-foot {
+    position: absolute;
+    left: var(--arch-left);
+    right: 372px;
+    bottom: 4px;
+    z-index: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 2px 14px;
+    padding: 3px 10px;
+    font-size: 0.72rem;
+    color: var(--muted);
+    background: color-mix(in srgb, var(--panel-bg) 88%, transparent);
+    border-radius: 8px;
+    cursor: default;
+}
+.arch-plan-key { display: flex; flex-wrap: wrap; gap: 2px 12px; margin: 0; padding: 0; list-style: none; }
+.arch-plan-key li { display: flex; align-items: center; gap: 5px; }
+.arch-key-line { display: inline-block; width: 22px; border-top: 2px solid var(--muted); }
+.arch-key-inner { border-top: 1px solid var(--faint); }
+.arch-key-pending { border-top: 2px dashed var(--warn); }
+.arch-plan-open .arch-key-pending { border-top-color: var(--series-3); }
+.arch-key-frame { display: inline-block; width: 16px; height: 10px; border: 1px dashed var(--muted); border-radius: 2px; }
+.arch-hint.arch-plan-hint { position: static; flex-basis: 100%; }
+@media (max-width: 1100px) {
+    .arch-plan { position: relative; inset: auto; flex: 0 0 62vh; min-height: 340px; order: 2; }
+    .arch-plan-foot { left: 8px; right: 8px; }
+}
+@media (max-width: 700px) {
+    .arch-plan { flex-basis: 50vh; min-height: 280px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .arch-band, .arch-band-label, .arch-card, .arch-line, .arch-line-label { transition: none; }
+}
 ```
 
 <a id="b27"></a>
@@ -12537,7 +12697,7 @@ async function loadChatHistory() {
                 </div>`).join('')
             : '<p class="home-status">No saved chats yet. Each chat is saved here after its first answer.</p>';
     } catch (err) {
-        list.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        list.innerHTML = `<p class="home-status error">${escapeHtml(err.message)}</p>`;
         console.error(err);
     }
 }
@@ -13093,7 +13253,7 @@ async function sendPrompt() {
     } catch (err) {
         progress.finish();
         if (epoch !== chatEpoch) return;
-        appendMessage('ai-msg', `❌ Could not reach the OneTouch server, or the answer was cut off. Please try again.`);
+        appendMessage('ai-msg', `Could not reach the OneTouch server, or the answer was cut off. Please try again.`);
         console.error(err);
     }
 }
@@ -13108,13 +13268,13 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
     }
 
     if (data.error) {
-        appendMessage('ai-msg', `❌ Error: ${linkTicketsHtml(data.error)}`);
+        appendMessage('ai-msg', `Error: ${linkTicketsHtml(data.error)}`);
         return;
     }
 
     // About tickets they don't have permission to see: not answered (server.mjs)
     if (data.intent === 'denied') {
-        appendMessage('ai-msg', `<div class="result-restricted">🔒 ${linkTicketsHtml(data.message)}</div>` + answerTimingHtml(seconds, data.fromCache));
+        appendMessage('ai-msg', `<div class="result-restricted">${linkTicketsHtml(data.message)}</div>` + answerTimingHtml(seconds, data.fromCache));
         return;
     }
 
@@ -13122,7 +13282,7 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
     if (data.intent === 'clarify' || data.intent === 'unsupported') {
         const message = data.message || 'I need a little more detail to run that.';
         const download = downloadBarHtml(registerExport({ title: 'OneTouch answer', question: userPromptText, tables: buildExportTables(data, message) }));
-        appendMessage('ai-msg', `🙋 ${linkTicketsHtml(message)}` + download + answerTimingHtml(seconds, data.fromCache));
+        appendMessage('ai-msg', `${linkTicketsHtml(message)}` + download + answerTimingHtml(seconds, data.fromCache));
         return;
     }
 
@@ -13130,7 +13290,7 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
     // and tuck the assumptions into a collapsible note underneath
     let html = `<div class="result-title">${linkTicketsHtml(data.message || 'Here is what I found:')}</div>`;
     // Not the full report: tickets they don't have permission to see match too
-    if (data.restricted) html += `<div class="result-restricted">🔒 ${linkTicketsHtml(data.restricted)}</div>`;
+    if (data.restricted) html += `<div class="result-restricted">${linkTicketsHtml(data.restricted)}</div>`;
     // Nothing found anywhere: the server's explanation replaces the empty tables
     const explanationHtml = data.explanation
         ? `<div class="result-explanation">${linkTicketsHtml(data.explanation)}</div>` : '';
@@ -13165,7 +13325,7 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
     }
 
     // Not an admin: which tickets the answer could see (teams.mjs)
-    if (data.visibility && !(data.explanation && data.allEmpty)) html += `<div class="result-visibility">👥 ${escapeHtml(data.visibility)}</div>`;
+    if (data.visibility && !(data.explanation && data.allEmpty)) html += `<div class="result-visibility">${escapeHtml(data.visibility)}</div>`;
 
     // Star every ticket the answer lists, or all of one type
     html += starAllHtml(answerTicketNumbers(data));
@@ -13201,11 +13361,11 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
 
 // [while it runs, once it's done]
 const QUERY_STEPS = {
-    sending: ['📨 Sending your question…', 'Sent your question'],
-    understanding: ['🧠 Understanding your question…', 'Understood your question'],
-    cached: ['⚡ Asked before: reusing that answer…', 'Reused the earlier answer (no AI wait)'],
-    querying: ['📊 Getting the data…', 'Got the data'],
-    explaining: ['🔎 Nothing matched; working out why…', 'Worked out why'],
+    sending: ['Sending your question…', 'Sent your question'],
+    understanding: ['Understanding your question…', 'Understood your question'],
+    cached: ['Asked before: reusing that answer…', 'Reused the earlier answer (no AI wait)'],
+    querying: ['Getting the data…', 'Got the data'],
+    explaining: ['Nothing matched; working out why…', 'Worked out why'],
 };
 
 // A chat bubble listing finished steps (with how long each took) and the
@@ -13276,13 +13436,13 @@ async function readQueryResponse(response, onStep) {
     return result;
 }
 
-// "Answered in 2.8 s", or for a repeated question "⚡ Answered in 0.2 s …"
+// "Answered in 2.8 s", or for a repeated question "Answered in 0.2 s …"
 // (nothing for a saved answer whose time wasn't kept)
 function answerTimingHtml(seconds, fromCache) {
     if (seconds == null) return '';
     const time = `${seconds.toFixed(1)} s`;
     return fromCache
-        ? `<div class="result-timing">⚡ Answered in ${time}: this question was asked before, so the AI step was skipped</div>`
+        ? `<div class="result-timing">Answered in ${time}: this question was asked before, so the AI step was skipped</div>`
         : `<div class="result-timing">Answered in ${time}</div>`;
 }
 
@@ -13951,7 +14111,7 @@ async function downloadExport(exportId) {
         status.textContent = `Downloaded ${fileName}`;
     } catch (err) {
         status.className = 'download-status error';
-        status.textContent = `❌ ${err.message}`;
+        status.textContent = `${err.message}`;
         console.error(err);
     } finally {
         button.disabled = false;
@@ -14114,12 +14274,12 @@ async function starMany(numbers, what) {
         for (const n of leftOut) starredTickets.delete(n);
         refreshStarButtons();
         showToast(leftOut.length
-            ? `★ Starred ${(toAdd.length - leftOut.length).toLocaleString()}; ${leftOut.length.toLocaleString()} more would pass the limit of 2,000 starred tickets. Unstar some first.`
-            : `★ Starred ${what}`);
+            ? `Starred ${(toAdd.length - leftOut.length).toLocaleString()}; ${leftOut.length.toLocaleString()} more would pass the limit of 2,000 starred tickets. Unstar some first.`
+            : `Starred ${what}`);
     } catch (err) {
         for (const n of toAdd) starredTickets.delete(n);
         refreshStarButtons();
-        showToast(`❌ ${err.message}`);
+        showToast(`${err.message}`, 'error');
     }
 }
 
@@ -14160,14 +14320,14 @@ async function setStarred(number, on) {
         if (on) starredTickets.delete(number);
         else starredTickets.set(number, before);
         refreshStarButtons();
-        showToast(`❌ ${err.message}`);
+        showToast(`${err.message}`, 'error');
         return false;
     }
 }
 
-// A short message at the bottom of the screen
+// A short message at the bottom of the screen; kind 'error' marks it as a failure
 let toastTimer = null;
-function showToast(message) {
+function showToast(message, kind) {
     let toast = document.getElementById('toast');
     if (!toast) {
         toast = document.createElement('div');
@@ -14177,6 +14337,9 @@ function showToast(message) {
         document.body.appendChild(toast);
     }
     toast.textContent = message;
+    const isError = kind === 'error';
+    toast.classList.toggle('toast-error', isError);
+    toast.setAttribute('role', isError ? 'alert' : 'status');
     toast.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => toast.classList.remove('show'), 4000);
@@ -14485,7 +14648,7 @@ async function runHomeSearch(mode, outId, work, quiet = false) {
         applyLookups(out);
     } catch (err) {
         if (run !== homeRuns[mode]) return;
-        out.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        out.innerHTML = `<p class="home-status error">${escapeHtml(err.message)}</p>`;
         console.error(err);
     }
     forgetRemovedExports();
@@ -14577,7 +14740,7 @@ function assignedHtml() {
           'Click any heading to sort by it. ';
     const head = '<div class="results-head">' +
         `<p class="home-status">${listed.length.toLocaleString()} ${which}${listed.length === 1 ? 'ticket' : 'tickets'} assigned to you, ${order}</p>` + filter + '</div>' +
-        (drill ? `<div class="drill-chip" role="status">📊 Only the ones in <b>${escapeHtml(drill.label)}</b>, from My charts ` +
+        (drill ? `<div class="drill-chip" role="status">Only the ones in <b>${escapeHtml(drill.label)}</b>, from My charts ` +
             '<button type="button" class="home-action" data-assigned-drill-clear>✕ Show them all</button></div>' : '');
     if (!listed.length) {
         return head + `<p class="home-status">${drill ? `None ${which}in ${escapeHtml(drill.label)}.` : `None ${status === 'open' ? 'open: you\'re all caught up.' : 'closed yet.'}`}</p>`;
@@ -14982,7 +15145,7 @@ async function toggleFamilyTickets(button) {
         Object.assign(box, { familyId: data.id, familyTickets: data.tickets, showAll: false });
         drawFamilyTickets(box);
     } catch (err) {
-        if (box.isConnected) box.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        if (box.isConnected) box.innerHTML = `<p class="home-status error">${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -15098,7 +15261,7 @@ function showTicketResults(quiet = false) {
 // noAccess: in the data, but not one this person may see), or not in the data
 function notOpenedText(number, noAccess) {
     return (noAccess || []).includes(number)
-        ? `🔒 You don't have permission to see ${number}. Only whoever it's assigned to, its team's project manager and admins can open it.`
+        ? `You don't have permission to see ${number}. Only whoever it's assigned to, its team's project manager and admins can open it.`
         : `${number} is not in the data.`;
 }
 
@@ -15204,7 +15367,7 @@ function relatedHtml(families, focus, inChat = false) {
             `Download all ${families.length} families as`)
         : '';
     const single = focus.size === 1 ? [...focus][0] : null;
-    const heading = single ? `👪 ${single}'s family: parent, children and other linked tickets` : '🔗 Related tickets';
+    const heading = single ? `${single}'s family: parent, children and other linked tickets` : 'Related tickets';
     return `<div class="related"><div class="related-title">${text(heading)}</div>` + all + families.map(f => {
         const facts = list => list.map(fact => `<span class="fact"><b>${escapeHtml(fact.field)}:</b> ${text(familyFact(fact))}</span>`).join('');
         const same = f.same.length
@@ -15268,7 +15431,7 @@ function familyRoleLine(f, number) {
 async function showRelated(container, numbers, conversation, before = null) {
     const slot = document.createElement('div');
     slot.className = 'related-slot';
-    slot.innerHTML = `<p class="related-loading">${before ? '👪 Looking for its parent, children and other linked tickets…' : '🔗 Looking for related tickets…'}</p>`;
+    slot.innerHTML = `<p class="related-loading">${before ? 'Looking for its parent, children and other linked tickets…' : 'Looking for related tickets…'}</p>`;
     if (before) before.before(slot); else container.appendChild(slot);
     try {
         const response = await fetch(`${API_BASE}/api/tickets/related`, {
@@ -15281,7 +15444,7 @@ async function showRelated(container, numbers, conversation, before = null) {
         if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
         if (!slot.isConnected) return; // the chat was cleared, or another record opened
         if (!data.families.length) {
-            if (before) slot.innerHTML = '<p class="related-none">👪 No parent, child or other linked tickets.</p>';
+            if (before) slot.innerHTML = '<p class="related-none">No parent, child or other linked tickets.</p>';
             else slot.remove();
             return;
         }
@@ -15315,7 +15478,7 @@ async function clearTicketResults(count) {
         await showTicketResults();
         showToast('Ticket results cleared');
     } catch (err) {
-        showToast(`❌ ${err.message}`);
+        showToast(`${err.message}`, 'error');
     }
 }
 
@@ -15325,7 +15488,7 @@ function ticketsShown(numbers) {
     latestShown = new Set(numbers);
     openedRecord = null;
     setHomeMode('results', true);
-    showToast(`🎫 ${numbers.length.toLocaleString()} ${numbers.length === 1 ? 'ticket' : 'tickets'} from this answer ${numbers.length === 1 ? 'is' : 'are'} now in Ticket results on Home`);
+    showToast(`${numbers.length.toLocaleString()} ${numbers.length === 1 ? 'ticket' : 'tickets'} from this answer ${numbers.length === 1 ? 'is' : 'are'} now in Ticket results on Home`);
 }
 
 // Newest star first. Unstarring here leaves the row (with an empty star) until
@@ -15347,7 +15510,7 @@ function showStarred(quiet = false) {
         }
         const columns = withLinks([STARRED_COLUMN]);
         const missing = (data.noAccess?.length
-            ? `<p class="home-status">🔒 You don't have permission to see these any more (they're no longer yours): ${escapeHtml(data.noAccess.join(', '))}</p>` : '') +
+            ? `<p class="home-status">You don't have permission to see these any more (they're no longer yours): ${escapeHtml(data.noAccess.join(', '))}</p>` : '') +
             (data.notFound.length ? `<p class="home-status">Not in the data any more: ${escapeHtml(data.notFound.join(', '))}</p>` : '');
         return '<div class="results-head">' +
             `<p class="home-status">${numbers.length.toLocaleString()} starred ${numbers.length === 1 ? 'ticket' : 'tickets'}, newest first. ` +
@@ -15572,7 +15735,7 @@ async function removeFromResults(numbers, { quiet = false } = {}) {
         showToast(`Removed ${numbers.length.toLocaleString()} ${numbers.length === 1 ? 'ticket' : 'tickets'} from Ticket results`);
         return true;
     } catch (err) {
-        showToast(`❌ ${err.message}`);
+        showToast(`${err.message}`, 'error');
         return false;
     }
 }
@@ -15614,7 +15777,7 @@ async function unstarMany(numbers, what, { quiet = false } = {}) {
     } catch (err) {
         for (const [n, at] of before) starredTickets.set(n, at);
         refreshStarButtons();
-        showToast(`❌ ${err.message}`);
+        showToast(`${err.message}`, 'error');
         return false;
     }
 }
@@ -15718,7 +15881,7 @@ async function loadTicketDetail(box, number) {
         box.innerHTML = ticketCardHtml(data.found[0], data.record);
         showRelated(box, [number], false, box.querySelector('.record-fields'));
     } catch (err) {
-        if (box.isConnected) box.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        if (box.isConnected) box.innerHTML = `<p class="home-status error">${escapeHtml(err.message)}</p>`;
         console.error(err);
     }
 }
@@ -17892,7 +18055,7 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 | `kpis.mjs` | Ticket and family KPIs: every ticket's KPI fields read from Cube once at start (`load`, fixed query), "now" = newest timestamp in the data, "typical" = median of that kind; `ticketKpis`, `teamFamilyKpis` (families with open tickets first), `oneFamilyKpis`. A KPI is `{ key, label, value, tone: good/warn/bad/info, detail }`. Routes: `POST /api/kpis/tickets` (only numbers `teams.canSeeTicket` allows), `GET /api/kpis/families[/:id]` (team's PM or admin, `teams.teamFamilies` / `familyMembers`). app.js: `KPI_COLUMN` + `fillTicketKpis` in "Assigned to me", `showFamilyKpis` for Home's "Team families" tab. Page scripts share one global scope: a top-level `const` named like one in another script (e.g. `familiesView` in families.js) breaks the whole page |
 | `mail.mjs` | Every notification by email through Brevo's transactional API (`POST https://api.brevo.com/v3/smtp/email`, header `api-key`; no npm package). Outbox: `notifications.email_state` 'pending' (rows from before email existed are 'before'), `sendPending` every 30 s after the change has committed: 'sent' / 'skipped' + `email_note` (test or service account, deactivated, no `users.email`, `users.email_notifications` off, not on `MAIL_ONLY_TO`, older than an hour) / retried with doubling waits, 'failed' after 5. `emailFor` words it like public/notifications.js (numbers and a link only). Settings in `.env`: `BREVO_API_KEY` (none: off), `MAIL_FROM`, `MAIL_FROM_NAME`, `APP_URL`, `MAIL_ONLY_TO`; tests point `BREVO_API_URL` at a stand-in and shorten `MAIL_INTERVAL_MS` / `MAIL_RETRY_MS`. Addresses: `auth.setEmail` (`npm run users -- email|emails`), never exported to `db/accounts.json`; `GET /api/me` returns `email: { address, on, enabled }`, `PUT /api/me/email { on }` (the 🔔 panel's switch, `paintEmailSetting`). `npm run mail-test -- <address>` sends one test email. Never test with a real person's address |
 | `notifications.mjs` | The 🔔 in the header (`notifications` in `onetouch_auth`): kinds `assigned` (someone gave you tickets), `family` (a family moved to the team you're the project manager of) and `report` (a member says they resolved or closed a ticket). `teams.mjs` makes them in the same transaction as the change; `teams.reportTicket` also writes `ticket_reports`, which only tells the PM and never changes the ticket. Routes: `GET /api/notifications`, `POST /api/notifications/read`, `POST /api/tickets/report`. `public/notifications.js`: the list (checked every minute, opening it marks them read), and the "Tell my project manager" dialog (`reportButtonHtml`, on a ticket's record and the Team tab's rows) |
-| `architecture.mjs` | 🧊 Architecture, admins only: everything the 3D map says (`LAYERS`, `NODES`, `LINKS`, `FLOWS`, `SERVICENOW`), `architectureMap` (adds versions read from `package-lock.json` and `docker-compose.yml`), `pushState`. `GET /api/architecture` and `/push`: one admin check in `server.mjs` covers everything under that path; `servicenowPush` there counts `onetouch_tickets_changed` signals since start. `public/architecture.js` is drawing code only (one function; three.js from `public/vendor/three-0.186.1/`, loaded on first open; never put map facts in `public/`, which can be read without signing in). `checks/architecture.mjs` (`npm test`) holds the map to the repo. Test it as a throwaway account named like an admin in a throwaway database, never as a real admin. Headless Edge draws it with `--use-angle=swiftshader --enable-unsafe-swiftshader` |
+| `architecture.mjs` | 🧊 Architecture, admins only: everything the 3D and 🗺️ 2D maps say (`LAYERS`, `NODES`, `LINKS`, `FLOWS`, `SERVICENOW`, and for 2D `PLAN` plus each block's `plan` and `doing`, each link's `route` and `labelAt`, each layer's `band`), `architectureMap` (adds versions read from `package-lock.json` and `docker-compose.yml`), `pushState`. `GET /api/architecture` and `/push`: one admin check in `server.mjs` covers everything under that path; `servicenowPush` there counts `onetouch_tickets_changed` signals since start. `public/architecture.js` is drawing code only (one function; three.js from `public/vendor/three-0.186.1/`, loaded on first open; never put map facts in `public/`, which can be read without signing in). `checks/architecture.mjs` (`npm test`) holds the map to the repo. Test it as a throwaway account named like an admin in a throwaway database, never as a real admin. Headless Edge draws it with `--use-angle=swiftshader --enable-unsafe-swiftshader` |
 | `charts.mjs` | The charts people build: `CHART_SOURCES` (per ticket type, the fields to group / filter by and the time groupings), `sanitizeChart`, `chartData` (builds its own Cube query: count, one dimension, `equals` / `notEquals` / `contains` filters, open / closed states from `ENTITY_CATALOG`, a day range, plus a dashboard's `scope` (dates, teams via `TEAM_FIELDS`); top N plus an `other` total), `chartTickets` (the tickets behind one bar), `chartFromQuery` (an AI answer's validated query as a chart, returned on `/api/query` as `chartable`), `chartValues` / `teamValues`, `chartCatalog`. In-memory LRU cache, since the data is frozen. Routes: `/api/charts/catalog`, `/api/charts/data`, `/api/charts/values`, `/api/charts/teams`, `/api/charts/tickets` |
 | `shares.mjs` | Shared dashboards (`shared_dashboards` in `onetouch_auth`): one random token per (owner, dashboard), re-sharing updates it, anyone signed in can read it (`/api/shares`). The board goes through `prefs.cleanBoard` |
 | `business_logic.mjs` | Everything Claude knows about the data: `ENTITY_CATALOG`, `buildSystemPrompt()` (sections A-E), `OUTPUT_SCHEMA`, and `normalizeAndValidate()`, which every Claude-built query passes through before Cube |
@@ -21566,7 +21729,7 @@ function loadPreferences() {
         } catch (err) {
             prefsLoadFailed = true;
             console.error('Could not load the saved layout and colors:', err);
-            showToast(`❌ ${err.message} Showing the defaults; refresh the page to try again.`);
+            showToast(`${err.message} Showing the defaults; refresh the page to try again.`, 'error');
         }
         applyTheme(prefs.theme);
         rememberTheme();
@@ -21607,7 +21770,7 @@ function savePreference(part) {
                 const data = await response.json().catch(() => ({}));
                 if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
             } catch (err) {
-                showToast(`❌ Your ${PART_NAMES[part]} could not be saved: ${err.message}`);
+                showToast(`Your ${PART_NAMES[part]} could not be saved: ${err.message}`, 'error');
                 return false;
             }
         } while (state.again);
@@ -21869,7 +22032,7 @@ async function fillTile(tile, chart, asTable = tile._asTable || false, scope = t
     } catch (err) {
         if (body._run !== run) return;
         body._drawn = null;
-        body.innerHTML = `<p class="chart-empty error">❌ ${escapeHtml(err.message)}</p>`;
+        body.innerHTML = `<p class="chart-empty error">${escapeHtml(err.message)}</p>`;
         console.error(err);
     } finally {
         if (body._run === run) body.classList.remove('refreshing');
@@ -21975,7 +22138,7 @@ function tileAction(tile, action) {
         prefs.home.blocks.push({ type: 'chart', chart: { ...structuredClone(chart), id: newChartId() } });
         renderHomeLayout();
         savePreference('home');
-        showToast(`📌 "${chartTitle(chart)}" is now on your Home page too`);
+        showToast(`"${chartTitle(chart)}" is now on your Home page too`);
     } else if (action === 'remove') {
         if (!confirm(`Remove the chart "${chartTitle(chart)}"?`)) return;
         list.splice(index, 1);
@@ -21996,8 +22159,8 @@ document.addEventListener('click', e => {
 // ---------------------------------------------------------------------
 
 const HOME_SECTIONS = {
-    tickets: '🎫 Your tickets',
-    shortcuts: '📊 Your dashboards',
+    tickets: 'Your tickets',
+    shortcuts: 'Your dashboards',
 };
 
 function renderHomeLayout() {
@@ -22416,7 +22579,7 @@ async function openBuilder({ chart = null, onSave, scope = null, destination = f
     try {
         if (!await loadChartCatalog()) return;
     } catch (err) {
-        showToast(`❌ ${err.message}`);
+        showToast(`${err.message}`, 'error');
         return;
     }
     const editing = Boolean(chart) && !destination;
@@ -22553,7 +22716,7 @@ async function paintFilterValues(i) {
             (!list.length ? '<p class="filter-more">Nothing matches that search.</p>' : '');
         paintFilterCount(i);
     } catch (err) {
-        box.innerHTML = `<p class="chart-empty error">❌ ${escapeHtml(err.message)}</p>`;
+        box.innerHTML = `<p class="chart-empty error">${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -22816,7 +22979,7 @@ async function paintTeamList() {
             (all.length > shown.length ? `<p class="filter-more">${(all.length - shown.length).toLocaleString()} more: search to find them</p>` : '') +
             (!all.length ? '<p class="filter-more">No team matches that search.</p>' : '');
     } catch (err) {
-        list.innerHTML = `<p class="chart-empty error">❌ ${escapeHtml(err.message)}</p>`;
+        list.innerHTML = `<p class="chart-empty error">${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -22855,7 +23018,7 @@ async function openDrill({ chart, scope = null, value = null, label = '' }) {
             'Click a ticket number to open it, with its parent, children and other linked tickets.</p>' +
             starAllHtml(tickets.map(t => t.number)) + ticketTableHtml(tickets) + ticketDownloadHtml(tickets, title);
     } catch (err) {
-        if (run === drillRun) body.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        if (run === drillRun) body.innerHTML = `<p class="home-status error">${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -22882,7 +23045,7 @@ async function saveChartTo(chart, dest) {
         prefs.home.blocks.push({ type: 'chart', chart });
         renderHomeLayout();
         savePreference('home');
-        showToast(`📌 "${chartTitle(chart)}" is saved on your Home page`);
+        showToast(`"${chartTitle(chart)}" is saved on your Home page`);
         return;
     }
     let board = prefs.dashboards.boards.find(b => b.id === dest);
@@ -22905,7 +23068,7 @@ async function saveChartTo(chart, dest) {
     if (currentBoardId === board.id) renderBoard();
     savePreference('dashboards');
     updateShareSoon(board);
-    showToast(`📌 "${chartTitle(chart)}" is saved on your dashboard "${board.name}"`);
+    showToast(`"${chartTitle(chart)}" is saved on your dashboard "${board.name}"`);
 }
 
 // ---------------------------------------------------------------------
@@ -22955,7 +23118,7 @@ async function putShare(board, quiet = false) {
         paintShareButton();
         return data.token;
     } catch (err) {
-        if (!quiet) showToast(`❌ ${err.message}`);
+        if (!quiet) showToast(`${err.message}`, 'error');
         return null;
     }
 }
@@ -23013,7 +23176,7 @@ async function stopSharing(board, quiet = false) {
         document.getElementById('share-dialog').close();
         if (!quiet) showToast(`"${board.name}" is no longer shared`);
     } catch (err) {
-        showToast(`❌ ${err.message}`);
+        showToast(`${err.message}`, 'error');
     }
 }
 
@@ -23045,7 +23208,7 @@ async function openSharedLink() {
         const scope = share.scope && (share.scope.dates?.preset !== 'all' || share.scope.teams?.length) ? share.scope : null;
         grid.querySelectorAll('.chart-tile').forEach((tile, i) => fillTile(tile, share.charts[i], false, scope));
     } catch (err) {
-        showToast(`❌ ${err.message}`);
+        showToast(`${err.message}`, 'error');
     }
     return true;
 }
@@ -23091,13 +23254,13 @@ const TOUR_STEPS = [
     { target: '#nav-ask', title: 'Ask anything about the data',
         text: 'Type a question in plain English here, on any page, like "How many open incidents are there by priority?", and press Enter. Claude answers in a chat over the page, with tables you can switch to a chart, download (also as a picture), or save to a dashboard. With nothing typed, the button opens your chat; a click anywhere outside the chat closes it. Press / to jump here.' },
     { target: '[data-block="tickets"]', title: 'Your tickets',
-        text: 'The tickets assigned to you, as a list and in charts (📊 My charts), and every ticket the AI assistant shows you in Ticket results. Click ☆ to star one. Every list has a 🔍 box to look up its tickets by any of its columns.' },
+        text: 'The tickets assigned to you, as a list and in charts (My charts), and every ticket the AI assistant shows you in Ticket results. Click ☆ to star one. Every list has a 🔍 box to look up its tickets by any of its columns.' },
     { target: '#customize-home-btn', title: 'Make Home yours',
         text: 'Move or hide these sections, and add charts of your own.' },
     { target: '.tab-btn[data-tab="dashboard"]', title: 'Dashboards: the team\'s and yours',
         text: 'The team dashboards, plus ones you build: ☰ Dashboards, then ＋ New dashboard. Click any bar or slice to see its tickets, filter a whole dashboard by team or date, and share it with a link. It has its own short tour the first time you open it.' },
     { target: '#theme-btn', title: 'Your colors',
-        text: 'Light or dark, your own accent color, and the header\'s color. "❔ Tour" on Home shows this tour again.' },
+        text: 'Light or dark, your own accent color, and the header\'s color. "Tour" on Home shows this tour again.' },
 ];
 
 // drawer: the step is inside the ☰ Dashboards drawer (open it) or not (close it).
@@ -23119,7 +23282,7 @@ const DASHBOARDS_TOUR_STEPS = [
     { target: '#board-view .board-bar', drawer: false, title: 'Your dashboard',
         text: 'Add charts, share it with a link, rename or delete it. Click a bar or slice to list its tickets.' },
     { target: '#dashboard-tour-btn', drawer: false, title: 'This tour again',
-        text: '❔ Tour shows this tour again any time. Home has its own, under ❔ Tour there.' },
+        text: 'Tour shows this tour again any time. Home has its own, under Tour there.' },
 ];
 
 // Each tour: its steps, its page, and its flag in prefs.tour
@@ -23448,7 +23611,7 @@ async function loadFamilies(more = false, quiet = false) {
         }
         paintFamiliesMore();
     } catch (err) {
-        if (run === familiesState.run) list.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        if (run === familiesState.run) list.innerHTML = `<p class="home-status error">${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -23536,7 +23699,7 @@ async function toggleFamilyRow(row) {
         box.innerHTML = relatedHtml([data.family], new Set([row.dataset.anchor]));
         forgetRemovedExports();
     } catch (err) {
-        if (box.isConnected) box.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        if (box.isConnected) box.innerHTML = `<p class="home-status error">${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -23564,7 +23727,7 @@ async function findFamilies(number) {
             if (data.families.length === 1) toggleFamilyRow(list.querySelector('tr.family-row'));
         }
     } catch (err) {
-        if (run === familiesState.run) list.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        if (run === familiesState.run) list.innerHTML = `<p class="home-status error">${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -23647,7 +23810,7 @@ async function openTicketDialog(number, { back = false } = {}) {
         }
         forgetRemovedExports();
     } catch (err) {
-        if (run === ticketDialogRun) body.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        if (run === ticketDialogRun) body.innerHTML = `<p class="home-status error">${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -23700,7 +23863,7 @@ async function showRecordFamily(number) {
     body.innerHTML = '';
     toggle.hidden = true;
     if (!number) return;
-    summary.textContent = `👪 Looking for ${number}'s parent, children and other linked tickets…`;
+    summary.textContent = `Looking for ${number}'s parent, children and other linked tickets…`;
     try {
         const response = await fetch(`${API_BASE}/api/tickets/related`, {
             method: 'POST',
@@ -23712,16 +23875,16 @@ async function showRecordFamily(number) {
         if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
         if (run !== recordFamily.run) return;
         if (!data.families.length) {
-            summary.textContent = `👪 ${number} has no parent, child or other linked tickets.`;
+            summary.textContent = `${number} has no parent, child or other linked tickets.`;
             return;
         }
-        summary.innerHTML = `<b>👪 ${escapeHtml(number)}'s family:</b> ${escapeHtml(data.families.map(f => f.title).join(' · '))}`;
+        summary.innerHTML = `<b>${escapeHtml(number)}'s family:</b> ${escapeHtml(data.families.map(f => f.title).join(' · '))}`;
         body.innerHTML = relatedHtml(data.families, new Set([number]));
         forgetRemovedExports();
         toggle.hidden = false;
         paintRecordFamily();
     } catch (err) {
-        if (run === recordFamily.run) summary.textContent = `👪 Couldn't look for ${number}'s family: ${err.message}`;
+        if (run === recordFamily.run) summary.textContent = `Couldn't look for ${number}'s family: ${err.message}`;
     }
 }
 
@@ -25111,7 +25274,7 @@ async function loadTeams() {
         }
         renderTeams();
     } catch (err) {
-        box.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        box.innerHTML = `<p class="home-status error">${escapeHtml(err.message)}</p>`;
         console.error(err);
     }
 }
@@ -25141,7 +25304,7 @@ async function refreshTeamCounts() {
 
 function youLine(team) {
     if (currentAccess.admin) return 'You\'re an admin: you see every team and every ticket, put people on teams, and move families between them. ' +
-        '📥 Not assigned yet shows every ticket nobody has, on a team or on none.';
+        'Not assigned yet shows every ticket nobody has, on a team or on none.';
     if (!team) return 'You\'re not on a team yet, so no tickets are assigned to you. An admin can add you to one.';
     if (currentAccess.role === 'project_manager') return `You're the project manager of ${team.name}: you see all of its tickets, hand them out, and see who's working on what.`;
     return `You're on ${team.name} as ${roleName(currentAccess.role).toLowerCase()}. You see the tickets assigned to you, ` +
@@ -25152,9 +25315,9 @@ function renderTeams() {
     const { data } = teamsView;
     const team = currentTeam();
     const box = document.getElementById('teams');
-    let html = `<div class="home-head"><h2 class="home-welcome">👥 ${currentAccess.admin ? 'Teams' : escapeHtml(team?.name || 'Your team')}</h2></div>` +
+    let html = `<div class="home-head"><h2 class="home-welcome">${currentAccess.admin ? 'Teams' : escapeHtml(team?.name || 'Your team')}</h2></div>` +
         `<p class="home-status">${escapeHtml(youLine(team))}</p>`;
-    if (canSeeStatuses()) html += '<section class="team-card" id="ticket-statuses"><h3>✅ Resolved or closed</h3><p class="home-status">Loading…</p></section>';
+    if (canSeeStatuses()) html += '<section class="team-card" id="ticket-statuses"><h3>Resolved or closed</h3><p class="home-status">Loading…</p></section>';
     if (currentAccess.admin) html += `<div class="team-picker" id="team-picker">${teamPickerHtml()}</div>`;
     if (showingUnassigned()) {
         html += unassignedCardHtml();
@@ -25276,7 +25439,7 @@ async function loadTeamTickets(quiet = false) {
         const all = document.querySelector('#teams .team-select-all');
         if (all) all.checked = false;
     } catch (err) {
-        if (run === teamsView.run) out.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        if (run === teamsView.run) out.innerHTML = `<p class="home-status error">${escapeHtml(err.message)}</p>`;
         console.error(err);
     }
 }
@@ -25346,7 +25509,7 @@ function teamTicketsHtml(team, data) {
 function reportLineHtml(report) {
     if (!report) return '';
     const note = String(report.note || '');
-    return `<div class="team-report"${note ? ` title="${escapeHtml(note)}"` : ''}>✅ ` +
+    return `<div class="team-report"${note ? ` title="${escapeHtml(note)}"` : ''}>` +
         // An admin or project manager who set the status themselves (Resolved or closed)
         (report.mine ? (canSeeStatuses() ? `You set it to ${escapeHtml(report.status)}` : `You told your project manager you ${escapeHtml(report.status)} it`)
             : `${escapeHtml(report.by || 'Someone')} says it's ${escapeHtml(report.status)}`) +
@@ -25424,7 +25587,7 @@ async function findFamily(number) {
                 personPickerHtml(f.team.id, undefined, `Give the family to someone on ${f.team.name}`,
                     { placeholder: 'Type a name…', attrs: `data-family="${escapeHtml(f.id)}" data-family-size="${f.size}"` }) + '</div>' : '');
     } catch (err) {
-        out.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        out.innerHTML = `<p class="home-status error">${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -25464,7 +25627,7 @@ function unassignedCardHtml() {
     const f = teamsView.filter.team;
     const teamOptions = `<option value=""${f ? '' : ' selected'}>Any team, or none</option><option value="none"${f === 'none' ? ' selected' : ''}>No team</option>` +
         teamsView.data.teams.map(t => `<option value="${t.id}"${String(t.id) === f ? ' selected' : ''}>${escapeHtml(t.name)}</option>`).join('');
-    return `<section class="team-card"><h3>📥 Not assigned yet</h3>` +
+    return `<section class="team-card"><h3>Not assigned yet</h3>` +
         `<p class="home-status" id="unassigned-summary">${unassignedSummaryHtml()}</p>` +
         `<div class="team-filters"><label>Team <select id="team-filter-team">${teamOptions}</select></label>${kindFilterHtml()}</div>` +
         // Any of the list's columns; the server looks through every ticket nobody has
@@ -25494,7 +25657,7 @@ function familyGroupHtml(f) {
             .map(t => `<option value="${t.id}">${escapeHtml(t.name)}${t.test ? ' (test team)' : ''}</option>`).join('') +
         `</select></label><button type="button" class="home-action" data-group-move="${id}" data-family-size="${f.size}" data-family-unassigned="${f.unassigned}">Move</button>`;
     return `<tr class="family-group"><td colspan="7"><div class="family-group-head">` +
-        `<div class="family-group-what"><span>👪 <button type="button" class="ticket-link" data-ticket="${id}" title="Open ${id}: its record and family">${id}</button>` +
+        `<div class="family-group-what"><span><button type="button" class="ticket-link" data-ticket="${id}" title="Open ${id}: its record and family">${id}</button>` +
         (f.size > 1 && f.summary ? ` <span class="family-group-summary">${escapeHtml(f.summary.length > 90 ? `${f.summary.slice(0, 87)}…` : f.summary)}</span>` : '') + '</span>' +
         `<span class="family-group-meta">${what} · ${nobody} · ${f.team ? `on ${escapeHtml(f.team.name)}` : '<strong>on no team</strong>'}</span></div>` +
         `<div class="family-group-do">${give}${move}</div></div></td></tr>`;
@@ -25583,7 +25746,7 @@ async function loadTicketStatuses() {
         restoreSorts(box);
         applyLookups(box);
     } catch (err) {
-        if (box.isConnected) box.innerHTML = `<h3>✅ Resolved or closed</h3><p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        if (box.isConnected) box.innerHTML = `<h3>Resolved or closed</h3><p class="home-status error">${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -25591,7 +25754,7 @@ function ticketStatusesHtml(tickets) {
     const admin = currentAccess.admin;
     const heads = STATUS_HEADS.filter(h => admin || h !== 'Team');
     const where = admin ? 'on every team' : `on ${escapeHtml(currentAccess.team?.name || 'your team')}`;
-    let html = '<h3>✅ Resolved or closed</h3><p class="home-status">' + (tickets.length
+    let html = '<h3>Resolved or closed</h3><p class="home-status">' + (tickets.length
         ? `${howMany(tickets.length, 'ticket', 'tickets')} ${where} that someone said they resolved or closed, newest first. Change one's status with its menu; ` +
           '"Open" takes the status away. Only OneTouch\'s record changes, never the ticket\'s data.'
         : `Nobody has said they resolved or closed a ticket ${where} yet. When someone does, it shows here.`) + '</p>';
@@ -25605,7 +25768,7 @@ function ticketStatusesHtml(tickets) {
             `<td>${escapeHtml(t.type || capitalize(KIND_NOUNS[blank.kind]?.[0] || 'ticket'))}</td>` +
             `<td>${t.summary ? escapeHtml(t.summary) : blankHtml('Summary', blank)}</td>` +
             `<td>${t.state ? escapeHtml(t.state) : blankHtml('State', blank)}</td>` +
-            `<td><span class="status-tag">✅ ${STATUS_NAMES[t.status]}</span>` +
+            `<td><span class="status-tag">${STATUS_NAMES[t.status]}</span>` +
             (t.note ? `<span class="team-report-note">“${escapeHtml(t.note)}”</span>` : '') + '</td>' +
             `<td>${escapeHtml(t.by || 'Someone')}</td>` +
             `<td data-sort="${escapeHtml(t.at)}">${escapeHtml(formatShownAt(t.at))}</td>` +
@@ -25633,12 +25796,12 @@ async function changeTicketStatus(select) {
     try {
         const data = await teamsFetch(`/api/ticket-statuses/${encodeURIComponent(number)}`, { method: 'PUT', body: JSON.stringify({ status }) });
         if (!data) return;
-        showToast(status === 'open' ? `↩ ${number} is open again` : `✅ ${number} is ${STATUS_NAMES[status].toLowerCase()} now`);
+        showToast(status === 'open' ? `${number} is open again` : `${number} is ${STATUS_NAMES[status].toLowerCase()} now`);
         afterStatusChange();
     } catch (err) {
         select.value = before;
         select.disabled = false;
-        showToast(`❌ ${err.message}`);
+        showToast(`${err.message}`, 'error');
     }
 }
 
@@ -25663,7 +25826,7 @@ function presentationHtml() {
         : d.onTeam || d.assigned ? `${howMany(d.tickets, '[Demo] ticket', '[Demo] tickets')}: ${d.onTeam.toLocaleString()} on a team, ${d.assigned.toLocaleString()} assigned to someone.`
             : `The ${howMany(d.tickets, '[Demo] ticket is', '[Demo] tickets are')} on no team and assigned to nobody, ready to hand out.`;
     const statuses = p.statuses ? `${howMany(p.statuses, 'ticket has', 'tickets have')} a status (someone said they resolved or closed it).` : 'No ticket has a status.';
-    return '<h3>🎬 Before a presentation</h3>' +
+    return '<h3>Before a presentation</h3>' +
         '<p class="home-status">Puts things back the way a presentation starts. Every real ticket stays on its team, by family, as it is now.</p>' +
         '<ul class="presentation-steps">' +
         `<li><span>${escapeHtml(statuses)}</span><button type="button" class="home-action danger" data-undo-statuses="${p.statuses}"${p.statuses ? '' : ' disabled'}>↩ Undo every status</button></li>` +
@@ -25673,14 +25836,14 @@ function presentationHtml() {
 
 async function undoAllStatuses(count) {
     if (!confirm(`Undo every status? The ${howMany(count, 'ticket', 'tickets')} someone said they resolved or closed go back to having no status, ` +
-        'and the 🔔 notifications that told project managers about them go too. This can\'t be undone.')) return;
+        'and the notifications that told project managers about them go too. This can\'t be undone.')) return;
     try {
         const data = await teamsFetch('/api/ticket-statuses/undo-all', { method: 'POST', body: '{}' });
         if (!data) return;
-        showToast(`↩ Undid the status of ${howMany(data.tickets, 'ticket', 'tickets')}`);
+        showToast(`Undid the status of ${howMany(data.tickets, 'ticket', 'tickets')}`);
         afterStatusChange();
     } catch (err) {
-        showToast(`❌ ${err.message}`);
+        showToast(`${err.message}`, 'error');
     }
 }
 
@@ -25690,10 +25853,10 @@ async function resetDemoTickets(count) {
     try {
         const data = await teamsFetch('/api/demo-tickets/reset', { method: 'POST', body: '{}' });
         if (!data) return;
-        showToast(`🧹 The ${howMany(data.tickets, '[Demo] ticket is', '[Demo] tickets are')} back on no team, assigned to nobody`);
+        showToast(`The ${howMany(data.tickets, '[Demo] ticket is', '[Demo] tickets are')} back on no team, assigned to nobody`);
         loadTeams();
     } catch (err) {
-        showToast(`❌ ${err.message}`);
+        showToast(`${err.message}`, 'error');
     }
 }
 
@@ -25907,7 +26070,7 @@ replacing that.
   "[Demo]" tickets in 5 families (numbers `…99000xx`, outside the export) on no
   team, ready to move to the Brewers live; running it again resets them, and
   `db/demo-tickets-remove.sql` removes them (restart the app after either).
-  Without a restart, an admin's **🎬 Before a presentation** card (Team tab)
+  Without a restart, an admin's **Before a presentation** card (Team tab)
   puts them back (`POST /api/demo-tickets/reset`, `teams.resetDemoTickets`: no
   team, nobody, and their statuses, notifications, stars and ticket results
   gone) and undoes every status (`POST /api/ticket-statuses/undo-all`,
@@ -25987,13 +26150,19 @@ one function, so its names can't clash with the other page scripts.
 **🧊 Architecture** (`architecture.mjs`, `public/architecture.js`, the 🧊 in the header,
 admins only): a 3D map of how OneTouch is built, drawn with three.js (unchanged, in
 `public/vendor/three-0.186.1/`, loaded the first time an admin opens the map), with the same
-content in a list for screen readers and browsers that can't draw 3D. `public/` can be read
+content in a list for screen readers. **🗺️ 2D** (`buildPlanView`, no three.js) draws the same
+blocks, links, flows and health on a flat sheet, with each block's `doing` sentence and each link's
+label written on it; browsers that can't draw 3D get it. It and the 3D scene answer to the same calls
+(`scene()`), so the page's buttons and steps don't care which is showing. `public/` can be read
 without signing in, so everything the map says is in `architecture.mjs` and comes from
 `GET /api/architecture` (401 signed out, 403 for anyone who isn't an admin); the page's
 script only draws. Versions are read from `package-lock.json` and `docker-compose.yml`.
 `checks/architecture.mjs` (`npm test`) fails if a file the map names is gone, a link or a
-flow's step doesn't join real blocks, a container in `docker-compose.yml` isn't on it, or the
-map's facts appear in `public/`: **a new container or service goes in `NODES`.**
+flow's step doesn't join real blocks, a container in `docker-compose.yml` isn't on it, the
+map's facts appear in `public/`, or the 2D drawing doesn't add up (a block with no `plan` or `doing`, two
+blocks overlapping, a `route` that doesn't start and end on its own blocks or runs through another):
+**a new container or service goes in `NODES`, with its place on the sheet, and its links get a `route`
+and `labelAt`.**
 **The ServiceNow live push is on it as built, but needing ServiceNow's authentication:** a
 dashed amber path that stops at a locked gate, and a "What happens when…" that animates it
 (nothing is sent). It says so until this server really hears a record (`servicenowPush` in
@@ -26022,7 +26191,7 @@ minute). Each one is saved in the same transaction as the change it reports:
   ticket's record and on its row in the Team tab): their project manager is
   told, and the Team tab shows it under the ticket's state. This is only a
   message (`ticket_reports`): the ticket's data never changes. The Team tab's
-  **✅ Resolved or closed** (`GET /api/ticket-statuses`, `teams.ticketStatuses`)
+  **Resolved or closed** (`GET /api/ticket-statuses`, `teams.ticketStatuses`)
   lists each ticket whose latest report is resolved or closed: every team's for
   admins, a project manager's own team's. They change it
   (`PUT /api/ticket-statuses/:number`, `teams.setTicketStatus`): resolved or
@@ -26362,7 +26531,7 @@ async function checkNotifications() {
             renderNotifications();
             markNotificationsRead();
         }
-        if (fresh.length) showToast(fresh.length === 1 ? `🔔 ${notificationText(fresh[0])}` : `🔔 ${fresh.length} new notifications`);
+        if (fresh.length) showToast(fresh.length === 1 ? `${notificationText(fresh[0])}` : `${fresh.length} new notifications`);
         // New tickets for them: Home's "Assigned to me" catches up if it's showing
         if (fresh.some(n => n.kind === 'assigned') && homeMode === 'assigned'
             && document.getElementById('home-view').classList.contains('active')) showAssigned(true);
@@ -26450,10 +26619,10 @@ document.getElementById('notify-email-on').addEventListener('change', async e =>
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
         paintEmailSetting(data.email);
-        showToast(on ? `✉️ Your notifications will be emailed to ${data.email.address} too` : '✉️ No more notification emails; they still show here');
+        showToast(on ? `Your notifications will be emailed to ${data.email.address} too` : 'No more notification emails; they still show here');
     } catch (err) {
         paintEmailSetting();
-        showToast(`❌ ${err.message}`);
+        showToast(`${err.message}`, 'error');
     }
 });
 
@@ -26534,7 +26703,7 @@ async function clearNotifications(ids) {
         if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
     } catch (err) {
         Object.assign(notifyState, before);
-        showToast(`❌ ${err.message}`);
+        showToast(`${err.message}`, 'error');
         checkNotifications(); // the list as the server has it
     }
 }
@@ -26632,7 +26801,7 @@ document.querySelector('#report-dialog form').addEventListener('submit', async e
         // The Team tab shows it next to the ticket
         if (document.getElementById('teams-view').classList.contains('active')) loadTeamTickets();
     } catch (err) {
-        error.textContent = `❌ ${err.message}`;
+        error.textContent = `${err.message}`;
         error.hidden = false;
     } finally {
         send.disabled = false;
@@ -26677,7 +26846,7 @@ document.querySelector('#issue-dialog form').addEventListener('submit', async e 
         document.getElementById('issue-dialog').close();
         showToast('✓ Your report went to the admins. Thank you.');
     } catch (err) {
-        error.textContent = `❌ ${err.message}`;
+        error.textContent = `${err.message}`;
         error.hidden = false;
     } finally {
         send.disabled = false;
@@ -27755,7 +27924,7 @@ export function emailFor(n, cfg = mailConfig()) {
   } else if (n.kind === 'issue') {
     // The kind of problem only: what they wrote stays behind the sign-in
     what = `${who} reported a problem with OneTouch: ${d.label}`;
-    where = 'Read it and mark it resolved in OneTouch, on the 🧊 Architecture page, under 📣 Reports.';
+    where = 'Read it and mark it resolved in OneTouch, on the Architecture page, under Reports.';
   } else {
     what = `${who} sent you a notification`;
     where = 'See it under the 🔔 in OneTouch.';
@@ -28160,9 +28329,18 @@ CREATE TABLE IF NOT EXISTS servicenow_pending (
     UNIQUE (table_name, record_key)
 );
 
--- The account the listener uses needs, in analytics_db: SELECT, INSERT and
--- UPDATE on the six ticket tables, and all of these on servicenow_pending;
--- in onetouch_auth: what OneTouch's own account (onetouch_app) has.
+-- The account the listener uses (PGUSER in its .env). Nothing in this repo
+-- makes it, so make it first. Run these on analytics_db once this table exists,
+-- with the account's name in place of servicenow_sync if it's different:
+--
+--   GRANT SELECT, INSERT, UPDATE ON incident, change_request, sc_req_item, sc_task,
+--     change_approvals, ritm_approvals TO servicenow_sync;
+--   GRANT SELECT, INSERT, UPDATE, DELETE ON servicenow_pending TO servicenow_sync;
+--   GRANT USAGE ON SEQUENCE servicenow_pending_id_seq TO servicenow_sync;
+--
+-- DELETE is how a record stops waiting, and it runs after every record saved.
+-- USAGE is what lets a record start waiting (the table numbers its rows).
+-- In onetouch_auth it uses OneTouch's own account, onetouch_app (AUTH_DB_USER).
 ```
 
 <a id="b68"></a>
@@ -28596,7 +28774,11 @@ export async function upsertRecord(table, record) {
 
 import { analytics } from '../config/db.js';
 
+// Looked for first: asking to create it is refused without the right to create
+// tables, even when it's already there, and db/schema.sql is the usual way it's made
 export async function ensurePendingTable() {
+  const { rows: [{ found }] } = await analytics.query(`SELECT to_regclass('servicenow_pending') IS NOT NULL AS found`);
+  if (found) return;
   await analytics.query(`
     CREATE TABLE IF NOT EXISTS servicenow_pending (
       id bigserial PRIMARY KEY, table_name text NOT NULL, record_key text NOT NULL, record jsonb NOT NULL,
@@ -29021,7 +29203,10 @@ curl -i -X POST http://localhost:8090/api/v1/servicenow-webhook \
 ## Checklist for go-live
 
 - [ ] `db/schema.sql` run on analytics_db (or the listener allowed to make `servicenow_pending`)
-- [ ] An account for the listener with SELECT, INSERT and UPDATE on the six tables
+- [ ] An account for the listener, made by hand (nothing in this repo makes it), with
+      the rights at the end of `db/schema.sql`: SELECT, INSERT and UPDATE on the six
+      tables; those and DELETE on `servicenow_pending`; USAGE on its sequence
+- [ ] In the same `.env`, `AUTH_DB_*` set to OneTouch's own account (`onetouch_app`)
 - [ ] `.env` filled in on the listener's server (never committed)
 - [ ] The listener reachable from ServiceNow over HTTPS (ServiceNow's cloud
       can't reach `localhost`; use a public host or a tunnel, and a MID Server
@@ -29677,12 +29862,12 @@ files.txt
         speakingPill.hidden = true;
     }
 
-    // "🔊 Reading… ⏹ Stop", while it reads
+    // "Reading… ⏹ Stop", while it reads
     const speakingPill = document.createElement('div');
     speakingPill.className = 'a11y-pill a11y-ui';
     speakingPill.setAttribute('role', 'status');
     speakingPill.hidden = true;
-    speakingPill.innerHTML = '<span>🔊 Reading aloud…</span><button type="button" class="a11y-pill-btn">⏹ Stop</button>';
+    speakingPill.innerHTML = '<span>Reading aloud…</span><button type="button" class="a11y-pill-btn">⏹ Stop</button>';
     speakingPill.querySelector('button').addEventListener('click', stopSpeaking);
 
     // An answer in the chat, as it's best heard: its words, and each table
@@ -29845,7 +30030,7 @@ files.txt
     listeningPill.className = 'a11y-pill a11y-pill-listening a11y-ui';
     listeningPill.setAttribute('role', 'status');
     listeningPill.hidden = true;
-    listeningPill.innerHTML = '<span>🎤 Listening… speak now</span><button type="button" class="a11y-pill-btn">⏹ Stop</button>';
+    listeningPill.innerHTML = '<span>Listening… speak now</span><button type="button" class="a11y-pill-btn">⏹ Stop</button>';
     listeningPill.querySelector('button').addEventListener('click', stopDictation);
 
     // 🎤 buttons: <button class="mic-btn" data-mic-for="the box's id">
@@ -29927,6 +30112,14 @@ files.txt
 // Names of settings only, never their values. Nothing here reads a secret.
 //
 // pos is [x, y, z] in the 3D scene: y is the floor, x runs left to right.
+//
+// The 2D view is the same map on a flat sheet (PLAN is its size). A block's
+// plan is [x, y, width, height] and doing is the sentence written on it; a
+// link's route is the line's corners, from the block it starts at to the one
+// it ends at, and labelAt is [x, y, width] for its label's center; a layer's
+// band is [x, y, width, height] and bandLabel [x, y, width]. The checks hold
+// these up too: lines must be straight runs that start and end on their own
+// blocks and go through no other.
 // =====================================================================
 
 import { readFileSync } from 'node:fs';
@@ -29934,25 +30127,35 @@ import { readFileSync } from 'node:fs';
 // Which floor of the stack, top to bottom. color: a --series-* in style.css
 export const LAYERS = [
   { id: 'people', name: 'People', color: 'series-1', y: 22.5, plate: [7, 4.5],
+    band: [262,6,1060,92], bandLabel: [272,10,300],
     hint: 'Where people use it: a web page, with nothing to install.' },
   { id: 'edge', name: 'Edge', color: 'series-7', y: 18, plate: [7, 4.5],
+    band: [278,122,1028,84], bandLabel: [288,126,280],
     hint: 'How the page reaches the server from the internet.' },
   { id: 'app', name: 'Application', color: 'series-3', y: 12, plate: [9, 6],
+    band: [278,218,1028,322], bandLabel: [288,221,340],
     hint: 'The Node server and what it is made of. Every permission is decided here.' },
   { id: 'semantic', name: 'Semantic layer and dashboards', color: 'series-2', y: 6, plate: [9, 6],
+    band: [278,586,1028,152], bandLabel: [288,696,305],
     hint: 'Cube turns queries into SQL. Metabase draws the dashboards.' },
   { id: 'data', name: 'Data', color: 'series-4', y: 0, plate: [9, 6],
+    band: [278,744,1028,222], bandLabel: [288,748,300],
     hint: 'One Postgres server with two separate databases.' },
   { id: 'outside', name: 'Outside services', color: 'series-5', y: null,
+    band: [16,118,216,400], bandLabel: [24,122,200],
     hint: 'Services run by someone else, reached over HTTPS.' },
   { id: 'push', name: 'ServiceNow live push', color: 'warn', y: null,
-    hint: 'Built, and waiting on ServiceNow authentication.' },
+    band: [1388,232,240,692], bandLabel: [1398,236,220],
+    hint: 'Built, and waiting on ServiceNow authentication.',
+    openHint: 'Records with the right token are reaching this server.' },
 ];
 
 export const NODES = [
   // ---- People ----
   {
     id: 'browser', name: 'OneTouch page', layer: 'people', shape: 'screen', pos: [0, 22.5, 0], big: true,
+    plan: [582, 18, 420, 72],
+    doing: 'Shows Home, Dashboards, Team and the AI chat, and calls the server with the session token.',
     tech: 'Plain JavaScript, no build step',
     what: 'The whole interface: Home, Dashboards, Team, the AI assistant and this map. One page, written in plain JavaScript and CSS with no framework, so a change only needs a browser refresh.',
     facts: [
@@ -29962,12 +30165,14 @@ export const NODES = [
       ['Other way in', 'Remote mode (remote.mjs) serves this page from a clone and forwards /api to the server'],
     ],
     secure: 'Holds no permissions of its own: anything it hides is also refused by the server. Scripts can only load from OneTouch itself (the Content-Security-Policy in server.mjs).',
-    files: ['public/index.html', 'public/app.js', 'public/charts.js', 'public/customize.js', 'public/families.js', 'public/teams.js', 'public/notifications.js', 'public/accessibility.js', 'public/architecture.js', 'public/style.css', 'remote.mjs'],
+    files: ['public/index.html', 'public/app.js', 'public/charts.js', 'public/customize.js', 'public/families.js', 'public/teams.js', 'public/notifications.js', 'public/accessibility.js', 'public/lookup.js', 'public/picker.js', 'public/sorting.js', 'public/architecture.js', 'public/style.css', 'remote.mjs'],
   },
 
   // ---- Edge ----
   {
     id: 'tunnel', name: 'Cloudflare Tunnel', layer: 'edge', shape: 'ring', pos: [0, 18, 0], big: true,
+    plan: [582, 128, 420, 72],
+    doing: 'Carries traffic from the public https address to the Node server, with no port open to the network.',
     tech: 'cloudflared', image: 'cloudflare/cloudflared',
     what: 'The only way in from the internet. cloudflared makes an outgoing connection to Cloudflare, so no port on this computer is open to the network. Cloudflare provides the https address.',
     facts: [
@@ -29983,6 +30188,8 @@ export const NODES = [
   // ---- Application ----
   {
     id: 'express', name: 'Node server', layer: 'app', shape: 'server', pos: [0, 12, 0], big: true,
+    plan: [642, 250, 300, 92],
+    doing: 'Serves the page and API, checks the session on each request, and works out which tickets that person may see.',
     tech: 'Node.js and Express', npm: 'express', runtime: true,
     what: 'The center of OneTouch. It serves the page and the API, checks who is signed in, and works out which tickets each person may see before anything else runs.',
     facts: [
@@ -29992,10 +30199,12 @@ export const NODES = [
       ['Listens for', 'Postgres channel onetouch_tickets_changed (what the ServiceNow push announces on)'],
     ],
     secure: 'A session token is required on every OneTouch API route except sign-in. This page\'s data has one more check: admins only.',
-    files: ['server.mjs', 'Dockerfile', 'architecture.mjs'],
+    files: ['server.mjs', 'Dockerfile', 'architecture.mjs', 'health.mjs'],
   },
   {
     id: 'auth', name: 'Sign-in', layer: 'app', shape: 'module', pos: [-3.3, 12, -4.2],
+    plan: [730, 404, 160, 122],
+    doing: 'Checks passwords against scrypt hashes and manages 12-hour sessions.',
     tech: 'Node crypto: scrypt and SHA-256',
     what: 'Accounts and sessions. Passwords are kept only as salted scrypt hashes, and session tokens only as their SHA-256.',
     facts: [
@@ -30008,6 +30217,8 @@ export const NODES = [
   },
   {
     id: 'teams', name: 'Teams and permissions', layer: 'app', shape: 'module', pos: [5.4, 12, -4.2],
+    plan: [900, 404, 160, 122],
+    doing: 'Holds teams and assignments, and limits each person\'s queries to their tickets.',
     tech: 'teams.mjs',
     what: 'Decides what each person sees. Teams, roles, ticket families and assignments live here, and restrictQuery adds "ticket number is one of theirs" to every Cube query for anyone who isn\'t an admin.',
     facts: [
@@ -30015,12 +30226,15 @@ export const NODES = [
       ['Project managers', 'See every ticket of their team'],
       ['Everyone else on a team', 'See only the tickets assigned to them'],
       ['Families', 'Tickets linked to each other stay on one team and are never split'],
+      ['Its own Cube queries', 'Ticket links at the first start, and whether an AI answer left out tickets the person can\'t see. That second one only ever gives true or false'],
     ],
     secure: 'Enforced on the server: the AI assistant, search, records, families, charts and dashboards all go through it.',
     files: ['teams.mjs'],
   },
   {
     id: 'ai', name: 'AI translator', layer: 'app', shape: 'module', pos: [-6.6, 12, -2],
+    plan: [292, 404, 170, 122],
+    doing: 'Has Claude turn a question into a query, then checks every field of it.',
     tech: 'Anthropic SDK', npm: '@anthropic-ai/sdk',
     what: 'Turns a plain-English question into a Cube query with Claude, then checks that query field by field. When a query comes back empty, it works out why.',
     facts: [
@@ -30029,10 +30243,12 @@ export const NODES = [
       ['Refused early', 'A question naming only tickets the person can\'t see never reaches Claude'],
     ],
     secure: 'Claude returns a query, and has no connection to the database. The query then runs with the person\'s own limits added.',
-    files: ['business_logic.mjs', 'empty_results.mjs', 'BUSINESS_LOGIC.md'],
+    files: ['server.mjs', 'business_logic.mjs', 'empty_results.mjs', 'BUSINESS_LOGIC.md'],
   },
   {
     id: 'notify', name: 'Notifications and email', layer: 'app', shape: 'module', pos: [-6.6, 12, 2.2],
+    plan: [1092, 250, 200, 92],
+    doing: 'Saves each 🔔 with its change, emails it from the outbox, and takes 🚩 reports.',
     tech: 'notifications.mjs and mail.mjs',
     what: 'The 🔔 in the header, the same notification by email, and the 🚩 problem reports people send the admins. Each is saved in the same transaction as the change it reports, and emails go out from that outbox after the change commits.',
     facts: [
@@ -30044,6 +30260,8 @@ export const NODES = [
   },
   {
     id: 'tickets', name: 'Tickets, KPIs and charts', layer: 'app', shape: 'module', pos: [-1.9, 12, 4.3],
+    plan: [472, 404, 170, 122],
+    doing: 'Runs search, records and families, and works out KPIs and charts.',
     tech: 'tickets, relations, kpis and charts modules',
     what: 'Ticket search and records, families, KPIs and the charts people build. Every ticket\'s summary and KPI fields are read from Cube once at start, and read again when tickets change.',
     facts: [
@@ -30055,6 +30273,8 @@ export const NODES = [
   },
   {
     id: 'export', name: 'Downloads', layer: 'app', shape: 'module', pos: [3, 12, 4.3],
+    plan: [292, 250, 200, 92],
+    doing: 'Turns result tables into PDF, Word, Excel, CSV, text or RTF, or bundles them.',
     tech: 'pdfmake, docx, exceljs and 7-Zip',
     what: 'Turns result tables into PDF, Word, Excel, CSV, text and RTF files, and bundles them as .zip or .7z.',
     facts: [
@@ -30066,6 +30286,8 @@ export const NODES = [
   },
   {
     id: 'prefs', name: 'Personal settings', layer: 'app', shape: 'module', pos: [6.8, 12, 0],
+    plan: [1070, 404, 160, 122],
+    doing: 'Saves each person\'s colors, Home, stars, results, shares and chats.',
     tech: 'prefs, stars, seen, shares and chats modules',
     what: 'What belongs to one person: colors, Home layout and dashboards, starred tickets, ticket results, shared dashboards and saved chats.',
     facts: [
@@ -30078,6 +30300,8 @@ export const NODES = [
   // ---- Semantic layer and dashboards ----
   {
     id: 'cube', name: 'Cube', layer: 'semantic', shape: 'cube', pos: [-4.4, 6, 0], big: true,
+    plan: [292, 600, 340, 92],
+    doing: 'Turns each query from the app into SQL using the data model, and runs it read-only.',
     tech: 'Semantic layer', image: 'cubejs/cube',
     what: 'The data model. It knows what an incident, a change and a request are, and turns a query from the app into SQL, so neither Claude nor the page ever writes SQL.',
     facts: [
@@ -30090,6 +30314,8 @@ export const NODES = [
   },
   {
     id: 'metabase', name: 'Metabase', layer: 'semantic', shape: 'bars', pos: [4.4, 6, 0], big: true,
+    plan: [645, 600, 240, 92],
+    doing: 'Draws the dashboard charts from the reporting views, showing only the viewer\'s tickets.',
     tech: 'Dashboards', image: 'metabase/metabase',
     what: 'Draws the dashboards in the Dashboards tab. It only listens on this computer, so its embedded pages reach people through the Node server.',
     facts: [
@@ -30105,6 +30331,8 @@ export const NODES = [
   // ---- Data ----
   {
     id: 'analytics_db', name: 'analytics_db', layer: 'data', shape: 'db', pos: [-5, 0, 0.6], big: true,
+    plan: [570, 792, 230, 110],
+    doing: 'Holds the ticket tables from the export, and the reporting views the dashboards read.',
     tech: 'PostgreSQL', image: 'postgres',
     what: 'The tickets: the six tables the ServiceNow export was loaded into, and the typed reporting views the dashboards read.',
     facts: [
@@ -30118,10 +30346,12 @@ export const NODES = [
   },
   {
     id: 'onetouch_auth', name: 'onetouch_auth', layer: 'data', shape: 'db', pos: [5, 0, 0.6], big: true,
+    plan: [905, 792, 395, 110],
+    doing: 'Holds accounts, sessions, teams, families, who has each ticket, notifications and each person\'s settings.',
     tech: 'PostgreSQL', image: 'postgres',
     what: 'OneTouch\'s own data, kept apart from the tickets: accounts and sessions, teams and families, who has each ticket, notifications, and each person\'s settings.',
     facts: [
-      ['Tables', 'users, sessions, teams, team_members, ticket_families, ticket_assignments, ticket_reports, notifications, user_preferences, starred_tickets, seen_tickets, shared_dashboards, saved_chats'],
+      ['Tables', 'users, sessions, teams, team_members, ticket_families, ticket_assignments, ticket_reports, notifications, issue_reports, user_preferences, starred_tickets, seen_tickets, shared_dashboards, saved_chats'],
       ['Role', 'onetouch_app, its own password (AUTH_DB_PASSWORD)'],
       ['Created by', 'The app on start (auth.mjs ensureSchema and each module\'s own tables)'],
     ],
@@ -30130,6 +30360,8 @@ export const NODES = [
   },
   {
     id: 'csv', name: 'ServiceNow export', layer: 'data', shape: 'sheets', pos: [-7, 0, -3.9],
+    plan: [292, 770, 160, 88],
+    doing: 'The one-time export, loaded on the database\'s first start.',
     tech: 'CSV files',
     what: 'Where the first tickets came from: a one-time export of ServiceNow, loaded on the database\'s first start. Until the ServiceNow push is authenticated, the data stays as it was exported.',
     facts: [
@@ -30141,6 +30373,8 @@ export const NODES = [
   },
   {
     id: 'db_setup', name: 'Database setup', layer: 'data', shape: 'module', pos: [0, 0, -4.2],
+    plan: [292, 864, 160, 100],
+    doing: 'On every compose up: creates what\'s missing, updates views and roles, exits.',
     tech: 'Runs and exits', image: 'postgres',
     what: 'A container that runs on every docker compose up and then exits. It creates what\'s missing, keeps passwords in step with .env, and updates the reporting views and read-only roles.',
     facts: [
@@ -30154,6 +30388,8 @@ export const NODES = [
   // ---- Outside services ----
   {
     id: 'claude', name: 'Claude API', layer: 'outside', shape: 'orb', pos: [-14.5, 15.5, -3], big: true,
+    plan: [28, 400, 192, 112],
+    doing: 'Reads a question and answers with a structured query. Also explains empty results.',
     tech: 'Anthropic',
     what: 'Reads a question with the system prompt (what the data holds) and answers with a structured query. It also explains why a query came back empty.',
     facts: [
@@ -30165,6 +30401,8 @@ export const NODES = [
   },
   {
     id: 'brevo', name: 'Brevo', layer: 'outside', shape: 'orb', pos: [-14.5, 9.5, 3], big: true,
+    plan: [28, 268, 192, 92],
+    doing: 'Delivers the notification emails, from notifications@onetouch.fyi.',
     tech: 'Transactional email',
     what: 'Sends the notification emails, from notifications@onetouch.fyi, through Brevo\'s API.',
     facts: [
@@ -30176,6 +30414,8 @@ export const NODES = [
   },
   {
     id: 'ci', name: 'GitHub Actions', layer: 'outside', shape: 'orb', pos: [-14.5, 22.5, -0.5],
+    plan: [28, 162, 192, 100],
+    doing: 'On each push: build checks, npm test and audit, then a fetch of the public address.',
     tech: 'Checks on every push',
     what: 'Runs the checks on every push: the syntax and README checks, npm test and a dependency audit, then fetches the public address to confirm the site is up.',
     facts: [
@@ -30189,17 +30429,21 @@ export const NODES = [
   // ---- The ServiceNow live push ----
   {
     id: 'servicenow', name: 'ServiceNow', layer: 'push', shape: 'orb', pos: [20.8, 12, 4.4], big: true, pending: true,
+    plan: [1400, 290, 216, 112],
+    doing: 'Once set up and authenticated, its Business Rules send each saved ticket or approval to OneTouch.',
     tech: 'Where the tickets really live',
     what: 'Once it\'s set up and authenticated, async Business Rules send every insert and update of an incident, change, requested item, catalog task and approval to OneTouch.',
     facts: [
       ['To set up there', 'A system property, one REST Message, one Script Include and five Business Rules'],
       ['Direction', 'ServiceNow calls OneTouch. OneTouch never signs in to ServiceNow'],
     ],
-    secure: 'Needs an admin on the ServiceNow instance, and the shared secret on both sides. See the 🔌 ServiceNow tab.',
+    secure: 'Needs an admin on the ServiceNow instance, and the shared secret on both sides. See the ServiceNow tab.',
     files: ['servicenow-sync/servicenow-blueprint.md'],
   },
   {
     id: 'gate', name: 'Authentication gate', layer: 'push', shape: 'gate', pos: [16.6, 12, 3.2], big: true, pending: true, between: ['servicenow', 'listener'],
+    plan: [1400, 500, 216, 140],
+    doing: 'Lets a call through only if X-Webhook-Token equals the shared secret. Anything else gets a 401.',
     tech: 'X-Webhook-Token',
     what: 'The check every call has to pass. The call must carry X-Webhook-Token equal to WEBHOOK_SECRET, compared in constant time. Without the right token the listener answers 401 and saves nothing.',
     facts: [
@@ -30211,6 +30455,8 @@ export const NODES = [
   },
   {
     id: 'listener', name: 'ServiceNow listener', layer: 'push', shape: 'listener', pos: [12.6, 12, 2], big: true, pending: true,
+    plan: [1400, 800, 216, 112],
+    doing: 'Saves one record per call in the export\'s tables, then puts each new ticket in its family and team.',
     tech: 'Express, its own process', pushNpm: 'express',
     what: 'A small server of its own that takes one record per call, saves it in the same tables the export filled, and puts each new ticket in its family by OneTouch\'s own rules.',
     facts: [
@@ -30219,7 +30465,7 @@ export const NODES = [
       ['Status', 'Built, in servicenow-sync/. Not in docker-compose.yml, so it\'s started on its own with npm start'],
       ['Answers', 'Straight away, then saves, so ServiceNow never waits'],
     ],
-    secure: 'Needs its own .env. It uses a servicenow_sync database account for the ticket tables.',
+    secure: 'Needs its own .env. It uses a servicenow_sync database account in analytics_db, which isn\'t made for you, and OneTouch\'s own onetouch_app account in onetouch_auth.',
     files: ['servicenow-sync/src/app.js', 'servicenow-sync/src/routes/webhook.js', 'servicenow-sync/src/processRecord.js', 'servicenow-sync/src/families.js', 'servicenow-sync/src/db/upsertRecord.js', 'servicenow-sync/src/db/pending.js', 'servicenow-sync/src/config/schema.js', 'servicenow-sync/db/schema.sql', 'servicenow-sync/.env.example'],
   },
 ];
@@ -30227,40 +30473,41 @@ export const NODES = [
 // kind: 'main' (a connection that's in use), 'inner' (inside the Node server)
 // or 'pending' (built, waiting on ServiceNow). bend: pushes the curve sideways.
 export const LINKS = [
-  { from: 'browser', to: 'tunnel', kind: 'main', label: 'HTTPS, with the session token' },
-  { from: 'tunnel', to: 'express', kind: 'main', label: 'Plain HTTP inside Docker\'s network' },
-  { from: 'ci', to: 'tunnel', kind: 'main', label: 'Smoke test of the public address' },
+  { from: 'browser', to: 'tunnel', kind: 'main', label: 'HTTPS, with the session token', route: [[792,90],[792,128]], labelAt: [885,109,170] },
+  { from: 'tunnel', to: 'express', kind: 'main', label: 'Plain HTTP inside Docker\'s network', route: [[792,200],[792,250]], labelAt: [715,226,140] },
+  { from: 'ci', to: 'tunnel', kind: 'main', label: 'Smoke test of the public address', route: [[220,185],[582,185]], labelAt: [400,185,200] },
 
-  { from: 'express', to: 'auth', kind: 'inner', label: 'Who is this?' },
-  { from: 'express', to: 'teams', kind: 'inner', label: 'What may they see?' },
-  { from: 'express', to: 'ai', kind: 'inner', label: 'Questions' },
-  { from: 'express', to: 'notify', kind: 'inner', label: 'The 🔔 list' },
-  { from: 'express', to: 'tickets', kind: 'inner', label: 'Search, records, KPIs and charts' },
-  { from: 'express', to: 'export', kind: 'inner', label: 'Result tables, made into files' },
-  { from: 'express', to: 'prefs', kind: 'inner', label: 'Each person\'s settings' },
+  { from: 'express', to: 'auth', kind: 'inner', label: 'Who is this?', route: [[810,342],[810,404]], labelAt: [810,373,90] },
+  { from: 'express', to: 'teams', kind: 'inner', label: 'What may they see?', route: [[860,342],[860,382],[980,382],[980,404]], labelAt: [925,382,120] },
+  { from: 'express', to: 'ai', kind: 'inner', label: 'Questions', route: [[650,342],[650,360],[377,360],[377,404]], labelAt: [500,360,90] },
+  { from: 'express', to: 'notify', kind: 'inner', label: 'The 🔔 list', route: [[942,296],[1092,296]], labelAt: [1017,296,90] },
+  { from: 'express', to: 'tickets', kind: 'inner', label: 'Search, records, KPIs and charts', route: [[665,342],[665,382],[557,382],[557,404]], labelAt: [608,382,100] },
+  { from: 'express', to: 'export', kind: 'inner', label: 'Result tables, made into files', route: [[642,296],[492,296]], labelAt: [567,296,120] },
+  { from: 'express', to: 'prefs', kind: 'inner', label: 'Each person\'s settings', route: [[900,342],[900,360],[1150,360],[1150,404]], labelAt: [1040,360,170] },
 
-  { from: 'ai', to: 'claude', kind: 'main', label: 'Question to query, over HTTPS with an API key' },
-  { from: 'notify', to: 'brevo', kind: 'main', label: 'Emails, over HTTPS with an API key' },
-  { from: 'ai', to: 'cube', kind: 'main', label: 'The validated query, with the person\'s limits added' },
-  { from: 'tickets', to: 'cube', kind: 'main', label: 'Search, KPI and chart queries, with a signed token' },
-  { from: 'express', to: 'metabase', kind: 'main', label: 'Passes through signed dashboard pages only', bend: 1.6 },
+  { from: 'ai', to: 'claude', kind: 'main', label: 'Question to query, over HTTPS with an API key', route: [[292,424],[220,424]], labelAt: [262,383,140] },
+  { from: 'notify', to: 'brevo', kind: 'main', label: 'Emails, over HTTPS with an API key', route: [[1120,250],[1120,212],[250,212],[250,314],[220,314]], labelAt: [450,212,230] },
+  { from: 'ai', to: 'cube', kind: 'main', label: 'The validated query, with the person\'s limits added', route: [[377,526],[377,600]], labelAt: [438,563,118] },
+  { from: 'tickets', to: 'cube', kind: 'main', label: 'Search, KPI and chart queries, with a signed token', route: [[510,526],[510,600]], labelAt: [566,563,108] },
+  { from: 'teams', to: 'cube', kind: 'main', label: 'Family links at the first start; hidden-ticket checks', route: [[940,526],[940,580],[625,580],[625,600]], labelAt: [755,572,100] },
+  { from: 'express', to: 'metabase', kind: 'main', label: 'Passes through signed dashboard pages only', bend: 1.6, route: [[700,342],[700,600]], labelAt: [686,465,78] },
 
-  { from: 'auth', to: 'onetouch_auth', kind: 'main', label: 'Accounts and sessions', bend: 4 },
-  { from: 'teams', to: 'onetouch_auth', kind: 'main', label: 'Teams, families and assignments', bend: 2 },
-  { from: 'notify', to: 'onetouch_auth', kind: 'main', label: 'Notifications and the email outbox', bend: 4 },
-  { from: 'prefs', to: 'onetouch_auth', kind: 'main', label: 'Preferences, stars, results, shares and chats', bend: 2 },
-  { from: 'cube', to: 'analytics_db', kind: 'main', label: 'SQL as cube_reader (read-only)' },
-  { from: 'metabase', to: 'analytics_db', kind: 'main', label: 'SQL as metabase_reader, through the reporting views' },
-  { from: 'analytics_db', to: 'onetouch_auth', kind: 'main', label: 'postgres_fdw as access_reader: ticket_access only' },
-  { from: 'csv', to: 'analytics_db', kind: 'main', label: 'load_csv.sql, on the first start' },
-  { from: 'db_setup', to: 'analytics_db', kind: 'main', label: 'Reporting views and read-only roles' },
-  { from: 'db_setup', to: 'onetouch_auth', kind: 'main', label: 'The database and its role' },
+  { from: 'auth', to: 'onetouch_auth', kind: 'main', label: 'Accounts and sessions', bend: 4, route: [[810,526],[810,560],[920,560],[920,792]], labelAt: [865,560,100] },
+  { from: 'teams', to: 'onetouch_auth', kind: 'main', label: 'Teams, families and assignments', bend: 2, route: [[980,526],[980,792]], labelAt: [980,665,110] },
+  { from: 'notify', to: 'onetouch_auth', kind: 'main', label: 'Notifications and the email outbox', bend: 4, route: [[1268,342],[1268,792]], labelAt: [1268,665,84] },
+  { from: 'prefs', to: 'onetouch_auth', kind: 'main', label: 'Preferences, stars, results, shares and chats', bend: 2, route: [[1150,526],[1150,792]], labelAt: [1150,665,130] },
+  { from: 'cube', to: 'analytics_db', kind: 'main', label: 'SQL as cube_reader (read-only)', route: [[600,692],[600,792]], labelAt: [672,745,130] },
+  { from: 'metabase', to: 'analytics_db', kind: 'main', label: 'SQL as metabase_reader, through the reporting views', route: [[750,692],[750,792]], labelAt: [825,745,140] },
+  { from: 'analytics_db', to: 'onetouch_auth', kind: 'main', label: 'postgres_fdw as access_reader: ticket_access only', route: [[800,848],[905,848]], labelAt: [852,815,100] },
+  { from: 'csv', to: 'analytics_db', kind: 'main', label: 'load_csv.sql, on the first start', route: [[452,816],[570,816]], labelAt: [511,797,112] },
+  { from: 'db_setup', to: 'analytics_db', kind: 'main', label: 'Reporting views and read-only roles', route: [[452,884],[570,884]], labelAt: [511,905,112] },
+  { from: 'db_setup', to: 'onetouch_auth', kind: 'main', label: 'The database and its role', route: [[452,940],[1102,940],[1102,902]], labelAt: [800,940,180] },
 
-  { from: 'servicenow', to: 'gate', kind: 'pending', label: 'POST { table, record }, carrying X-Webhook-Token' },
-  { from: 'gate', to: 'listener', kind: 'pending', label: 'Only calls with the right token get through' },
-  { from: 'listener', to: 'analytics_db', kind: 'pending', label: 'Saves the record in the export\'s own table', bend: 1.5 },
-  { from: 'listener', to: 'onetouch_auth', kind: 'pending', label: 'teams.placeTicket: family, team, then a signal', bend: 2 },
-  { from: 'onetouch_auth', to: 'express', kind: 'pending', label: 'onetouch_tickets_changed: read the data again', bend: -2.5 },
+  { from: 'servicenow', to: 'gate', kind: 'pending', label: 'POST { table, record }, carrying X-Webhook-Token', route: [[1508,402],[1508,500]], labelAt: [1508,451,180] },
+  { from: 'gate', to: 'listener', kind: 'pending', label: 'Only calls with the right token get through', route: [[1508,640],[1508,800]], labelAt: [1508,720,170] },
+  { from: 'listener', to: 'analytics_db', kind: 'pending', label: 'Saves the record in the export\'s own table', bend: 1.5, route: [[1508,912],[1508,1006],[690,1006],[690,902]], labelAt: [1100,1006,280] },
+  { from: 'listener', to: 'onetouch_auth', kind: 'pending', label: 'teams.placeTicket: family, team, then a signal', bend: 2, route: [[1400,870],[1300,870]], labelAt: [1350,916,96] },
+  { from: 'onetouch_auth', to: 'express', kind: 'pending', label: 'onetouch_tickets_changed: read the data again', bend: -2.5, route: [[1300,820],[1314,820],[1314,240],[900,240],[900,250]], labelAt: [1010,232,190] },
 ];
 
 // "What happens when…": each step moves along path (blocks joined by links).
@@ -30335,7 +30582,7 @@ export const FLOWS = [
       { path: ['onetouch_auth', 'notify', 'brevo'], title: 'The admins are emailed',
         text: 'Through the usual outbox. The email says who reported what kind of problem. What they wrote stays behind the sign-in.' },
       { path: ['onetouch_auth', 'notify', 'express', 'tunnel', 'browser'], title: 'It shows up here',
-        text: 'Under the admins\' 🔔, and in the banner and the 📣 Reports tab of this page, where an admin marks it resolved.' },
+        text: 'Under the admins\' 🔔, and in the banner and the Reports tab of this page, where an admin marks it resolved.' },
     ],
   },
   {
@@ -30388,7 +30635,7 @@ export const SERVICENOW = {
     { title: 'An address ServiceNow can reach',
       text: 'ServiceNow\'s cloud can\'t reach localhost. The listener needs a public HTTPS address, and it isn\'t in docker-compose.yml today, so it also has to be started and hosted.' },
     { title: 'A database account for the listener',
-      text: 'SELECT, INSERT and UPDATE on the six ticket tables, with its own .env filled in on the server.' },
+      text: 'A servicenow_sync account made by hand in analytics_db: SELECT, INSERT and UPDATE on the six ticket tables; those and DELETE on servicenow_pending; USAGE on its sequence. In onetouch_auth it uses OneTouch\'s own onetouch_app. Both go in its own .env on the server.' },
     { title: 'The instance\'s own field names',
       text: 'The fields marked "check" in the blueprint have no standard ServiceNow field, or were custom in the export.' },
     { title: 'One real ticket to prove it',
@@ -30409,7 +30656,12 @@ const COMPOSE = {
   note: 'Every container publishes its port on 127.0.0.1 only. The ServiceNow listener and the outside services are outside this frame.',
   min: [-10, -1.2, -7],
   max: [10, 20, 7],
+  band: [262, 110, 1060, 880],
+  bandLabel: [272, 971, 1040],
 };
+
+// The 2D view's sheet, in the same units as plan, route and band
+export const PLAN = { w: 1640, h: 1030 };
 
 // ---------------------------------------------------------------------
 // Versions: read from the files that decide them, so they can't fall behind
@@ -30519,7 +30771,8 @@ export function architectureMap({ model = null, push = {} } = {}) {
   return {
     overview: OVERVIEW,
     compose: COMPOSE,
-    layers: LAYERS,
+    plan: PLAN,
+    layers: LAYERS.map(({ openHint, ...layer }) => (open && openHint ? { ...layer, hint: openHint } : layer)),
     nodes: NODES.map(({ image, npm: pkg, runtime, pushNpm: pushPkg, ...node }) => ({
       ...node,
       version: nodeVersion({ image, npm: pkg, runtime, pushNpm: pushPkg }, images, npm, pushNpm),
@@ -30547,9 +30800,13 @@ export function architectureMap({ model = null, push = {} } = {}) {
 // answers admins (architecture.mjs). three.js is loaded the first time an
 // admin opens the map, so nobody else's page pays for it.
 //
-// The same content is in a list (📝 List), for screen readers and for
-// browsers that can't draw 3D. One function, so its names can't clash with
-// the other page scripts.
+// The same map is drawn flat (🗺️ 2D, no three.js or graphics card needed), with
+// what each block and line does written on it. Browsers that can't draw 3D
+// get that. The 3D scene and the flat view answer to the same calls (see
+// scene()), so the buttons and steps work the same on both.
+//
+// The same content is in a list (📝 List), for screen readers. One function,
+// so its names can't clash with the other page scripts.
 // =====================================================================
 
 (function () {
@@ -30560,11 +30817,12 @@ export function architectureMap({ model = null, push = {} } = {}) {
     const DIM = 0.14; // how faint what isn't in focus gets
 
     let map = null;        // what the server said; null until loaded and after sign-out
-    let world = null;      // the 3D scene; null when only the list can be shown
+    let world = null;      // the 3D scene; null when this browser can't draw it
+    let planView = null;   // the flat view
     let active = false;
     let loading = null;    // the first opening, while it's still under way
     let opening = 0;       // goes up at sign-out, so a late answer can't draw the map for the next person
-    let mode = '3d';       // '3d' or 'list'
+    let mode = '3d';       // '3d', '2d' or 'list'
     let sideTab = 'details';
     let selected = null;   // a block's id
     let focusLayer = null; // a layer's id
@@ -30577,6 +30835,8 @@ export function architectureMap({ model = null, push = {} } = {}) {
     const RAIL_KEY = 'onetouch-arch-rail-min';
     let railMin = false;   // the left side bar minimized
     try { railMin = localStorage.getItem(RAIL_KEY) === '1'; } catch { /* Open, then */ }
+    const MODE_KEY = 'onetouch-arch-mode';
+    const LABELS_KEY = 'onetouch-arch-plan-labels-off';
     const PUSH_BAR_KEY = 'onetouch-arch-push-bar-hidden';
     let pushBarOff = false; // someone closed the "needs authentication" bar
     try { pushBarOff = localStorage.getItem(PUSH_BAR_KEY) === '1'; } catch { /* Showing, then */ }
@@ -30590,6 +30850,8 @@ export function architectureMap({ model = null, push = {} } = {}) {
         || matchMedia('(prefers-reduced-motion: reduce)').matches;
     const receiving = () => map?.push.state === 'receiving';
     const colorVar = name => `var(--${/^(series-[1-8]|warn)$/.test(name) ? name : 'muted'})`;
+    // Whichever drawing is showing: both answer to the same calls. The list has none.
+    const scene = () => (mode === '3d' ? world : mode === '2d' ? planView : null);
 
     // -----------------------------------------------------------------
     // The page's text (everything but the scene)
@@ -30606,6 +30868,20 @@ export function architectureMap({ model = null, push = {} } = {}) {
                 <div class="arch-tags" id="arch-tags"></div>
                 <p class="arch-hint">Drag to turn · scroll to zoom · Shift+drag to move · click a block. Moving dots show which way data goes, not live traffic.</p>
             </div>
+            <div class="arch-plan" id="arch-plan" tabindex="0" role="group" hidden
+                 aria-label="2D map of OneTouch. Arrow keys move it, plus and minus zoom, 0 resets the view. Each block is a button that says what it does. The List view has the same information.">
+                <div class="arch-plan-sheet" id="arch-plan-sheet"></div>
+                <div class="arch-plan-foot" id="arch-plan-foot">
+                    <ul class="arch-plan-key">
+                        <li><span class="arch-key-line" aria-hidden="true"></span> In use</li>
+                        <li><span class="arch-key-line arch-key-inner" aria-hidden="true"></span> Inside the Node server</li>
+                        <li><span class="arch-key-line arch-key-pending" aria-hidden="true"></span> <span id="arch-key-pending-text"></span></li>
+                        <li><span class="arch-key-frame" aria-hidden="true"></span> Docker Compose</li>
+                    </ul>
+                    <button type="button" class="arch-btn" id="arch-plan-labels" data-do="labels"></button>
+                    <p class="arch-hint arch-plan-hint">Drag to move · scroll to zoom · click a block for its details · point at a line to trace it. Moving dots show which way data goes, not live traffic.</p>
+                </div>
+            </div>
             <div class="arch-list" id="arch-list" hidden></div>
             <section class="arch-step" id="arch-step" aria-live="polite" hidden></section>
             <aside class="arch-side" id="arch-side" aria-label="Details"></aside>`;
@@ -30621,14 +30897,14 @@ export function architectureMap({ model = null, push = {} } = {}) {
         const list = problems();
         const shown = list.slice(0, 3);
         const bad = !list.length ? '' : `<div class="arch-status-row arch-status-problems">
-                <span class="arch-chip arch-chip-stop">⚠️ ${list.length} problem${list.length === 1 ? '' : 's'}</span>
+                <span class="arch-chip arch-chip-stop">${list.length} problem${list.length === 1 ? '' : 's'}</span>
                 <span class="arch-status-text">${shown.map(p => `<b>${esc(p.name)}:</b> ${esc(p.text)}`).join('<br>')}${list.length > shown.length ? `<br>and ${list.length - shown.length} more` : ''}</span>
                 <button type="button" class="arch-btn" data-side="health">See what's wrong</button>
             </div>`;
         const open = issues?.openCount || 0;
         const latest = issues?.open[0];
         const reported = !open ? '' : `<div class="arch-status-row arch-status-problems">
-                <span class="arch-chip arch-chip-warn">📣 ${open} open report${open === 1 ? '' : 's'}</span>
+                <span class="arch-chip arch-chip-warn">${open} open report${open === 1 ? '' : 's'}</span>
                 <span class="arch-status-text">${latest ? `<b>Latest, from ${esc(latest.reporter)}:</b> ${esc(latest.label)}` : ''}</span>
                 <button type="button" class="arch-btn" data-side="reports">See the reports</button>
             </div>`;
@@ -30679,11 +30955,11 @@ export function architectureMap({ model = null, push = {} } = {}) {
 
     // What people have told the admins (the 🚩 in the header)
     function reportsHtml(Heading = 'h3') {
-        const title = `<${Heading} class="arch-node-name">📣 Problems people reported</${Heading}>`;
+        const title = `<${Heading} class="arch-node-name">Problems people reported</${Heading}>`;
         if (!issues) return `${title}<p>Loading the reports…</p>`;
         const open = issues.open.length
             ? `<ul class="arch-checks">${issues.open.map(r => reportHtml(r, false)).join('')}</ul>`
-            : '<p class="arch-notice arch-notice-good"><b>✅ No open reports.</b></p>';
+            : '<p class="arch-notice arch-notice-good"><b>No open reports.</b></p>';
         const resolved = issues.resolved.length
             ? `<details class="arch-reports-done"><summary>Resolved lately (${issues.resolved.length})</summary>
                 <ul class="arch-checks">${issues.resolved.map(r => reportHtml(r, true)).join('')}</ul></details>` : '';
@@ -30696,17 +30972,16 @@ export function architectureMap({ model = null, push = {} } = {}) {
         const rank = { problem: 0, off: 1, ok: 2 };
         const checks = [...(health?.checks || [])].sort((a, b) => rank[a.state] - rank[b.state]);
         const list = problems();
-        const icon = { problem: '⚠️', off: '⚪', ok: '✅' };
         const summary = list.length
-            ? `<p class="arch-notice arch-notice-bad"><b>⚠️ ${list.length} problem${list.length === 1 ? '' : 's'} right now.</b></p>`
-            : health ? '<p class="arch-notice arch-notice-good"><b>✅ Everything checked is working.</b></p>' : '<p>Checking…</p>';
-        const server = healthError ? `<li class="arch-check arch-check-problem"><b>⚠️ OneTouch server</b><br>${esc(healthError)}<br><span class="arch-small">Noticed ${esc(when(healthErrorSince))}. These results are from the last answer.</span></li>` : '';
+            ? `<p class="arch-notice arch-notice-bad"><b>${list.length} problem${list.length === 1 ? '' : 's'} right now.</b></p>`
+            : health ? '<p class="arch-notice arch-notice-good"><b>Everything checked is working.</b></p>' : '<p>Checking…</p>';
+        const server = healthError ? `<li class="arch-check arch-check-problem"><b>OneTouch server</b><br>${esc(healthError)}<br><span class="arch-small">Noticed ${esc(when(healthErrorSince))}. These results are from the last answer.</span></li>` : '';
         return `
-            <${Heading} class="arch-node-name">🩺 Is everything working?</${Heading}>
+            <${Heading} class="arch-node-name">Is everything working?</${Heading}>
             ${summary}
             <ul class="arch-checks">${server}${checks.map(c => `
                 <li class="arch-check arch-check-${esc(c.state)}">
-                    <b>${icon[c.state] || ''} ${c.node ? `<button type="button" class="arch-link" data-node="${esc(c.node)}">${esc(c.name)}</button>` : esc(c.name)}</b><br>
+                    <b>${c.node ? `<button type="button" class="arch-link" data-node="${esc(c.node)}">${esc(c.name)}</button>` : esc(c.name)}</b><br>
                     ${esc(c.text)}
                     ${c.effect ? `<br><b>What this means:</b> ${esc(c.effect)}` : ''}
                     ${c.state === 'problem' && c.detail && c.detail !== c.text ? `<br><span class="arch-small">${esc(c.detail)}</span>` : ''}
@@ -30719,13 +30994,13 @@ export function architectureMap({ model = null, push = {} } = {}) {
         const push = map.push;
         const s = map.servicenow;
         if (receiving()) {
-            return `<span class="arch-chip arch-chip-good">🔓 Records arriving</span>
+            return `<span class="arch-chip arch-chip-good">Records arriving</span>
                 <span class="arch-status-text"><b>ServiceNow live push:</b> ${push.heard.toLocaleString()} record${push.heard === 1 ? '' : 's'} since this server started, the last at ${esc(when(push.lastAt))}.</span>
                 <button type="button" class="arch-btn" data-side="servicenow">Details</button>`;
         }
         return `<button type="button" class="arch-status-close" data-do="hide-push-bar" aria-label="Hide this ServiceNow notice"
                 title="Hide this. ServiceNow live push on the left brings it back.">✕</button>
-            <span class="arch-chip arch-chip-warn">🔒 Needs ServiceNow authentication</span>
+            <span class="arch-chip arch-chip-warn">Needs ServiceNow authentication</span>
             <span class="arch-status-text"><b>${esc(s.headline)}</b> No data can arrive until then.</span>
             <span class="arch-status-actions">
                 <button type="button" class="arch-btn" data-side="servicenow">What it needs</button>
@@ -30746,14 +31021,29 @@ export function architectureMap({ model = null, push = {} } = {}) {
         return `
             <div class="arch-mode" role="group" aria-label="How to show the map">
                 <button type="button" class="arch-btn${mode === '3d' ? ' is-on' : ''}" data-do="3d" aria-pressed="${mode === '3d'}"${world ? '' : ' disabled title="This browser can\'t draw 3D here"'}>🧊 3D</button>
+                <button type="button" class="arch-btn${mode === '2d' ? ' is-on' : ''}" data-do="2d" aria-pressed="${mode === '2d'}">🗺️ 2D</button>
                 <button type="button" class="arch-btn${mode === 'list' ? ' is-on' : ''}" data-do="list" aria-pressed="${mode === 'list'}">📝 List</button>
-                <button type="button" class="arch-btn" data-do="reset" title="Back to the whole map"${mode === '3d' && world ? '' : ' disabled'}>↺</button>
+                <button type="button" class="arch-btn" data-do="reset" title="Back to the whole map"${scene() ? '' : ' disabled'}>↺</button>
                 <button type="button" class="arch-btn" data-do="rail" aria-expanded="true" aria-label="Hide the views and layers" title="Hide the views and layers">◀</button>
             </div>
             <h3 class="arch-rail-head">What happens when…</h3>
             <div class="arch-rail-group">${flows}</div>
             <h3 class="arch-rail-head">Layers</h3>
             <div class="arch-rail-group">${layers}</div>`;
+    }
+
+    // The part of the page no panel is floating over, for a view w by h
+    function freeAreaOf(w, h) {
+        const root = $('architecture');
+        const stacked = getComputedStyle($('arch-rail')).position !== 'absolute';
+        const rect = root.getBoundingClientRect();
+        if (stacked) return { w, h, left: 0, right: 0, top: 0, bottom: 0 };
+        const left = $('arch-rail').getBoundingClientRect().right - rect.left;
+        const right = rect.right - $('arch-side').getBoundingClientRect().left;
+        const status = $('arch-status');
+        const top = status.hidden ? 12 : status.getBoundingClientRect().bottom - rect.top;
+        const bottom = 26;
+        return { w: w - left - right, h: h - top - bottom, left, right, top, bottom };
     }
 
     // A time as this person reads it
@@ -30774,7 +31064,7 @@ export function architectureMap({ model = null, push = {} } = {}) {
                 <span class="arch-link-note">${esc(l.label)}${l.kind === 'pending' && !receiving() ? ' (once authenticated)' : ''}</span></li>`;
         }).join('');
         const notice = node.pending && !receiving()
-            ? `<p class="arch-notice">🔒 ${esc(map.servicenow.headline)} <button type="button" class="arch-link" data-side="servicenow">See what it needs</button></p>` : '';
+            ? `<p class="arch-notice">${esc(map.servicenow.headline)} <button type="button" class="arch-link" data-side="servicenow">See what it needs</button></p>` : '';
         return `
             <div class="arch-node-head" style="--arch-c: ${colorVar(layer.color)}">
                 <span class="arch-swatch" aria-hidden="true"></span>
@@ -30805,10 +31095,10 @@ export function architectureMap({ model = null, push = {} } = {}) {
         const s = map.servicenow;
         const push = map.push;
         const heard = receiving()
-            ? `<p class="arch-notice arch-notice-good">🔓 <b>${push.heard.toLocaleString()} record${push.heard === 1 ? '' : 's'}</b> heard since this server started, the last at ${esc(when(push.lastAt))}${push.last ? ` (${esc(push.last)})` : ''}.</p>`
-            : `<p class="arch-notice"><b>🔒 ${esc(s.headline)}</b></p>`;
+            ? `<p class="arch-notice arch-notice-good"><b>${push.heard.toLocaleString()} record${push.heard === 1 ? '' : 's'}</b> heard since this server started, the last at ${esc(when(push.lastAt))}${push.last ? ` (${esc(push.last)})` : ''}.</p>`
+            : `<p class="arch-notice"><b>${esc(s.headline)}</b></p>`;
         return `
-            <${Heading} class="arch-node-name">🔌 ServiceNow live push</${Heading}>
+            <${Heading} class="arch-node-name">ServiceNow live push</${Heading}>
             ${heard}
             <p>${esc(s.summary)}</p>
             <div class="arch-evidence">
@@ -30833,6 +31123,7 @@ export function architectureMap({ model = null, push = {} } = {}) {
             <p>${esc(map.overview)}</p>
             <h4>Find your way around</h4>
             <ul class="arch-built">
+                <li><b>3D</b>, <b>2D</b> and <b>List</b> are the same map. 2D writes on every block and line what it's doing.</li>
                 <li>Click any block for what it does, how it's protected and where its code is.</li>
                 <li>Pick a <b>What happens when…</b> to follow a real request through the system, step by step.</li>
                 <li>Moving dots show which way data goes. They aren't live traffic.</li>
@@ -30868,12 +31159,12 @@ export function architectureMap({ model = null, push = {} } = {}) {
         const box = $('arch-step');
         if (!box) return;
         const flow = player.flow;
-        box.hidden = !flow || mode !== '3d';
+        box.hidden = !flow || mode === 'list';
         if (box.hidden) return;
         const step = flow.steps[player.index];
         const chip = {
             needs: '<span class="arch-chip arch-chip-warn">Needs setting up in ServiceNow</span>',
-            stop: '<span class="arch-chip arch-chip-stop">🔒 Needs ServiceNow authentication</span>',
+            stop: '<span class="arch-chip arch-chip-stop">Needs ServiceNow authentication</span>',
             after: '<span class="arch-chip">Built. Runs once authenticated</span>',
         }[step.phase] || '';
         box.className = `arch-step${step.stop ? ' arch-step-stop' : ''}`;
@@ -30897,7 +31188,6 @@ export function architectureMap({ model = null, push = {} } = {}) {
     function renderList() {
         const list = $('arch-list');
         if (!list) return;
-        const note = world ? '' : '<p class="arch-notice">This browser can\'t draw the 3D map here, so here it is as a list.</p>';
         const flows = map.flows.map(f => `
             <article class="arch-item" id="arch-flow-${esc(f.id)}" tabindex="-1">
                 <h4 class="arch-node-name"><span aria-hidden="true">${esc(f.icon)}</span> ${esc(f.name)}</h4>
@@ -30908,8 +31198,8 @@ export function architectureMap({ model = null, push = {} } = {}) {
             return `<section class="arch-list-layer" id="arch-layer-${esc(l.id)}"><h3>${esc(l.name)}</h3><p class="arch-small">${esc(l.hint)}</p>
                 ${nodes.map(n => `<article class="arch-item" id="arch-item-${esc(n.id)}" tabindex="-1">${nodeHtml(n, 'h4')}</article>`).join('')}</section>`;
         }).join('');
-        list.innerHTML = `${note}
-            <section class="arch-list-layer"><h2>🧊 Architecture</h2><p>${esc(map.overview)}</p></section>
+        list.innerHTML = `
+            <section class="arch-list-layer"><h2>Architecture</h2><p>${esc(map.overview)}</p></section>
             <section class="arch-list-layer arch-item" id="arch-list-health" tabindex="-1">${healthHtml('h3')}</section>
             <section class="arch-list-layer arch-item" id="arch-list-reports" tabindex="-1">${reportsHtml('h3')}</section>
             <section class="arch-list-layer arch-item" id="arch-list-servicenow" tabindex="-1">${servicenowHtml('h3')}</section>
@@ -30919,21 +31209,46 @@ export function architectureMap({ model = null, push = {} } = {}) {
     }
 
     function setMode(next) {
-        mode = next === '3d' && world ? '3d' : 'list';
+        // A person following a request between 3D and 2D stays on their step;
+        // the list has no scene to follow it in
+        if (next === 'list') stopFlow();
+        const before = scene();
+        before?.endStep();
+        before?.sleep();
+        // No 3D here: the flat view has everything the scene does
+        mode = next === '3d' && !world ? '2d' : next;
         const root = $('architecture');
         root.classList.toggle('arch-is-list', mode === 'list');
         $('arch-stage').hidden = mode !== '3d';
+        $('arch-plan').hidden = mode !== '2d';
         $('arch-list').hidden = mode !== 'list';
-        if (mode === 'list') {
-            stopFlow();
-            world?.sleep();
-            renderList();
-        } else {
-            world.resize();
-            if (active) world.wake();
-        }
         $('arch-rail').innerHTML = railHtml();
+        // Before the scene: the camera leaves room for the step's card, so it needs its size
         renderStep();
+        const now = scene();
+        if (!now) {
+            renderList();
+            return;
+        }
+        now.resize();
+        if (active) now.wake();
+        if (player.flow) now.playStep(player.flow.steps[player.index]);
+        else now.showFocus(false);
+    }
+
+    // Which view this browser last used
+    function savedMode() {
+        try {
+            const saved = localStorage.getItem(MODE_KEY);
+            return ['3d', '2d', 'list'].includes(saved) ? saved : '3d';
+        } catch {
+            return '3d';
+        }
+    }
+
+    function pickMode(next) {
+        try { localStorage.setItem(MODE_KEY, next); } catch { /* Just for this visit */ }
+        setMode(next);
     }
 
     // In the list, a button that would change the scene goes to that part instead
@@ -30959,7 +31274,7 @@ export function architectureMap({ model = null, push = {} } = {}) {
         if (player.flow) return;
         focusLayer = null;
         $('arch-rail').innerHTML = railHtml();
-        world?.showFocus(fly);
+        scene()?.showFocus(fly);
     }
 
     function pickLayer(id) {
@@ -30972,7 +31287,7 @@ export function architectureMap({ model = null, push = {} } = {}) {
             if (focusLayer) goToInList(`arch-layer-${focusLayer}`);
             return;
         }
-        world?.showFocus(true);
+        scene()?.showFocus(true);
     }
 
     function startFlow(id) {
@@ -31003,14 +31318,14 @@ export function architectureMap({ model = null, push = {} } = {}) {
         if (step.stop) player.playing = false;
         // In this order: the camera leaves room for the card, so it needs its size
         renderStep();
-        world?.playStep(step);
+        scene()?.playStep(step);
     }
 
     function stopFlow() {
         if (!player.flow) return;
         player.flow = null;
         player.playing = false;
-        world?.endStep();
+        scene()?.endStep();
         renderStep();
     }
 
@@ -31052,9 +31367,10 @@ export function architectureMap({ model = null, push = {} } = {}) {
     function act(what) {
         if (what === 'rail') setRailMin(!railMin);
         else if (what === 'hide-push-bar') hidePushBar();
-        else if (what === '3d' || what === 'list') setMode(what);
+        else if (what === '3d' || what === '2d' || what === 'list') pickMode(what);
+        else if (what === 'labels') planView?.toggleLabels();
         else if (what === 'reset') resetView();
-        else if (what === 'close') { stopFlow(); $('arch-rail').innerHTML = railHtml(); world?.showFocus(true); }
+        else if (what === 'close') { stopFlow(); $('arch-rail').innerHTML = railHtml(); scene()?.showFocus(true); }
         else if (what === 'back' && player.flow && player.index > 0) goToStep(player.index - 1);
         else if (what === 'next' && player.flow && player.index < player.flow.steps.length - 1) goToStep(player.index + 1);
         else if (what === 'play' && player.flow) {
@@ -31076,7 +31392,7 @@ export function architectureMap({ model = null, push = {} } = {}) {
         $('architecture').classList.toggle('arch-rail-min', railMin);
         $('arch-rail').classList.toggle('arch-rail-closed', railMin);
         $('arch-rail').innerHTML = railHtml();
-        if (mode === '3d') world?.resize();
+        scene()?.resize();
     }
 
     function resetView() {
@@ -31085,7 +31401,7 @@ export function architectureMap({ model = null, push = {} } = {}) {
         stopFlow();
         renderSide();
         $('arch-rail').innerHTML = railHtml();
-        world?.home();
+        scene()?.home();
     }
 
     // -----------------------------------------------------------------
@@ -31105,11 +31421,13 @@ export function architectureMap({ model = null, push = {} } = {}) {
             status.classList.toggle('arch-status-good', receiving() && !list.length);
             status.classList.toggle('arch-status-bad', list.length > 0);
             // The banner's height may have changed, and the scene is centered below it
-            if (mode === '3d') world?.resize();
+            scene()?.resize();
             world?.setProblems(list.map(p => p.node).filter(Boolean));
+            planView?.setProblems(list.filter(p => p.node));
         }
         world?.setPushState(receiving());
-        if (before !== undefined && map.push.heard > before) world?.pulse(map.servicenow.arrives);
+        planView?.setPushState(receiving());
+        if (before !== undefined && map.push.heard > before) scene()?.pulse(map.servicenow.arrives);
     }
 
     async function fetchMap() {
@@ -31185,7 +31503,7 @@ export function architectureMap({ model = null, push = {} } = {}) {
             document.querySelector('.arch-side-body')?.focus({ preventScroll: true });
         } catch (error) {
             button.disabled = false;
-            showToast(`❌ ${error.message}`);
+            showToast(`${error.message}`, 'error');
         }
     }
 
@@ -31227,7 +31545,7 @@ export function architectureMap({ model = null, push = {} } = {}) {
         if (loading) return; // It wakes the scene itself when it's ready
         if (map) {
             pollPush();
-            if (mode === '3d') world?.wake();
+            scene()?.wake();
             return;
         }
         loading = openMap().finally(() => { loading = null; });
@@ -31263,10 +31581,11 @@ export function architectureMap({ model = null, push = {} } = {}) {
                 world = null;
             }
         }
+        planView = buildPlanView();
         renderSide();
         paintRail();
         paintPush();
-        setMode(world ? '3d' : 'list');
+        setMode(savedMode());
         pollHealth();
         pollIssues();
     }
@@ -31278,7 +31597,7 @@ export function architectureMap({ model = null, push = {} } = {}) {
         pollTimer = null;
         player.playing = false;
         renderStep();
-        world?.sleep();
+        scene()?.sleep();
     }
 
     // Signed out: nothing of the map stays in this browser's memory
@@ -31287,6 +31606,8 @@ export function architectureMap({ model = null, push = {} } = {}) {
         opening++;
         world?.dispose();
         world = null;
+        planView?.dispose();
+        planView = null;
         map = null;
         health = null;
         healthError = null;
@@ -31826,18 +32147,7 @@ export function architectureMap({ model = null, push = {} } = {}) {
         };
 
         // The part of the canvas no panel is floating over
-        function freeArea() {
-            const root = $('architecture');
-            const stacked = getComputedStyle($('arch-rail')).position !== 'absolute';
-            const rect = root.getBoundingClientRect();
-            if (stacked) return { w: size.w, h: size.h, left: 0, right: 0, top: 0, bottom: 0 };
-            const left = $('arch-rail').getBoundingClientRect().right - rect.left;
-            const right = rect.right - $('arch-side').getBoundingClientRect().left;
-            const status = $('arch-status');
-            const top = status.hidden ? 12 : status.getBoundingClientRect().bottom - rect.top;
-            const bottom = 26;
-            return { w: size.w - left - right, h: size.h - top - bottom, left, right, top, bottom };
-        }
+        const freeArea = () => freeAreaOf(size.w, size.h);
 
         function resize() {
             const w = stage.clientWidth, h = stage.clientHeight;
@@ -32133,7 +32443,7 @@ export function architectureMap({ model = null, push = {} } = {}) {
             for (const link of links) if (link.pending) link.base = color;
             if (gate.lock) gate.lock.visible = !open;
             gate.tag.el.classList.toggle('arch-tag-open', open);
-            gate.tag.el.firstChild.textContent = open ? '🔓 Records arriving' : '🔒 Needs ServiceNow authentication';
+            gate.tag.el.firstChild.textContent = open ? 'Records arriving' : 'Needs ServiceNow authentication';
             gate.tag.w = gate.tag.el.offsetWidth;
             gate.tag.h = gate.tag.el.offsetHeight;
             applyTheme();
@@ -32323,7 +32633,7 @@ export function architectureMap({ model = null, push = {} } = {}) {
             dispose();
             world = null;
             stopFlow();
-            setMode('list');
+            setMode('2d');
         }
         canvas.addEventListener('webglcontextlost', onContextLost);
 
@@ -32364,6 +32674,687 @@ export function architectureMap({ model = null, push = {} } = {}) {
         return { resize, wake, sleep, dispose, home, showFocus, playStep, endStep, pulse, setPushState, setProblems };
     }
 
+    // -----------------------------------------------------------------
+    // The flat view: the same blocks, lines, flows and focus as the scene,
+    // on a sheet with what each block and line does written on it. Blocks and
+    // labels are real page elements, so keys and screen readers reach them and
+    // the page's colors and ♿ settings apply; the lines are SVG underneath.
+    // Everything sits on one sheet, which drag and zoom move as a whole.
+    // -----------------------------------------------------------------
+
+    function buildPlanView() {
+        const box = $('arch-plan');
+        const sheet = $('arch-plan-sheet');
+        const foot = $('arch-plan-foot');
+        const { w: W, h: H } = map.plan;
+        const ICONS = { screen: '🌐', ring: '🚇', server: '⚙️', module: '🧩', cube: '🧊', bars: '📊', db: '🛢️', sheets: '📄', orb: '☁️', listener: '👂', gate: '🔒' };
+        const CORNER = 8;
+        const MIN_ZOOM = 0.25;
+        const MAX_ZOOM = 3;
+        const FLY_ZOOM = 1.3; // the closest a pick goes by itself
+
+        const size = { w: 1, h: 1 };
+        const view = { x: 0, y: 0, k: 1 };
+        const goal = { x: 0, y: 0, k: 1 };
+        const clock = { last: performance.now(), t: 0 };
+        let raf = null;
+        let dirty = true;
+        let touched = false; // once someone moves it, it stays where they put it
+        let hovered = null;
+        let hoveredLink = null;
+        let stepFocus = null;
+        let labelsOn = true;
+        try { labelsOn = localStorage.getItem(LABELS_KEY) !== '1'; } catch { /* On, then */ }
+
+        const px = rect => `left:${rect[0]}px;top:${rect[1]}px;width:${rect[2]}px;${rect[3] === undefined ? '' : `height:${rect[3]}px;`}`;
+
+        // ---- A line: its corners rounded, as points a dot can follow too ----
+
+        function linePoints(route) {
+            const points = [route[0]];
+            for (let i = 1; i < route.length - 1; i++) {
+                const [ax, ay] = route[i - 1], [bx, by] = route[i], [cx, cy] = route[i + 1];
+                const toA = Math.hypot(ax - bx, ay - by), toC = Math.hypot(cx - bx, cy - by);
+                const ra = Math.min(CORNER, toA / 2), rc = Math.min(CORNER, toC / 2);
+                const p0 = [bx + (ax - bx) / toA * ra, by + (ay - by) / toA * ra];
+                const p1 = [bx + (cx - bx) / toC * rc, by + (cy - by) / toC * rc];
+                for (let t = 0; t <= 1; t += 0.25) {
+                    const u = 1 - t;
+                    points.push([u * u * p0[0] + 2 * u * t * bx + t * t * p1[0], u * u * p0[1] + 2 * u * t * by + t * t * p1[1]]);
+                }
+            }
+            points.push(route[route.length - 1]);
+            return points;
+        }
+
+        const pathOf = points => `M${points.map(p => `${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join('L')}`;
+
+        function arrowOf(points) {
+            const [x1, y1] = points[points.length - 2], [x2, y2] = points[points.length - 1];
+            const d = Math.hypot(x2 - x1, y2 - y1) || 1;
+            const ux = (x2 - x1) / d, uy = (y2 - y1) / d;
+            const back = [x2 - ux * 10, y2 - uy * 10];
+            return `M${x2} ${y2}L${back[0] - uy * 5} ${back[1] + ux * 5}L${back[0] + uy * 5} ${back[1] - ux * 5}Z`;
+        }
+
+        // ---- The sheet ----
+
+        const links = map.links.map((data, index) => ({ data, index, points: linePoints(data.route), dimmed: false, u: Math.random(), dot: null, group: null, label: null }));
+        const nodesWithPush = new Set(map.nodes.filter(n => n.pending).map(n => n.layer));
+
+        const bandsHtml = map.layers.map(l => `
+            <div class="arch-band" data-band="${esc(l.id)}" style="${px(l.band)}--arch-c:${colorVar(l.color)}"></div>
+            <div class="arch-band-label" data-band-label="${esc(l.id)}" style="${px(l.bandLabel)}--arch-c:${colorVar(l.color)}"><b>${esc(l.name)}</b> ${esc(l.hint)}</div>`).join('');
+
+        const linesHtml = links.map(link => {
+            const d = pathOf(link.points);
+            return `<g class="arch-line arch-line-${esc(link.data.kind)}" data-line="${link.index}">
+                <path class="arch-line-path" d="${d}"/>
+                <path class="arch-line-arrow" d="${arrowOf(link.points)}"/>
+                <path class="arch-line-hit" d="${d}"/>
+            </g>`;
+        }).join('');
+
+        const labelsHtml = links.map(link => {
+            const [x, y, w] = link.data.labelAt;
+            return `<span class="arch-line-label arch-line-label-${esc(link.data.kind)}" data-line="${link.index}" style="left:${x}px;top:${y}px;max-width:${w}px;">${esc(link.data.label)}</span>`;
+        }).join('');
+
+        const cardsHtml = map.nodes.map(node => {
+            const tech = node.version ? `${node.tech} · ${node.version}` : node.tech;
+            return `<button type="button" class="arch-card${node.big ? ' arch-card-big' : ''}${node.pending ? ' arch-card-pending' : ''}" data-node="${esc(node.id)}"
+                    style="${px(node.plan)}--arch-c:${colorVar(layerById(node.layer).color)}">
+                <span class="arch-card-head"><span class="arch-card-icon" aria-hidden="true">${ICONS[node.shape] || ICONS.module}</span><span class="arch-card-name">${esc(node.name)}</span></span>
+                ${node.shape === 'gate' ? '<span class="arch-card-state"></span>' : ''}
+                <span class="arch-card-tech" title="${esc(tech)}">${esc(tech)}</span>
+                <span class="arch-card-doing">${esc(node.doing)}</span>
+            </button>`;
+        }).join('');
+
+        sheet.style.width = `${W}px`;
+        sheet.style.height = `${H}px`;
+        sheet.innerHTML = `
+            ${bandsHtml}
+            <div class="arch-plan-frame" style="${px(map.compose.band)}"></div>
+            <div class="arch-plan-frame-label" style="${px(map.compose.bandLabel)}"><b>${esc(map.compose.name)}.</b> ${esc(map.compose.note)}</div>
+            <svg class="arch-plan-lines" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true">${linesHtml}</svg>
+            <div class="arch-plan-labels" aria-hidden="true">${labelsHtml}</div>
+            ${cardsHtml}
+            <div class="arch-plan-movers" aria-hidden="true"></div>`;
+
+        const movers = sheet.querySelector('.arch-plan-movers');
+        const cards = new Map([...sheet.querySelectorAll('.arch-card')].map(el => [el.dataset.node, el]));
+        const groups = sheet.querySelectorAll('.arch-line');
+        const labels = sheet.querySelectorAll('.arch-line-label');
+        const bands = sheet.querySelectorAll('[data-band], [data-band-label]');
+        for (const link of links) {
+            link.group = groups[link.index];
+            link.label = labels[link.index];
+        }
+        const linkBetween = (x, y) => links.find(l => (l.data.from === x && l.data.to === y) || (l.data.from === y && l.data.to === x));
+        const nodeRect = id => nodeById(id).plan;
+        const centerOf = id => {
+            const [x, y, w, h] = nodeRect(id);
+            return [x + w / 2, y + h / 2];
+        };
+
+        // ---- The dots that show which way data goes: on each link in use, never on the push ----
+
+        // Each its own element, moved by its transform: drawn once, so a moving dot
+        // doesn't make the browser paint the whole sheet again on every frame
+        function circle(className, r) {
+            const el = document.createElement('span');
+            el.className = `arch-mover ${className}`;
+            el.style.cssText = `display:none;width:${r * 2}px;height:${r * 2}px;margin:${-r}px 0 0 ${-r}px;`;
+            movers.append(el);
+            return el;
+        }
+
+        const moveTo = (el, x, y) => { el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`; };
+
+        function pointAlong(points, lengths, at) {
+            let i = 1;
+            while (i < lengths.length - 1 && lengths[i] < at) i++;
+            const span = lengths[i] - lengths[i - 1] || 1;
+            const t = Math.min(1, Math.max(0, (at - lengths[i - 1]) / span));
+            return [points[i - 1][0] + (points[i][0] - points[i - 1][0]) * t, points[i - 1][1] + (points[i][1] - points[i - 1][1]) * t];
+        }
+
+        function lengthsOf(points) {
+            const lengths = [0];
+            for (let i = 1; i < points.length; i++) lengths[i] = lengths[i - 1] + Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]);
+            return lengths;
+        }
+
+        for (const link of links) {
+            link.lengths = lengthsOf(link.points);
+            link.total = link.lengths[link.lengths.length - 1];
+            if (link.data.kind === 'main') link.dot = circle('arch-dot', 3.5);
+        }
+
+        // ---- The dot that follows a request ----
+
+        function makeTraveller() {
+            return { halo: circle('arch-traveller-halo', 15), dot: circle('arch-traveller', 7), points: [], lengths: [], total: 0, at: 0, speed: 320 };
+        }
+        const flowDot = makeTraveller();
+        const pulses = [];
+
+        function pathPoints(path) {
+            if (path.length === 1) return [centerOf(path[0])];
+            const points = [];
+            for (let i = 0; i < path.length - 1; i++) {
+                const link = linkBetween(path[i], path[i + 1]);
+                const part = link ? [...link.points] : [centerOf(path[i]), centerOf(path[i + 1])];
+                if (link && link.data.from !== path[i]) part.reverse();
+                points.push(...part);
+            }
+            return points;
+        }
+
+        function setRoute(traveller, points) {
+            traveller.points = points;
+            traveller.lengths = lengthsOf(points);
+            traveller.total = traveller.lengths[points.length - 1] || 0;
+            traveller.at = 0;
+        }
+
+        function showTraveller(traveller, show) {
+            traveller.dot.style.display = show ? '' : 'none';
+            traveller.halo.style.display = show ? '' : 'none';
+        }
+
+        function placeTraveller(traveller) {
+            if (!traveller.points.length) return;
+            const [x, y] = traveller.total ? pointAlong(traveller.points, traveller.lengths, Math.min(traveller.at, traveller.total)) : traveller.points[0];
+            moveTo(traveller.dot, x, y);
+            moveTo(traveller.halo, x, y);
+        }
+
+        // ---- Where the sheet sits ----
+
+        // Room for the sheet: not under a panel, nor under the key along the bottom
+        function roomFor(cardHeight = 0) {
+            const free = freeAreaOf(size.w, size.h);
+            const stacked = !free.left && !free.right;
+            const footHeight = foot.offsetHeight + (stacked ? 8 : 4);
+            const bottomGap = stacked ? footHeight : Math.max(free.bottom, footHeight);
+            const pad = 10;
+            return {
+                left: free.left + pad,
+                top: free.top + pad,
+                w: Math.max(80, free.w - pad * 2),
+                h: Math.max(80, size.h - free.top - bottomGap - cardHeight - pad * 2),
+            };
+        }
+
+        // ♿ Larger text: the sheet opens that much bigger, and can be moved to see the rest
+        const textScale = () => Math.max(1, parseFloat(getComputedStyle(document.documentElement).fontSize) / 16 || 1);
+
+        function fitted([x, y, w, h], cardHeight = 0, limit = MAX_ZOOM) {
+            const room = roomFor(cardHeight);
+            const k = Math.min(room.w / w, room.h / h, limit);
+            return { k, x: room.left + (room.w - w * k) / 2 - x * k, y: room.top + (room.h - h * k) / 2 - y * k };
+        }
+
+        function homeGoal() {
+            const whole = fitted([0, 0, W, H]);
+            const scale = textScale();
+            if (scale === 1) return whole;
+            const room = roomFor();
+            return { k: whole.k * scale, x: room.left, y: room.top };
+        }
+
+        const setGoal = next => {
+            Object.assign(goal, next);
+            dirty = true;
+        };
+
+        function frameBlocks(ids, cardHeight = 0) {
+            const rects = ids.map(nodeRect);
+            const x0 = Math.min(...rects.map(r => r[0])) - 44, y0 = Math.min(...rects.map(r => r[1])) - 44;
+            const x1 = Math.max(...rects.map(r => r[0] + r[2])) + 44, y1 = Math.max(...rects.map(r => r[1] + r[3])) + 44;
+            const next = fitted([x0, y0, x1 - x0, y1 - y0], cardHeight, FLY_ZOOM);
+            const home = homeGoal();
+            // No closer than the whole map shows it: back to the whole map, unless a card covers part
+            setGoal(!cardHeight && next.k <= home.k ? home : next);
+            touched = true;
+        }
+
+        function home() {
+            touched = false;
+            setGoal(homeGoal());
+            showFocus(false);
+        }
+
+        function resize() {
+            const w = box.clientWidth, h = box.clientHeight;
+            if (!w || !h) return;
+            size.w = w;
+            size.h = h;
+            if (!touched) {
+                const next = homeGoal();
+                setGoal(next);
+                Object.assign(view, next);
+            }
+            dirty = true;
+        }
+
+        function zoomAt(x, y, factor) {
+            const k = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, goal.k * factor));
+            setGoal({ k, x: x - (x - goal.x) * k / goal.k, y: y - (y - goal.y) * k / goal.k });
+            touched = true;
+        }
+
+        function moveBy(dx, dy) {
+            goal.x += dx;
+            goal.y += dy;
+            touched = true;
+            dirty = true;
+        }
+
+        // A block reached by Tab that's outside the view comes into it
+        function bringIntoView(id) {
+            const [x, y, w, h] = nodeRect(id);
+            const room = roomFor();
+            const sx = goal.x + x * goal.k, sy = goal.y + y * goal.k, sw = w * goal.k, sh = h * goal.k;
+            let dx = 0, dy = 0;
+            if (sx < room.left) dx = room.left - sx;
+            else if (sx + sw > room.left + room.w) dx = room.left + room.w - sx - sw;
+            if (sy < room.top) dy = room.top - sy;
+            else if (sy + sh > room.top + room.h) dy = room.top + room.h - sy - sh;
+            if (dx || dy) moveBy(dx, dy);
+        }
+
+        // ---- Mouse, touch and keys ----
+
+        const pointers = new Map();
+        let press = null;
+        let pinch = 0;
+        let swallowClick = false;
+
+        const onFoot = el => el.closest?.('.arch-plan-foot');
+
+        box.addEventListener('pointerdown', e => {
+            if (onFoot(e.target)) return;
+            pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            press = { x: e.clientX, y: e.clientY, moved: false, onBlock: Boolean(e.target.closest('.arch-card')) };
+            swallowClick = false;
+            if (pointers.size === 2) {
+                const [a, b] = [...pointers.values()];
+                pinch = Math.hypot(a.x - b.x, a.y - b.y);
+            }
+            noteTouch();
+        });
+        box.addEventListener('pointermove', e => {
+            noteTouch();
+            const known = pointers.get(e.pointerId);
+            if (!known) return;
+            const dx = e.clientX - known.x, dy = e.clientY - known.y;
+            known.x = e.clientX;
+            known.y = e.clientY;
+            if (press && !press.moved && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 5) {
+                press.moved = true;
+                swallowClick = true;
+                box.setPointerCapture(e.pointerId);
+                box.classList.add('is-moving');
+            }
+            if (!press?.moved) return;
+            if (pointers.size === 2) {
+                const [a, b] = [...pointers.values()];
+                const distance = Math.hypot(a.x - b.x, a.y - b.y);
+                const rect = box.getBoundingClientRect();
+                if (pinch) zoomAt((a.x + b.x) / 2 - rect.left, (a.y + b.y) / 2 - rect.top, distance / pinch);
+                pinch = distance;
+            }
+            moveBy(dx / pointers.size, dy / pointers.size);
+            // A drag follows the hand, with no easing behind it
+            Object.assign(view, goal);
+        });
+        function endPress(e) {
+            const wasClick = press && !press.moved && !press.onBlock && pointers.size === 1 && e.type === 'pointerup';
+            pointers.delete(e.pointerId);
+            if (pointers.size < 2) pinch = 0;
+            if (wasClick && (selected || focusLayer)) {
+                selected = null;
+                focusLayer = null;
+                renderSide();
+                $('arch-rail').innerHTML = railHtml();
+                showFocus(false);
+            }
+            if (!pointers.size) {
+                press = null;
+                box.classList.remove('is-moving');
+            }
+        }
+        box.addEventListener('pointerup', endPress);
+        box.addEventListener('pointercancel', endPress);
+        // A drag that began on a block is a drag, not a press of it
+        box.addEventListener('click', e => {
+            if (!swallowClick) return;
+            swallowClick = false;
+            e.stopPropagation();
+        }, true);
+        box.addEventListener('wheel', e => {
+            e.preventDefault();
+            noteTouch();
+            const rect = box.getBoundingClientRect();
+            zoomAt(e.clientX - rect.left, e.clientY - rect.top, Math.exp(-e.deltaY * 0.0014));
+        }, { passive: false });
+        box.addEventListener('keydown', e => {
+            if (e.altKey || e.ctrlKey || e.metaKey) return;
+            noteTouch();
+            const moves = { ArrowLeft: [60, 0], ArrowRight: [-60, 0], ArrowUp: [0, 60], ArrowDown: [0, -60] };
+            if (moves[e.key]) {
+                e.preventDefault();
+                moveBy(...moves[e.key]);
+            } else if (e.key === '+' || e.key === '=' || e.key === '-') {
+                e.preventDefault();
+                zoomAt(size.w / 2, size.h / 2, e.key === '-' ? 1 / 1.15 : 1.15);
+            } else if (e.key === '0') {
+                e.preventDefault();
+                resetView();
+            } else if (e.key === 'Escape') {
+                if (player.flow) act('close');
+                else if (selected || focusLayer) resetView();
+            }
+        });
+        // Focus can scroll an overflow:hidden box: the sheet only moves by its transform
+        box.addEventListener('scroll', () => {
+            box.scrollTop = 0;
+            box.scrollLeft = 0;
+        });
+
+        function hoverOn(target) {
+            const card = target.closest?.('.arch-card');
+            const line = target.closest?.('[data-line]');
+            const id = card ? card.dataset.node : null;
+            const link = !card && line ? links[Number(line.dataset.line)] : null;
+            if (id === hovered && link === hoveredLink) return;
+            hovered = id;
+            hoveredLink = link;
+            showFocus(false);
+        }
+        sheet.addEventListener('pointerover', e => hoverOn(e.target));
+        sheet.addEventListener('pointerleave', () => hoverOn(sheet));
+        sheet.addEventListener('focusin', e => {
+            const card = e.target.closest('.arch-card');
+            if (!card) return;
+            bringIntoView(card.dataset.node);
+            hoverOn(card);
+        });
+        sheet.addEventListener('focusout', () => hoverOn(sheet));
+
+        // ---- What's in focus: the same choices as the scene's ----
+
+        function showFocus(fly) {
+            let bright = null;
+            let brightLinks = null;
+            const lit = new Set();
+            if (stepFocus) {
+                bright = new Set([...stepFocus.path, ...stepFocus.around]);
+                brightLinks = new Set([...stepFocus.links, ...stepFocus.aroundLinks]);
+                stepFocus.path.forEach(id => lit.add(id));
+            } else if (selected) {
+                bright = new Set([selected]);
+                brightLinks = new Set();
+                lit.add(selected);
+                for (const link of links) {
+                    if (link.data.from === selected || link.data.to === selected) {
+                        brightLinks.add(link);
+                        bright.add(link.data.from);
+                        bright.add(link.data.to);
+                    }
+                }
+            } else if (focusLayer) {
+                bright = new Set(map.nodes.filter(n => n.layer === focusLayer).map(n => n.id));
+                brightLinks = new Set(links.filter(l => bright.has(l.data.from) && bright.has(l.data.to)));
+            }
+            for (const [id, card] of cards) {
+                card.classList.toggle('arch-card-dim', Boolean(bright) && !bright.has(id) && hovered !== id);
+                card.classList.toggle('arch-card-on', lit.has(id) || hovered === id);
+            }
+            for (const link of links) {
+                const touchesHover = hovered && (link.data.from === hovered || link.data.to === hovered);
+                const pointedAt = hoveredLink === link;
+                const dim = Boolean(brightLinks) && !brightLinks.has(link) && !touchesHover && !pointedAt;
+                const hot = pointedAt || touchesHover || (stepFocus ? stepFocus.links.includes(link) : selected ? brightLinks.has(link) : false);
+                link.dimmed = dim;
+                link.group.classList.toggle('is-dim', dim);
+                link.group.classList.toggle('is-hot', hot);
+                link.label.classList.toggle('is-dim', dim);
+                link.label.classList.toggle('is-hot', hot);
+            }
+            for (const band of bands) {
+                const id = band.dataset.band || band.dataset.bandLabel;
+                band.classList.toggle('is-dim', focusLayer ? id !== focusLayer : Boolean(bright));
+            }
+            if (fly) {
+                if (stepFocus) {
+                    // With what's either side of it, for a step that stands between two
+                    // blocks; and clear of the card, when that floats over the sheet
+                    const card = freeAreaOf(size.w, size.h).left ? $('arch-step').offsetHeight + 12 : 0;
+                    frameBlocks([...stepFocus.path, ...stepFocus.around], card);
+                } else if (selected) frameBlocks([...bright]);
+                else if (focusLayer) frameBlocks(map.nodes.filter(n => n.layer === focusLayer).map(n => n.id));
+                else if (touched) {
+                    touched = false;
+                    setGoal(homeGoal());
+                }
+            }
+            dirty = true;
+        }
+
+        function playStep(step) {
+            lastTouch = performance.now();
+            const path = step.path;
+            const stepLinks = [];
+            for (let i = 0; i < path.length - 1; i++) {
+                const link = linkBetween(path[i], path[i + 1]);
+                if (link) stepLinks.push(link);
+            }
+            const around = step.around || [];
+            stepFocus = { path, links: stepLinks, stop: Boolean(step.stop), around, aroundLinks: around.map(id => linkBetween(id, path[0])).filter(Boolean) };
+            let route;
+            if (step.stop) {
+                // A step that stops: the dot comes up to the block from the side it's on, and no further
+                const from = around[around.length - 1];
+                const points = pathPoints([from, path[0]]);
+                const end = points[points.length - 1];
+                route = [[points[0][0] + (end[0] - points[0][0]) * 0.45, points[0][1] + (end[1] - points[0][1]) * 0.45], end];
+            } else {
+                route = pathPoints(path);
+            }
+            setRoute(flowDot, route);
+            showTraveller(flowDot, true);
+            if (lessMotion()) flowDot.at = flowDot.total;
+            placeTraveller(flowDot);
+            showFocus(true);
+        }
+
+        function endStep() {
+            stepFocus = null;
+            showTraveller(flowDot, false);
+            showFocus(false);
+        }
+
+        // A real record just arrived: one dot, along the way it really went
+        function pulse(path) {
+            if (lessMotion() || mode !== '2d') return;
+            const traveller = makeTraveller();
+            showTraveller(traveller, true);
+            setRoute(traveller, pathPoints(path));
+            pulses.push(traveller);
+            wake();
+        }
+
+        // Green instead of amber, and no lock, once records really arrive
+        const pushParts = [...cards.values()].filter(el => el.classList.contains('arch-card-pending'));
+        for (const id of nodesWithPush) pushParts.push(...sheet.querySelectorAll(`[data-band="${id}"], [data-band-label="${id}"]`));
+        const gateCard = cards.get(map.nodes.find(n => n.shape === 'gate').id);
+        let pushOpen = null;
+        function setPushState(open) {
+            if (open === pushOpen) return;
+            pushOpen = open;
+            box.classList.toggle('arch-plan-open', open);
+            // What a layer says about the push moves on with it (map is the fresh one by now)
+            for (const id of nodesWithPush) {
+                const layer = layerById(id);
+                sheet.querySelector(`[data-band-label="${id}"]`).innerHTML = `<b>${esc(layer.name)}</b> ${esc(layer.hint)}`;
+            }
+            for (const el of pushParts) el.style.setProperty('--arch-c', colorVar(open ? 'series-3' : 'warn'));
+            gateCard.querySelector('.arch-card-icon').textContent = open ? '🔓' : '🔒';
+            gateCard.querySelector('.arch-card-state').textContent = open ? 'Records arriving' : 'Needs ServiceNow authentication';
+            $('arch-key-pending-text').textContent = open ? 'ServiceNow live push' : 'Waiting on ServiceNow';
+        }
+
+        // A block with a problem turns red and says what's wrong, on the block itself
+        function setProblems(list) {
+            for (const [id, card] of cards) {
+                const own = list.filter(p => p.node === id);
+                card.classList.toggle('arch-card-bad', own.length > 0);
+                card.querySelector('.arch-card-problem')?.remove();
+                if (!own.length) continue;
+                const note = document.createElement('span');
+                note.className = 'arch-card-problem';
+                note.textContent = `${own.map(p => p.text).join(' ')}`;
+                card.prepend(note);
+            }
+        }
+
+        function paintLabels() {
+            box.classList.toggle('arch-plan-no-labels', !labelsOn);
+            const button = $('arch-plan-labels');
+            button.textContent = labelsOn ? '🏷️ Hide line labels' : '🏷️ Show line labels';
+            button.setAttribute('aria-pressed', String(labelsOn));
+        }
+        function toggleLabels() {
+            labelsOn = !labelsOn;
+            try { localStorage.setItem(LABELS_KEY, labelsOn ? '0' : '1'); } catch { /* Just for this visit */ }
+            paintLabels();
+        }
+
+        // ---- Each frame: as light as the scene's, for the same reason ----
+
+        const IDLE_MS = 2 * 60 * 1000;
+        const SLOW_FRAME_MS = 70;
+        const FRAME_MS = 1000 / 30;
+        let lastTouch = performance.now();
+        let lastDrawn = 0;
+        let slowFor = 0;
+        let lowPower = false;
+        let dotsShowing = false;
+        function noteTouch() { lastTouch = performance.now(); dirty = true; }
+
+        function watchSpeed(ms) {
+            if (lowPower) return;
+            slowFor = ms > SLOW_FRAME_MS ? slowFor + ms : 0;
+            if (slowFor < 3000) return;
+            lowPower = true;
+            console.warn('🗺️ Frames are slow here, so the flat map stops its moving dots to keep the computer free');
+        }
+
+        function drawDots(lively, dt) {
+            const show = lively && !stepFocus;
+            if (!show && !dotsShowing) return;
+            dotsShowing = show;
+            for (const link of links) {
+                if (!link.dot) continue;
+                const visible = show && !link.dimmed;
+                link.dot.style.display = visible ? '' : 'none';
+                if (!visible) continue;
+                link.u = (link.u + dt * (60 / Math.max(60, link.total))) % 1;
+                const [x, y] = pointAlong(link.points, link.lengths, link.u * link.total);
+                moveTo(link.dot, x, y);
+            }
+        }
+
+        function frame(now) {
+            raf = requestAnimationFrame(frame);
+            const gap = now - clock.last;
+            if (now - lastDrawn < 200 && gap < 1000) watchSpeed(gap);
+            const dt = Math.min(0.05, gap / 1000);
+            clock.last = now;
+            clock.t += dt;
+            const still = lessMotion();
+            tickPlayer(dt * 1000);
+            const lively = !still && !lowPower && now - lastTouch < IDLE_MS;
+
+            // By the clock, not the frame count, so a slow computer still arrives on time
+            const ease = 1 - Math.exp(-(still ? 1000 : 7) * Math.min(0.25, gap / 1000 || 0.016));
+            for (const key of ['x', 'y', 'k']) {
+                const gapTo = goal[key] - view[key];
+                if (Math.abs(gapTo) < (key === 'k' ? 0.0005 : 0.05)) {
+                    if (gapTo) dirty = true;
+                    view[key] = goal[key];
+                } else {
+                    view[key] += gapTo * ease;
+                    dirty = true;
+                }
+            }
+
+            drawDots(lively, dt);
+
+            // The dot following a request
+            if (flowDot.dot.style.display !== 'none') {
+                if (stepFocus?.stop && lively) {
+                    // Knocks at the gate, and doesn't get through
+                    flowDot.at = flowDot.total * (0.5 + 0.5 * Math.sin(clock.t * 5));
+                } else if (!still && flowDot.total && flowDot.at < flowDot.total) {
+                    flowDot.at += dt * flowDot.speed;
+                }
+                placeTraveller(flowDot);
+            }
+            for (let i = pulses.length - 1; i >= 0; i--) {
+                const traveller = pulses[i];
+                traveller.at += dt * traveller.speed;
+                placeTraveller(traveller);
+                if (traveller.at >= traveller.total) {
+                    traveller.dot.remove();
+                    traveller.halo.remove();
+                    pulses.splice(i, 1);
+                }
+            }
+
+            if (dirty && now - lastDrawn >= FRAME_MS - 1) {
+                lastDrawn = now;
+                sheet.style.transform = `translate(${view.x.toFixed(2)}px, ${view.y.toFixed(2)}px) scale(${view.k.toFixed(4)})`;
+                dirty = false;
+            }
+        }
+
+        function wake() {
+            if (raf !== null) return;
+            clock.last = performance.now();
+            lastTouch = clock.last;
+            lastDrawn = 0;
+            dirty = true;
+            raf = requestAnimationFrame(frame);
+        }
+        function sleep() {
+            if (raf !== null) cancelAnimationFrame(raf);
+            raf = null;
+        }
+
+        const sizeWatch = new ResizeObserver(resize);
+        sizeWatch.observe(box);
+        // ♿ Text size is set on the page's root
+        const textWatch = new MutationObserver(resize);
+        textWatch.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
+
+        function dispose() {
+            sleep();
+            sizeWatch.disconnect();
+            textWatch.disconnect();
+            sheet.innerHTML = '';
+        }
+
+        paintLabels();
+        setPushState(receiving());
+
+        return { resize, wake, sleep, dispose, home, showFocus, playStep, endStep, pulse, setPushState, setProblems, toggleLabels };
+    }
+
     window.showArchitecture = showArchitecture;
     window.hideArchitecture = hideArchitecture;
     window.resetArchitecture = resetArchitecture;
@@ -32394,7 +33385,7 @@ export function architectureMap({ model = null, push = {} } = {}) {
 
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
-import { architectureMap, composeImages, FLOWS, LAYERS, LINKS, NODES, SERVICENOW } from '../architecture.mjs';
+import { architectureMap, composeImages, FLOWS, LAYERS, LINKS, NODES, PLAN, SERVICENOW } from '../architecture.mjs';
 import { buildChecks, makeHealth, noteResponse } from '../health.mjs';
 
 const problems = [];
@@ -32432,6 +33423,52 @@ SERVICENOW.arrives.forEach((id, i, path) => {
   if (i) check(linked(path[i - 1], id), `A record arrives from ${path[i - 1]} to ${id}, and they aren't linked`);
 });
 
+// The 2D view is the same map: every block is on the sheet with a sentence
+// saying what it does, in its own layer's band and on the same side of the
+// Docker Compose frame as in 3D; no two blocks overlap, and each line starts and
+// ends on its own blocks, in straight runs that go through no other block.
+const inside = ([x, y, w, h], [bx, by, bw, bh]) => x >= bx && y >= by && x + w <= bx + bw && y + h <= by + bh;
+const onSheet = rect => inside(rect, [0, 0, PLAN.w, PLAN.h]);
+const onEdge = ([px, py], [x, y, w, h]) => ((px === x || px === x + w) && py >= y && py <= y + h)
+  || ((py === y || py === y + h) && px >= x && px <= x + w);
+const compose = architectureMap().compose;
+for (const node of NODES) {
+  check(typeof node.doing === 'string' && node.doing.length > 0 && node.doing.length <= 120, `${node.id}: its sentence for the 2D view must be 1-120 characters`);
+  check(node.plan?.length === 4 && onSheet(node.plan), `${node.id}: its place in the 2D view is off the sheet`);
+  const layer = LAYERS.find(l => l.id === node.layer);
+  check(layer?.band && inside(node.plan, layer.band), `${node.id}: outside the ${node.layer} band in the 2D view`);
+  const in3d = node.pos[0] >= compose.min[0] && node.pos[0] <= compose.max[0] && node.pos[1] >= compose.min[1] && node.pos[1] <= compose.max[1];
+  check(in3d === inside(node.plan, compose.band), `${node.id}: on different sides of the Docker Compose frame in 2D and 3D`);
+}
+for (const layer of LAYERS) check(layer.band?.length === 4 && onSheet(layer.band) && layer.bandLabel?.length === 3, `${layer.id}: no band for the 2D view`);
+NODES.forEach((a, i) => {
+  for (const b of NODES.slice(i + 1)) {
+    const clear = a.plan[0] + a.plan[2] <= b.plan[0] || b.plan[0] + b.plan[2] <= a.plan[0]
+      || a.plan[1] + a.plan[3] <= b.plan[1] || b.plan[1] + b.plan[3] <= a.plan[1];
+    check(clear, `${a.id} and ${b.id} overlap in the 2D view`);
+  }
+});
+for (const link of LINKS) {
+  const name = `${link.from} to ${link.to}`;
+  const route = link.route || [];
+  const a = NODES.find(n => n.id === link.from);
+  const b = NODES.find(n => n.id === link.to);
+  check(route.length >= 2, `${name}: no line in the 2D view`);
+  check(link.labelAt?.length === 3 && onSheet([link.labelAt[0], link.labelAt[1], 0, 0]), `${name}: its label in the 2D view is off the sheet`);
+  if (route.length < 2 || !a || !b) continue;
+  check(onEdge(route[0], a.plan), `${name}: the 2D line doesn't start on the edge of ${a.id}`);
+  check(onEdge(route[route.length - 1], b.plan), `${name}: the 2D line doesn't end on the edge of ${b.id}`);
+  route.slice(1).forEach(([x2, y2], i) => {
+    const [x1, y1] = route[i];
+    check((x1 === x2) !== (y1 === y2), `${name}: the 2D line isn't a straight run at point ${i + 1}`);
+    for (const node of NODES) {
+      const [x, y, w, h] = node.plan;
+      const through = Math.max(x1, x2) > x && Math.min(x1, x2) < x + w && Math.max(y1, y2) > y && Math.min(y1, y2) < y + h;
+      check(!through, `${name}: the 2D line goes through ${node.id}`);
+    }
+  });
+}
+
 // Every container on the map, with the version docker-compose.yml gives it
 const onMap = new Set(NODES.map(n => n.image).filter(Boolean));
 for (const image of Object.keys(composeImages())) check(onMap.has(image), `docker-compose.yml runs ${image}, and the map doesn't show it`);
@@ -32450,6 +33487,8 @@ const open = architectureMap({ push: { heard: 1, lastAt: '2026-11-04T00:00:00.00
 assert.equal(open.push.state, 'receiving');
 assert.ok(!open.flows.find(f => f.id === 'servicenow').steps.some(s => s.stop || s.phase), 'Once records arrive, nothing says it stops at the gate');
 assert.ok(!/can't receive/.test(open.servicenow.summary), 'Once records arrive, the summary moves on');
+assert.ok(!/waiting/i.test(open.layers.find(l => l.id === 'push').hint), 'Once records arrive, the push\'s layer stops saying it\'s waiting');
+assert.ok(map.layers.every(l => !('openHint' in l)), 'The words for later stay on the server until then');
 
 // No setting's value ever reaches the map, only names
 const SECRET = 'not-a-real-secret-3f9a';

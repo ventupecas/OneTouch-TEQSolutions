@@ -61,7 +61,7 @@ replacing that.
   "[Demo]" tickets in 5 families (numbers `…99000xx`, outside the export) on no
   team, ready to move to the Brewers live; running it again resets them, and
   `db/demo-tickets-remove.sql` removes them (restart the app after either).
-  Without a restart, an admin's **🎬 Before a presentation** card (Team tab)
+  Without a restart, an admin's **Before a presentation** card (Team tab)
   puts them back (`POST /api/demo-tickets/reset`, `teams.resetDemoTickets`: no
   team, nobody, and their statuses, notifications, stars and ticket results
   gone) and undoes every status (`POST /api/ticket-statuses/undo-all`,
@@ -141,13 +141,19 @@ one function, so its names can't clash with the other page scripts.
 **🧊 Architecture** (`architecture.mjs`, `public/architecture.js`, the 🧊 in the header,
 admins only): a 3D map of how OneTouch is built, drawn with three.js (unchanged, in
 `public/vendor/three-0.186.1/`, loaded the first time an admin opens the map), with the same
-content in a list for screen readers and browsers that can't draw 3D. `public/` can be read
+content in a list for screen readers. **🗺️ 2D** (`buildPlanView`, no three.js) draws the same
+blocks, links, flows and health on a flat sheet, with each block's `doing` sentence and each link's
+label written on it; browsers that can't draw 3D get it. It and the 3D scene answer to the same calls
+(`scene()`), so the page's buttons and steps don't care which is showing. `public/` can be read
 without signing in, so everything the map says is in `architecture.mjs` and comes from
 `GET /api/architecture` (401 signed out, 403 for anyone who isn't an admin); the page's
 script only draws. Versions are read from `package-lock.json` and `docker-compose.yml`.
 `checks/architecture.mjs` (`npm test`) fails if a file the map names is gone, a link or a
-flow's step doesn't join real blocks, a container in `docker-compose.yml` isn't on it, or the
-map's facts appear in `public/`: **a new container or service goes in `NODES`.**
+flow's step doesn't join real blocks, a container in `docker-compose.yml` isn't on it, the
+map's facts appear in `public/`, or the 2D drawing doesn't add up (a block with no `plan` or `doing`, two
+blocks overlapping, a `route` that doesn't start and end on its own blocks or runs through another):
+**a new container or service goes in `NODES`, with its place on the sheet, and its links get a `route`
+and `labelAt`.**
 **The ServiceNow live push is on it as built, but needing ServiceNow's authentication:** a
 dashed amber path that stops at a locked gate, and a "What happens when…" that animates it
 (nothing is sent). It says so until this server really hears a record (`servicenowPush` in
@@ -176,7 +182,7 @@ minute). Each one is saved in the same transaction as the change it reports:
   ticket's record and on its row in the Team tab): their project manager is
   told, and the Team tab shows it under the ticket's state. This is only a
   message (`ticket_reports`): the ticket's data never changes. The Team tab's
-  **✅ Resolved or closed** (`GET /api/ticket-statuses`, `teams.ticketStatuses`)
+  **Resolved or closed** (`GET /api/ticket-statuses`, `teams.ticketStatuses`)
   lists each ticket whose latest report is resolved or closed: every team's for
   admins, a project manager's own team's. They change it
   (`PUT /api/ticket-statuses/:number`, `teams.setTicketStatus`): resolved or

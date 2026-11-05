@@ -132,7 +132,7 @@ async function loadFamilies(more = false, quiet = false) {
         }
         paintFamiliesMore();
     } catch (err) {
-        if (run === familiesState.run) list.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        if (run === familiesState.run) list.innerHTML = `<p class="home-status error">${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -220,7 +220,7 @@ async function toggleFamilyRow(row) {
         box.innerHTML = relatedHtml([data.family], new Set([row.dataset.anchor]));
         forgetRemovedExports();
     } catch (err) {
-        if (box.isConnected) box.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        if (box.isConnected) box.innerHTML = `<p class="home-status error">${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -248,7 +248,7 @@ async function findFamilies(number) {
             if (data.families.length === 1) toggleFamilyRow(list.querySelector('tr.family-row'));
         }
     } catch (err) {
-        if (run === familiesState.run) list.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        if (run === familiesState.run) list.innerHTML = `<p class="home-status error">${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -331,7 +331,7 @@ async function openTicketDialog(number, { back = false } = {}) {
         }
         forgetRemovedExports();
     } catch (err) {
-        if (run === ticketDialogRun) body.innerHTML = `<p class="home-status error">❌ ${escapeHtml(err.message)}</p>`;
+        if (run === ticketDialogRun) body.innerHTML = `<p class="home-status error">${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -384,7 +384,7 @@ async function showRecordFamily(number) {
     body.innerHTML = '';
     toggle.hidden = true;
     if (!number) return;
-    summary.textContent = `👪 Looking for ${number}'s parent, children and other linked tickets…`;
+    summary.textContent = `Looking for ${number}'s parent, children and other linked tickets…`;
     try {
         const response = await fetch(`${API_BASE}/api/tickets/related`, {
             method: 'POST',
@@ -396,16 +396,16 @@ async function showRecordFamily(number) {
         if (!response.ok) throw new Error(data.error || `The server answered ${response.status}.`);
         if (run !== recordFamily.run) return;
         if (!data.families.length) {
-            summary.textContent = `👪 ${number} has no parent, child or other linked tickets.`;
+            summary.textContent = `${number} has no parent, child or other linked tickets.`;
             return;
         }
-        summary.innerHTML = `<b>👪 ${escapeHtml(number)}'s family:</b> ${escapeHtml(data.families.map(f => f.title).join(' · '))}`;
+        summary.innerHTML = `<b>${escapeHtml(number)}'s family:</b> ${escapeHtml(data.families.map(f => f.title).join(' · '))}`;
         body.innerHTML = relatedHtml(data.families, new Set([number]));
         forgetRemovedExports();
         toggle.hidden = false;
         paintRecordFamily();
     } catch (err) {
-        if (run === recordFamily.run) summary.textContent = `👪 Couldn't look for ${number}'s family: ${err.message}`;
+        if (run === recordFamily.run) summary.textContent = `Couldn't look for ${number}'s family: ${err.message}`;
     }
 }
 

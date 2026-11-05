@@ -13,6 +13,14 @@
 // Names of settings only, never their values. Nothing here reads a secret.
 //
 // pos is [x, y, z] in the 3D scene: y is the floor, x runs left to right.
+//
+// The 2D view is the same map on a flat sheet (PLAN is its size). A block's
+// plan is [x, y, width, height] and doing is the sentence written on it; a
+// link's route is the line's corners, from the block it starts at to the one
+// it ends at, and labelAt is [x, y, width] for its label's center; a layer's
+// band is [x, y, width, height] and bandLabel [x, y, width]. The checks hold
+// these up too: lines must be straight runs that start and end on their own
+// blocks and go through no other.
 // =====================================================================
 
 import { readFileSync } from 'node:fs';
@@ -20,25 +28,35 @@ import { readFileSync } from 'node:fs';
 // Which floor of the stack, top to bottom. color: a --series-* in style.css
 export const LAYERS = [
   { id: 'people', name: 'People', color: 'series-1', y: 22.5, plate: [7, 4.5],
+    band: [262,6,1060,92], bandLabel: [272,10,300],
     hint: 'Where people use it: a web page, with nothing to install.' },
   { id: 'edge', name: 'Edge', color: 'series-7', y: 18, plate: [7, 4.5],
+    band: [278,122,1028,84], bandLabel: [288,126,280],
     hint: 'How the page reaches the server from the internet.' },
   { id: 'app', name: 'Application', color: 'series-3', y: 12, plate: [9, 6],
+    band: [278,218,1028,322], bandLabel: [288,221,340],
     hint: 'The Node server and what it is made of. Every permission is decided here.' },
   { id: 'semantic', name: 'Semantic layer and dashboards', color: 'series-2', y: 6, plate: [9, 6],
+    band: [278,586,1028,152], bandLabel: [288,696,305],
     hint: 'Cube turns queries into SQL. Metabase draws the dashboards.' },
   { id: 'data', name: 'Data', color: 'series-4', y: 0, plate: [9, 6],
+    band: [278,744,1028,222], bandLabel: [288,748,300],
     hint: 'One Postgres server with two separate databases.' },
   { id: 'outside', name: 'Outside services', color: 'series-5', y: null,
+    band: [16,118,216,400], bandLabel: [24,122,200],
     hint: 'Services run by someone else, reached over HTTPS.' },
   { id: 'push', name: 'ServiceNow live push', color: 'warn', y: null,
-    hint: 'Built, and waiting on ServiceNow authentication.' },
+    band: [1388,232,240,692], bandLabel: [1398,236,220],
+    hint: 'Built, and waiting on ServiceNow authentication.',
+    openHint: 'Records with the right token are reaching this server.' },
 ];
 
 export const NODES = [
   // ---- People ----
   {
     id: 'browser', name: 'OneTouch page', layer: 'people', shape: 'screen', pos: [0, 22.5, 0], big: true,
+    plan: [582, 18, 420, 72],
+    doing: 'Shows Home, Dashboards, Team and the AI chat, and calls the server with the session token.',
     tech: 'Plain JavaScript, no build step',
     what: 'The whole interface: Home, Dashboards, Team, the AI assistant and this map. One page, written in plain JavaScript and CSS with no framework, so a change only needs a browser refresh.',
     facts: [
@@ -48,12 +66,14 @@ export const NODES = [
       ['Other way in', 'Remote mode (remote.mjs) serves this page from a clone and forwards /api to the server'],
     ],
     secure: 'Holds no permissions of its own: anything it hides is also refused by the server. Scripts can only load from OneTouch itself (the Content-Security-Policy in server.mjs).',
-    files: ['public/index.html', 'public/app.js', 'public/charts.js', 'public/customize.js', 'public/families.js', 'public/teams.js', 'public/notifications.js', 'public/accessibility.js', 'public/architecture.js', 'public/style.css', 'remote.mjs'],
+    files: ['public/index.html', 'public/app.js', 'public/charts.js', 'public/customize.js', 'public/families.js', 'public/teams.js', 'public/notifications.js', 'public/accessibility.js', 'public/lookup.js', 'public/picker.js', 'public/sorting.js', 'public/architecture.js', 'public/style.css', 'remote.mjs'],
   },
 
   // ---- Edge ----
   {
     id: 'tunnel', name: 'Cloudflare Tunnel', layer: 'edge', shape: 'ring', pos: [0, 18, 0], big: true,
+    plan: [582, 128, 420, 72],
+    doing: 'Carries traffic from the public https address to the Node server, with no port open to the network.',
     tech: 'cloudflared', image: 'cloudflare/cloudflared',
     what: 'The only way in from the internet. cloudflared makes an outgoing connection to Cloudflare, so no port on this computer is open to the network. Cloudflare provides the https address.',
     facts: [
@@ -69,6 +89,8 @@ export const NODES = [
   // ---- Application ----
   {
     id: 'express', name: 'Node server', layer: 'app', shape: 'server', pos: [0, 12, 0], big: true,
+    plan: [642, 250, 300, 92],
+    doing: 'Serves the page and API, checks the session on each request, and works out which tickets that person may see.',
     tech: 'Node.js and Express', npm: 'express', runtime: true,
     what: 'The center of OneTouch. It serves the page and the API, checks who is signed in, and works out which tickets each person may see before anything else runs.',
     facts: [
@@ -78,10 +100,12 @@ export const NODES = [
       ['Listens for', 'Postgres channel onetouch_tickets_changed (what the ServiceNow push announces on)'],
     ],
     secure: 'A session token is required on every OneTouch API route except sign-in. This page\'s data has one more check: admins only.',
-    files: ['server.mjs', 'Dockerfile', 'architecture.mjs'],
+    files: ['server.mjs', 'Dockerfile', 'architecture.mjs', 'health.mjs'],
   },
   {
     id: 'auth', name: 'Sign-in', layer: 'app', shape: 'module', pos: [-3.3, 12, -4.2],
+    plan: [730, 404, 160, 122],
+    doing: 'Checks passwords against scrypt hashes and manages 12-hour sessions.',
     tech: 'Node crypto: scrypt and SHA-256',
     what: 'Accounts and sessions. Passwords are kept only as salted scrypt hashes, and session tokens only as their SHA-256.',
     facts: [
@@ -94,6 +118,8 @@ export const NODES = [
   },
   {
     id: 'teams', name: 'Teams and permissions', layer: 'app', shape: 'module', pos: [5.4, 12, -4.2],
+    plan: [900, 404, 160, 122],
+    doing: 'Holds teams and assignments, and limits each person\'s queries to their tickets.',
     tech: 'teams.mjs',
     what: 'Decides what each person sees. Teams, roles, ticket families and assignments live here, and restrictQuery adds "ticket number is one of theirs" to every Cube query for anyone who isn\'t an admin.',
     facts: [
@@ -101,12 +127,15 @@ export const NODES = [
       ['Project managers', 'See every ticket of their team'],
       ['Everyone else on a team', 'See only the tickets assigned to them'],
       ['Families', 'Tickets linked to each other stay on one team and are never split'],
+      ['Its own Cube queries', 'Ticket links at the first start, and whether an AI answer left out tickets the person can\'t see. That second one only ever gives true or false'],
     ],
     secure: 'Enforced on the server: the AI assistant, search, records, families, charts and dashboards all go through it.',
     files: ['teams.mjs'],
   },
   {
     id: 'ai', name: 'AI translator', layer: 'app', shape: 'module', pos: [-6.6, 12, -2],
+    plan: [292, 404, 170, 122],
+    doing: 'Has Claude turn a question into a query, then checks every field of it.',
     tech: 'Anthropic SDK', npm: '@anthropic-ai/sdk',
     what: 'Turns a plain-English question into a Cube query with Claude, then checks that query field by field. When a query comes back empty, it works out why.',
     facts: [
@@ -115,10 +144,12 @@ export const NODES = [
       ['Refused early', 'A question naming only tickets the person can\'t see never reaches Claude'],
     ],
     secure: 'Claude returns a query, and has no connection to the database. The query then runs with the person\'s own limits added.',
-    files: ['business_logic.mjs', 'empty_results.mjs', 'BUSINESS_LOGIC.md'],
+    files: ['server.mjs', 'business_logic.mjs', 'empty_results.mjs', 'BUSINESS_LOGIC.md'],
   },
   {
     id: 'notify', name: 'Notifications and email', layer: 'app', shape: 'module', pos: [-6.6, 12, 2.2],
+    plan: [1092, 250, 200, 92],
+    doing: 'Saves each 🔔 with its change, emails it from the outbox, and takes 🚩 reports.',
     tech: 'notifications.mjs and mail.mjs',
     what: 'The 🔔 in the header, the same notification by email, and the 🚩 problem reports people send the admins. Each is saved in the same transaction as the change it reports, and emails go out from that outbox after the change commits.',
     facts: [
@@ -130,6 +161,8 @@ export const NODES = [
   },
   {
     id: 'tickets', name: 'Tickets, KPIs and charts', layer: 'app', shape: 'module', pos: [-1.9, 12, 4.3],
+    plan: [472, 404, 170, 122],
+    doing: 'Runs search, records and families, and works out KPIs and charts.',
     tech: 'tickets, relations, kpis and charts modules',
     what: 'Ticket search and records, families, KPIs and the charts people build. Every ticket\'s summary and KPI fields are read from Cube once at start, and read again when tickets change.',
     facts: [
@@ -141,6 +174,8 @@ export const NODES = [
   },
   {
     id: 'export', name: 'Downloads', layer: 'app', shape: 'module', pos: [3, 12, 4.3],
+    plan: [292, 250, 200, 92],
+    doing: 'Turns result tables into PDF, Word, Excel, CSV, text or RTF, or bundles them.',
     tech: 'pdfmake, docx, exceljs and 7-Zip',
     what: 'Turns result tables into PDF, Word, Excel, CSV, text and RTF files, and bundles them as .zip or .7z.',
     facts: [
@@ -152,6 +187,8 @@ export const NODES = [
   },
   {
     id: 'prefs', name: 'Personal settings', layer: 'app', shape: 'module', pos: [6.8, 12, 0],
+    plan: [1070, 404, 160, 122],
+    doing: 'Saves each person\'s colors, Home, stars, results, shares and chats.',
     tech: 'prefs, stars, seen, shares and chats modules',
     what: 'What belongs to one person: colors, Home layout and dashboards, starred tickets, ticket results, shared dashboards and saved chats.',
     facts: [
@@ -164,6 +201,8 @@ export const NODES = [
   // ---- Semantic layer and dashboards ----
   {
     id: 'cube', name: 'Cube', layer: 'semantic', shape: 'cube', pos: [-4.4, 6, 0], big: true,
+    plan: [292, 600, 340, 92],
+    doing: 'Turns each query from the app into SQL using the data model, and runs it read-only.',
     tech: 'Semantic layer', image: 'cubejs/cube',
     what: 'The data model. It knows what an incident, a change and a request are, and turns a query from the app into SQL, so neither Claude nor the page ever writes SQL.',
     facts: [
@@ -176,6 +215,8 @@ export const NODES = [
   },
   {
     id: 'metabase', name: 'Metabase', layer: 'semantic', shape: 'bars', pos: [4.4, 6, 0], big: true,
+    plan: [645, 600, 240, 92],
+    doing: 'Draws the dashboard charts from the reporting views, showing only the viewer\'s tickets.',
     tech: 'Dashboards', image: 'metabase/metabase',
     what: 'Draws the dashboards in the Dashboards tab. It only listens on this computer, so its embedded pages reach people through the Node server.',
     facts: [
@@ -191,6 +232,8 @@ export const NODES = [
   // ---- Data ----
   {
     id: 'analytics_db', name: 'analytics_db', layer: 'data', shape: 'db', pos: [-5, 0, 0.6], big: true,
+    plan: [570, 792, 230, 110],
+    doing: 'Holds the ticket tables from the export, and the reporting views the dashboards read.',
     tech: 'PostgreSQL', image: 'postgres',
     what: 'The tickets: the six tables the ServiceNow export was loaded into, and the typed reporting views the dashboards read.',
     facts: [
@@ -204,10 +247,12 @@ export const NODES = [
   },
   {
     id: 'onetouch_auth', name: 'onetouch_auth', layer: 'data', shape: 'db', pos: [5, 0, 0.6], big: true,
+    plan: [905, 792, 395, 110],
+    doing: 'Holds accounts, sessions, teams, families, who has each ticket, notifications and each person\'s settings.',
     tech: 'PostgreSQL', image: 'postgres',
     what: 'OneTouch\'s own data, kept apart from the tickets: accounts and sessions, teams and families, who has each ticket, notifications, and each person\'s settings.',
     facts: [
-      ['Tables', 'users, sessions, teams, team_members, ticket_families, ticket_assignments, ticket_reports, notifications, user_preferences, starred_tickets, seen_tickets, shared_dashboards, saved_chats'],
+      ['Tables', 'users, sessions, teams, team_members, ticket_families, ticket_assignments, ticket_reports, notifications, issue_reports, user_preferences, starred_tickets, seen_tickets, shared_dashboards, saved_chats'],
       ['Role', 'onetouch_app, its own password (AUTH_DB_PASSWORD)'],
       ['Created by', 'The app on start (auth.mjs ensureSchema and each module\'s own tables)'],
     ],
@@ -216,6 +261,8 @@ export const NODES = [
   },
   {
     id: 'csv', name: 'ServiceNow export', layer: 'data', shape: 'sheets', pos: [-7, 0, -3.9],
+    plan: [292, 770, 160, 88],
+    doing: 'The one-time export, loaded on the database\'s first start.',
     tech: 'CSV files',
     what: 'Where the first tickets came from: a one-time export of ServiceNow, loaded on the database\'s first start. Until the ServiceNow push is authenticated, the data stays as it was exported.',
     facts: [
@@ -227,6 +274,8 @@ export const NODES = [
   },
   {
     id: 'db_setup', name: 'Database setup', layer: 'data', shape: 'module', pos: [0, 0, -4.2],
+    plan: [292, 864, 160, 100],
+    doing: 'On every compose up: creates what\'s missing, updates views and roles, exits.',
     tech: 'Runs and exits', image: 'postgres',
     what: 'A container that runs on every docker compose up and then exits. It creates what\'s missing, keeps passwords in step with .env, and updates the reporting views and read-only roles.',
     facts: [
@@ -240,6 +289,8 @@ export const NODES = [
   // ---- Outside services ----
   {
     id: 'claude', name: 'Claude API', layer: 'outside', shape: 'orb', pos: [-14.5, 15.5, -3], big: true,
+    plan: [28, 400, 192, 112],
+    doing: 'Reads a question and answers with a structured query. Also explains empty results.',
     tech: 'Anthropic',
     what: 'Reads a question with the system prompt (what the data holds) and answers with a structured query. It also explains why a query came back empty.',
     facts: [
@@ -251,6 +302,8 @@ export const NODES = [
   },
   {
     id: 'brevo', name: 'Brevo', layer: 'outside', shape: 'orb', pos: [-14.5, 9.5, 3], big: true,
+    plan: [28, 268, 192, 92],
+    doing: 'Delivers the notification emails, from notifications@onetouch.fyi.',
     tech: 'Transactional email',
     what: 'Sends the notification emails, from notifications@onetouch.fyi, through Brevo\'s API.',
     facts: [
@@ -262,6 +315,8 @@ export const NODES = [
   },
   {
     id: 'ci', name: 'GitHub Actions', layer: 'outside', shape: 'orb', pos: [-14.5, 22.5, -0.5],
+    plan: [28, 162, 192, 100],
+    doing: 'On each push: build checks, npm test and audit, then a fetch of the public address.',
     tech: 'Checks on every push',
     what: 'Runs the checks on every push: the syntax and README checks, npm test and a dependency audit, then fetches the public address to confirm the site is up.',
     facts: [
@@ -275,17 +330,21 @@ export const NODES = [
   // ---- The ServiceNow live push ----
   {
     id: 'servicenow', name: 'ServiceNow', layer: 'push', shape: 'orb', pos: [20.8, 12, 4.4], big: true, pending: true,
+    plan: [1400, 290, 216, 112],
+    doing: 'Once set up and authenticated, its Business Rules send each saved ticket or approval to OneTouch.',
     tech: 'Where the tickets really live',
     what: 'Once it\'s set up and authenticated, async Business Rules send every insert and update of an incident, change, requested item, catalog task and approval to OneTouch.',
     facts: [
       ['To set up there', 'A system property, one REST Message, one Script Include and five Business Rules'],
       ['Direction', 'ServiceNow calls OneTouch. OneTouch never signs in to ServiceNow'],
     ],
-    secure: 'Needs an admin on the ServiceNow instance, and the shared secret on both sides. See the 🔌 ServiceNow tab.',
+    secure: 'Needs an admin on the ServiceNow instance, and the shared secret on both sides. See the ServiceNow tab.',
     files: ['servicenow-sync/servicenow-blueprint.md'],
   },
   {
     id: 'gate', name: 'Authentication gate', layer: 'push', shape: 'gate', pos: [16.6, 12, 3.2], big: true, pending: true, between: ['servicenow', 'listener'],
+    plan: [1400, 500, 216, 140],
+    doing: 'Lets a call through only if X-Webhook-Token equals the shared secret. Anything else gets a 401.',
     tech: 'X-Webhook-Token',
     what: 'The check every call has to pass. The call must carry X-Webhook-Token equal to WEBHOOK_SECRET, compared in constant time. Without the right token the listener answers 401 and saves nothing.',
     facts: [
@@ -297,6 +356,8 @@ export const NODES = [
   },
   {
     id: 'listener', name: 'ServiceNow listener', layer: 'push', shape: 'listener', pos: [12.6, 12, 2], big: true, pending: true,
+    plan: [1400, 800, 216, 112],
+    doing: 'Saves one record per call in the export\'s tables, then puts each new ticket in its family and team.',
     tech: 'Express, its own process', pushNpm: 'express',
     what: 'A small server of its own that takes one record per call, saves it in the same tables the export filled, and puts each new ticket in its family by OneTouch\'s own rules.',
     facts: [
@@ -305,7 +366,7 @@ export const NODES = [
       ['Status', 'Built, in servicenow-sync/. Not in docker-compose.yml, so it\'s started on its own with npm start'],
       ['Answers', 'Straight away, then saves, so ServiceNow never waits'],
     ],
-    secure: 'Needs its own .env. It uses a servicenow_sync database account for the ticket tables.',
+    secure: 'Needs its own .env. It uses a servicenow_sync database account in analytics_db, which isn\'t made for you, and OneTouch\'s own onetouch_app account in onetouch_auth.',
     files: ['servicenow-sync/src/app.js', 'servicenow-sync/src/routes/webhook.js', 'servicenow-sync/src/processRecord.js', 'servicenow-sync/src/families.js', 'servicenow-sync/src/db/upsertRecord.js', 'servicenow-sync/src/db/pending.js', 'servicenow-sync/src/config/schema.js', 'servicenow-sync/db/schema.sql', 'servicenow-sync/.env.example'],
   },
 ];
@@ -313,40 +374,41 @@ export const NODES = [
 // kind: 'main' (a connection that's in use), 'inner' (inside the Node server)
 // or 'pending' (built, waiting on ServiceNow). bend: pushes the curve sideways.
 export const LINKS = [
-  { from: 'browser', to: 'tunnel', kind: 'main', label: 'HTTPS, with the session token' },
-  { from: 'tunnel', to: 'express', kind: 'main', label: 'Plain HTTP inside Docker\'s network' },
-  { from: 'ci', to: 'tunnel', kind: 'main', label: 'Smoke test of the public address' },
+  { from: 'browser', to: 'tunnel', kind: 'main', label: 'HTTPS, with the session token', route: [[792,90],[792,128]], labelAt: [885,109,170] },
+  { from: 'tunnel', to: 'express', kind: 'main', label: 'Plain HTTP inside Docker\'s network', route: [[792,200],[792,250]], labelAt: [715,226,140] },
+  { from: 'ci', to: 'tunnel', kind: 'main', label: 'Smoke test of the public address', route: [[220,185],[582,185]], labelAt: [400,185,200] },
 
-  { from: 'express', to: 'auth', kind: 'inner', label: 'Who is this?' },
-  { from: 'express', to: 'teams', kind: 'inner', label: 'What may they see?' },
-  { from: 'express', to: 'ai', kind: 'inner', label: 'Questions' },
-  { from: 'express', to: 'notify', kind: 'inner', label: 'The 🔔 list' },
-  { from: 'express', to: 'tickets', kind: 'inner', label: 'Search, records, KPIs and charts' },
-  { from: 'express', to: 'export', kind: 'inner', label: 'Result tables, made into files' },
-  { from: 'express', to: 'prefs', kind: 'inner', label: 'Each person\'s settings' },
+  { from: 'express', to: 'auth', kind: 'inner', label: 'Who is this?', route: [[810,342],[810,404]], labelAt: [810,373,90] },
+  { from: 'express', to: 'teams', kind: 'inner', label: 'What may they see?', route: [[860,342],[860,382],[980,382],[980,404]], labelAt: [925,382,120] },
+  { from: 'express', to: 'ai', kind: 'inner', label: 'Questions', route: [[650,342],[650,360],[377,360],[377,404]], labelAt: [500,360,90] },
+  { from: 'express', to: 'notify', kind: 'inner', label: 'The 🔔 list', route: [[942,296],[1092,296]], labelAt: [1017,296,90] },
+  { from: 'express', to: 'tickets', kind: 'inner', label: 'Search, records, KPIs and charts', route: [[665,342],[665,382],[557,382],[557,404]], labelAt: [608,382,100] },
+  { from: 'express', to: 'export', kind: 'inner', label: 'Result tables, made into files', route: [[642,296],[492,296]], labelAt: [567,296,120] },
+  { from: 'express', to: 'prefs', kind: 'inner', label: 'Each person\'s settings', route: [[900,342],[900,360],[1150,360],[1150,404]], labelAt: [1040,360,170] },
 
-  { from: 'ai', to: 'claude', kind: 'main', label: 'Question to query, over HTTPS with an API key' },
-  { from: 'notify', to: 'brevo', kind: 'main', label: 'Emails, over HTTPS with an API key' },
-  { from: 'ai', to: 'cube', kind: 'main', label: 'The validated query, with the person\'s limits added' },
-  { from: 'tickets', to: 'cube', kind: 'main', label: 'Search, KPI and chart queries, with a signed token' },
-  { from: 'express', to: 'metabase', kind: 'main', label: 'Passes through signed dashboard pages only', bend: 1.6 },
+  { from: 'ai', to: 'claude', kind: 'main', label: 'Question to query, over HTTPS with an API key', route: [[292,424],[220,424]], labelAt: [262,383,140] },
+  { from: 'notify', to: 'brevo', kind: 'main', label: 'Emails, over HTTPS with an API key', route: [[1120,250],[1120,212],[250,212],[250,314],[220,314]], labelAt: [450,212,230] },
+  { from: 'ai', to: 'cube', kind: 'main', label: 'The validated query, with the person\'s limits added', route: [[377,526],[377,600]], labelAt: [438,563,118] },
+  { from: 'tickets', to: 'cube', kind: 'main', label: 'Search, KPI and chart queries, with a signed token', route: [[510,526],[510,600]], labelAt: [566,563,108] },
+  { from: 'teams', to: 'cube', kind: 'main', label: 'Family links at the first start; hidden-ticket checks', route: [[940,526],[940,580],[625,580],[625,600]], labelAt: [755,572,100] },
+  { from: 'express', to: 'metabase', kind: 'main', label: 'Passes through signed dashboard pages only', bend: 1.6, route: [[700,342],[700,600]], labelAt: [686,465,78] },
 
-  { from: 'auth', to: 'onetouch_auth', kind: 'main', label: 'Accounts and sessions', bend: 4 },
-  { from: 'teams', to: 'onetouch_auth', kind: 'main', label: 'Teams, families and assignments', bend: 2 },
-  { from: 'notify', to: 'onetouch_auth', kind: 'main', label: 'Notifications and the email outbox', bend: 4 },
-  { from: 'prefs', to: 'onetouch_auth', kind: 'main', label: 'Preferences, stars, results, shares and chats', bend: 2 },
-  { from: 'cube', to: 'analytics_db', kind: 'main', label: 'SQL as cube_reader (read-only)' },
-  { from: 'metabase', to: 'analytics_db', kind: 'main', label: 'SQL as metabase_reader, through the reporting views' },
-  { from: 'analytics_db', to: 'onetouch_auth', kind: 'main', label: 'postgres_fdw as access_reader: ticket_access only' },
-  { from: 'csv', to: 'analytics_db', kind: 'main', label: 'load_csv.sql, on the first start' },
-  { from: 'db_setup', to: 'analytics_db', kind: 'main', label: 'Reporting views and read-only roles' },
-  { from: 'db_setup', to: 'onetouch_auth', kind: 'main', label: 'The database and its role' },
+  { from: 'auth', to: 'onetouch_auth', kind: 'main', label: 'Accounts and sessions', bend: 4, route: [[810,526],[810,560],[920,560],[920,792]], labelAt: [865,560,100] },
+  { from: 'teams', to: 'onetouch_auth', kind: 'main', label: 'Teams, families and assignments', bend: 2, route: [[980,526],[980,792]], labelAt: [980,665,110] },
+  { from: 'notify', to: 'onetouch_auth', kind: 'main', label: 'Notifications and the email outbox', bend: 4, route: [[1268,342],[1268,792]], labelAt: [1268,665,84] },
+  { from: 'prefs', to: 'onetouch_auth', kind: 'main', label: 'Preferences, stars, results, shares and chats', bend: 2, route: [[1150,526],[1150,792]], labelAt: [1150,665,130] },
+  { from: 'cube', to: 'analytics_db', kind: 'main', label: 'SQL as cube_reader (read-only)', route: [[600,692],[600,792]], labelAt: [672,745,130] },
+  { from: 'metabase', to: 'analytics_db', kind: 'main', label: 'SQL as metabase_reader, through the reporting views', route: [[750,692],[750,792]], labelAt: [825,745,140] },
+  { from: 'analytics_db', to: 'onetouch_auth', kind: 'main', label: 'postgres_fdw as access_reader: ticket_access only', route: [[800,848],[905,848]], labelAt: [852,815,100] },
+  { from: 'csv', to: 'analytics_db', kind: 'main', label: 'load_csv.sql, on the first start', route: [[452,816],[570,816]], labelAt: [511,797,112] },
+  { from: 'db_setup', to: 'analytics_db', kind: 'main', label: 'Reporting views and read-only roles', route: [[452,884],[570,884]], labelAt: [511,905,112] },
+  { from: 'db_setup', to: 'onetouch_auth', kind: 'main', label: 'The database and its role', route: [[452,940],[1102,940],[1102,902]], labelAt: [800,940,180] },
 
-  { from: 'servicenow', to: 'gate', kind: 'pending', label: 'POST { table, record }, carrying X-Webhook-Token' },
-  { from: 'gate', to: 'listener', kind: 'pending', label: 'Only calls with the right token get through' },
-  { from: 'listener', to: 'analytics_db', kind: 'pending', label: 'Saves the record in the export\'s own table', bend: 1.5 },
-  { from: 'listener', to: 'onetouch_auth', kind: 'pending', label: 'teams.placeTicket: family, team, then a signal', bend: 2 },
-  { from: 'onetouch_auth', to: 'express', kind: 'pending', label: 'onetouch_tickets_changed: read the data again', bend: -2.5 },
+  { from: 'servicenow', to: 'gate', kind: 'pending', label: 'POST { table, record }, carrying X-Webhook-Token', route: [[1508,402],[1508,500]], labelAt: [1508,451,180] },
+  { from: 'gate', to: 'listener', kind: 'pending', label: 'Only calls with the right token get through', route: [[1508,640],[1508,800]], labelAt: [1508,720,170] },
+  { from: 'listener', to: 'analytics_db', kind: 'pending', label: 'Saves the record in the export\'s own table', bend: 1.5, route: [[1508,912],[1508,1006],[690,1006],[690,902]], labelAt: [1100,1006,280] },
+  { from: 'listener', to: 'onetouch_auth', kind: 'pending', label: 'teams.placeTicket: family, team, then a signal', bend: 2, route: [[1400,870],[1300,870]], labelAt: [1350,916,96] },
+  { from: 'onetouch_auth', to: 'express', kind: 'pending', label: 'onetouch_tickets_changed: read the data again', bend: -2.5, route: [[1300,820],[1314,820],[1314,240],[900,240],[900,250]], labelAt: [1010,232,190] },
 ];
 
 // "What happens when…": each step moves along path (blocks joined by links).
@@ -421,7 +483,7 @@ export const FLOWS = [
       { path: ['onetouch_auth', 'notify', 'brevo'], title: 'The admins are emailed',
         text: 'Through the usual outbox. The email says who reported what kind of problem. What they wrote stays behind the sign-in.' },
       { path: ['onetouch_auth', 'notify', 'express', 'tunnel', 'browser'], title: 'It shows up here',
-        text: 'Under the admins\' 🔔, and in the banner and the 📣 Reports tab of this page, where an admin marks it resolved.' },
+        text: 'Under the admins\' 🔔, and in the banner and the Reports tab of this page, where an admin marks it resolved.' },
     ],
   },
   {
@@ -474,7 +536,7 @@ export const SERVICENOW = {
     { title: 'An address ServiceNow can reach',
       text: 'ServiceNow\'s cloud can\'t reach localhost. The listener needs a public HTTPS address, and it isn\'t in docker-compose.yml today, so it also has to be started and hosted.' },
     { title: 'A database account for the listener',
-      text: 'SELECT, INSERT and UPDATE on the six ticket tables, with its own .env filled in on the server.' },
+      text: 'A servicenow_sync account made by hand in analytics_db: SELECT, INSERT and UPDATE on the six ticket tables; those and DELETE on servicenow_pending; USAGE on its sequence. In onetouch_auth it uses OneTouch\'s own onetouch_app. Both go in its own .env on the server.' },
     { title: 'The instance\'s own field names',
       text: 'The fields marked "check" in the blueprint have no standard ServiceNow field, or were custom in the export.' },
     { title: 'One real ticket to prove it',
@@ -495,7 +557,12 @@ const COMPOSE = {
   note: 'Every container publishes its port on 127.0.0.1 only. The ServiceNow listener and the outside services are outside this frame.',
   min: [-10, -1.2, -7],
   max: [10, 20, 7],
+  band: [262, 110, 1060, 880],
+  bandLabel: [272, 971, 1040],
 };
+
+// The 2D view's sheet, in the same units as plan, route and band
+export const PLAN = { w: 1640, h: 1030 };
 
 // ---------------------------------------------------------------------
 // Versions: read from the files that decide them, so they can't fall behind
@@ -605,7 +672,8 @@ export function architectureMap({ model = null, push = {} } = {}) {
   return {
     overview: OVERVIEW,
     compose: COMPOSE,
-    layers: LAYERS,
+    plan: PLAN,
+    layers: LAYERS.map(({ openHint, ...layer }) => (open && openHint ? { ...layer, hint: openHint } : layer)),
     nodes: NODES.map(({ image, npm: pkg, runtime, pushNpm: pushPkg, ...node }) => ({
       ...node,
       version: nodeVersion({ image, npm: pkg, runtime, pushNpm: pushPkg }, images, npm, pushNpm),

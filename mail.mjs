@@ -85,7 +85,7 @@ export function emailFor(n, cfg = mailConfig()) {
   } else if (n.kind === 'issue') {
     // The kind of problem only: what they wrote stays behind the sign-in
     what = `${who} reported a problem with OneTouch: ${d.label}`;
-    where = 'Read it and mark it resolved in OneTouch, on the 🧊 Architecture page, under 📣 Reports.';
+    where = 'Read it and mark it resolved in OneTouch, on the Architecture page, under Reports.';
   } else {
     what = `${who} sent you a notification`;
     where = 'See it under the 🔔 in OneTouch.';

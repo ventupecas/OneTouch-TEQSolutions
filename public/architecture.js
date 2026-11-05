@@ -7,9 +7,13 @@
 // answers admins (architecture.mjs). three.js is loaded the first time an
 // admin opens the map, so nobody else's page pays for it.
 //
-// The same content is in a list (📝 List), for screen readers and for
-// browsers that can't draw 3D. One function, so its names can't clash with
-// the other page scripts.
+// The same map is drawn flat (🗺️ 2D, no three.js or graphics card needed), with
+// what each block and line does written on it. Browsers that can't draw 3D
+// get that. The 3D scene and the flat view answer to the same calls (see
+// scene()), so the buttons and steps work the same on both.
+//
+// The same content is in a list (📝 List), for screen readers. One function,
+// so its names can't clash with the other page scripts.
 // =====================================================================
 
 (function () {
@@ -20,11 +24,12 @@
     const DIM = 0.14; // how faint what isn't in focus gets
 
     let map = null;        // what the server said; null until loaded and after sign-out
-    let world = null;      // the 3D scene; null when only the list can be shown
+    let world = null;      // the 3D scene; null when this browser can't draw it
+    let planView = null;   // the flat view
     let active = false;
     let loading = null;    // the first opening, while it's still under way
     let opening = 0;       // goes up at sign-out, so a late answer can't draw the map for the next person
-    let mode = '3d';       // '3d' or 'list'
+    let mode = '3d';       // '3d', '2d' or 'list'
     let sideTab = 'details';
     let selected = null;   // a block's id
     let focusLayer = null; // a layer's id
@@ -37,6 +42,8 @@
     const RAIL_KEY = 'onetouch-arch-rail-min';
     let railMin = false;   // the left side bar minimized
     try { railMin = localStorage.getItem(RAIL_KEY) === '1'; } catch { /* Open, then */ }
+    const MODE_KEY = 'onetouch-arch-mode';
+    const LABELS_KEY = 'onetouch-arch-plan-labels-off';
     const PUSH_BAR_KEY = 'onetouch-arch-push-bar-hidden';
     let pushBarOff = false; // someone closed the "needs authentication" bar
     try { pushBarOff = localStorage.getItem(PUSH_BAR_KEY) === '1'; } catch { /* Showing, then */ }
@@ -50,6 +57,8 @@
         || matchMedia('(prefers-reduced-motion: reduce)').matches;
     const receiving = () => map?.push.state === 'receiving';
     const colorVar = name => `var(--${/^(series-[1-8]|warn)$/.test(name) ? name : 'muted'})`;
+    // Whichever drawing is showing: both answer to the same calls. The list has none.
+    const scene = () => (mode === '3d' ? world : mode === '2d' ? planView : null);
 
     // -----------------------------------------------------------------
     // The page's text (everything but the scene)
@@ -66,6 +75,20 @@
                 <div class="arch-tags" id="arch-tags"></div>
                 <p class="arch-hint">Drag to turn · scroll to zoom · Shift+drag to move · click a block. Moving dots show which way data goes, not live traffic.</p>
             </div>
+            <div class="arch-plan" id="arch-plan" tabindex="0" role="group" hidden
+                 aria-label="2D map of OneTouch. Arrow keys move it, plus and minus zoom, 0 resets the view. Each block is a button that says what it does. The List view has the same information.">
+                <div class="arch-plan-sheet" id="arch-plan-sheet"></div>
+                <div class="arch-plan-foot" id="arch-plan-foot">
+                    <ul class="arch-plan-key">
+                        <li><span class="arch-key-line" aria-hidden="true"></span> In use</li>
+                        <li><span class="arch-key-line arch-key-inner" aria-hidden="true"></span> Inside the Node server</li>
+                        <li><span class="arch-key-line arch-key-pending" aria-hidden="true"></span> <span id="arch-key-pending-text"></span></li>
+                        <li><span class="arch-key-frame" aria-hidden="true"></span> Docker Compose</li>
+                    </ul>
+                    <button type="button" class="arch-btn" id="arch-plan-labels" data-do="labels"></button>
+                    <p class="arch-hint arch-plan-hint">Drag to move · scroll to zoom · click a block for its details · point at a line to trace it. Moving dots show which way data goes, not live traffic.</p>
+                </div>
+            </div>
             <div class="arch-list" id="arch-list" hidden></div>
             <section class="arch-step" id="arch-step" aria-live="polite" hidden></section>
             <aside class="arch-side" id="arch-side" aria-label="Details"></aside>`;
@@ -81,14 +104,14 @@
         const list = problems();
         const shown = list.slice(0, 3);
         const bad = !list.length ? '' : `<div class="arch-status-row arch-status-problems">
-                <span class="arch-chip arch-chip-stop">⚠️ ${list.length} problem${list.length === 1 ? '' : 's'}</span>
+                <span class="arch-chip arch-chip-stop">${list.length} problem${list.length === 1 ? '' : 's'}</span>
                 <span class="arch-status-text">${shown.map(p => `<b>${esc(p.name)}:</b> ${esc(p.text)}`).join('<br>')}${list.length > shown.length ? `<br>and ${list.length - shown.length} more` : ''}</span>
                 <button type="button" class="arch-btn" data-side="health">See what's wrong</button>
             </div>`;
         const open = issues?.openCount || 0;
         const latest = issues?.open[0];
         const reported = !open ? '' : `<div class="arch-status-row arch-status-problems">
-                <span class="arch-chip arch-chip-warn">📣 ${open} open report${open === 1 ? '' : 's'}</span>
+                <span class="arch-chip arch-chip-warn">${open} open report${open === 1 ? '' : 's'}</span>
                 <span class="arch-status-text">${latest ? `<b>Latest, from ${esc(latest.reporter)}:</b> ${esc(latest.label)}` : ''}</span>
                 <button type="button" class="arch-btn" data-side="reports">See the reports</button>
             </div>`;
@@ -139,11 +162,11 @@
 
     // What people have told the admins (the 🚩 in the header)
     function reportsHtml(Heading = 'h3') {
-        const title = `<${Heading} class="arch-node-name">📣 Problems people reported</${Heading}>`;
+        const title = `<${Heading} class="arch-node-name">Problems people reported</${Heading}>`;
         if (!issues) return `${title}<p>Loading the reports…</p>`;
         const open = issues.open.length
             ? `<ul class="arch-checks">${issues.open.map(r => reportHtml(r, false)).join('')}</ul>`
-            : '<p class="arch-notice arch-notice-good"><b>✅ No open reports.</b></p>';
+            : '<p class="arch-notice arch-notice-good"><b>No open reports.</b></p>';
         const resolved = issues.resolved.length
             ? `<details class="arch-reports-done"><summary>Resolved lately (${issues.resolved.length})</summary>
                 <ul class="arch-checks">${issues.resolved.map(r => reportHtml(r, true)).join('')}</ul></details>` : '';
@@ -156,17 +179,16 @@
         const rank = { problem: 0, off: 1, ok: 2 };
         const checks = [...(health?.checks || [])].sort((a, b) => rank[a.state] - rank[b.state]);
         const list = problems();
-        const icon = { problem: '⚠️', off: '⚪', ok: '✅' };
         const summary = list.length
-            ? `<p class="arch-notice arch-notice-bad"><b>⚠️ ${list.length} problem${list.length === 1 ? '' : 's'} right now.</b></p>`
-            : health ? '<p class="arch-notice arch-notice-good"><b>✅ Everything checked is working.</b></p>' : '<p>Checking…</p>';
-        const server = healthError ? `<li class="arch-check arch-check-problem"><b>⚠️ OneTouch server</b><br>${esc(healthError)}<br><span class="arch-small">Noticed ${esc(when(healthErrorSince))}. These results are from the last answer.</span></li>` : '';
+            ? `<p class="arch-notice arch-notice-bad"><b>${list.length} problem${list.length === 1 ? '' : 's'} right now.</b></p>`
+            : health ? '<p class="arch-notice arch-notice-good"><b>Everything checked is working.</b></p>' : '<p>Checking…</p>';
+        const server = healthError ? `<li class="arch-check arch-check-problem"><b>OneTouch server</b><br>${esc(healthError)}<br><span class="arch-small">Noticed ${esc(when(healthErrorSince))}. These results are from the last answer.</span></li>` : '';
         return `
-            <${Heading} class="arch-node-name">🩺 Is everything working?</${Heading}>
+            <${Heading} class="arch-node-name">Is everything working?</${Heading}>
             ${summary}
             <ul class="arch-checks">${server}${checks.map(c => `
                 <li class="arch-check arch-check-${esc(c.state)}">
-                    <b>${icon[c.state] || ''} ${c.node ? `<button type="button" class="arch-link" data-node="${esc(c.node)}">${esc(c.name)}</button>` : esc(c.name)}</b><br>
+                    <b>${c.node ? `<button type="button" class="arch-link" data-node="${esc(c.node)}">${esc(c.name)}</button>` : esc(c.name)}</b><br>
                     ${esc(c.text)}
                     ${c.effect ? `<br><b>What this means:</b> ${esc(c.effect)}` : ''}
                     ${c.state === 'problem' && c.detail && c.detail !== c.text ? `<br><span class="arch-small">${esc(c.detail)}</span>` : ''}
@@ -179,13 +201,13 @@
         const push = map.push;
         const s = map.servicenow;
         if (receiving()) {
-            return `<span class="arch-chip arch-chip-good">🔓 Records arriving</span>
+            return `<span class="arch-chip arch-chip-good">Records arriving</span>
                 <span class="arch-status-text"><b>ServiceNow live push:</b> ${push.heard.toLocaleString()} record${push.heard === 1 ? '' : 's'} since this server started, the last at ${esc(when(push.lastAt))}.</span>
                 <button type="button" class="arch-btn" data-side="servicenow">Details</button>`;
         }
         return `<button type="button" class="arch-status-close" data-do="hide-push-bar" aria-label="Hide this ServiceNow notice"
                 title="Hide this. ServiceNow live push on the left brings it back.">✕</button>
-            <span class="arch-chip arch-chip-warn">🔒 Needs ServiceNow authentication</span>
+            <span class="arch-chip arch-chip-warn">Needs ServiceNow authentication</span>
             <span class="arch-status-text"><b>${esc(s.headline)}</b> No data can arrive until then.</span>
             <span class="arch-status-actions">
                 <button type="button" class="arch-btn" data-side="servicenow">What it needs</button>
@@ -206,14 +228,29 @@
         return `
             <div class="arch-mode" role="group" aria-label="How to show the map">
                 <button type="button" class="arch-btn${mode === '3d' ? ' is-on' : ''}" data-do="3d" aria-pressed="${mode === '3d'}"${world ? '' : ' disabled title="This browser can\'t draw 3D here"'}>🧊 3D</button>
+                <button type="button" class="arch-btn${mode === '2d' ? ' is-on' : ''}" data-do="2d" aria-pressed="${mode === '2d'}">🗺️ 2D</button>
                 <button type="button" class="arch-btn${mode === 'list' ? ' is-on' : ''}" data-do="list" aria-pressed="${mode === 'list'}">📝 List</button>
-                <button type="button" class="arch-btn" data-do="reset" title="Back to the whole map"${mode === '3d' && world ? '' : ' disabled'}>↺</button>
+                <button type="button" class="arch-btn" data-do="reset" title="Back to the whole map"${scene() ? '' : ' disabled'}>↺</button>
                 <button type="button" class="arch-btn" data-do="rail" aria-expanded="true" aria-label="Hide the views and layers" title="Hide the views and layers">◀</button>
             </div>
             <h3 class="arch-rail-head">What happens when…</h3>
             <div class="arch-rail-group">${flows}</div>
             <h3 class="arch-rail-head">Layers</h3>
             <div class="arch-rail-group">${layers}</div>`;
+    }
+
+    // The part of the page no panel is floating over, for a view w by h
+    function freeAreaOf(w, h) {
+        const root = $('architecture');
+        const stacked = getComputedStyle($('arch-rail')).position !== 'absolute';
+        const rect = root.getBoundingClientRect();
+        if (stacked) return { w, h, left: 0, right: 0, top: 0, bottom: 0 };
+        const left = $('arch-rail').getBoundingClientRect().right - rect.left;
+        const right = rect.right - $('arch-side').getBoundingClientRect().left;
+        const status = $('arch-status');
+        const top = status.hidden ? 12 : status.getBoundingClientRect().bottom - rect.top;
+        const bottom = 26;
+        return { w: w - left - right, h: h - top - bottom, left, right, top, bottom };
     }
 
     // A time as this person reads it
@@ -234,7 +271,7 @@
                 <span class="arch-link-note">${esc(l.label)}${l.kind === 'pending' && !receiving() ? ' (once authenticated)' : ''}</span></li>`;
         }).join('');
         const notice = node.pending && !receiving()
-            ? `<p class="arch-notice">🔒 ${esc(map.servicenow.headline)} <button type="button" class="arch-link" data-side="servicenow">See what it needs</button></p>` : '';
+            ? `<p class="arch-notice">${esc(map.servicenow.headline)} <button type="button" class="arch-link" data-side="servicenow">See what it needs</button></p>` : '';
         return `
             <div class="arch-node-head" style="--arch-c: ${colorVar(layer.color)}">
                 <span class="arch-swatch" aria-hidden="true"></span>
@@ -265,10 +302,10 @@
         const s = map.servicenow;
         const push = map.push;
         const heard = receiving()
-            ? `<p class="arch-notice arch-notice-good">🔓 <b>${push.heard.toLocaleString()} record${push.heard === 1 ? '' : 's'}</b> heard since this server started, the last at ${esc(when(push.lastAt))}${push.last ? ` (${esc(push.last)})` : ''}.</p>`
-            : `<p class="arch-notice"><b>🔒 ${esc(s.headline)}</b></p>`;
+            ? `<p class="arch-notice arch-notice-good"><b>${push.heard.toLocaleString()} record${push.heard === 1 ? '' : 's'}</b> heard since this server started, the last at ${esc(when(push.lastAt))}${push.last ? ` (${esc(push.last)})` : ''}.</p>`
+            : `<p class="arch-notice"><b>${esc(s.headline)}</b></p>`;
         return `
-            <${Heading} class="arch-node-name">🔌 ServiceNow live push</${Heading}>
+            <${Heading} class="arch-node-name">ServiceNow live push</${Heading}>
             ${heard}
             <p>${esc(s.summary)}</p>
             <div class="arch-evidence">
@@ -293,6 +330,7 @@
             <p>${esc(map.overview)}</p>
             <h4>Find your way around</h4>
             <ul class="arch-built">
+                <li><b>3D</b>, <b>2D</b> and <b>List</b> are the same map. 2D writes on every block and line what it's doing.</li>
                 <li>Click any block for what it does, how it's protected and where its code is.</li>
                 <li>Pick a <b>What happens when…</b> to follow a real request through the system, step by step.</li>
                 <li>Moving dots show which way data goes. They aren't live traffic.</li>
@@ -328,12 +366,12 @@
         const box = $('arch-step');
         if (!box) return;
         const flow = player.flow;
-        box.hidden = !flow || mode !== '3d';
+        box.hidden = !flow || mode === 'list';
         if (box.hidden) return;
         const step = flow.steps[player.index];
         const chip = {
             needs: '<span class="arch-chip arch-chip-warn">Needs setting up in ServiceNow</span>',
-            stop: '<span class="arch-chip arch-chip-stop">🔒 Needs ServiceNow authentication</span>',
+            stop: '<span class="arch-chip arch-chip-stop">Needs ServiceNow authentication</span>',
             after: '<span class="arch-chip">Built. Runs once authenticated</span>',
         }[step.phase] || '';
         box.className = `arch-step${step.stop ? ' arch-step-stop' : ''}`;
@@ -357,7 +395,6 @@
     function renderList() {
         const list = $('arch-list');
         if (!list) return;
-        const note = world ? '' : '<p class="arch-notice">This browser can\'t draw the 3D map here, so here it is as a list.</p>';
         const flows = map.flows.map(f => `
             <article class="arch-item" id="arch-flow-${esc(f.id)}" tabindex="-1">
                 <h4 class="arch-node-name"><span aria-hidden="true">${esc(f.icon)}</span> ${esc(f.name)}</h4>
@@ -368,8 +405,8 @@
             return `<section class="arch-list-layer" id="arch-layer-${esc(l.id)}"><h3>${esc(l.name)}</h3><p class="arch-small">${esc(l.hint)}</p>
                 ${nodes.map(n => `<article class="arch-item" id="arch-item-${esc(n.id)}" tabindex="-1">${nodeHtml(n, 'h4')}</article>`).join('')}</section>`;
         }).join('');
-        list.innerHTML = `${note}
-            <section class="arch-list-layer"><h2>🧊 Architecture</h2><p>${esc(map.overview)}</p></section>
+        list.innerHTML = `
+            <section class="arch-list-layer"><h2>Architecture</h2><p>${esc(map.overview)}</p></section>
             <section class="arch-list-layer arch-item" id="arch-list-health" tabindex="-1">${healthHtml('h3')}</section>
             <section class="arch-list-layer arch-item" id="arch-list-reports" tabindex="-1">${reportsHtml('h3')}</section>
             <section class="arch-list-layer arch-item" id="arch-list-servicenow" tabindex="-1">${servicenowHtml('h3')}</section>
@@ -379,21 +416,46 @@
     }
 
     function setMode(next) {
-        mode = next === '3d' && world ? '3d' : 'list';
+        // A person following a request between 3D and 2D stays on their step;
+        // the list has no scene to follow it in
+        if (next === 'list') stopFlow();
+        const before = scene();
+        before?.endStep();
+        before?.sleep();
+        // No 3D here: the flat view has everything the scene does
+        mode = next === '3d' && !world ? '2d' : next;
         const root = $('architecture');
         root.classList.toggle('arch-is-list', mode === 'list');
         $('arch-stage').hidden = mode !== '3d';
+        $('arch-plan').hidden = mode !== '2d';
         $('arch-list').hidden = mode !== 'list';
-        if (mode === 'list') {
-            stopFlow();
-            world?.sleep();
-            renderList();
-        } else {
-            world.resize();
-            if (active) world.wake();
-        }
         $('arch-rail').innerHTML = railHtml();
+        // Before the scene: the camera leaves room for the step's card, so it needs its size
         renderStep();
+        const now = scene();
+        if (!now) {
+            renderList();
+            return;
+        }
+        now.resize();
+        if (active) now.wake();
+        if (player.flow) now.playStep(player.flow.steps[player.index]);
+        else now.showFocus(false);
+    }
+
+    // Which view this browser last used
+    function savedMode() {
+        try {
+            const saved = localStorage.getItem(MODE_KEY);
+            return ['3d', '2d', 'list'].includes(saved) ? saved : '3d';
+        } catch {
+            return '3d';
+        }
+    }
+
+    function pickMode(next) {
+        try { localStorage.setItem(MODE_KEY, next); } catch { /* Just for this visit */ }
+        setMode(next);
     }
 
     // In the list, a button that would change the scene goes to that part instead
@@ -419,7 +481,7 @@
         if (player.flow) return;
         focusLayer = null;
         $('arch-rail').innerHTML = railHtml();
-        world?.showFocus(fly);
+        scene()?.showFocus(fly);
     }
 
     function pickLayer(id) {
@@ -432,7 +494,7 @@
             if (focusLayer) goToInList(`arch-layer-${focusLayer}`);
             return;
         }
-        world?.showFocus(true);
+        scene()?.showFocus(true);
     }
 
     function startFlow(id) {
@@ -463,14 +525,14 @@
         if (step.stop) player.playing = false;
         // In this order: the camera leaves room for the card, so it needs its size
         renderStep();
-        world?.playStep(step);
+        scene()?.playStep(step);
     }
 
     function stopFlow() {
         if (!player.flow) return;
         player.flow = null;
         player.playing = false;
-        world?.endStep();
+        scene()?.endStep();
         renderStep();
     }
 
@@ -512,9 +574,10 @@
     function act(what) {
         if (what === 'rail') setRailMin(!railMin);
         else if (what === 'hide-push-bar') hidePushBar();
-        else if (what === '3d' || what === 'list') setMode(what);
+        else if (what === '3d' || what === '2d' || what === 'list') pickMode(what);
+        else if (what === 'labels') planView?.toggleLabels();
         else if (what === 'reset') resetView();
-        else if (what === 'close') { stopFlow(); $('arch-rail').innerHTML = railHtml(); world?.showFocus(true); }
+        else if (what === 'close') { stopFlow(); $('arch-rail').innerHTML = railHtml(); scene()?.showFocus(true); }
         else if (what === 'back' && player.flow && player.index > 0) goToStep(player.index - 1);
         else if (what === 'next' && player.flow && player.index < player.flow.steps.length - 1) goToStep(player.index + 1);
         else if (what === 'play' && player.flow) {
@@ -536,7 +599,7 @@
         $('architecture').classList.toggle('arch-rail-min', railMin);
         $('arch-rail').classList.toggle('arch-rail-closed', railMin);
         $('arch-rail').innerHTML = railHtml();
-        if (mode === '3d') world?.resize();
+        scene()?.resize();
     }
 
     function resetView() {
@@ -545,7 +608,7 @@
         stopFlow();
         renderSide();
         $('arch-rail').innerHTML = railHtml();
-        world?.home();
+        scene()?.home();
     }
 
     // -----------------------------------------------------------------
@@ -565,11 +628,13 @@
             status.classList.toggle('arch-status-good', receiving() && !list.length);
             status.classList.toggle('arch-status-bad', list.length > 0);
             // The banner's height may have changed, and the scene is centered below it
-            if (mode === '3d') world?.resize();
+            scene()?.resize();
             world?.setProblems(list.map(p => p.node).filter(Boolean));
+            planView?.setProblems(list.filter(p => p.node));
         }
         world?.setPushState(receiving());
-        if (before !== undefined && map.push.heard > before) world?.pulse(map.servicenow.arrives);
+        planView?.setPushState(receiving());
+        if (before !== undefined && map.push.heard > before) scene()?.pulse(map.servicenow.arrives);
     }
 
     async function fetchMap() {
@@ -645,7 +710,7 @@
             document.querySelector('.arch-side-body')?.focus({ preventScroll: true });
         } catch (error) {
             button.disabled = false;
-            showToast(`❌ ${error.message}`);
+            showToast(`${error.message}`, 'error');
         }
     }
 
@@ -687,7 +752,7 @@
         if (loading) return; // It wakes the scene itself when it's ready
         if (map) {
             pollPush();
-            if (mode === '3d') world?.wake();
+            scene()?.wake();
             return;
         }
         loading = openMap().finally(() => { loading = null; });
@@ -723,10 +788,11 @@
                 world = null;
             }
         }
+        planView = buildPlanView();
         renderSide();
         paintRail();
         paintPush();
-        setMode(world ? '3d' : 'list');
+        setMode(savedMode());
         pollHealth();
         pollIssues();
     }
@@ -738,7 +804,7 @@
         pollTimer = null;
         player.playing = false;
         renderStep();
-        world?.sleep();
+        scene()?.sleep();
     }
 
     // Signed out: nothing of the map stays in this browser's memory
@@ -747,6 +813,8 @@
         opening++;
         world?.dispose();
         world = null;
+        planView?.dispose();
+        planView = null;
         map = null;
         health = null;
         healthError = null;
@@ -1286,18 +1354,7 @@
         };
 
         // The part of the canvas no panel is floating over
-        function freeArea() {
-            const root = $('architecture');
-            const stacked = getComputedStyle($('arch-rail')).position !== 'absolute';
-            const rect = root.getBoundingClientRect();
-            if (stacked) return { w: size.w, h: size.h, left: 0, right: 0, top: 0, bottom: 0 };
-            const left = $('arch-rail').getBoundingClientRect().right - rect.left;
-            const right = rect.right - $('arch-side').getBoundingClientRect().left;
-            const status = $('arch-status');
-            const top = status.hidden ? 12 : status.getBoundingClientRect().bottom - rect.top;
-            const bottom = 26;
-            return { w: size.w - left - right, h: size.h - top - bottom, left, right, top, bottom };
-        }
+        const freeArea = () => freeAreaOf(size.w, size.h);
 
         function resize() {
             const w = stage.clientWidth, h = stage.clientHeight;
@@ -1593,7 +1650,7 @@
             for (const link of links) if (link.pending) link.base = color;
             if (gate.lock) gate.lock.visible = !open;
             gate.tag.el.classList.toggle('arch-tag-open', open);
-            gate.tag.el.firstChild.textContent = open ? '🔓 Records arriving' : '🔒 Needs ServiceNow authentication';
+            gate.tag.el.firstChild.textContent = open ? 'Records arriving' : 'Needs ServiceNow authentication';
             gate.tag.w = gate.tag.el.offsetWidth;
             gate.tag.h = gate.tag.el.offsetHeight;
             applyTheme();
@@ -1783,7 +1840,7 @@
             dispose();
             world = null;
             stopFlow();
-            setMode('list');
+            setMode('2d');
         }
         canvas.addEventListener('webglcontextlost', onContextLost);
 
@@ -1822,6 +1879,687 @@
         }
 
         return { resize, wake, sleep, dispose, home, showFocus, playStep, endStep, pulse, setPushState, setProblems };
+    }
+
+    // -----------------------------------------------------------------
+    // The flat view: the same blocks, lines, flows and focus as the scene,
+    // on a sheet with what each block and line does written on it. Blocks and
+    // labels are real page elements, so keys and screen readers reach them and
+    // the page's colors and ♿ settings apply; the lines are SVG underneath.
+    // Everything sits on one sheet, which drag and zoom move as a whole.
+    // -----------------------------------------------------------------
+
+    function buildPlanView() {
+        const box = $('arch-plan');
+        const sheet = $('arch-plan-sheet');
+        const foot = $('arch-plan-foot');
+        const { w: W, h: H } = map.plan;
+        const ICONS = { screen: '🌐', ring: '🚇', server: '⚙️', module: '🧩', cube: '🧊', bars: '📊', db: '🛢️', sheets: '📄', orb: '☁️', listener: '👂', gate: '🔒' };
+        const CORNER = 8;
+        const MIN_ZOOM = 0.25;
+        const MAX_ZOOM = 3;
+        const FLY_ZOOM = 1.3; // the closest a pick goes by itself
+
+        const size = { w: 1, h: 1 };
+        const view = { x: 0, y: 0, k: 1 };
+        const goal = { x: 0, y: 0, k: 1 };
+        const clock = { last: performance.now(), t: 0 };
+        let raf = null;
+        let dirty = true;
+        let touched = false; // once someone moves it, it stays where they put it
+        let hovered = null;
+        let hoveredLink = null;
+        let stepFocus = null;
+        let labelsOn = true;
+        try { labelsOn = localStorage.getItem(LABELS_KEY) !== '1'; } catch { /* On, then */ }
+
+        const px = rect => `left:${rect[0]}px;top:${rect[1]}px;width:${rect[2]}px;${rect[3] === undefined ? '' : `height:${rect[3]}px;`}`;
+
+        // ---- A line: its corners rounded, as points a dot can follow too ----
+
+        function linePoints(route) {
+            const points = [route[0]];
+            for (let i = 1; i < route.length - 1; i++) {
+                const [ax, ay] = route[i - 1], [bx, by] = route[i], [cx, cy] = route[i + 1];
+                const toA = Math.hypot(ax - bx, ay - by), toC = Math.hypot(cx - bx, cy - by);
+                const ra = Math.min(CORNER, toA / 2), rc = Math.min(CORNER, toC / 2);
+                const p0 = [bx + (ax - bx) / toA * ra, by + (ay - by) / toA * ra];
+                const p1 = [bx + (cx - bx) / toC * rc, by + (cy - by) / toC * rc];
+                for (let t = 0; t <= 1; t += 0.25) {
+                    const u = 1 - t;
+                    points.push([u * u * p0[0] + 2 * u * t * bx + t * t * p1[0], u * u * p0[1] + 2 * u * t * by + t * t * p1[1]]);
+                }
+            }
+            points.push(route[route.length - 1]);
+            return points;
+        }
+
+        const pathOf = points => `M${points.map(p => `${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join('L')}`;
+
+        function arrowOf(points) {
+            const [x1, y1] = points[points.length - 2], [x2, y2] = points[points.length - 1];
+            const d = Math.hypot(x2 - x1, y2 - y1) || 1;
+            const ux = (x2 - x1) / d, uy = (y2 - y1) / d;
+            const back = [x2 - ux * 10, y2 - uy * 10];
+            return `M${x2} ${y2}L${back[0] - uy * 5} ${back[1] + ux * 5}L${back[0] + uy * 5} ${back[1] - ux * 5}Z`;
+        }
+
+        // ---- The sheet ----
+
+        const links = map.links.map((data, index) => ({ data, index, points: linePoints(data.route), dimmed: false, u: Math.random(), dot: null, group: null, label: null }));
+        const nodesWithPush = new Set(map.nodes.filter(n => n.pending).map(n => n.layer));
+
+        const bandsHtml = map.layers.map(l => `
+            <div class="arch-band" data-band="${esc(l.id)}" style="${px(l.band)}--arch-c:${colorVar(l.color)}"></div>
+            <div class="arch-band-label" data-band-label="${esc(l.id)}" style="${px(l.bandLabel)}--arch-c:${colorVar(l.color)}"><b>${esc(l.name)}</b> ${esc(l.hint)}</div>`).join('');
+
+        const linesHtml = links.map(link => {
+            const d = pathOf(link.points);
+            return `<g class="arch-line arch-line-${esc(link.data.kind)}" data-line="${link.index}">
+                <path class="arch-line-path" d="${d}"/>
+                <path class="arch-line-arrow" d="${arrowOf(link.points)}"/>
+                <path class="arch-line-hit" d="${d}"/>
+            </g>`;
+        }).join('');
+
+        const labelsHtml = links.map(link => {
+            const [x, y, w] = link.data.labelAt;
+            return `<span class="arch-line-label arch-line-label-${esc(link.data.kind)}" data-line="${link.index}" style="left:${x}px;top:${y}px;max-width:${w}px;">${esc(link.data.label)}</span>`;
+        }).join('');
+
+        const cardsHtml = map.nodes.map(node => {
+            const tech = node.version ? `${node.tech} · ${node.version}` : node.tech;
+            return `<button type="button" class="arch-card${node.big ? ' arch-card-big' : ''}${node.pending ? ' arch-card-pending' : ''}" data-node="${esc(node.id)}"
+                    style="${px(node.plan)}--arch-c:${colorVar(layerById(node.layer).color)}">
+                <span class="arch-card-head"><span class="arch-card-icon" aria-hidden="true">${ICONS[node.shape] || ICONS.module}</span><span class="arch-card-name">${esc(node.name)}</span></span>
+                ${node.shape === 'gate' ? '<span class="arch-card-state"></span>' : ''}
+                <span class="arch-card-tech" title="${esc(tech)}">${esc(tech)}</span>
+                <span class="arch-card-doing">${esc(node.doing)}</span>
+            </button>`;
+        }).join('');
+
+        sheet.style.width = `${W}px`;
+        sheet.style.height = `${H}px`;
+        sheet.innerHTML = `
+            ${bandsHtml}
+            <div class="arch-plan-frame" style="${px(map.compose.band)}"></div>
+            <div class="arch-plan-frame-label" style="${px(map.compose.bandLabel)}"><b>${esc(map.compose.name)}.</b> ${esc(map.compose.note)}</div>
+            <svg class="arch-plan-lines" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true">${linesHtml}</svg>
+            <div class="arch-plan-labels" aria-hidden="true">${labelsHtml}</div>
+            ${cardsHtml}
+            <div class="arch-plan-movers" aria-hidden="true"></div>`;
+
+        const movers = sheet.querySelector('.arch-plan-movers');
+        const cards = new Map([...sheet.querySelectorAll('.arch-card')].map(el => [el.dataset.node, el]));
+        const groups = sheet.querySelectorAll('.arch-line');
+        const labels = sheet.querySelectorAll('.arch-line-label');
+        const bands = sheet.querySelectorAll('[data-band], [data-band-label]');
+        for (const link of links) {
+            link.group = groups[link.index];
+            link.label = labels[link.index];
+        }
+        const linkBetween = (x, y) => links.find(l => (l.data.from === x && l.data.to === y) || (l.data.from === y && l.data.to === x));
+        const nodeRect = id => nodeById(id).plan;
+        const centerOf = id => {
+            const [x, y, w, h] = nodeRect(id);
+            return [x + w / 2, y + h / 2];
+        };
+
+        // ---- The dots that show which way data goes: on each link in use, never on the push ----
+
+        // Each its own element, moved by its transform: drawn once, so a moving dot
+        // doesn't make the browser paint the whole sheet again on every frame
+        function circle(className, r) {
+            const el = document.createElement('span');
+            el.className = `arch-mover ${className}`;
+            el.style.cssText = `display:none;width:${r * 2}px;height:${r * 2}px;margin:${-r}px 0 0 ${-r}px;`;
+            movers.append(el);
+            return el;
+        }
+
+        const moveTo = (el, x, y) => { el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`; };
+
+        function pointAlong(points, lengths, at) {
+            let i = 1;
+            while (i < lengths.length - 1 && lengths[i] < at) i++;
+            const span = lengths[i] - lengths[i - 1] || 1;
+            const t = Math.min(1, Math.max(0, (at - lengths[i - 1]) / span));
+            return [points[i - 1][0] + (points[i][0] - points[i - 1][0]) * t, points[i - 1][1] + (points[i][1] - points[i - 1][1]) * t];
+        }
+
+        function lengthsOf(points) {
+            const lengths = [0];
+            for (let i = 1; i < points.length; i++) lengths[i] = lengths[i - 1] + Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]);
+            return lengths;
+        }
+
+        for (const link of links) {
+            link.lengths = lengthsOf(link.points);
+            link.total = link.lengths[link.lengths.length - 1];
+            if (link.data.kind === 'main') link.dot = circle('arch-dot', 3.5);
+        }
+
+        // ---- The dot that follows a request ----
+
+        function makeTraveller() {
+            return { halo: circle('arch-traveller-halo', 15), dot: circle('arch-traveller', 7), points: [], lengths: [], total: 0, at: 0, speed: 320 };
+        }
+        const flowDot = makeTraveller();
+        const pulses = [];
+
+        function pathPoints(path) {
+            if (path.length === 1) return [centerOf(path[0])];
+            const points = [];
+            for (let i = 0; i < path.length - 1; i++) {
+                const link = linkBetween(path[i], path[i + 1]);
+                const part = link ? [...link.points] : [centerOf(path[i]), centerOf(path[i + 1])];
+                if (link && link.data.from !== path[i]) part.reverse();
+                points.push(...part);
+            }
+            return points;
+        }
+
+        function setRoute(traveller, points) {
+            traveller.points = points;
+            traveller.lengths = lengthsOf(points);
+            traveller.total = traveller.lengths[points.length - 1] || 0;
+            traveller.at = 0;
+        }
+
+        function showTraveller(traveller, show) {
+            traveller.dot.style.display = show ? '' : 'none';
+            traveller.halo.style.display = show ? '' : 'none';
+        }
+
+        function placeTraveller(traveller) {
+            if (!traveller.points.length) return;
+            const [x, y] = traveller.total ? pointAlong(traveller.points, traveller.lengths, Math.min(traveller.at, traveller.total)) : traveller.points[0];
+            moveTo(traveller.dot, x, y);
+            moveTo(traveller.halo, x, y);
+        }
+
+        // ---- Where the sheet sits ----
+
+        // Room for the sheet: not under a panel, nor under the key along the bottom
+        function roomFor(cardHeight = 0) {
+            const free = freeAreaOf(size.w, size.h);
+            const stacked = !free.left && !free.right;
+            const footHeight = foot.offsetHeight + (stacked ? 8 : 4);
+            const bottomGap = stacked ? footHeight : Math.max(free.bottom, footHeight);
+            const pad = 10;
+            return {
+                left: free.left + pad,
+                top: free.top + pad,
+                w: Math.max(80, free.w - pad * 2),
+                h: Math.max(80, size.h - free.top - bottomGap - cardHeight - pad * 2),
+            };
+        }
+
+        // ♿ Larger text: the sheet opens that much bigger, and can be moved to see the rest
+        const textScale = () => Math.max(1, parseFloat(getComputedStyle(document.documentElement).fontSize) / 16 || 1);
+
+        function fitted([x, y, w, h], cardHeight = 0, limit = MAX_ZOOM) {
+            const room = roomFor(cardHeight);
+            const k = Math.min(room.w / w, room.h / h, limit);
+            return { k, x: room.left + (room.w - w * k) / 2 - x * k, y: room.top + (room.h - h * k) / 2 - y * k };
+        }
+
+        function homeGoal() {
+            const whole = fitted([0, 0, W, H]);
+            const scale = textScale();
+            if (scale === 1) return whole;
+            const room = roomFor();
+            return { k: whole.k * scale, x: room.left, y: room.top };
+        }
+
+        const setGoal = next => {
+            Object.assign(goal, next);
+            dirty = true;
+        };
+
+        function frameBlocks(ids, cardHeight = 0) {
+            const rects = ids.map(nodeRect);
+            const x0 = Math.min(...rects.map(r => r[0])) - 44, y0 = Math.min(...rects.map(r => r[1])) - 44;
+            const x1 = Math.max(...rects.map(r => r[0] + r[2])) + 44, y1 = Math.max(...rects.map(r => r[1] + r[3])) + 44;
+            const next = fitted([x0, y0, x1 - x0, y1 - y0], cardHeight, FLY_ZOOM);
+            const home = homeGoal();
+            // No closer than the whole map shows it: back to the whole map, unless a card covers part
+            setGoal(!cardHeight && next.k <= home.k ? home : next);
+            touched = true;
+        }
+
+        function home() {
+            touched = false;
+            setGoal(homeGoal());
+            showFocus(false);
+        }
+
+        function resize() {
+            const w = box.clientWidth, h = box.clientHeight;
+            if (!w || !h) return;
+            size.w = w;
+            size.h = h;
+            if (!touched) {
+                const next = homeGoal();
+                setGoal(next);
+                Object.assign(view, next);
+            }
+            dirty = true;
+        }
+
+        function zoomAt(x, y, factor) {
+            const k = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, goal.k * factor));
+            setGoal({ k, x: x - (x - goal.x) * k / goal.k, y: y - (y - goal.y) * k / goal.k });
+            touched = true;
+        }
+
+        function moveBy(dx, dy) {
+            goal.x += dx;
+            goal.y += dy;
+            touched = true;
+            dirty = true;
+        }
+
+        // A block reached by Tab that's outside the view comes into it
+        function bringIntoView(id) {
+            const [x, y, w, h] = nodeRect(id);
+            const room = roomFor();
+            const sx = goal.x + x * goal.k, sy = goal.y + y * goal.k, sw = w * goal.k, sh = h * goal.k;
+            let dx = 0, dy = 0;
+            if (sx < room.left) dx = room.left - sx;
+            else if (sx + sw > room.left + room.w) dx = room.left + room.w - sx - sw;
+            if (sy < room.top) dy = room.top - sy;
+            else if (sy + sh > room.top + room.h) dy = room.top + room.h - sy - sh;
+            if (dx || dy) moveBy(dx, dy);
+        }
+
+        // ---- Mouse, touch and keys ----
+
+        const pointers = new Map();
+        let press = null;
+        let pinch = 0;
+        let swallowClick = false;
+
+        const onFoot = el => el.closest?.('.arch-plan-foot');
+
+        box.addEventListener('pointerdown', e => {
+            if (onFoot(e.target)) return;
+            pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            press = { x: e.clientX, y: e.clientY, moved: false, onBlock: Boolean(e.target.closest('.arch-card')) };
+            swallowClick = false;
+            if (pointers.size === 2) {
+                const [a, b] = [...pointers.values()];
+                pinch = Math.hypot(a.x - b.x, a.y - b.y);
+            }
+            noteTouch();
+        });
+        box.addEventListener('pointermove', e => {
+            noteTouch();
+            const known = pointers.get(e.pointerId);
+            if (!known) return;
+            const dx = e.clientX - known.x, dy = e.clientY - known.y;
+            known.x = e.clientX;
+            known.y = e.clientY;
+            if (press && !press.moved && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 5) {
+                press.moved = true;
+                swallowClick = true;
+                box.setPointerCapture(e.pointerId);
+                box.classList.add('is-moving');
+            }
+            if (!press?.moved) return;
+            if (pointers.size === 2) {
+                const [a, b] = [...pointers.values()];
+                const distance = Math.hypot(a.x - b.x, a.y - b.y);
+                const rect = box.getBoundingClientRect();
+                if (pinch) zoomAt((a.x + b.x) / 2 - rect.left, (a.y + b.y) / 2 - rect.top, distance / pinch);
+                pinch = distance;
+            }
+            moveBy(dx / pointers.size, dy / pointers.size);
+            // A drag follows the hand, with no easing behind it
+            Object.assign(view, goal);
+        });
+        function endPress(e) {
+            const wasClick = press && !press.moved && !press.onBlock && pointers.size === 1 && e.type === 'pointerup';
+            pointers.delete(e.pointerId);
+            if (pointers.size < 2) pinch = 0;
+            if (wasClick && (selected || focusLayer)) {
+                selected = null;
+                focusLayer = null;
+                renderSide();
+                $('arch-rail').innerHTML = railHtml();
+                showFocus(false);
+            }
+            if (!pointers.size) {
+                press = null;
+                box.classList.remove('is-moving');
+            }
+        }
+        box.addEventListener('pointerup', endPress);
+        box.addEventListener('pointercancel', endPress);
+        // A drag that began on a block is a drag, not a press of it
+        box.addEventListener('click', e => {
+            if (!swallowClick) return;
+            swallowClick = false;
+            e.stopPropagation();
+        }, true);
+        box.addEventListener('wheel', e => {
+            e.preventDefault();
+            noteTouch();
+            const rect = box.getBoundingClientRect();
+            zoomAt(e.clientX - rect.left, e.clientY - rect.top, Math.exp(-e.deltaY * 0.0014));
+        }, { passive: false });
+        box.addEventListener('keydown', e => {
+            if (e.altKey || e.ctrlKey || e.metaKey) return;
+            noteTouch();
+            const moves = { ArrowLeft: [60, 0], ArrowRight: [-60, 0], ArrowUp: [0, 60], ArrowDown: [0, -60] };
+            if (moves[e.key]) {
+                e.preventDefault();
+                moveBy(...moves[e.key]);
+            } else if (e.key === '+' || e.key === '=' || e.key === '-') {
+                e.preventDefault();
+                zoomAt(size.w / 2, size.h / 2, e.key === '-' ? 1 / 1.15 : 1.15);
+            } else if (e.key === '0') {
+                e.preventDefault();
+                resetView();
+            } else if (e.key === 'Escape') {
+                if (player.flow) act('close');
+                else if (selected || focusLayer) resetView();
+            }
+        });
+        // Focus can scroll an overflow:hidden box: the sheet only moves by its transform
+        box.addEventListener('scroll', () => {
+            box.scrollTop = 0;
+            box.scrollLeft = 0;
+        });
+
+        function hoverOn(target) {
+            const card = target.closest?.('.arch-card');
+            const line = target.closest?.('[data-line]');
+            const id = card ? card.dataset.node : null;
+            const link = !card && line ? links[Number(line.dataset.line)] : null;
+            if (id === hovered && link === hoveredLink) return;
+            hovered = id;
+            hoveredLink = link;
+            showFocus(false);
+        }
+        sheet.addEventListener('pointerover', e => hoverOn(e.target));
+        sheet.addEventListener('pointerleave', () => hoverOn(sheet));
+        sheet.addEventListener('focusin', e => {
+            const card = e.target.closest('.arch-card');
+            if (!card) return;
+            bringIntoView(card.dataset.node);
+            hoverOn(card);
+        });
+        sheet.addEventListener('focusout', () => hoverOn(sheet));
+
+        // ---- What's in focus: the same choices as the scene's ----
+
+        function showFocus(fly) {
+            let bright = null;
+            let brightLinks = null;
+            const lit = new Set();
+            if (stepFocus) {
+                bright = new Set([...stepFocus.path, ...stepFocus.around]);
+                brightLinks = new Set([...stepFocus.links, ...stepFocus.aroundLinks]);
+                stepFocus.path.forEach(id => lit.add(id));
+            } else if (selected) {
+                bright = new Set([selected]);
+                brightLinks = new Set();
+                lit.add(selected);
+                for (const link of links) {
+                    if (link.data.from === selected || link.data.to === selected) {
+                        brightLinks.add(link);
+                        bright.add(link.data.from);
+                        bright.add(link.data.to);
+                    }
+                }
+            } else if (focusLayer) {
+                bright = new Set(map.nodes.filter(n => n.layer === focusLayer).map(n => n.id));
+                brightLinks = new Set(links.filter(l => bright.has(l.data.from) && bright.has(l.data.to)));
+            }
+            for (const [id, card] of cards) {
+                card.classList.toggle('arch-card-dim', Boolean(bright) && !bright.has(id) && hovered !== id);
+                card.classList.toggle('arch-card-on', lit.has(id) || hovered === id);
+            }
+            for (const link of links) {
+                const touchesHover = hovered && (link.data.from === hovered || link.data.to === hovered);
+                const pointedAt = hoveredLink === link;
+                const dim = Boolean(brightLinks) && !brightLinks.has(link) && !touchesHover && !pointedAt;
+                const hot = pointedAt || touchesHover || (stepFocus ? stepFocus.links.includes(link) : selected ? brightLinks.has(link) : false);
+                link.dimmed = dim;
+                link.group.classList.toggle('is-dim', dim);
+                link.group.classList.toggle('is-hot', hot);
+                link.label.classList.toggle('is-dim', dim);
+                link.label.classList.toggle('is-hot', hot);
+            }
+            for (const band of bands) {
+                const id = band.dataset.band || band.dataset.bandLabel;
+                band.classList.toggle('is-dim', focusLayer ? id !== focusLayer : Boolean(bright));
+            }
+            if (fly) {
+                if (stepFocus) {
+                    // With what's either side of it, for a step that stands between two
+                    // blocks; and clear of the card, when that floats over the sheet
+                    const card = freeAreaOf(size.w, size.h).left ? $('arch-step').offsetHeight + 12 : 0;
+                    frameBlocks([...stepFocus.path, ...stepFocus.around], card);
+                } else if (selected) frameBlocks([...bright]);
+                else if (focusLayer) frameBlocks(map.nodes.filter(n => n.layer === focusLayer).map(n => n.id));
+                else if (touched) {
+                    touched = false;
+                    setGoal(homeGoal());
+                }
+            }
+            dirty = true;
+        }
+
+        function playStep(step) {
+            lastTouch = performance.now();
+            const path = step.path;
+            const stepLinks = [];
+            for (let i = 0; i < path.length - 1; i++) {
+                const link = linkBetween(path[i], path[i + 1]);
+                if (link) stepLinks.push(link);
+            }
+            const around = step.around || [];
+            stepFocus = { path, links: stepLinks, stop: Boolean(step.stop), around, aroundLinks: around.map(id => linkBetween(id, path[0])).filter(Boolean) };
+            let route;
+            if (step.stop) {
+                // A step that stops: the dot comes up to the block from the side it's on, and no further
+                const from = around[around.length - 1];
+                const points = pathPoints([from, path[0]]);
+                const end = points[points.length - 1];
+                route = [[points[0][0] + (end[0] - points[0][0]) * 0.45, points[0][1] + (end[1] - points[0][1]) * 0.45], end];
+            } else {
+                route = pathPoints(path);
+            }
+            setRoute(flowDot, route);
+            showTraveller(flowDot, true);
+            if (lessMotion()) flowDot.at = flowDot.total;
+            placeTraveller(flowDot);
+            showFocus(true);
+        }
+
+        function endStep() {
+            stepFocus = null;
+            showTraveller(flowDot, false);
+            showFocus(false);
+        }
+
+        // A real record just arrived: one dot, along the way it really went
+        function pulse(path) {
+            if (lessMotion() || mode !== '2d') return;
+            const traveller = makeTraveller();
+            showTraveller(traveller, true);
+            setRoute(traveller, pathPoints(path));
+            pulses.push(traveller);
+            wake();
+        }
+
+        // Green instead of amber, and no lock, once records really arrive
+        const pushParts = [...cards.values()].filter(el => el.classList.contains('arch-card-pending'));
+        for (const id of nodesWithPush) pushParts.push(...sheet.querySelectorAll(`[data-band="${id}"], [data-band-label="${id}"]`));
+        const gateCard = cards.get(map.nodes.find(n => n.shape === 'gate').id);
+        let pushOpen = null;
+        function setPushState(open) {
+            if (open === pushOpen) return;
+            pushOpen = open;
+            box.classList.toggle('arch-plan-open', open);
+            // What a layer says about the push moves on with it (map is the fresh one by now)
+            for (const id of nodesWithPush) {
+                const layer = layerById(id);
+                sheet.querySelector(`[data-band-label="${id}"]`).innerHTML = `<b>${esc(layer.name)}</b> ${esc(layer.hint)}`;
+            }
+            for (const el of pushParts) el.style.setProperty('--arch-c', colorVar(open ? 'series-3' : 'warn'));
+            gateCard.querySelector('.arch-card-icon').textContent = open ? '🔓' : '🔒';
+            gateCard.querySelector('.arch-card-state').textContent = open ? 'Records arriving' : 'Needs ServiceNow authentication';
+            $('arch-key-pending-text').textContent = open ? 'ServiceNow live push' : 'Waiting on ServiceNow';
+        }
+
+        // A block with a problem turns red and says what's wrong, on the block itself
+        function setProblems(list) {
+            for (const [id, card] of cards) {
+                const own = list.filter(p => p.node === id);
+                card.classList.toggle('arch-card-bad', own.length > 0);
+                card.querySelector('.arch-card-problem')?.remove();
+                if (!own.length) continue;
+                const note = document.createElement('span');
+                note.className = 'arch-card-problem';
+                note.textContent = `${own.map(p => p.text).join(' ')}`;
+                card.prepend(note);
+            }
+        }
+
+        function paintLabels() {
+            box.classList.toggle('arch-plan-no-labels', !labelsOn);
+            const button = $('arch-plan-labels');
+            button.textContent = labelsOn ? '🏷️ Hide line labels' : '🏷️ Show line labels';
+            button.setAttribute('aria-pressed', String(labelsOn));
+        }
+        function toggleLabels() {
+            labelsOn = !labelsOn;
+            try { localStorage.setItem(LABELS_KEY, labelsOn ? '0' : '1'); } catch { /* Just for this visit */ }
+            paintLabels();
+        }
+
+        // ---- Each frame: as light as the scene's, for the same reason ----
+
+        const IDLE_MS = 2 * 60 * 1000;
+        const SLOW_FRAME_MS = 70;
+        const FRAME_MS = 1000 / 30;
+        let lastTouch = performance.now();
+        let lastDrawn = 0;
+        let slowFor = 0;
+        let lowPower = false;
+        let dotsShowing = false;
+        function noteTouch() { lastTouch = performance.now(); dirty = true; }
+
+        function watchSpeed(ms) {
+            if (lowPower) return;
+            slowFor = ms > SLOW_FRAME_MS ? slowFor + ms : 0;
+            if (slowFor < 3000) return;
+            lowPower = true;
+            console.warn('🗺️ Frames are slow here, so the flat map stops its moving dots to keep the computer free');
+        }
+
+        function drawDots(lively, dt) {
+            const show = lively && !stepFocus;
+            if (!show && !dotsShowing) return;
+            dotsShowing = show;
+            for (const link of links) {
+                if (!link.dot) continue;
+                const visible = show && !link.dimmed;
+                link.dot.style.display = visible ? '' : 'none';
+                if (!visible) continue;
+                link.u = (link.u + dt * (60 / Math.max(60, link.total))) % 1;
+                const [x, y] = pointAlong(link.points, link.lengths, link.u * link.total);
+                moveTo(link.dot, x, y);
+            }
+        }
+
+        function frame(now) {
+            raf = requestAnimationFrame(frame);
+            const gap = now - clock.last;
+            if (now - lastDrawn < 200 && gap < 1000) watchSpeed(gap);
+            const dt = Math.min(0.05, gap / 1000);
+            clock.last = now;
+            clock.t += dt;
+            const still = lessMotion();
+            tickPlayer(dt * 1000);
+            const lively = !still && !lowPower && now - lastTouch < IDLE_MS;
+
+            // By the clock, not the frame count, so a slow computer still arrives on time
+            const ease = 1 - Math.exp(-(still ? 1000 : 7) * Math.min(0.25, gap / 1000 || 0.016));
+            for (const key of ['x', 'y', 'k']) {
+                const gapTo = goal[key] - view[key];
+                if (Math.abs(gapTo) < (key === 'k' ? 0.0005 : 0.05)) {
+                    if (gapTo) dirty = true;
+                    view[key] = goal[key];
+                } else {
+                    view[key] += gapTo * ease;
+                    dirty = true;
+                }
+            }
+
+            drawDots(lively, dt);
+
+            // The dot following a request
+            if (flowDot.dot.style.display !== 'none') {
+                if (stepFocus?.stop && lively) {
+                    // Knocks at the gate, and doesn't get through
+                    flowDot.at = flowDot.total * (0.5 + 0.5 * Math.sin(clock.t * 5));
+                } else if (!still && flowDot.total && flowDot.at < flowDot.total) {
+                    flowDot.at += dt * flowDot.speed;
+                }
+                placeTraveller(flowDot);
+            }
+            for (let i = pulses.length - 1; i >= 0; i--) {
+                const traveller = pulses[i];
+                traveller.at += dt * traveller.speed;
+                placeTraveller(traveller);
+                if (traveller.at >= traveller.total) {
+                    traveller.dot.remove();
+                    traveller.halo.remove();
+                    pulses.splice(i, 1);
+                }
+            }
+
+            if (dirty && now - lastDrawn >= FRAME_MS - 1) {
+                lastDrawn = now;
+                sheet.style.transform = `translate(${view.x.toFixed(2)}px, ${view.y.toFixed(2)}px) scale(${view.k.toFixed(4)})`;
+                dirty = false;
+            }
+        }
+
+        function wake() {
+            if (raf !== null) return;
+            clock.last = performance.now();
+            lastTouch = clock.last;
+            lastDrawn = 0;
+            dirty = true;
+            raf = requestAnimationFrame(frame);
+        }
+        function sleep() {
+            if (raf !== null) cancelAnimationFrame(raf);
+            raf = null;
+        }
+
+        const sizeWatch = new ResizeObserver(resize);
+        sizeWatch.observe(box);
+        // ♿ Text size is set on the page's root
+        const textWatch = new MutationObserver(resize);
+        textWatch.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
+
+        function dispose() {
+            sleep();
+            sizeWatch.disconnect();
+            textWatch.disconnect();
+            sheet.innerHTML = '';
+        }
+
+        paintLabels();
+        setPushState(receiving());
+
+        return { resize, wake, sleep, dispose, home, showFocus, playStep, endStep, pulse, setPushState, setProblems, toggleLabels };
     }
 
     window.showArchitecture = showArchitecture;
