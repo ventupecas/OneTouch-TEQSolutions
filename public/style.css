@@ -2708,3 +2708,337 @@ html.a11y-motion *::after {
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
 }
+
+/* =====================================================================
+   🧊 ARCHITECTURE (architecture.js): the scene fills the page, and the
+   panels float over it. In a narrow window they stack and the page scrolls.
+   ===================================================================== */
+/* An admin has one more page button: the Ask bar gives up the room for it, so
+   the header stays one row, and on smaller screens the button is just 🧊 */
+@media (min-width: 701px) {
+    .header-left:has(#architecture-tab:not([hidden])) .nav-ask input { width: clamp(150px, calc(100vw - 1230px), 360px); }
+}
+@media (max-width: 1400px) {
+    #architecture-tab .tab-btn-text { display: none; }
+}
+@media (min-width: 701px) and (max-width: 1400px) {
+    .header-left:has(#architecture-tab:not([hidden])) .nav-ask input { width: clamp(150px, calc(100vw - 1170px), 360px); }
+    .header-left:has(#architecture-tab:not([hidden])) .user-name { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+/* Too narrow for one row anyway: the Ask bar takes its usual size on the second */
+@media (min-width: 701px) and (max-width: 1269px) {
+    .header-left:has(#architecture-tab:not([hidden])) .nav-ask input { width: clamp(170px, 24vw, 360px); }
+}
+.arch {
+    flex: 1;
+    min-width: 0;
+    position: relative;
+    overflow: hidden;
+    color: var(--text);
+    background: radial-gradient(ellipse at 50% 35%, var(--panel-bg), var(--bg-primary) 75%);
+}
+.arch h3, .arch h4 { margin: 0; }
+.arch p { margin: 0 0 10px; line-height: 1.5; }
+.arch code { font-size: 0.82em; word-break: break-word; }
+.arch [hidden] { display: none !important; }
+.arch-message { padding: 32px; color: var(--text-2); }
+
+.arch-stage { position: absolute; inset: 0; outline: none; overflow: hidden; }
+.arch-stage:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.arch-stage canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+.arch-stage canvas:active { cursor: grabbing; }
+.arch-hint {
+    position: absolute;
+    left: 262px;
+    right: 372px;
+    bottom: 4px;
+    margin: 0 !important;
+    font-size: 0.72rem;
+    color: var(--muted);
+    text-align: center;
+    pointer-events: none;
+}
+
+/* The names over the blocks */
+.arch-tags { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.arch-tag, .arch-layer-tag {
+    position: absolute;
+    left: 0;
+    top: 0;
+    will-change: transform;
+    transition: opacity 0.18s;
+    white-space: nowrap;
+}
+.arch-tag {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+    padding: 3px 8px 3px 7px;
+    font: inherit;
+    font-size: 0.72rem;
+    line-height: 1.25;
+    color: var(--text);
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--arch-c);
+    border-radius: 5px;
+    box-shadow: 0 1px 3px var(--shadow);
+    cursor: pointer;
+    pointer-events: auto;
+}
+.arch-tag:hover, .arch-tag:focus-visible, .arch-tag-on { border-color: var(--accent); border-left-color: var(--arch-c); z-index: 3; }
+.arch-tag:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.arch-tag-big .arch-tag-name { font-weight: 700; }
+.arch-tag:not(.arch-tag-big) { font-size: 0.68rem; padding: 2px 6px 2px 5px; }
+/* The version only when it's asked for, so more names fit */
+.arch-tag-sub { display: none; color: var(--muted); font-size: 0.66rem; }
+.arch-tag:hover .arch-tag-sub, .arch-tag:focus-visible .arch-tag-sub, .arch-tag-on .arch-tag-sub { display: block; }
+.arch-tag-gate {
+    z-index: 2;
+    padding: 5px 10px;
+    font-weight: 700;
+    color: var(--warn-ink);
+    background: var(--warn-soft);
+    border: 1px solid var(--warn-line);
+}
+.arch-tag-gate:hover, .arch-tag-gate.arch-tag-on { border-color: var(--warn); }
+.arch-tag-gate.arch-tag-open { color: var(--same-ink); background: var(--same-bg); border-color: var(--same-ink); }
+.arch-tag-dim { opacity: 0.28; }
+.arch-tag-off { opacity: 0; pointer-events: none; }
+.arch-tag-off:focus-visible { opacity: 1; }
+.arch-layer-tag {
+    padding: 1px 6px;
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--arch-c, var(--muted));
+    pointer-events: none;
+}
+.arch-frame-tag { color: var(--muted); text-transform: none; font-weight: 600; pointer-events: auto; cursor: help; }
+
+/* The panels */
+.arch-status, .arch-rail, .arch-side, .arch-step {
+    position: absolute;
+    z-index: 2;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 4px 16px var(--shadow);
+}
+.arch-status {
+    top: 12px;
+    left: 262px;
+    right: 372px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    padding: 8px 12px;
+    font-size: 0.82rem;
+    background: var(--warn-softer);
+    border-color: var(--warn-line);
+}
+.arch-status.arch-status-good { background: var(--same-bg); border-color: var(--same-ink); }
+.arch-status-text { flex: 1 1 260px; line-height: 1.35; }
+.arch-status-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.arch-chip {
+    display: inline-block;
+    padding: 2px 8px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    white-space: nowrap;
+    border-radius: 999px;
+    color: var(--text-2);
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+}
+.arch-chip-warn { color: var(--warn-ink); background: var(--warn-soft); border-color: var(--warn-line); }
+.arch-chip-stop { color: var(--danger); background: var(--danger-soft); border-color: var(--danger-line); }
+.arch-chip-good { color: var(--same-ink); background: var(--panel-bg); border-color: var(--same-ink); }
+
+.arch-btn {
+    padding: 4px 10px;
+    font: inherit;
+    font-size: 0.8rem;
+    color: var(--text);
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+}
+.arch-btn:hover:not(:disabled) { border-color: var(--accent); }
+.arch-btn:disabled { opacity: 0.5; cursor: default; }
+.arch-btn.is-on { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
+.arch-btn-wide { width: 100%; margin-top: 12px; padding: 7px 10px; }
+.arch-icon-btn { padding: 0 4px; font: inherit; color: var(--muted); background: none; border: none; cursor: pointer; }
+.arch-icon-btn:hover { color: var(--text); }
+
+.arch-rail {
+    top: 12px;
+    left: 12px;
+    bottom: 12px;
+    width: 238px;
+    padding: 10px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.arch-mode { display: flex; gap: 4px; }
+.arch-mode .arch-btn:not([data-do="reset"]) { flex: 1; }
+.arch-rail-head {
+    margin-top: 8px !important;
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+.arch-rail-group { display: flex; flex-direction: column; gap: 3px; }
+.arch-rail-btn {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    padding: 6px 8px;
+    font: inherit;
+    font-size: 0.82rem;
+    text-align: left;
+    color: var(--text);
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    cursor: pointer;
+}
+.arch-rail-btn:hover { background: var(--surface-2); }
+.arch-rail-pending { border-color: var(--warn-line); background: var(--warn-softer); }
+.arch-rail-btn.is-on { background: var(--accent-soft); border-color: var(--accent); }
+.arch-lock { margin-left: auto; }
+.arch-swatch { flex-shrink: 0; display: inline-block; width: 10px; height: 10px; border-radius: 3px; background: var(--arch-c); }
+
+.arch-side {
+    top: 12px;
+    right: 12px;
+    bottom: 12px;
+    width: 348px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.arch-tabs { display: flex; flex-shrink: 0; border-bottom: 1px solid var(--border); }
+.arch-tab {
+    flex: 1;
+    padding: 9px 4px;
+    font: inherit;
+    font-size: 0.76rem;
+    color: var(--text-2);
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+}
+.arch-tab:hover { color: var(--text); }
+.arch-tab.is-on { color: var(--text); font-weight: 700; border-bottom-color: var(--accent); }
+.arch-side-body { flex: 1; padding: 12px 14px 16px; overflow-y: auto; font-size: 0.85rem; outline: none; }
+.arch-side-body:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.arch-side-body h4, .arch-item h4:not(.arch-node-name), .arch-list-layer h4:not(.arch-node-name) {
+    margin: 14px 0 6px;
+    font-size: 0.74rem;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+.arch-node-head { display: flex; align-items: center; gap: 6px; font-size: 0.72rem; color: var(--muted); margin-bottom: 2px; }
+.arch-node-name { font-size: 1.05rem; line-height: 1.3; margin-bottom: 2px !important; }
+.arch-node-tech { font-size: 0.78rem; color: var(--text-2); }
+.arch-notice {
+    padding: 8px 10px;
+    font-size: 0.82rem;
+    color: var(--warn-ink);
+    background: var(--warn-soft);
+    border: 1px solid var(--warn-line);
+    border-radius: 6px;
+}
+.arch-notice-good { color: var(--same-ink); background: var(--same-bg); border-color: var(--same-ink); }
+.arch-small { font-size: 0.76rem; color: var(--muted); }
+.arch-facts { display: grid; grid-template-columns: minmax(84px, max-content) 1fr; gap: 3px 10px; margin: 0; font-size: 0.8rem; }
+.arch-facts dt { color: var(--muted); }
+.arch-facts dd { margin: 0; overflow-wrap: anywhere; }
+.arch-talks, .arch-files, .arch-built, .arch-needs { margin: 0; padding: 0; list-style: none; font-size: 0.8rem; }
+.arch-talks li { margin-bottom: 6px; line-height: 1.35; }
+.arch-arrow { color: var(--muted); }
+.arch-link { padding: 0; font: inherit; font-weight: 600; color: var(--link); background: none; border: none; cursor: pointer; text-decoration: underline; }
+.arch-link-note { display: block; padding-left: 18px; font-size: 0.74rem; color: var(--muted); }
+.arch-files li { margin-bottom: 2px; }
+.arch-built { padding-left: 16px; list-style: disc; }
+.arch-built li { margin-bottom: 4px; line-height: 1.4; }
+.arch-needs { padding-left: 20px; list-style: decimal; }
+.arch-needs li { margin-bottom: 7px; line-height: 1.4; }
+.arch-needs b { display: block; }
+.arch-evidence { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 6px; }
+.arch-evidence div { padding: 6px 8px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; }
+.arch-evidence span { display: block; font-size: 0.66rem; color: var(--muted); }
+.arch-evidence b { font-size: 0.76rem; overflow-wrap: anywhere; }
+.arch-stack { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.arch-stack th, .arch-stack td { padding: 3px 6px 3px 0; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+.arch-stack th { font-weight: 600; white-space: nowrap; }
+.arch-stack-version { white-space: nowrap; font-weight: 600; color: var(--accent-ink); }
+
+.arch-step {
+    left: 262px;
+    right: 372px;
+    bottom: 26px;
+    max-width: 620px;
+    margin: 0 auto;
+    padding: 10px 14px 12px;
+    font-size: 0.85rem;
+}
+.arch-step-stop { border-color: var(--danger-line); box-shadow: 0 0 0 2px var(--danger-line), 0 4px 16px var(--shadow); }
+.arch-step h3 { margin: 6px 0 3px; font-size: 1rem; }
+.arch-step p { margin-bottom: 8px; }
+.arch-step-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 0.78rem; }
+.arch-step-count { margin-left: auto; color: var(--muted); }
+.arch-step-nav { display: flex; gap: 6px; justify-content: flex-end; }
+
+/* 📝 List: the same content, no scene. The rail stays beside it; the page scrolls */
+.arch.arch-is-list {
+    display: grid;
+    grid-template-columns: 262px minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    align-items: start;
+    overflow: auto;
+    background: var(--bg-primary);
+}
+.arch-is-list .arch-status { position: static; grid-column: 2; margin: 12px 12px 0 0; box-shadow: none; }
+.arch-is-list .arch-rail { position: sticky; top: 12px; bottom: auto; grid-column: 1; grid-row: 1 / span 2; margin: 12px; width: auto; box-shadow: none; }
+.arch-is-list .arch-side { display: none; }
+.arch-list { grid-column: 2; padding: 12px 12px 24px 0; max-width: 900px; }
+.arch-list-layer { margin-bottom: 18px; scroll-margin-top: 12px; }
+.arch-list-layer > h2 { margin: 0 0 6px; font-size: 1.2rem; }
+.arch-list-layer > h3 { margin-bottom: 4px; font-size: 1rem; }
+.arch-item { margin-bottom: 10px; padding: 12px 14px; font-size: 0.85rem; background: var(--panel-bg); border: 1px solid var(--border); border-radius: 10px; scroll-margin-top: 12px; }
+.arch-item:focus { outline: 2px solid var(--accent); }
+
+/* A narrower window: one column, and the page scrolls */
+@media (max-width: 1100px) {
+    .arch, .arch.arch-is-list { overflow-y: auto; display: flex; flex-direction: column; background: var(--bg-primary); }
+    .arch-stage { position: relative; inset: auto; flex: 0 0 62vh; min-height: 340px; order: 2; }
+    .arch-status, .arch-rail, .arch-side, .arch-step { position: static !important; flex-shrink: 0; width: auto; max-width: none; margin: 8px 12px 0 !important; box-shadow: none; }
+    .arch-status { order: 1; }
+    .arch-step { order: 3; }
+    .arch-rail { order: 4; }
+    .arch-side { order: 5; margin-bottom: 12px !important; overflow: visible; }
+    .arch-side-body { overflow: visible; }
+    .arch-list { order: 6; padding: 8px 12px 24px; }
+    .arch-hint { left: 8px; right: 8px; }
+    .arch-evidence { grid-template-columns: 1fr; }
+}
+/* A phone: a finger on the scene turns it, so the page needs room to scroll by */
+@media (max-width: 700px) {
+    .arch-stage { flex-basis: 50vh; min-height: 280px; }
+    .arch-hint { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .arch-tag, .arch-layer-tag { transition: none; }
+}

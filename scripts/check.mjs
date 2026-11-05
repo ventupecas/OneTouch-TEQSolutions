@@ -22,7 +22,9 @@ function run(label, cmd, args) {
   return r.status === 0;
 }
 
-const jsFiles = tracked.filter(f => /\.(mjs|js)$/.test(f));
+// Not public/vendor/: other people's published builds, which are ES modules in
+// a package whose .js files are CommonJS, so node --check can't read them
+const jsFiles = tracked.filter(f => /\.(mjs|js)$/.test(f) && !f.startsWith('public/vendor/'));
 for (const f of jsFiles) run(`node --check ${f}`, process.execPath, ['--check', f]);
 console.log(`node --check: ${jsFiles.length} files`);
 

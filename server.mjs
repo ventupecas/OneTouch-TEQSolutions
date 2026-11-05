@@ -26,6 +26,7 @@ import * as notifications from './notifications.mjs';
 import { startMail, mailEnabled } from './mail.mjs';
 import * as kpis from './kpis.mjs';
 import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
+import { architectureMap, pushState } from './architecture.mjs';
 
 dotenv.config();
 
@@ -334,7 +335,28 @@ function scopedRunner(scope) {
   return run;
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families', '/api/notifications', '/api/my-tickets', '/api/kpis', '/api/ticket-statuses', '/api/demo-tickets'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families', '/api/notifications', '/api/my-tickets', '/api/kpis', '/api/ticket-statuses', '/api/demo-tickets', '/api/architecture'], requireLogin);
+
+// 🧊 Architecture (architecture.mjs): admins only, for everything under this
+// path. The page's script holds no facts, so this is the whole lock.
+app.use('/api/architecture', (req, res, next) => {
+  if (!req.scope.access.admin) return res.status(403).json({ error: 'Only an admin can see this.' });
+  res.set('Cache-Control', 'no-store');
+  next();
+});
+
+// What this server has heard from the ServiceNow listener since it started
+// (listenForTicketChanges). Nothing is heard until ServiceNow is authenticated.
+const servicenowPush = { listening: false, heard: 0, lastAt: null, last: null, since: new Date().toISOString() };
+
+app.get('/api/architecture', (req, res) => {
+  res.json(architectureMap({ model: CLAUDE_MODEL, push: servicenowPush }));
+});
+
+// Just the push's status: the open page asks for it every so often
+app.get('/api/architecture/push', (req, res) => {
+  res.json(pushState(servicenowPush));
+});
 
 // Who is signed in (the page shows their display name), and what they may do
 app.get('/api/me', async (req, res) => {
@@ -1913,14 +1935,22 @@ async function listenForTicketChanges() {
   let client;
   try {
     client = await auth.pool.connect();
-    client.on('notification', ticketsChanged);
+    client.on('notification', message => {
+      // Only the listener signals here, so this is what 🧊 Architecture reports
+      servicenowPush.heard += 1;
+      servicenowPush.lastAt = new Date().toISOString();
+      servicenowPush.last = message.payload || null;
+      ticketsChanged();
+    });
     // A dropped connection: listen again
     client.on('error', error => {
       console.error('🔄 Lost the ticket-change channel:', error.message);
+      servicenowPush.listening = false;
       client.release(true);
       setTimeout(listenForTicketChanges, 10 * 1000).unref();
     });
     await client.query(`LISTEN ${teams.TICKETS_CHANGED}`);
+    servicenowPush.listening = true;
   } catch (error) {
     client?.release(true);
     console.error(`🔄 Could not listen for ticket changes yet (${error.message}); retrying in 10s`);

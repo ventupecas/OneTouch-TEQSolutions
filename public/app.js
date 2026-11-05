@@ -100,6 +100,8 @@ function setCurrentUser(user) {
     else if (user.access) currentAccess = user.access;
     // The Team tab: admins, and anyone on a team
     document.getElementById('teams-tab').hidden = !(currentAccess.admin || currentAccess.team);
+    // 🧊 Architecture: admins only (architecture.js; the server checks too)
+    document.getElementById('architecture-tab').hidden = !currentAccess.admin;
     // Home's "Team families": project managers and admins
     document.getElementById('kpi-families-tab').hidden = !canSeeFamilies();
     // The 🔔 panel's "Email me these too" (notifications.js)
@@ -186,6 +188,7 @@ function signOut(message) {
     resetTeams();
     resetNotifications();
     resetCustomizing();
+    resetArchitecture();
     showLoginError(typeof message === 'string' ? message : '');
     showApp(false);
 }
@@ -384,6 +387,9 @@ function switchTab(viewName) {
     if (viewName === 'dashboard') loadDashboards().then(() => maybeStartTour('dashboards'));
     // The Team tab, fresh each time (assignments change)
     if (viewName === 'teams') loadTeams();
+    // The 3D map only draws while it's showing
+    if (viewName === 'architecture') showArchitecture();
+    else hideArchitecture();
     // Stars and assignments may have changed elsewhere (the chat, a dashboard, another computer)
     if (viewName === 'home') showHomeMode(homeMode !== 'starred');
 }

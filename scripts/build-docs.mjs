@@ -46,6 +46,7 @@ const FILES = [
   'servicenow-sync/src/db/pending.js', 'servicenow-sync/src/families.js',
   'servicenow-sync/servicenow-blueprint.md',
   'checks/ticket-order.mjs', '.github/workflows/ci.yml', '.dockerignore', 'public/accessibility.js',
+  'architecture.mjs', 'public/architecture.js', 'checks/architecture.mjs',
 ];
 
 // Not copied in, and why (shown in the appendix)
@@ -54,6 +55,9 @@ const SKIPPED = {
   'package-lock.json': 'written by `npm install`; the versions it pins are in the table above',
   'servicenow-sync/package-lock.json': 'written by `npm install` in `servicenow-sync/`',
   'db/accounts.json': "everyone's usernames and password hashes; make your own accounts instead (step 16)",
+  'public/vendor/three-0.186.1/three.module.js': 'three.js, unchanged: `build/three.module.js` from `npm pack three@0.186.1`',
+  'public/vendor/three-0.186.1/three.core.js': 'three.js, unchanged: `build/three.core.js` from `npm pack three@0.186.1`',
+  'public/vendor/three-0.186.1/LICENSE': 'three.js\'s MIT license, from the same package',
 };
 
 // Images can't be pasted as text; the guide says how to make each one (step 14)

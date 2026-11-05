@@ -138,6 +138,23 @@ Alt+M in any text box (the browser's speech service, so `microphone=(self)` in t
 Permissions-Policy). Kept in the browser and saved as the `access` preference. The file is
 one function, so its names can't clash with the other page scripts.
 
+**🧊 Architecture** (`architecture.mjs`, `public/architecture.js`, the 🧊 in the header,
+admins only): a 3D map of how OneTouch is built, drawn with three.js (unchanged, in
+`public/vendor/three-0.186.1/`, loaded the first time an admin opens the map), with the same
+content in a list for screen readers and browsers that can't draw 3D. `public/` can be read
+without signing in, so everything the map says is in `architecture.mjs` and comes from
+`GET /api/architecture` (401 signed out, 403 for anyone who isn't an admin); the page's
+script only draws. Versions are read from `package-lock.json` and `docker-compose.yml`.
+`checks/architecture.mjs` (`npm test`) fails if a file the map names is gone, a link or a
+flow's step doesn't join real blocks, a container in `docker-compose.yml` isn't on it, or the
+map's facts appear in `public/`: **a new container or service goes in `NODES`.**
+**The ServiceNow live push is on it as built, but needing ServiceNow's authentication:** a
+dashed amber path that stops at a locked gate, and a "What happens when…" that animates it
+(nothing is sent). It says so until this server really hears a record (`servicenowPush` in
+`server.mjs`, counted from `onetouch_tickets_changed`, `GET /api/architecture/push`, read
+every 20 s while the map is open); then it turns green and its words move on. The count is
+in memory, so after a restart it says "needs authentication" until the next record arrives.
+
 **Notifications** (`notifications.mjs`, the 🔔 in the header, checked every
 minute). Each one is saved in the same transaction as the change it reports:
 

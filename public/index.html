@@ -86,6 +86,8 @@
                 <button class="tab-btn" data-tab="dashboard" onclick="switchTab('dashboard')">📈 Dashboards</button>
                 <!-- Admins and anyone on a team (teams.js) -->
                 <button class="tab-btn" data-tab="teams" id="teams-tab" onclick="switchTab('teams')" hidden>👥 Team</button>
+                <!-- Admins only (the server refuses anyone else; architecture.mjs) -->
+                <button class="tab-btn" data-tab="architecture" id="architecture-tab" onclick="switchTab('architecture')" aria-label="Architecture" title="Architecture" hidden>🧊<span class="tab-btn-text"> Architecture</span></button>
             </nav>
             <!-- The AI assistant: a question typed here is asked in the chat; with nothing typed, the chat opens (app.js) -->
             <form class="nav-ask" id="nav-ask" role="search" aria-label="Ask Claude about the data" onsubmit="event.preventDefault(); askFromHeader();">
@@ -318,6 +320,11 @@
         <!-- TEAM: teams, their people and roles, and who has which ticket (teams.js) -->
         <section id="teams-view" class="view-panel">
             <div class="home teams" id="teams"></div>
+        </section>
+
+        <!-- ARCHITECTURE: the 3D map of how OneTouch is built, admins only (architecture.js) -->
+        <section id="architecture-view" class="view-panel">
+            <div class="arch" id="architecture"></div>
         </section>
 
         <!-- DASHBOARD VIEW CONTAINER (METABASE, and each person's own dashboards) -->
@@ -649,6 +656,7 @@
     <script src="teams.js"></script>
     <script src="notifications.js"></script>
     <script src="accessibility.js"></script>
+    <script src="architecture.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
