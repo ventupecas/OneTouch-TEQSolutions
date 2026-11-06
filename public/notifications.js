@@ -329,6 +329,8 @@ document.querySelector('#report-dialog form').addEventListener('submit', async e
         showToast(`✓ Told ${names} that you ${status} ${number}`);
         // The Team tab shows it next to the ticket
         if (document.getElementById('teams-view').classList.contains('active')) loadTeamTickets();
+        // Someone said it's done, so it's no longer highlighted
+        else if (homeMode === 'assigned' && document.getElementById('home-view').classList.contains('active')) showAssigned(true);
     } catch (err) {
         error.textContent = `${err.message}`;
         error.hidden = false;

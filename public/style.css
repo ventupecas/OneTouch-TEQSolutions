@@ -684,6 +684,15 @@ td.kpi-cell { min-width: 260px; }
 .results-head .home-status { flex: 1 1 320px; margin-bottom: 0; }
 .results-head .home-action { flex-shrink: 0; }
 /* Ticket results: the rows from the latest answer */
+/* Tickets that need attention (kpis.mjs flags). Above .fresh, so a ticket from the
+   latest answer keeps its colour, and the bar and its flags still say this */
+.result-table tbody tr.attention,
+.result-table tbody tr.attention:nth-child(even) { background: var(--danger-soft); }
+.result-table tbody tr.attention:hover { background: color-mix(in srgb, var(--danger) 12%, var(--danger-soft)); }
+.result-table tbody tr.attention td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
+.attention-flags { margin: 4px 0; }
+.attention-flags .kpi-list { flex-direction: column; align-items: flex-start; }
+.attention-legend { font-size: 0.8rem; color: var(--muted); margin: 4px 0; }
 .result-table tbody tr.fresh,
 .result-table tbody tr.fresh:nth-child(even) { background: var(--warn-soft); }
 .result-table tbody tr.fresh:hover { background: var(--warn-soft-hover); }

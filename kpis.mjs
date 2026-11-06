@@ -52,6 +52,11 @@ const median = values => {
   const mid = sorted.length >> 1;
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 };
+// How long 95 in 100 of them took or less (what "overdue" goes by, where the data has no deadline)
+const slowest = values => {
+  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+  return sorted.length ? sorted[Math.ceil(sorted.length * 0.95) - 1] : null;
+};
 
 // ---------------------------------------------------------------------
 // The data: every ticket, loaded once. load() starts it (server start-up
@@ -98,7 +103,12 @@ async function readAll(runCubeQuery) {
     RITM: median(finished('RITM').map(t => t.done - t.created)),
     SCTASK: median(finished('SCTASK').map(t => t.done - t.created)),
   };
-  return { asOf, tickets, typical };
+  const late = {
+    INC: Object.fromEntries([1, 2, 3, 4].map(p => [p, slowest(finished('INC').filter(t => t.priority === p).map(t => t.done - t.created))])),
+    RITM: slowest(finished('RITM').map(t => t.done - t.created)),
+    SCTASK: slowest(finished('SCTASK').map(t => t.done - t.created)),
+  };
+  return { asOf, tickets, typical, late };
 }
 
 // One row of the export -> what the KPIs read. done: when it was finished
@@ -244,6 +254,49 @@ export async function ticketKpis(numbers, runCubeQuery) {
 }
 
 // ---------------------------------------------------------------------
+// Which open tickets need attention, so every ticket list can highlight them:
+// overdue, no update for a week, or nobody has it in OneTouch. Closed tickets
+// never do. Flags have a KPI's shape.
+//
+// Only a change has a deadline in the export (its planned end), and only
+// incidents and catalog tasks record an SLA breach. Any other open ticket is
+// overdue once it has been open longer than 95 in 100 finished tickets of its
+// kind took (an incident's kind includes its priority).
+// ---------------------------------------------------------------------
+
+function overdueFlag(t, { asOf, late }) {
+  if (!t.open) return null;
+  if (t.kind === 'CHG') {
+    return t.plannedEnd && t.plannedEnd < asOf
+      ? kpi('overdue', 'Overdue by', duration(asOf - t.plannedEnd), 'bad', 'Still open after its planned end.')
+      : null;
+  }
+  if (t.breach || t.sla) return kpi('overdue', 'Overdue:', 'SLA breached', 'bad', 'Its SLA was breached and it is still open.');
+  const limit = t.kind === 'INC' ? late.INC[t.priority] : late[t.kind];
+  if (limit == null || !t.created || asOf - t.created <= limit) return null;
+  const like = t.kind === 'INC' ? `${PRIORITY_NAME[t.priority]} incidents` : KIND_NAMES[t.kind][1];
+  return kpi('overdue', 'Overdue: open', duration(asOf - t.created), 'bad', `95 in 100 finished ${like} took ${duration(limit)} or less.`);
+}
+
+// Changes aren't in here: the export doesn't record when one was last updated
+const isStale = (t, asOf) => t.open && t.kind !== 'CHG' && t.updated && asOf - t.updated >= 7 * DAY;
+
+function flagsOf(t, hasPerson, d) {
+  if (!t?.open) return [];
+  return [
+    overdueFlag(t, d),
+    isStale(t, d.asOf) ? kpi('stale', 'No update for', duration(d.asOf - t.updated), 'bad', 'Nobody has updated it for 7 days or more.') : null,
+    hasPerson ? null : kpi('unassigned', 'Not assigned', '', 'warn', 'Nobody in OneTouch has it yet.'),
+  ].filter(Boolean);
+}
+
+// -> function(number, hasPerson) -> [flag]. hasPerson: someone has it in OneTouch
+export async function attentionFlagger(runCubeQuery) {
+  const d = data || await load(runCubeQuery);
+  return (number, hasPerson) => flagsOf(d.tickets.get(number), hasPerson, d);
+}
+
+// ---------------------------------------------------------------------
 // One family's KPIs: its tickets taken together. members: [{ number, assigneeId }]
 // ---------------------------------------------------------------------
 
@@ -274,8 +327,10 @@ function familyKpis(members, d, summary = familySummary(members, d)) {
   if (open.length) {
     const age = asOf - summary.oldestOpen;
     list.push(kpi('oldest', 'Oldest open', duration(age), age < 3 * DAY ? 'good' : age < 7 * DAY ? 'warn' : 'bad', 'How long its oldest open ticket has been open.'));
-    const stale = open.filter(t => t.updated && asOf - t.updated >= 7 * DAY).length;
+    const stale = open.filter(t => isStale(t, asOf)).length;
     list.push(kpi('stale', 'No update for a week', stale, stale ? 'bad' : 'good', 'Open tickets nobody has updated for 7 days or more.'));
+    const overdue = open.filter(t => overdueFlag(t, d)).length;
+    if (overdue) list.push(kpi('overdue', 'Overdue', overdue, 'bad', 'Open tickets past their planned end, with a breached SLA, or open longer than 95 in 100 finished ones like them took.'));
   }
   const incidents = tickets.filter(t => t.kind === 'INC');
   const top = Math.min(...incidents.map(t => t.priority || 5));

@@ -98,6 +98,22 @@ today, and "typical" means the median for that kind of ticket.
   incidents caused by its changes, how long it's been active, people on it,
   and open-but-unassigned. Families with open tickets come first.
 
+**Highlighted tickets** (`kpis.mjs` `attentionFlagger`, `server.mjs` `attentionCheck` and
+`withFlags`). Open tickets that need attention get a red row and say why under their number
+(`t.flags`, `attentionFlagsHtml` in `app.js`), in Assigned to me, the Team tab, 📥 Not assigned
+yet, a family's tickets in Team families, ticket search, Ticket results and Starred tickets.
+Assigned to me and the Team tab's lists have a **Needs attention (n)** filter
+(`?attention=1`). Closed tickets aren't flagged, nor are ones someone said they resolved or
+closed (`ticket_reports`), since the data never changes to clear them.
+
+- **Overdue**: the export has few deadlines, so a change is overdue past its planned end, an
+  incident or catalog task with a breached SLA while still open, and anything else once it has
+  been open longer than 95 in 100 finished tickets of its kind took (an incident's kind includes
+  its priority). Nothing finished to compare with: not overdue. No fixed targets are invented.
+- **No update**: 7 days or more, as the red "Last update" KPI. The export has no update date
+  for changes, so they never get this one.
+- **Not assigned**: nobody has it in OneTouch (`ticket_assignments`), not ServiceNow's `assigned_to`.
+
 **Sorting** (`public/sorting.js`). Every ticket list and table sorts by any of its
 columns: a heading sorts ascending, then descending, then back to the list's own order.
 Lists shown a page at a time sort all of their tickets, not just the page; the Team tab,

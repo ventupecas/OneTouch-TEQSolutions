@@ -25,8 +25,9 @@ const teamsView = {
     data: null,     // GET /api/teams: { teams, roles, people?, unassigned? }
     teamId: null,   // the team showing, or UNASSIGNED_VIEW
     // assignee: a team's; team: "Not assigned yet"'s (a team's id, 'none' or '').
+    // attention: '1' for only the tickets that need attention.
     // What's typed in the 🔍 box is the 'team-tickets' or 'unassigned-tickets' lookup (lookup.js)
-    filter: { assignee: '', kind: '', team: '' },
+    filter: { assignee: '', kind: '', team: '', attention: '' },
     offset: 0,
     run: 0,         // bumped on every load, so an answer for an older view is dropped
 };
@@ -35,7 +36,7 @@ const teamsView = {
 function resetTeams() {
     teamsView.data = null;
     teamsView.teamId = null;
-    teamsView.filter = { assignee: '', kind: '', team: '' };
+    teamsView.filter = { assignee: '', kind: '', team: '', attention: '' };
     teamsView.offset = 0;
     teamsView.run += 1;
     pickerPeople.clear();
@@ -132,7 +133,7 @@ function renderTeams() {
             `<h3>${manage ? `${escapeHtml(team.name)}'s tickets` : 'My tickets'}</h3>` +
             `<div class="team-filters">` +
             (manage ? `<label>Who has it <select id="team-filter-assignee">${assigneeFilterOptions(team)}</select></label>` : '') +
-            kindFilterHtml() +
+            kindFilterHtml() + attentionFilterHtml() +
             `</div>` +
             // Any of the list's columns; the server looks through all of the team's tickets
             lookupBarHtml('team-tickets', Object.keys(TEAM_TICKET_SORT_KEYS), { mode: 'list' }) +
@@ -152,6 +153,11 @@ function kindFilterHtml() {
     return `<label>Type <select id="team-filter-kind"><option value="">All types</option>` +
         TEAM_KINDS.map(([k, label]) => `<option value="${k}"${teamsView.filter.kind === k ? ' selected' : ''}>${label}</option>`).join('') +
         `</select></label>`;
+}
+
+// Only the tickets that need attention; its count comes with each load of the list
+function attentionFilterHtml() {
+    return `<div class="assigned-filter"><button type="button" class="home-action" id="team-attention-filter" data-team-attention aria-pressed="${teamsView.filter.attention === '1'}">Needs attention</button></div>`;
 }
 
 // Admins first get "Not assigned yet", then every team
@@ -240,6 +246,8 @@ async function loadTeamTickets(quiet = false) {
         if (!data || run !== teamsView.run) return;
         out.innerHTML = nobody ? unassignedTicketsHtml(data) : teamTicketsHtml(team, data);
         setLookupCount(list, data.total, data.before ?? data.total);
+        const attention = document.getElementById('team-attention-filter');
+        if (attention && data.attention != null) attention.textContent = `Needs attention (${data.attention.toLocaleString()})`;
         const all = document.querySelector('#teams .team-select-all');
         if (all) all.checked = false;
     } catch (err) {
@@ -261,7 +269,7 @@ pagedLookups['unassigned-tickets'] = pagedSorts['team-tickets'];
 function ticketCellsHtml(t) {
     const n = escapeHtml(t.number);
     const summary = String(t.summary || '');
-    return `<td class="ticket-cell"><button type="button" class="ticket-link" data-ticket="${n}" title="Open ${n}">${n}</button>${starButtonHtml(t.number)}</td>` +
+    return `<td class="ticket-cell"><button type="button" class="ticket-link" data-ticket="${n}" title="Open ${n}">${n}</button>${starButtonHtml(t.number)}${attentionFlagsHtml(t)}</td>` +
         `<td>${t.type ? escapeHtml(t.type) : blankHtml('Type', t)}</td>` +
         `<td${summary.length > 100 ? ` title="${escapeHtml(summary)}"` : ''}>${summary ? escapeHtml(summary.length > 100 ? `${summary.slice(0, 97)}…` : summary) : blankHtml('Summary', t)}</td>` +
         `<td>${t.state ? escapeHtml(t.state) : blankHtml('State', t)}${reportLineHtml(t.report)}</td>`;
@@ -277,7 +285,8 @@ function teamPagerHtml(data) {
 
 function teamTicketsHtml(team, data) {
     if (!data.total) {
-        return `<p class="home-status">${teamsView.filter.assignee || teamsView.filter.kind || lookupActive('team-tickets')
+        return `<p class="home-status">${teamsView.filter.attention && !lookupActive('team-tickets') ? 'None of these tickets need attention.'
+            : teamsView.filter.assignee || teamsView.filter.kind || lookupActive('team-tickets')
             ? 'No tickets match.' : team.canManage ? 'This team has no tickets.' : 'No tickets are assigned to you yet.'}</p>`;
     }
     const manage = team.canManage;
@@ -291,7 +300,7 @@ function teamTicketsHtml(team, data) {
               (manage ? ` <button type="button" class="link-btn" data-family-give="${escapeHtml(t.family.id)}" data-family-size="${t.family.size}" title="Give all ${t.family.size.toLocaleString()} of them to one person">Give all…</button>` : '') +
               (admin ? ` <button type="button" class="link-btn" data-family-find="${n}" title="Move this family to another team">Move…</button>` : '')
             : 'On its own' + (admin ? ` <button type="button" class="link-btn" data-family-find="${n}" title="Move this ticket to another team">Move…</button>` : '');
-        return '<tr>' +
+        return `<tr${needsAttention(t) ? ' class="attention"' : ''}>` +
             (manage ? `<td class="select-cell"><input type="checkbox" class="team-select" value="${n}" aria-label="Tick ${n}"></td>` : '') +
             ticketCellsHtml(t) +
             `<td>${family}</td>` +
@@ -301,7 +310,7 @@ function teamTicketsHtml(team, data) {
             (tell ? `<td>${reportButtonHtml(t.number, t.report?.mine ? 'Tell them again…' : 'Resolved or closed?…')}</td>` : '') +
             '</tr>';
     }).join('');
-    return `<div class="table-wrap"><table class="result-table" data-sort-list="team-tickets"><thead><tr>` +
+    return ATTENTION_LEGEND_HTML + `<div class="table-wrap"><table class="result-table" data-sort-list="team-tickets"><thead><tr>` +
         (manage ? '<th class="select-cell"></th>' : '') +
         Object.keys(TEAM_TICKET_SORT_KEYS).map(label => sortHeadHtml('team-tickets', label)).join('') +
         (tell ? '<th>Tell your project manager</th>' : '') +
@@ -433,7 +442,7 @@ function unassignedCardHtml() {
         teamsView.data.teams.map(t => `<option value="${t.id}"${String(t.id) === f ? ' selected' : ''}>${escapeHtml(t.name)}</option>`).join('');
     return `<section class="team-card"><h3>Not assigned yet</h3>` +
         `<p class="home-status" id="unassigned-summary">${unassignedSummaryHtml()}</p>` +
-        `<div class="team-filters"><label>Team <select id="team-filter-team">${teamOptions}</select></label>${kindFilterHtml()}</div>` +
+        `<div class="team-filters"><label>Team <select id="team-filter-team">${teamOptions}</select></label>${kindFilterHtml()}${attentionFilterHtml()}</div>` +
         // Any of the list's columns; the server looks through every ticket nobody has
         lookupBarHtml('unassigned-tickets', Object.keys(UNASSIGNED_SORT_KEYS), { mode: 'list' }) +
         `<div id="team-tickets"></div></section>`;
@@ -469,7 +478,8 @@ function familyGroupHtml(f) {
 
 function unassignedTicketsHtml(data) {
     if (!data.total) {
-        return `<p class="home-status">${teamsView.filter.team || teamsView.filter.kind || lookupActive('unassigned-tickets')
+        return `<p class="home-status">${teamsView.filter.attention && !lookupActive('unassigned-tickets') ? 'None of these tickets need attention.'
+            : teamsView.filter.team || teamsView.filter.kind || lookupActive('unassigned-tickets')
             ? 'No tickets match.' : '✓ Every ticket has someone.'}</p>`;
     }
     // In the list's own order a family's tickets come together, under its row;
@@ -486,7 +496,7 @@ function unassignedTicketsHtml(data) {
             (grouped ? '' : (t.team && t.family.size > 1
                 ? ` <button type="button" class="link-btn" data-family-give="${fid}" data-family-size="${t.family.size}" data-family-team="${t.team.id}" title="Give all ${t.family.size.toLocaleString()} of them to one person">Give all…</button>`
                 : '') + ` <button type="button" class="link-btn" data-family-find="${n}" title="Move this family to another team">Move…</button>`);
-        return head + '<tr>' + ticketCellsHtml(t) +
+        return head + `<tr${needsAttention(t) ? ' class="attention"' : ''}>` + ticketCellsHtml(t) +
             `<td>${family}</td>` +
             `<td>${t.team ? escapeHtml(t.team.name) : '<span class="blank" title="This ticket\'s family isn\'t on any team yet">No team</span>'}</td>` +
             `<td>${t.team
@@ -494,7 +504,7 @@ function unassignedTicketsHtml(data) {
                 : '<span class="blank" title="Only someone on its family\'s team can have it">Move its family to a team first</span>'}</td>` +
             '</tr>';
     }).join('');
-    return `<div class="table-wrap"><table class="result-table" data-sort-list="unassigned-tickets"><thead><tr>` +
+    return ATTENTION_LEGEND_HTML + `<div class="table-wrap"><table class="result-table" data-sort-list="unassigned-tickets"><thead><tr>` +
         Object.keys(UNASSIGNED_SORT_KEYS).map(label => sortHeadHtml('unassigned-tickets', label)).join('') +
         `<th>Give it to</th></tr></thead><tbody>${rows}</tbody></table></div>` + teamPagerHtml(data);
 }
@@ -672,7 +682,7 @@ document.getElementById('teams-view').addEventListener('click', e => {
     const pick = e.target.closest('[data-team-pick]');
     if (pick) {
         teamsView.teamId = pick.dataset.teamPick === UNASSIGNED_VIEW ? UNASSIGNED_VIEW : Number(pick.dataset.teamPick);
-        teamsView.filter = { assignee: '', kind: '', team: '' };
+        teamsView.filter = { assignee: '', kind: '', team: '', attention: '' };
         listLookups.delete('team-tickets');
         listLookups.delete('unassigned-tickets');
         teamsView.offset = 0;
@@ -687,6 +697,14 @@ document.getElementById('teams-view').addEventListener('click', e => {
         if (select) select.value = teamsView.filter.assignee;
         loadTeamTickets();
         document.getElementById('team-tickets').closest('.team-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+    }
+    const attention = e.target.closest('[data-team-attention]');
+    if (attention) {
+        teamsView.filter.attention = teamsView.filter.attention ? '' : '1';
+        attention.setAttribute('aria-pressed', String(Boolean(teamsView.filter.attention)));
+        teamsView.offset = 0;
+        loadTeamTickets();
         return;
     }
     const page = e.target.closest('[data-team-page]');
