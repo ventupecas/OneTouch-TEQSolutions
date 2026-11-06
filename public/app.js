@@ -2171,7 +2171,7 @@ function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set(
     const head = (select ? `<th class="select-cell"><input type="checkbox" class="select-all" data-select-list="${select}" aria-label="Select all"></th>` : '') +
         columns.map(([label]) => (sortable && !UNSORTED_COLUMNS.has(label) ? sortHeadHtml(sort, label) : `<th>${escapeHtml(label)}</th>`)).join('');
     const body = tickets.map((t, i) => {
-        const cls = [highlight.has(t.number) ? highlightClass : '', rowClass ? rowClass(t, i) : ''].filter(Boolean).join(' ');
+        const cls = [highlight.has(t.number) ? highlightClass : '', needsAttention(t) ? 'attention' : '', rowClass ? rowClass(t, i) : ''].filter(Boolean).join(' ');
         return (cls ? `<tr class="${cls}">` : '<tr>') +
         (select ? `<td class="select-cell"><input type="checkbox" class="row-select" data-select-list="${select}" value="${escapeHtml(t.number)}" aria-label="Select ${escapeHtml(t.number)}"></td>` : '') +
         columns.map(([label, get, html], i) => {
@@ -2179,7 +2179,7 @@ function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set(
         const sortAttr = by ? ` data-sort="${escapeHtml(String(by(t) ?? ''))}"` : '';
         if (i === 0) {
             return `<td class="ticket-cell"${sortAttr}><button type="button" class="ticket-link" data-ticket="${escapeHtml(t.number)}"` +
-                ` title="Open ${escapeHtml(t.number)}">${escapeHtml(t.number)}</button>${starButtonHtml(t.number)}</td>`;
+                ` title="Open ${escapeHtml(t.number)}">${escapeHtml(t.number)}</button>${starButtonHtml(t.number)}${attentionFlagsHtml(t)}</td>`;
         }
         if (html) return `<td class="${label === 'Family' ? 'family-cell' : label === 'KPIs' ? 'kpi-cell' : 'parent-cell'}"${sortAttr}>${html(t)}</td>`;
         const text = String(get(t) || '');
@@ -2218,7 +2218,9 @@ function ticketCardHtml(t, record) {
         `<span class="ticket-number">${escapeHtml(t.number)}</span>` +
         starButtonHtml(t.number, true) + dashboardButton + reportButtonHtml(t.number) +
         `</div>` +
-        (t.summary ? `<div class="ticket-summary">${escapeHtml(t.summary)}</div>` : '');
+        (t.summary ? `<div class="ticket-summary">${escapeHtml(t.summary)}</div>` : '') +
+        // A summary row below shows them already; a full record has no such row
+        (record ? attentionFlagsHtml(t) : '');
 
     if (!record) return html + ticketTableHtml([t], TICKET_COLUMNS, new Set(), 'fresh', { sort: false }) + ticketDownloadHtml([t], t.number);
 
@@ -2270,7 +2272,7 @@ async function runHomeSearch(mode, outId, work, quiet = false) {
 // =====================================================================
 
 const ASSIGNED_PAGE = 50;
-const ASSIGNED_STATUSES = [['open', 'Open'], ['closed', 'Closed'], ['all', 'All']];
+const ASSIGNED_STATUSES = [['open', 'Open'], ['attention', 'Needs attention'], ['closed', 'Closed'], ['all', 'All']];
 // drill: a bar or slice clicked in "My charts" ({ label, test }): only its tickets
 const assignedView = { tickets: null, status: 'open', page: 0, drill: null };
 const ASSIGNED_COLUMNS = [
@@ -2319,7 +2321,7 @@ function assignedHtml() {
             ? 'No tickets are assigned to you yet. Your project manager hands them out on the Team tab, and 🔔 tells you when they do.'
             : 'No tickets are assigned to you. You get some once you\'re on a team and your project manager or an admin assigns them to you.'}</p>`;
     }
-    const counts = { open: all.filter(t => t.open).length, all: all.length };
+    const counts = { open: all.filter(t => t.open).length, attention: all.filter(needsAttention).length, all: all.length };
     counts.closed = counts.all - counts.open;
     const { status } = assignedView;
     // Each ticket's KPIs (filled in once the page is drawn, fillTicketKpis; sorted by
@@ -2328,7 +2330,7 @@ function assignedHtml() {
     const columns = [...ASSIGNED_COLUMNS, KPI_COLUMN,
         ...(canTellManager() ? [['Tell your project manager', () => '', t => reportButtonHtml(t.number, 'Resolved or closed?…')]] : [])];
     const { drill } = assignedView;
-    const inStatus = status === 'all' ? all : all.filter(t => t.open === (status === 'open'));
+    const inStatus = status === 'all' ? all : status === 'attention' ? all.filter(needsAttention) : all.filter(t => t.open === (status === 'open'));
     const listed = drill ? inStatus.filter(drill.test) : inStatus;
     // Looked up and sorted by a heading: all of them, before they're cut into pages
     const matched = lookedUpTickets(listed, 'assigned', lookupColumns(columns), ticketLookupText);
@@ -2340,7 +2342,7 @@ function assignedHtml() {
 
     const filter = '<div class="assigned-filter" role="group" aria-label="Which tickets">' + ASSIGNED_STATUSES.map(([key, label]) =>
         `<button type="button" class="home-action" data-assigned-status="${key}" aria-pressed="${status === key}">${label} (${counts[key].toLocaleString()})</button>`).join('') + '</div>';
-    const which = status === 'all' ? '' : `${status} `;
+    const which = status === 'all' ? '' : status === 'attention' ? 'highlighted ' : `${status} `;
     const sort = listSorts.get('assigned');
     const order = sort
         ? `sorted by ${sort.col}, ${sort.dir === 'asc' ? 'ascending' : 'descending'} (click its heading again to change that). `
@@ -2351,7 +2353,7 @@ function assignedHtml() {
         (drill ? `<div class="drill-chip" role="status">Only the ones in <b>${escapeHtml(drill.label)}</b>, from My charts ` +
             '<button type="button" class="home-action" data-assigned-drill-clear>✕ Show them all</button></div>' : '');
     if (!listed.length) {
-        return head + `<p class="home-status">${drill ? `None ${which}in ${escapeHtml(drill.label)}.` : `None ${status === 'open' ? 'open: you\'re all caught up.' : 'closed yet.'}`}</p>`;
+        return head + `<p class="home-status">${drill ? `None ${which}in ${escapeHtml(drill.label)}.` : status === 'attention' ? 'None of your tickets need attention.' : `None ${status === 'open' ? 'open: you\'re all caught up.' : 'closed yet.'}`}</p>`;
     }
     const bar = lookupBarHtml('assigned', lookupColumns(columns).map(([label]) => label),
         { mode: 'list', count: { shown: shown.length, total: listed.length } });
@@ -2362,7 +2364,7 @@ function assignedHtml() {
           `<button type="button" class="home-action" data-assigned-page="-1"${assignedView.page ? '' : ' disabled'}>← Previous</button>` +
           `<button type="button" class="home-action" data-assigned-page="1"${assignedView.page < pages - 1 ? '' : ' disabled'}>Next →</button></div>`
         : '';
-    return head + bar + KPI_LEGEND_HTML + ticketTableHtml(page, columns, new Set(), 'fresh', { sort: 'assigned', lookup: false }) + pager +
+    return head + bar + ATTENTION_LEGEND_HTML + KPI_LEGEND_HTML + ticketTableHtml(page, columns, new Set(), 'fresh', { sort: 'assigned', lookup: false }) + pager +
         ticketDownloadHtml(shown, `Assigned to me (${status === 'all' ? 'all' : status})`, ASSIGNED_COLUMNS);
 }
 
@@ -2592,6 +2594,14 @@ function kpiChipsHtml(list) {
     return '<div class="kpi-list">' + list.map(k => `<span class="kpi kpi-${['good', 'warn', 'bad'].includes(k.tone) ? k.tone : 'info'}"` +
         `${k.detail ? ` title="${escapeHtml(k.detail)}"` : ''}>${escapeHtml(k.label)} <b>${escapeHtml(k.value)}</b></span>`).join('') + '</div>';
 }
+
+// Open tickets that need attention (kpis.mjs attentionFlagger): every ticket list
+// highlights the row and says why under its number
+const needsAttention = t => Boolean(t.flags?.length);
+const attentionFlagsHtml = t => (needsAttention(t) ? `<div class="attention-flags">${kpiChipsHtml(t.flags)}</div>` : '');
+const ATTENTION_LEGEND_HTML = '<p class="attention-legend">Highlighted tickets need attention: overdue (past their planned end, SLA breached, ' +
+    'or open longer than 95 in 100 finished ones like them took), no update for a week, or not assigned. ' +
+    'Closed tickets, and ones someone said they resolved or closed, aren\'t highlighted. Hover one for why.</p>';
 
 // Fills the KPI cells in a container ([data-kpis="<number>"]) for the tickets showing
 async function fillTicketKpis(container) {

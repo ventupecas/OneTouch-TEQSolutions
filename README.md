@@ -271,6 +271,13 @@ then their tickets: **📋 Assigned to me**, **📊 My charts** (the same ticket
 tickets** (everything you've starred, newest first). Each person can add charts and
 dashboard shortcuts with **✏️ Customize Home**.
 
+**Tickets that need attention are highlighted** by themselves, in red with the reason under
+the number, in those lists and on the Team tab: overdue (a change past its planned end, a
+breached SLA still open, or open longer than 95 in 100 finished tickets like it took), no update
+for a week, or not assigned to anyone in OneTouch. **Needs attention** in Assigned to me and on
+the Team tab shows only those. Closed tickets, and ones someone said they resolved or closed,
+aren't highlighted.
+
 **The AI assistant** is the **Ask Claude about the data…** bar in the header, right of the
 **👥 Team** button, on every page (**/** jumps to it):
 
@@ -1549,7 +1556,8 @@ inside the data. Leave it empty to use the real date.
   and its open count, from made-up tickets through a stand-in for Cube (no database). Then
   `checks/architecture.mjs`: the 🧊 Architecture map against the repo, and that none of its
   content is in `public/`. Then `checks/issues.mjs`: what a problem report may hold, and that its
-  words stay out of the email.
+  words stay out of the email. Then `checks/attention.mjs`: which tickets get highlighted, from
+  made-up tickets.
 - **`npm run build`**: the same as `npm run check`; GitHub's CI runs it, then `npm test`,
   then a check that the live site is up (`.github/workflows/ci.yml`, [B.79](#b79)).
 - **Claude Code agents:** `onetouch-developer` and `onetouch-reviewer` (see Part 1).
@@ -2327,6 +2335,7 @@ Create each file at the path shown, with exactly this content. Files are in the 
 - [B.85 `health.mjs`](#b85)
 - [B.86 `issues.mjs`](#b86)
 - [B.87 `checks/issues.mjs`](#b87)
+- [B.88 `checks/attention.mjs`](#b88)
 
 <a id="b1"></a>
 ### B.1 `.gitignore`
@@ -2482,7 +2491,7 @@ public/vendor/** -text
     "wrappy": "^1.0.2"
   },
   "scripts": {
-    "test": "node checks/ticket-order.mjs && node checks/architecture.mjs && node checks/issues.mjs",
+    "test": "node checks/ticket-order.mjs && node checks/architecture.mjs && node checks/issues.mjs && node checks/attention.mjs",
     "build": "node scripts/check.mjs",
     "check": "node scripts/check.mjs",
     "docs": "node scripts/build-docs.mjs",
@@ -7413,7 +7422,7 @@ app.post('/api/tickets/search', async (req, res) => {
       });
     }
     console.log(`🔎 ${req.user.username} searched ${result.found.length} found, ${result.notFound.length} not found`);
-    res.json(result);
+    res.json({ ...result, found: await withFlags(result.found) });
   } catch (error) {
     console.error('🔎 Ticket search failed:', error.message);
     res.status(502).json({ error: `Could not search the tickets right now. Please try again.` });
@@ -7640,7 +7649,7 @@ app.get('/api/seen-tickets', async (req, res) => {
     const list = await seen.listSeen(req.user.id);
     const numbers = list.map(s => s.number);
     const [summaries, links] = await Promise.all([ticketSummaries(numbers, req.runQuery), linksOrNone(numbers, req.runQuery)]);
-    res.json({ tickets: list.filter(s => summaries.has(s.number)).map(s => ({ ...summaries.get(s.number), ...links.get(s.number), shownAt: s.shownAt, question: s.question })) });
+    res.json({ tickets: await withFlags(list.filter(s => summaries.has(s.number)).map(s => ({ ...summaries.get(s.number), ...links.get(s.number), shownAt: s.shownAt, question: s.question }))) });
   } catch (error) {
     console.error('🎫 Could not list the shown tickets:', error.message);
     res.status(503).json({ error: 'Your ticket results could not be loaded right now.' });
@@ -7697,13 +7706,43 @@ app.post('/api/seen-tickets', async (req, res) => {
   }
 });
 
+// Which tickets a list should highlight (kpis.mjs attentionFlagger). A ticket
+// someone has said they resolved or closed isn't flagged: the data stays as it
+// was, and the project manager sees that report under "Resolved or closed".
+// -> function(number, hasPerson) -> [flag]; if this can't be worked out, none
+// are flagged and the list still shows. Only ever used on tickets the person
+// may already see.
+async function attentionCheck() {
+  try {
+    const [flagsOf, reported] = await Promise.all([kpis.attentionFlagger(runCubeQuery), teams.reportedNumbers()]);
+    return (number, hasPerson) => (reported.has(number) ? [] : flagsOf(number, hasPerson));
+  } catch (error) {
+    console.error('📏 Could not work out which tickets need attention:', error.message);
+    return () => [];
+  }
+}
+
+// A list of tickets this person may see, each with its flags
+async function withFlags(tickets) {
+  if (!tickets.length) return tickets;
+  const [flagged, nobody] = await Promise.all([
+    attentionCheck(),
+    teams.unassignedAmong(tickets.map(t => t.number)).catch(error => {
+      console.error('📏 Could not look up who has those tickets:', error.message);
+      return new Set();
+    }),
+  ]);
+  return tickets.map(t => ({ ...t, flags: flagged(t.number, !nobody.has(t.number)) }));
+}
+
 // Home's "Assigned to me": every ticket assigned to this person in OneTouch,
 // most urgent first, then oldest (tickets.mjs ticketsByPriority), each marked
-// open or not; the page shows open, closed or all of them
+// open or not and with its flags; the page shows open, closed or all of them
 app.get('/api/my-tickets', async (req, res) => {
   try {
     const numbers = await teams.assignedNumbers(req.user.id);
     const tickets = numbers.length ? await ticketsByPriority(numbers, req.runQuery) : [];
+    const flagged = await attentionCheck();
     // How much each one's KPIs need attention, so the list sorts by them across every
     // page, and what they say, so it can be looked up by them (the page draws them itself)
     const found = await kpis.ticketKpis(tickets.map(t => t.number), runCubeQuery)
@@ -7711,7 +7750,7 @@ app.get('/api/my-tickets', async (req, res) => {
     res.json({
       tickets: tickets.map(t => {
         const list = found.kpis[t.number];
-        return { ...t, attention: list ? kpis.attention(list) : null, kpiText: list ? list.map(k => `${k.label} ${k.value}`).join(' · ') : '' };
+        return { ...t, flags: flagged(t.number, true), attention: list ? kpis.attention(list) : null, kpiText: list ? list.map(k => `${k.label} ${k.value}`).join(' · ') : '' };
       }),
     });
   } catch (error) {
@@ -7781,14 +7820,15 @@ app.get('/api/kpis/families/:id', async (req, res) => {
   try {
     const family = await teams.familyMembers(req.scope, String(req.params.id).toUpperCase());
     const numbers = family.members.map(m => m.number);
-    const [found, summaries] = await Promise.all([
+    const [found, summaries, flagged] = await Promise.all([
       kpis.oneFamilyKpis(family.members, runCubeQuery),
       ticketSummaries(numbers, runCubeQuery).catch(() => new Map()),
+      attentionCheck(),
     ]);
     // Open ones first, then the most urgent, then the oldest (as Assigned to me)
     const tickets = family.members
       .map(m => {
-        const t = { ...summaries.get(m.number), number: m.number, assignee: m.assignee, kpis: found.tickets[m.number] || [] };
+        const t = { ...summaries.get(m.number), number: m.number, assignee: m.assignee, kpis: found.tickets[m.number] || [], flags: flagged(m.number, Boolean(m.assigneeId)) };
         return { ...t, open: t.kind ? isOpen(t) : false, rank: t.kind ? priorityRank(t) : 5 };
       })
       .sort((a, b) => (b.open - a.open) || a.rank - b.rank || String(a.opened || '~').localeCompare(String(b.opened || '~')));
@@ -7811,7 +7851,7 @@ app.get('/api/stars', async (req, res) => {
     const noAccess = await noAccessTo(req.scope, missing);
     res.json({
       stars: list,
-      tickets: list.filter(s => summaries.has(s.number)).map(s => ({ ...summaries.get(s.number), ...links.get(s.number), starredAt: s.starredAt })),
+      tickets: await withFlags(list.filter(s => summaries.has(s.number)).map(s => ({ ...summaries.get(s.number), ...links.get(s.number), starredAt: s.starredAt }))),
       notFound: missing.filter(n => !noAccess.includes(n)),
       noAccess,
     });
@@ -8071,17 +8111,19 @@ app.get('/api/teams/unassigned/tickets', async (req, res) => {
       Family: r.familySize > 1 ? `${r.familyId} · ${r.familySize.toLocaleString()} linked tickets` : 'On its own',
       Team: r.team || 'No team',
     }));
+    const flagged = await attentionCheck();
     const page = await teams.unassignedTickets(req.scope, {
       team: req.query.team || null, kind: req.query.kind || null, matches,
       offset: req.query.offset, limit: req.query.limit, sort,
+      flagged, attentionOnly: req.query.attention === '1',
     });
     // An admin's: every number may be seen, so the summaries come straight from Cube
     const families = Object.values(page.families);
     const summaries = await ticketSummaries([...page.tickets.map(t => t.number), ...families.map(f => f.id)], runCubeQuery)
       .catch(error => { console.error('👥 Could not load ticket summaries:', error.message); return new Map(); });
     res.json({
-      total: page.total, before: page.before,
-      tickets: page.tickets.map(t => ({ ...summaries.get(t.number), ...t })),
+      total: page.total, before: page.before, attention: page.attention,
+      tickets: page.tickets.map(t => ({ ...summaries.get(t.number), ...t, flags: flagged(t.number, false) })),
       families: families.map(f => ({ ...f, summary: summaries.get(f.id)?.summary || null })),
     });
   } catch (error) {
@@ -8092,6 +8134,7 @@ app.get('/api/teams/unassigned/tickets', async (req, res) => {
 // ?assignee=<user id>|none&kind=INC&q=<words>&col=<column>&offset&limit -> { total, before, tickets }:
 // one page of a team's tickets with who has each one, and each one's summary
 // ...&sort=number|type|summary|state|family|assignee&dir=asc|desc: every match in that order, then the page
+// ...&attention=1: only the ones that need attention (attention: how many do; tickets: each with its flags)
 const TEAM_TICKET_SORTS = ['number', 'type', 'summary', 'state', 'family', 'assignee'];
 app.get('/api/teams/:id/tickets', async (req, res) => {
   try {
@@ -8100,14 +8143,19 @@ app.get('/api/teams/:id/tickets', async (req, res) => {
       Family: r.familySize > 1 ? `${r.familySize.toLocaleString()} linked tickets` : 'On its own',
       'Assigned to': r.assignee || 'Not assigned',
     }));
+    const flagged = await attentionCheck();
     const page = await teams.teamTickets(req.scope, Number(req.params.id), {
       assignee: req.query.assignee || null, kind: req.query.kind || null, matches,
       offset: req.query.offset, limit: req.query.limit, sort,
+      flagged, attentionOnly: req.query.attention === '1',
     });
     // The numbers are already this person's to see, so their summaries come straight from Cube
     const summaries = await ticketSummaries(page.tickets.map(t => t.number), runCubeQuery)
       .catch(error => { console.error('👥 Could not load ticket summaries:', error.message); return new Map(); });
-    res.json({ total: page.total, before: page.before, tickets: page.tickets.map(t => ({ ...summaries.get(t.number), ...t })) });
+    res.json({
+      total: page.total, before: page.before, attention: page.attention,
+      tickets: page.tickets.map(t => ({ ...summaries.get(t.number), ...t, flags: flagged(t.number, Boolean(t.assignee)) })),
+    });
   } catch (error) {
     teamsFailed(res, error, 'Loading the team\'s tickets');
   }
@@ -9811,6 +9859,15 @@ td.kpi-cell { min-width: 260px; }
 .results-head .home-status { flex: 1 1 320px; margin-bottom: 0; }
 .results-head .home-action { flex-shrink: 0; }
 /* Ticket results: the rows from the latest answer */
+/* Tickets that need attention (kpis.mjs flags). Above .fresh, so a ticket from the
+   latest answer keeps its colour, and the bar and its flags still say this */
+.result-table tbody tr.attention,
+.result-table tbody tr.attention:nth-child(even) { background: var(--danger-soft); }
+.result-table tbody tr.attention:hover { background: color-mix(in srgb, var(--danger) 12%, var(--danger-soft)); }
+.result-table tbody tr.attention td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
+.attention-flags { margin: 4px 0; }
+.attention-flags .kpi-list { flex-direction: column; align-items: flex-start; }
+.attention-legend { font-size: 0.8rem; color: var(--muted); margin: 4px 0; }
 .result-table tbody tr.fresh,
 .result-table tbody tr.fresh:nth-child(even) { background: var(--warn-soft); }
 .result-table tbody tr.fresh:hover { background: var(--warn-soft-hover); }
@@ -14563,7 +14620,7 @@ function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set(
     const head = (select ? `<th class="select-cell"><input type="checkbox" class="select-all" data-select-list="${select}" aria-label="Select all"></th>` : '') +
         columns.map(([label]) => (sortable && !UNSORTED_COLUMNS.has(label) ? sortHeadHtml(sort, label) : `<th>${escapeHtml(label)}</th>`)).join('');
     const body = tickets.map((t, i) => {
-        const cls = [highlight.has(t.number) ? highlightClass : '', rowClass ? rowClass(t, i) : ''].filter(Boolean).join(' ');
+        const cls = [highlight.has(t.number) ? highlightClass : '', needsAttention(t) ? 'attention' : '', rowClass ? rowClass(t, i) : ''].filter(Boolean).join(' ');
         return (cls ? `<tr class="${cls}">` : '<tr>') +
         (select ? `<td class="select-cell"><input type="checkbox" class="row-select" data-select-list="${select}" value="${escapeHtml(t.number)}" aria-label="Select ${escapeHtml(t.number)}"></td>` : '') +
         columns.map(([label, get, html], i) => {
@@ -14571,7 +14628,7 @@ function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set(
         const sortAttr = by ? ` data-sort="${escapeHtml(String(by(t) ?? ''))}"` : '';
         if (i === 0) {
             return `<td class="ticket-cell"${sortAttr}><button type="button" class="ticket-link" data-ticket="${escapeHtml(t.number)}"` +
-                ` title="Open ${escapeHtml(t.number)}">${escapeHtml(t.number)}</button>${starButtonHtml(t.number)}</td>`;
+                ` title="Open ${escapeHtml(t.number)}">${escapeHtml(t.number)}</button>${starButtonHtml(t.number)}${attentionFlagsHtml(t)}</td>`;
         }
         if (html) return `<td class="${label === 'Family' ? 'family-cell' : label === 'KPIs' ? 'kpi-cell' : 'parent-cell'}"${sortAttr}>${html(t)}</td>`;
         const text = String(get(t) || '');
@@ -14610,7 +14667,9 @@ function ticketCardHtml(t, record) {
         `<span class="ticket-number">${escapeHtml(t.number)}</span>` +
         starButtonHtml(t.number, true) + dashboardButton + reportButtonHtml(t.number) +
         `</div>` +
-        (t.summary ? `<div class="ticket-summary">${escapeHtml(t.summary)}</div>` : '');
+        (t.summary ? `<div class="ticket-summary">${escapeHtml(t.summary)}</div>` : '') +
+        // A summary row below shows them already; a full record has no such row
+        (record ? attentionFlagsHtml(t) : '');
 
     if (!record) return html + ticketTableHtml([t], TICKET_COLUMNS, new Set(), 'fresh', { sort: false }) + ticketDownloadHtml([t], t.number);
 
@@ -14662,7 +14721,7 @@ async function runHomeSearch(mode, outId, work, quiet = false) {
 // =====================================================================
 
 const ASSIGNED_PAGE = 50;
-const ASSIGNED_STATUSES = [['open', 'Open'], ['closed', 'Closed'], ['all', 'All']];
+const ASSIGNED_STATUSES = [['open', 'Open'], ['attention', 'Needs attention'], ['closed', 'Closed'], ['all', 'All']];
 // drill: a bar or slice clicked in "My charts" ({ label, test }): only its tickets
 const assignedView = { tickets: null, status: 'open', page: 0, drill: null };
 const ASSIGNED_COLUMNS = [
@@ -14711,7 +14770,7 @@ function assignedHtml() {
             ? 'No tickets are assigned to you yet. Your project manager hands them out on the Team tab, and 🔔 tells you when they do.'
             : 'No tickets are assigned to you. You get some once you\'re on a team and your project manager or an admin assigns them to you.'}</p>`;
     }
-    const counts = { open: all.filter(t => t.open).length, all: all.length };
+    const counts = { open: all.filter(t => t.open).length, attention: all.filter(needsAttention).length, all: all.length };
     counts.closed = counts.all - counts.open;
     const { status } = assignedView;
     // Each ticket's KPIs (filled in once the page is drawn, fillTicketKpis; sorted by
@@ -14720,7 +14779,7 @@ function assignedHtml() {
     const columns = [...ASSIGNED_COLUMNS, KPI_COLUMN,
         ...(canTellManager() ? [['Tell your project manager', () => '', t => reportButtonHtml(t.number, 'Resolved or closed?…')]] : [])];
     const { drill } = assignedView;
-    const inStatus = status === 'all' ? all : all.filter(t => t.open === (status === 'open'));
+    const inStatus = status === 'all' ? all : status === 'attention' ? all.filter(needsAttention) : all.filter(t => t.open === (status === 'open'));
     const listed = drill ? inStatus.filter(drill.test) : inStatus;
     // Looked up and sorted by a heading: all of them, before they're cut into pages
     const matched = lookedUpTickets(listed, 'assigned', lookupColumns(columns), ticketLookupText);
@@ -14732,7 +14791,7 @@ function assignedHtml() {
 
     const filter = '<div class="assigned-filter" role="group" aria-label="Which tickets">' + ASSIGNED_STATUSES.map(([key, label]) =>
         `<button type="button" class="home-action" data-assigned-status="${key}" aria-pressed="${status === key}">${label} (${counts[key].toLocaleString()})</button>`).join('') + '</div>';
-    const which = status === 'all' ? '' : `${status} `;
+    const which = status === 'all' ? '' : status === 'attention' ? 'highlighted ' : `${status} `;
     const sort = listSorts.get('assigned');
     const order = sort
         ? `sorted by ${sort.col}, ${sort.dir === 'asc' ? 'ascending' : 'descending'} (click its heading again to change that). `
@@ -14743,7 +14802,7 @@ function assignedHtml() {
         (drill ? `<div class="drill-chip" role="status">Only the ones in <b>${escapeHtml(drill.label)}</b>, from My charts ` +
             '<button type="button" class="home-action" data-assigned-drill-clear>✕ Show them all</button></div>' : '');
     if (!listed.length) {
-        return head + `<p class="home-status">${drill ? `None ${which}in ${escapeHtml(drill.label)}.` : `None ${status === 'open' ? 'open: you\'re all caught up.' : 'closed yet.'}`}</p>`;
+        return head + `<p class="home-status">${drill ? `None ${which}in ${escapeHtml(drill.label)}.` : status === 'attention' ? 'None of your tickets need attention.' : `None ${status === 'open' ? 'open: you\'re all caught up.' : 'closed yet.'}`}</p>`;
     }
     const bar = lookupBarHtml('assigned', lookupColumns(columns).map(([label]) => label),
         { mode: 'list', count: { shown: shown.length, total: listed.length } });
@@ -14754,7 +14813,7 @@ function assignedHtml() {
           `<button type="button" class="home-action" data-assigned-page="-1"${assignedView.page ? '' : ' disabled'}>← Previous</button>` +
           `<button type="button" class="home-action" data-assigned-page="1"${assignedView.page < pages - 1 ? '' : ' disabled'}>Next →</button></div>`
         : '';
-    return head + bar + KPI_LEGEND_HTML + ticketTableHtml(page, columns, new Set(), 'fresh', { sort: 'assigned', lookup: false }) + pager +
+    return head + bar + ATTENTION_LEGEND_HTML + KPI_LEGEND_HTML + ticketTableHtml(page, columns, new Set(), 'fresh', { sort: 'assigned', lookup: false }) + pager +
         ticketDownloadHtml(shown, `Assigned to me (${status === 'all' ? 'all' : status})`, ASSIGNED_COLUMNS);
 }
 
@@ -14984,6 +15043,14 @@ function kpiChipsHtml(list) {
     return '<div class="kpi-list">' + list.map(k => `<span class="kpi kpi-${['good', 'warn', 'bad'].includes(k.tone) ? k.tone : 'info'}"` +
         `${k.detail ? ` title="${escapeHtml(k.detail)}"` : ''}>${escapeHtml(k.label)} <b>${escapeHtml(k.value)}</b></span>`).join('') + '</div>';
 }
+
+// Open tickets that need attention (kpis.mjs attentionFlagger): every ticket list
+// highlights the row and says why under its number
+const needsAttention = t => Boolean(t.flags?.length);
+const attentionFlagsHtml = t => (needsAttention(t) ? `<div class="attention-flags">${kpiChipsHtml(t.flags)}</div>` : '');
+const ATTENTION_LEGEND_HTML = '<p class="attention-legend">Highlighted tickets need attention: overdue (past their planned end, SLA breached, ' +
+    'or open longer than 95 in 100 finished ones like them took), no update for a week, or not assigned. ' +
+    'Closed tickets, and ones someone said they resolved or closed, aren\'t highlighted. Hover one for why.</p>';
 
 // Fills the KPI cells in a container ([data-kpis="<number>"]) for the tickets showing
 async function fillTicketKpis(container) {
@@ -18263,7 +18330,7 @@ const FILES = [
   'servicenow-sync/src/db/pending.js', 'servicenow-sync/src/families.js',
   'servicenow-sync/servicenow-blueprint.md',
   'checks/ticket-order.mjs', '.github/workflows/ci.yml', '.dockerignore', 'public/accessibility.js',
-  'architecture.mjs', 'public/architecture.js', 'checks/architecture.mjs', 'health.mjs', 'issues.mjs', 'checks/issues.mjs',
+  'architecture.mjs', 'public/architecture.js', 'checks/architecture.mjs', 'health.mjs', 'issues.mjs', 'checks/issues.mjs', 'checks/attention.mjs',
 ];
 
 // Not copied in, and why (shown in the appendix)
@@ -24635,6 +24702,22 @@ export async function assignedNumbers(userId) {
   return rows.map(r => r.number);
 }
 
+// Of these numbers, the ones nobody has in OneTouch. -> Set of numbers
+export async function unassignedAmong(numbers) {
+  const { rows } = await pool.query('SELECT number FROM ticket_assignments WHERE number = ANY($1::text[]) AND assignee_id IS NULL', [numbers]);
+  return new Set(rows.map(r => r.number));
+}
+
+// Every ticket someone has said they resolved or closed (setting one back to
+// open deletes its reports). -> Set of numbers
+export async function reportedNumbers() {
+  const { rows } = await pool.query('SELECT DISTINCT number FROM ticket_reports');
+  return new Set(rows.map(r => r.number));
+}
+
+// flagged(number, hasPerson) -> [flag] (server.mjs attentionCheck): does this row need attention?
+const needsAttention = flagged => r => flagged(r.number, Boolean(r.assignee_id)).length > 0;
+
 // One page of a team's tickets, grouped by family (biggest first), each with
 // the latest "I resolved / closed it" someone told the project manager.
 // assignee: a user id, 'none' (unassigned) or null (everyone). Someone who
@@ -24643,9 +24726,11 @@ export async function assignedNumbers(userId) {
 // page is cut: by 'family' (its size), 'assignee' (their name), or anything
 // else through valueOf(number) (the ticket's summary, from server.mjs).
 // matches({ number, familySize, assignee }): only the tickets it says yes to (a
-// lookup typed over the list; assignee is a name or null). -> { total, before
-// (the total before that lookup), tickets: one page }
-export async function teamTickets(scope, teamId, { assignee = null, kind = null, matches = null, offset = 0, limit = 50, sort = null } = {}) {
+// lookup typed over the list; assignee is a name or null). flagged: as
+// needsAttention; attentionOnly: only the tickets that need attention.
+// -> { total, before (the total before that lookup), attention (how many of
+// them need attention), tickets: one page }
+export async function teamTickets(scope, teamId, { assignee = null, kind = null, matches = null, offset = 0, limit = 50, sort = null, flagged = () => [], attentionOnly = false } = {}) {
   if (!canManage(scope, teamId)) {
     if (scope.access.team?.id !== teamId) throw new AccessError('That is not your team.');
     assignee = scope.access.userId;
@@ -24664,9 +24749,11 @@ export async function teamTickets(scope, teamId, { assignee = null, kind = null,
       WHERE ${where.join(' AND ')}
       ORDER BY f.size DESC, a.family_id, a.number`,
     params);
+  const flaggedRows = all.filter(needsAttention(flagged));
+  const candidates = attentionOnly ? flaggedRows : all;
   let list = matches
-    ? all.filter(r => matches({ number: r.number, familySize: r.size, assignee: r.assignee_id ? personName(r) : null }))
-    : all;
+    ? candidates.filter(r => matches({ number: r.number, familySize: r.size, assignee: r.assignee_id ? personName(r) : null }))
+    : candidates;
   if (sort) {
     const valueOf = sort.by === 'family' ? r => r.size
       : sort.by === 'assignee' ? r => (r.assignee_id ? personName(r) : null)
@@ -24684,7 +24771,8 @@ export async function teamTickets(scope, teamId, { assignee = null, kind = null,
   const latest = new Map(reports.map(r => [r.number, r]));
   return {
     total: list.length,
-    before: all.length,
+    before: candidates.length,
+    attention: flaggedRows.length,
     tickets: rows.map(r => {
       const report = latest.get(r.number);
       return {
@@ -24704,10 +24792,10 @@ export async function teamTickets(scope, teamId, { assignee = null, kind = null,
 // first). team: a team id, 'none' (on no team) or null (any). kind, matches,
 // offset, limit and sort as for teamTickets, except that sort.by may be 'team'
 // (its name) and not 'assignee', and matches gets { number, familyId,
-// familySize, team } (team: a name or null). -> { total, before, tickets: one
-// page, families: { id -> { id, size, kinds, unassigned, team } } for the
-// families on that page }
-export async function unassignedTickets(scope, { team = null, kind = null, matches = null, offset = 0, limit = 50, sort = null } = {}) {
+// familySize, team } (team: a name or null). flagged and attentionOnly as for
+// teamTickets. -> { total, before, attention, tickets: one page, families:
+// { id -> { id, size, kinds, unassigned, team } } for the families on that page }
+export async function unassignedTickets(scope, { team = null, kind = null, matches = null, offset = 0, limit = 50, sort = null, flagged = () => [], attentionOnly = false } = {}) {
   requireAdmin(scope);
   const params = [];
   const where = ['a.assignee_id IS NULL'];
@@ -24726,9 +24814,11 @@ export async function unassignedTickets(scope, { team = null, kind = null, match
       WHERE ${where.join(' AND ')}
       ORDER BY f.team_id NULLS FIRST, f.size DESC, a.family_id, a.number`,
     params);
+  const flaggedRows = all.filter(needsAttention(flagged));
+  const candidates = attentionOnly ? flaggedRows : all;
   let list = matches
-    ? all.filter(r => matches({ number: r.number, familyId: r.family_id, familySize: r.size, team: r.team }))
-    : all;
+    ? candidates.filter(r => matches({ number: r.number, familyId: r.family_id, familySize: r.size, team: r.team }))
+    : candidates;
   if (sort) {
     const valueOf = sort.by === 'family' ? r => r.size
       : sort.by === 'team' ? r => r.team
@@ -24757,7 +24847,8 @@ export async function unassignedTickets(scope, { team = null, kind = null, match
   }
   return {
     total: list.length,
-    before: all.length,
+    before: candidates.length,
+    attention: flaggedRows.length,
     tickets: rows.map(r => ({
       number: r.number, family: { id: r.family_id, size: r.size },
       team: r.team_id ? { id: r.team_id, name: r.team } : null,
@@ -25221,8 +25312,9 @@ const teamsView = {
     data: null,     // GET /api/teams: { teams, roles, people?, unassigned? }
     teamId: null,   // the team showing, or UNASSIGNED_VIEW
     // assignee: a team's; team: "Not assigned yet"'s (a team's id, 'none' or '').
+    // attention: '1' for only the tickets that need attention.
     // What's typed in the 🔍 box is the 'team-tickets' or 'unassigned-tickets' lookup (lookup.js)
-    filter: { assignee: '', kind: '', team: '' },
+    filter: { assignee: '', kind: '', team: '', attention: '' },
     offset: 0,
     run: 0,         // bumped on every load, so an answer for an older view is dropped
 };
@@ -25231,7 +25323,7 @@ const teamsView = {
 function resetTeams() {
     teamsView.data = null;
     teamsView.teamId = null;
-    teamsView.filter = { assignee: '', kind: '', team: '' };
+    teamsView.filter = { assignee: '', kind: '', team: '', attention: '' };
     teamsView.offset = 0;
     teamsView.run += 1;
     pickerPeople.clear();
@@ -25328,7 +25420,7 @@ function renderTeams() {
             `<h3>${manage ? `${escapeHtml(team.name)}'s tickets` : 'My tickets'}</h3>` +
             `<div class="team-filters">` +
             (manage ? `<label>Who has it <select id="team-filter-assignee">${assigneeFilterOptions(team)}</select></label>` : '') +
-            kindFilterHtml() +
+            kindFilterHtml() + attentionFilterHtml() +
             `</div>` +
             // Any of the list's columns; the server looks through all of the team's tickets
             lookupBarHtml('team-tickets', Object.keys(TEAM_TICKET_SORT_KEYS), { mode: 'list' }) +
@@ -25348,6 +25440,11 @@ function kindFilterHtml() {
     return `<label>Type <select id="team-filter-kind"><option value="">All types</option>` +
         TEAM_KINDS.map(([k, label]) => `<option value="${k}"${teamsView.filter.kind === k ? ' selected' : ''}>${label}</option>`).join('') +
         `</select></label>`;
+}
+
+// Only the tickets that need attention; its count comes with each load of the list
+function attentionFilterHtml() {
+    return `<div class="assigned-filter"><button type="button" class="home-action" id="team-attention-filter" data-team-attention aria-pressed="${teamsView.filter.attention === '1'}">Needs attention</button></div>`;
 }
 
 // Admins first get "Not assigned yet", then every team
@@ -25436,6 +25533,8 @@ async function loadTeamTickets(quiet = false) {
         if (!data || run !== teamsView.run) return;
         out.innerHTML = nobody ? unassignedTicketsHtml(data) : teamTicketsHtml(team, data);
         setLookupCount(list, data.total, data.before ?? data.total);
+        const attention = document.getElementById('team-attention-filter');
+        if (attention && data.attention != null) attention.textContent = `Needs attention (${data.attention.toLocaleString()})`;
         const all = document.querySelector('#teams .team-select-all');
         if (all) all.checked = false;
     } catch (err) {
@@ -25457,7 +25556,7 @@ pagedLookups['unassigned-tickets'] = pagedSorts['team-tickets'];
 function ticketCellsHtml(t) {
     const n = escapeHtml(t.number);
     const summary = String(t.summary || '');
-    return `<td class="ticket-cell"><button type="button" class="ticket-link" data-ticket="${n}" title="Open ${n}">${n}</button>${starButtonHtml(t.number)}</td>` +
+    return `<td class="ticket-cell"><button type="button" class="ticket-link" data-ticket="${n}" title="Open ${n}">${n}</button>${starButtonHtml(t.number)}${attentionFlagsHtml(t)}</td>` +
         `<td>${t.type ? escapeHtml(t.type) : blankHtml('Type', t)}</td>` +
         `<td${summary.length > 100 ? ` title="${escapeHtml(summary)}"` : ''}>${summary ? escapeHtml(summary.length > 100 ? `${summary.slice(0, 97)}…` : summary) : blankHtml('Summary', t)}</td>` +
         `<td>${t.state ? escapeHtml(t.state) : blankHtml('State', t)}${reportLineHtml(t.report)}</td>`;
@@ -25473,7 +25572,8 @@ function teamPagerHtml(data) {
 
 function teamTicketsHtml(team, data) {
     if (!data.total) {
-        return `<p class="home-status">${teamsView.filter.assignee || teamsView.filter.kind || lookupActive('team-tickets')
+        return `<p class="home-status">${teamsView.filter.attention && !lookupActive('team-tickets') ? 'None of these tickets need attention.'
+            : teamsView.filter.assignee || teamsView.filter.kind || lookupActive('team-tickets')
             ? 'No tickets match.' : team.canManage ? 'This team has no tickets.' : 'No tickets are assigned to you yet.'}</p>`;
     }
     const manage = team.canManage;
@@ -25487,7 +25587,7 @@ function teamTicketsHtml(team, data) {
               (manage ? ` <button type="button" class="link-btn" data-family-give="${escapeHtml(t.family.id)}" data-family-size="${t.family.size}" title="Give all ${t.family.size.toLocaleString()} of them to one person">Give all…</button>` : '') +
               (admin ? ` <button type="button" class="link-btn" data-family-find="${n}" title="Move this family to another team">Move…</button>` : '')
             : 'On its own' + (admin ? ` <button type="button" class="link-btn" data-family-find="${n}" title="Move this ticket to another team">Move…</button>` : '');
-        return '<tr>' +
+        return `<tr${needsAttention(t) ? ' class="attention"' : ''}>` +
             (manage ? `<td class="select-cell"><input type="checkbox" class="team-select" value="${n}" aria-label="Tick ${n}"></td>` : '') +
             ticketCellsHtml(t) +
             `<td>${family}</td>` +
@@ -25497,7 +25597,7 @@ function teamTicketsHtml(team, data) {
             (tell ? `<td>${reportButtonHtml(t.number, t.report?.mine ? 'Tell them again…' : 'Resolved or closed?…')}</td>` : '') +
             '</tr>';
     }).join('');
-    return `<div class="table-wrap"><table class="result-table" data-sort-list="team-tickets"><thead><tr>` +
+    return ATTENTION_LEGEND_HTML + `<div class="table-wrap"><table class="result-table" data-sort-list="team-tickets"><thead><tr>` +
         (manage ? '<th class="select-cell"></th>' : '') +
         Object.keys(TEAM_TICKET_SORT_KEYS).map(label => sortHeadHtml('team-tickets', label)).join('') +
         (tell ? '<th>Tell your project manager</th>' : '') +
@@ -25629,7 +25729,7 @@ function unassignedCardHtml() {
         teamsView.data.teams.map(t => `<option value="${t.id}"${String(t.id) === f ? ' selected' : ''}>${escapeHtml(t.name)}</option>`).join('');
     return `<section class="team-card"><h3>Not assigned yet</h3>` +
         `<p class="home-status" id="unassigned-summary">${unassignedSummaryHtml()}</p>` +
-        `<div class="team-filters"><label>Team <select id="team-filter-team">${teamOptions}</select></label>${kindFilterHtml()}</div>` +
+        `<div class="team-filters"><label>Team <select id="team-filter-team">${teamOptions}</select></label>${kindFilterHtml()}${attentionFilterHtml()}</div>` +
         // Any of the list's columns; the server looks through every ticket nobody has
         lookupBarHtml('unassigned-tickets', Object.keys(UNASSIGNED_SORT_KEYS), { mode: 'list' }) +
         `<div id="team-tickets"></div></section>`;
@@ -25665,7 +25765,8 @@ function familyGroupHtml(f) {
 
 function unassignedTicketsHtml(data) {
     if (!data.total) {
-        return `<p class="home-status">${teamsView.filter.team || teamsView.filter.kind || lookupActive('unassigned-tickets')
+        return `<p class="home-status">${teamsView.filter.attention && !lookupActive('unassigned-tickets') ? 'None of these tickets need attention.'
+            : teamsView.filter.team || teamsView.filter.kind || lookupActive('unassigned-tickets')
             ? 'No tickets match.' : '✓ Every ticket has someone.'}</p>`;
     }
     // In the list's own order a family's tickets come together, under its row;
@@ -25682,7 +25783,7 @@ function unassignedTicketsHtml(data) {
             (grouped ? '' : (t.team && t.family.size > 1
                 ? ` <button type="button" class="link-btn" data-family-give="${fid}" data-family-size="${t.family.size}" data-family-team="${t.team.id}" title="Give all ${t.family.size.toLocaleString()} of them to one person">Give all…</button>`
                 : '') + ` <button type="button" class="link-btn" data-family-find="${n}" title="Move this family to another team">Move…</button>`);
-        return head + '<tr>' + ticketCellsHtml(t) +
+        return head + `<tr${needsAttention(t) ? ' class="attention"' : ''}>` + ticketCellsHtml(t) +
             `<td>${family}</td>` +
             `<td>${t.team ? escapeHtml(t.team.name) : '<span class="blank" title="This ticket\'s family isn\'t on any team yet">No team</span>'}</td>` +
             `<td>${t.team
@@ -25690,7 +25791,7 @@ function unassignedTicketsHtml(data) {
                 : '<span class="blank" title="Only someone on its family\'s team can have it">Move its family to a team first</span>'}</td>` +
             '</tr>';
     }).join('');
-    return `<div class="table-wrap"><table class="result-table" data-sort-list="unassigned-tickets"><thead><tr>` +
+    return ATTENTION_LEGEND_HTML + `<div class="table-wrap"><table class="result-table" data-sort-list="unassigned-tickets"><thead><tr>` +
         Object.keys(UNASSIGNED_SORT_KEYS).map(label => sortHeadHtml('unassigned-tickets', label)).join('') +
         `<th>Give it to</th></tr></thead><tbody>${rows}</tbody></table></div>` + teamPagerHtml(data);
 }
@@ -25868,7 +25969,7 @@ document.getElementById('teams-view').addEventListener('click', e => {
     const pick = e.target.closest('[data-team-pick]');
     if (pick) {
         teamsView.teamId = pick.dataset.teamPick === UNASSIGNED_VIEW ? UNASSIGNED_VIEW : Number(pick.dataset.teamPick);
-        teamsView.filter = { assignee: '', kind: '', team: '' };
+        teamsView.filter = { assignee: '', kind: '', team: '', attention: '' };
         listLookups.delete('team-tickets');
         listLookups.delete('unassigned-tickets');
         teamsView.offset = 0;
@@ -25883,6 +25984,14 @@ document.getElementById('teams-view').addEventListener('click', e => {
         if (select) select.value = teamsView.filter.assignee;
         loadTeamTickets();
         document.getElementById('team-tickets').closest('.team-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+    }
+    const attention = e.target.closest('[data-team-attention]');
+    if (attention) {
+        teamsView.filter.attention = teamsView.filter.attention ? '' : '1';
+        attention.setAttribute('aria-pressed', String(Boolean(teamsView.filter.attention)));
+        teamsView.offset = 0;
+        loadTeamTickets();
         return;
     }
     const page = e.target.closest('[data-team-page]');
@@ -26106,6 +26215,22 @@ today, and "typical" means the median for that kind of ticket.
   fulfil times, SLA breaches, reassignments, reopens, successful changes,
   incidents caused by its changes, how long it's been active, people on it,
   and open-but-unassigned. Families with open tickets come first.
+
+**Highlighted tickets** (`kpis.mjs` `attentionFlagger`, `server.mjs` `attentionCheck` and
+`withFlags`). Open tickets that need attention get a red row and say why under their number
+(`t.flags`, `attentionFlagsHtml` in `app.js`), in Assigned to me, the Team tab, 📥 Not assigned
+yet, a family's tickets in Team families, ticket search, Ticket results and Starred tickets.
+Assigned to me and the Team tab's lists have a **Needs attention (n)** filter
+(`?attention=1`). Closed tickets aren't flagged, nor are ones someone said they resolved or
+closed (`ticket_reports`), since the data never changes to clear them.
+
+- **Overdue**: the export has few deadlines, so a change is overdue past its planned end, an
+  incident or catalog task with a breached SLA while still open, and anything else once it has
+  been open longer than 95 in 100 finished tickets of its kind took (an incident's kind includes
+  its priority). Nothing finished to compare with: not overdue. No fixed targets are invented.
+- **No update**: 7 days or more, as the red "Last update" KPI. The export has no update date
+  for changes, so they never get this one.
+- **Not assigned**: nobody has it in OneTouch (`ticket_assignments`), not ServiceNow's `assigned_to`.
 
 **Sorting** (`public/sorting.js`). Every ticket list and table sorts by any of its
 columns: a heading sorts ascending, then descending, then back to the list's own order.
@@ -26800,6 +26925,8 @@ document.querySelector('#report-dialog form').addEventListener('submit', async e
         showToast(`✓ Told ${names} that you ${status} ${number}`);
         // The Team tab shows it next to the ticket
         if (document.getElementById('teams-view').classList.contains('active')) loadTeamTickets();
+        // Someone said it's done, so it's no longer highlighted
+        else if (homeMode === 'assigned' && document.getElementById('home-view').classList.contains('active')) showAssigned(true);
     } catch (err) {
         error.textContent = `${err.message}`;
         error.hidden = false;
@@ -26912,6 +27039,11 @@ const median = values => {
   const mid = sorted.length >> 1;
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 };
+// How long 95 in 100 of them took or less (what "overdue" goes by, where the data has no deadline)
+const slowest = values => {
+  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+  return sorted.length ? sorted[Math.ceil(sorted.length * 0.95) - 1] : null;
+};
 
 // ---------------------------------------------------------------------
 // The data: every ticket, loaded once. load() starts it (server start-up
@@ -26958,7 +27090,12 @@ async function readAll(runCubeQuery) {
     RITM: median(finished('RITM').map(t => t.done - t.created)),
     SCTASK: median(finished('SCTASK').map(t => t.done - t.created)),
   };
-  return { asOf, tickets, typical };
+  const late = {
+    INC: Object.fromEntries([1, 2, 3, 4].map(p => [p, slowest(finished('INC').filter(t => t.priority === p).map(t => t.done - t.created))])),
+    RITM: slowest(finished('RITM').map(t => t.done - t.created)),
+    SCTASK: slowest(finished('SCTASK').map(t => t.done - t.created)),
+  };
+  return { asOf, tickets, typical, late };
 }
 
 // One row of the export -> what the KPIs read. done: when it was finished
@@ -27104,6 +27241,49 @@ export async function ticketKpis(numbers, runCubeQuery) {
 }
 
 // ---------------------------------------------------------------------
+// Which open tickets need attention, so every ticket list can highlight them:
+// overdue, no update for a week, or nobody has it in OneTouch. Closed tickets
+// never do. Flags have a KPI's shape.
+//
+// Only a change has a deadline in the export (its planned end), and only
+// incidents and catalog tasks record an SLA breach. Any other open ticket is
+// overdue once it has been open longer than 95 in 100 finished tickets of its
+// kind took (an incident's kind includes its priority).
+// ---------------------------------------------------------------------
+
+function overdueFlag(t, { asOf, late }) {
+  if (!t.open) return null;
+  if (t.kind === 'CHG') {
+    return t.plannedEnd && t.plannedEnd < asOf
+      ? kpi('overdue', 'Overdue by', duration(asOf - t.plannedEnd), 'bad', 'Still open after its planned end.')
+      : null;
+  }
+  if (t.breach || t.sla) return kpi('overdue', 'Overdue:', 'SLA breached', 'bad', 'Its SLA was breached and it is still open.');
+  const limit = t.kind === 'INC' ? late.INC[t.priority] : late[t.kind];
+  if (limit == null || !t.created || asOf - t.created <= limit) return null;
+  const like = t.kind === 'INC' ? `${PRIORITY_NAME[t.priority]} incidents` : KIND_NAMES[t.kind][1];
+  return kpi('overdue', 'Overdue: open', duration(asOf - t.created), 'bad', `95 in 100 finished ${like} took ${duration(limit)} or less.`);
+}
+
+// Changes aren't in here: the export doesn't record when one was last updated
+const isStale = (t, asOf) => t.open && t.kind !== 'CHG' && t.updated && asOf - t.updated >= 7 * DAY;
+
+function flagsOf(t, hasPerson, d) {
+  if (!t?.open) return [];
+  return [
+    overdueFlag(t, d),
+    isStale(t, d.asOf) ? kpi('stale', 'No update for', duration(d.asOf - t.updated), 'bad', 'Nobody has updated it for 7 days or more.') : null,
+    hasPerson ? null : kpi('unassigned', 'Not assigned', '', 'warn', 'Nobody in OneTouch has it yet.'),
+  ].filter(Boolean);
+}
+
+// -> function(number, hasPerson) -> [flag]. hasPerson: someone has it in OneTouch
+export async function attentionFlagger(runCubeQuery) {
+  const d = data || await load(runCubeQuery);
+  return (number, hasPerson) => flagsOf(d.tickets.get(number), hasPerson, d);
+}
+
+// ---------------------------------------------------------------------
 // One family's KPIs: its tickets taken together. members: [{ number, assigneeId }]
 // ---------------------------------------------------------------------
 
@@ -27134,8 +27314,10 @@ function familyKpis(members, d, summary = familySummary(members, d)) {
   if (open.length) {
     const age = asOf - summary.oldestOpen;
     list.push(kpi('oldest', 'Oldest open', duration(age), age < 3 * DAY ? 'good' : age < 7 * DAY ? 'warn' : 'bad', 'How long its oldest open ticket has been open.'));
-    const stale = open.filter(t => t.updated && asOf - t.updated >= 7 * DAY).length;
+    const stale = open.filter(t => isStale(t, asOf)).length;
     list.push(kpi('stale', 'No update for a week', stale, stale ? 'bad' : 'good', 'Open tickets nobody has updated for 7 days or more.'));
+    const overdue = open.filter(t => overdueFlag(t, d)).length;
+    if (overdue) list.push(kpi('overdue', 'Overdue', overdue, 'bad', 'Open tickets past their planned end, with a breached SLA, or open longer than 95 in 100 finished ones like them took.'));
   }
   const incidents = tickets.filter(t => t.kind === 'INC');
   const top = Math.min(...incidents.map(t => t.priority || 5));
@@ -33912,6 +34094,95 @@ assert.ok(mail.html.includes('Sam &lt;b&gt;Lee&lt;/b&gt;') && !mail.html.include
 
 console.log('Problem reports: what is accepted, and what stays out of the email, are as they should be.');
 process.exit(0);
+```
+
+<a id="b88"></a>
+### B.88 `checks/attention.mjs`
+
+```js
+// Which tickets get highlighted (kpis.mjs attentionFlagger), checked against
+// tickets made up here (no Cube, no database, no API key).
+//
+//   npm test        (CI runs it on every push)
+//
+// Exits non-zero on the first wrong answer.
+
+import { attentionFlagger } from '../kpis.mjs';
+
+const NOW = '2026-09-01 12:00:00';
+const daysAgo = n => new Date(Date.parse(`${NOW.replace(' ', 'T')}Z`) - n * 864e5).toISOString().slice(0, 19).replace('T', ' ');
+
+// Twenty finished requests, taking 1 to 20 days: 95 in 100 took 19 days or less
+const finishedRequests = Array.from({ length: 20 }, (_, i) => ({
+  number: `RITM00001${String(i).padStart(2, '0')}`, state: 'Closed', opened: daysAgo(40), closed: daysAgo(40 - (i + 1)), updated: daysAgo(10),
+}));
+
+const DATA = {
+  incident: [
+    { number: 'INC0000001', state: 'Closed', priority: 'P3 - Moderate', created: daysAgo(30), resolved: daysAgo(28), updated: daysAgo(28) },
+    { number: 'INC0000002', state: 'In Progress', priority: 'P3 - Moderate', created: daysAgo(1), updated: daysAgo(0), breach_reason: 'Vendor' },
+    { number: 'INC0000003', state: 'In Progress', priority: 'P3 - Moderate', created: daysAgo(1), updated: daysAgo(0) },
+    { number: 'INC0000004', state: 'In Progress', priority: 'P3 - Moderate', created: daysAgo(5), updated: daysAgo(0) },
+    { number: 'INC0000005', state: 'Closed', priority: 'P4 - Low', created: daysAgo(90), closed: daysAgo(80), updated: daysAgo(80), breach_reason: 'Vendor' },
+    // No finished P1 to compare it with
+    { number: 'INC0000006', state: 'New', priority: 'P1 - Critical', created: daysAgo(6), updated: daysAgo(1) },
+  ],
+  change_request: [
+    { number: 'CHG0000001', state: 'Review', created: daysAgo(60), planned_start_date: daysAgo(10), planned_end_date: daysAgo(3) },
+    { number: 'CHG0000002', state: 'Review', created: daysAgo(60), planned_start_date: daysAgo(1), planned_end_date: daysAgo(-3) },
+    { number: 'CHG0000003', state: 'Closed', created: daysAgo(60), planned_start_date: daysAgo(10), planned_end_date: daysAgo(3) },
+  ],
+  sc_req_item: [
+    ...finishedRequests,
+    { number: 'RITM0000001', state: 'Open', opened: daysAgo(25), updated: daysAgo(0) },
+    { number: 'RITM0000002', state: 'Open', opened: daysAgo(18), updated: daysAgo(0) },
+    { number: 'RITM0000003', state: 'Pending', opened: daysAgo(9), updated: daysAgo(7) },
+    { number: 'RITM0000004', state: 'Pending', opened: daysAgo(9), updated: daysAgo(6) },
+  ],
+  sc_task: [
+    { number: 'SCTASK0000001', state: 'Open', created: daysAgo(1), updated: NOW, sla_flag: 'true' },
+    { number: 'SCTASK0000002', state: 'Closed', created: daysAgo(20), updated: daysAgo(15), sla_flag: 'true' },
+  ],
+};
+
+// Stands in for Cube: every row of the asked-for cube, with "cube.column" keys
+async function runCubeQuery({ dimensions }) {
+  const [cube] = dimensions[0].split('.');
+  return DATA[cube].map(row => Object.fromEntries(dimensions.map(d => [d, row[d.split('.')[1]] ?? ''])));
+}
+
+const flagged = await attentionFlagger(runCubeQuery);
+const keys = (number, hasPerson = true) => flagged(number, hasPerson).map(f => f.key).join(',');
+
+let failures = 0;
+function check(what, got, want) {
+  if (got === want) return;
+  console.error(`FAIL ${what}: got "${got}", wanted "${want}"`);
+  failures += 1;
+}
+
+check('a closed incident, unassigned', keys('INC0000001', false), '');
+check('a closed incident with an SLA breach', keys('INC0000005'), '');
+check('an open incident with an SLA breach', keys('INC0000002'), 'overdue');
+check('an open incident within its usual time', keys('INC0000003'), '');
+check('an open incident slower than 95 in 100', keys('INC0000004'), 'overdue');
+check('nothing finished to compare with', keys('INC0000006'), '');
+check('a change past its planned end', keys('CHG0000001'), 'overdue');
+check('a change inside its window, with no update date', keys('CHG0000002'), '');
+check('a closed change past its planned end', keys('CHG0000003'), '');
+check('a request slower than 95 in 100', keys('RITM0000001'), 'overdue');
+check('a request exactly under the limit', keys('RITM0000002'), '');
+check('no update for exactly 7 days', keys('RITM0000003'), 'stale');
+check('no update for 6 days', keys('RITM0000004'), '');
+check('an open catalog task with a breached SLA', keys('SCTASK0000001'), 'overdue');
+check('a closed catalog task with a breached SLA', keys('SCTASK0000002'), '');
+check('open and nobody has it', keys('INC0000003', false), 'unassigned');
+check('several flags at once', keys('RITM0000003', false), 'stale,unassigned');
+check('a number not in the data', keys('INC9999999', false), '');
+check('a flag says why', flagged('CHG0000001', true)[0].value, '3.0 days');
+
+if (failures) process.exit(1);
+console.log('Attention flags: all correct.');
 ```
 
 ## Appendix C: images

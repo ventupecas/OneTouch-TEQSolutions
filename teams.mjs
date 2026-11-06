@@ -556,6 +556,22 @@ export async function assignedNumbers(userId) {
   return rows.map(r => r.number);
 }
 
+// Of these numbers, the ones nobody has in OneTouch. -> Set of numbers
+export async function unassignedAmong(numbers) {
+  const { rows } = await pool.query('SELECT number FROM ticket_assignments WHERE number = ANY($1::text[]) AND assignee_id IS NULL', [numbers]);
+  return new Set(rows.map(r => r.number));
+}
+
+// Every ticket someone has said they resolved or closed (setting one back to
+// open deletes its reports). -> Set of numbers
+export async function reportedNumbers() {
+  const { rows } = await pool.query('SELECT DISTINCT number FROM ticket_reports');
+  return new Set(rows.map(r => r.number));
+}
+
+// flagged(number, hasPerson) -> [flag] (server.mjs attentionCheck): does this row need attention?
+const needsAttention = flagged => r => flagged(r.number, Boolean(r.assignee_id)).length > 0;
+
 // One page of a team's tickets, grouped by family (biggest first), each with
 // the latest "I resolved / closed it" someone told the project manager.
 // assignee: a user id, 'none' (unassigned) or null (everyone). Someone who
@@ -564,9 +580,11 @@ export async function assignedNumbers(userId) {
 // page is cut: by 'family' (its size), 'assignee' (their name), or anything
 // else through valueOf(number) (the ticket's summary, from server.mjs).
 // matches({ number, familySize, assignee }): only the tickets it says yes to (a
-// lookup typed over the list; assignee is a name or null). -> { total, before
-// (the total before that lookup), tickets: one page }
-export async function teamTickets(scope, teamId, { assignee = null, kind = null, matches = null, offset = 0, limit = 50, sort = null } = {}) {
+// lookup typed over the list; assignee is a name or null). flagged: as
+// needsAttention; attentionOnly: only the tickets that need attention.
+// -> { total, before (the total before that lookup), attention (how many of
+// them need attention), tickets: one page }
+export async function teamTickets(scope, teamId, { assignee = null, kind = null, matches = null, offset = 0, limit = 50, sort = null, flagged = () => [], attentionOnly = false } = {}) {
   if (!canManage(scope, teamId)) {
     if (scope.access.team?.id !== teamId) throw new AccessError('That is not your team.');
     assignee = scope.access.userId;
@@ -585,9 +603,11 @@ export async function teamTickets(scope, teamId, { assignee = null, kind = null,
       WHERE ${where.join(' AND ')}
       ORDER BY f.size DESC, a.family_id, a.number`,
     params);
+  const flaggedRows = all.filter(needsAttention(flagged));
+  const candidates = attentionOnly ? flaggedRows : all;
   let list = matches
-    ? all.filter(r => matches({ number: r.number, familySize: r.size, assignee: r.assignee_id ? personName(r) : null }))
-    : all;
+    ? candidates.filter(r => matches({ number: r.number, familySize: r.size, assignee: r.assignee_id ? personName(r) : null }))
+    : candidates;
   if (sort) {
     const valueOf = sort.by === 'family' ? r => r.size
       : sort.by === 'assignee' ? r => (r.assignee_id ? personName(r) : null)
@@ -605,7 +625,8 @@ export async function teamTickets(scope, teamId, { assignee = null, kind = null,
   const latest = new Map(reports.map(r => [r.number, r]));
   return {
     total: list.length,
-    before: all.length,
+    before: candidates.length,
+    attention: flaggedRows.length,
     tickets: rows.map(r => {
       const report = latest.get(r.number);
       return {
@@ -625,10 +646,10 @@ export async function teamTickets(scope, teamId, { assignee = null, kind = null,
 // first). team: a team id, 'none' (on no team) or null (any). kind, matches,
 // offset, limit and sort as for teamTickets, except that sort.by may be 'team'
 // (its name) and not 'assignee', and matches gets { number, familyId,
-// familySize, team } (team: a name or null). -> { total, before, tickets: one
-// page, families: { id -> { id, size, kinds, unassigned, team } } for the
-// families on that page }
-export async function unassignedTickets(scope, { team = null, kind = null, matches = null, offset = 0, limit = 50, sort = null } = {}) {
+// familySize, team } (team: a name or null). flagged and attentionOnly as for
+// teamTickets. -> { total, before, attention, tickets: one page, families:
+// { id -> { id, size, kinds, unassigned, team } } for the families on that page }
+export async function unassignedTickets(scope, { team = null, kind = null, matches = null, offset = 0, limit = 50, sort = null, flagged = () => [], attentionOnly = false } = {}) {
   requireAdmin(scope);
   const params = [];
   const where = ['a.assignee_id IS NULL'];
@@ -647,9 +668,11 @@ export async function unassignedTickets(scope, { team = null, kind = null, match
       WHERE ${where.join(' AND ')}
       ORDER BY f.team_id NULLS FIRST, f.size DESC, a.family_id, a.number`,
     params);
+  const flaggedRows = all.filter(needsAttention(flagged));
+  const candidates = attentionOnly ? flaggedRows : all;
   let list = matches
-    ? all.filter(r => matches({ number: r.number, familyId: r.family_id, familySize: r.size, team: r.team }))
-    : all;
+    ? candidates.filter(r => matches({ number: r.number, familyId: r.family_id, familySize: r.size, team: r.team }))
+    : candidates;
   if (sort) {
     const valueOf = sort.by === 'family' ? r => r.size
       : sort.by === 'team' ? r => r.team
@@ -678,7 +701,8 @@ export async function unassignedTickets(scope, { team = null, kind = null, match
   }
   return {
     total: list.length,
-    before: all.length,
+    before: candidates.length,
+    attention: flaggedRows.length,
     tickets: rows.map(r => ({
       number: r.number, family: { id: r.family_id, size: r.size },
       team: r.team_id ? { id: r.team_id, name: r.team } : null,

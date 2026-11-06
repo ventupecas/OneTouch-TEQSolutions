@@ -1016,7 +1016,7 @@ app.post('/api/tickets/search', async (req, res) => {
       });
     }
     console.log(`🔎 ${req.user.username} searched ${result.found.length} found, ${result.notFound.length} not found`);
-    res.json(result);
+    res.json({ ...result, found: await withFlags(result.found) });
   } catch (error) {
     console.error('🔎 Ticket search failed:', error.message);
     res.status(502).json({ error: `Could not search the tickets right now. Please try again.` });
@@ -1243,7 +1243,7 @@ app.get('/api/seen-tickets', async (req, res) => {
     const list = await seen.listSeen(req.user.id);
     const numbers = list.map(s => s.number);
     const [summaries, links] = await Promise.all([ticketSummaries(numbers, req.runQuery), linksOrNone(numbers, req.runQuery)]);
-    res.json({ tickets: list.filter(s => summaries.has(s.number)).map(s => ({ ...summaries.get(s.number), ...links.get(s.number), shownAt: s.shownAt, question: s.question })) });
+    res.json({ tickets: await withFlags(list.filter(s => summaries.has(s.number)).map(s => ({ ...summaries.get(s.number), ...links.get(s.number), shownAt: s.shownAt, question: s.question }))) });
   } catch (error) {
     console.error('🎫 Could not list the shown tickets:', error.message);
     res.status(503).json({ error: 'Your ticket results could not be loaded right now.' });
@@ -1300,13 +1300,43 @@ app.post('/api/seen-tickets', async (req, res) => {
   }
 });
 
+// Which tickets a list should highlight (kpis.mjs attentionFlagger). A ticket
+// someone has said they resolved or closed isn't flagged: the data stays as it
+// was, and the project manager sees that report under "Resolved or closed".
+// -> function(number, hasPerson) -> [flag]; if this can't be worked out, none
+// are flagged and the list still shows. Only ever used on tickets the person
+// may already see.
+async function attentionCheck() {
+  try {
+    const [flagsOf, reported] = await Promise.all([kpis.attentionFlagger(runCubeQuery), teams.reportedNumbers()]);
+    return (number, hasPerson) => (reported.has(number) ? [] : flagsOf(number, hasPerson));
+  } catch (error) {
+    console.error('📏 Could not work out which tickets need attention:', error.message);
+    return () => [];
+  }
+}
+
+// A list of tickets this person may see, each with its flags
+async function withFlags(tickets) {
+  if (!tickets.length) return tickets;
+  const [flagged, nobody] = await Promise.all([
+    attentionCheck(),
+    teams.unassignedAmong(tickets.map(t => t.number)).catch(error => {
+      console.error('📏 Could not look up who has those tickets:', error.message);
+      return new Set();
+    }),
+  ]);
+  return tickets.map(t => ({ ...t, flags: flagged(t.number, !nobody.has(t.number)) }));
+}
+
 // Home's "Assigned to me": every ticket assigned to this person in OneTouch,
 // most urgent first, then oldest (tickets.mjs ticketsByPriority), each marked
-// open or not; the page shows open, closed or all of them
+// open or not and with its flags; the page shows open, closed or all of them
 app.get('/api/my-tickets', async (req, res) => {
   try {
     const numbers = await teams.assignedNumbers(req.user.id);
     const tickets = numbers.length ? await ticketsByPriority(numbers, req.runQuery) : [];
+    const flagged = await attentionCheck();
     // How much each one's KPIs need attention, so the list sorts by them across every
     // page, and what they say, so it can be looked up by them (the page draws them itself)
     const found = await kpis.ticketKpis(tickets.map(t => t.number), runCubeQuery)
@@ -1314,7 +1344,7 @@ app.get('/api/my-tickets', async (req, res) => {
     res.json({
       tickets: tickets.map(t => {
         const list = found.kpis[t.number];
-        return { ...t, attention: list ? kpis.attention(list) : null, kpiText: list ? list.map(k => `${k.label} ${k.value}`).join(' · ') : '' };
+        return { ...t, flags: flagged(t.number, true), attention: list ? kpis.attention(list) : null, kpiText: list ? list.map(k => `${k.label} ${k.value}`).join(' · ') : '' };
       }),
     });
   } catch (error) {
@@ -1384,14 +1414,15 @@ app.get('/api/kpis/families/:id', async (req, res) => {
   try {
     const family = await teams.familyMembers(req.scope, String(req.params.id).toUpperCase());
     const numbers = family.members.map(m => m.number);
-    const [found, summaries] = await Promise.all([
+    const [found, summaries, flagged] = await Promise.all([
       kpis.oneFamilyKpis(family.members, runCubeQuery),
       ticketSummaries(numbers, runCubeQuery).catch(() => new Map()),
+      attentionCheck(),
     ]);
     // Open ones first, then the most urgent, then the oldest (as Assigned to me)
     const tickets = family.members
       .map(m => {
-        const t = { ...summaries.get(m.number), number: m.number, assignee: m.assignee, kpis: found.tickets[m.number] || [] };
+        const t = { ...summaries.get(m.number), number: m.number, assignee: m.assignee, kpis: found.tickets[m.number] || [], flags: flagged(m.number, Boolean(m.assigneeId)) };
         return { ...t, open: t.kind ? isOpen(t) : false, rank: t.kind ? priorityRank(t) : 5 };
       })
       .sort((a, b) => (b.open - a.open) || a.rank - b.rank || String(a.opened || '~').localeCompare(String(b.opened || '~')));
@@ -1414,7 +1445,7 @@ app.get('/api/stars', async (req, res) => {
     const noAccess = await noAccessTo(req.scope, missing);
     res.json({
       stars: list,
-      tickets: list.filter(s => summaries.has(s.number)).map(s => ({ ...summaries.get(s.number), ...links.get(s.number), starredAt: s.starredAt })),
+      tickets: await withFlags(list.filter(s => summaries.has(s.number)).map(s => ({ ...summaries.get(s.number), ...links.get(s.number), starredAt: s.starredAt }))),
       notFound: missing.filter(n => !noAccess.includes(n)),
       noAccess,
     });
@@ -1674,17 +1705,19 @@ app.get('/api/teams/unassigned/tickets', async (req, res) => {
       Family: r.familySize > 1 ? `${r.familyId} · ${r.familySize.toLocaleString()} linked tickets` : 'On its own',
       Team: r.team || 'No team',
     }));
+    const flagged = await attentionCheck();
     const page = await teams.unassignedTickets(req.scope, {
       team: req.query.team || null, kind: req.query.kind || null, matches,
       offset: req.query.offset, limit: req.query.limit, sort,
+      flagged, attentionOnly: req.query.attention === '1',
     });
     // An admin's: every number may be seen, so the summaries come straight from Cube
     const families = Object.values(page.families);
     const summaries = await ticketSummaries([...page.tickets.map(t => t.number), ...families.map(f => f.id)], runCubeQuery)
       .catch(error => { console.error('👥 Could not load ticket summaries:', error.message); return new Map(); });
     res.json({
-      total: page.total, before: page.before,
-      tickets: page.tickets.map(t => ({ ...summaries.get(t.number), ...t })),
+      total: page.total, before: page.before, attention: page.attention,
+      tickets: page.tickets.map(t => ({ ...summaries.get(t.number), ...t, flags: flagged(t.number, false) })),
       families: families.map(f => ({ ...f, summary: summaries.get(f.id)?.summary || null })),
     });
   } catch (error) {
@@ -1695,6 +1728,7 @@ app.get('/api/teams/unassigned/tickets', async (req, res) => {
 // ?assignee=<user id>|none&kind=INC&q=<words>&col=<column>&offset&limit -> { total, before, tickets }:
 // one page of a team's tickets with who has each one, and each one's summary
 // ...&sort=number|type|summary|state|family|assignee&dir=asc|desc: every match in that order, then the page
+// ...&attention=1: only the ones that need attention (attention: how many do; tickets: each with its flags)
 const TEAM_TICKET_SORTS = ['number', 'type', 'summary', 'state', 'family', 'assignee'];
 app.get('/api/teams/:id/tickets', async (req, res) => {
   try {
@@ -1703,14 +1737,19 @@ app.get('/api/teams/:id/tickets', async (req, res) => {
       Family: r.familySize > 1 ? `${r.familySize.toLocaleString()} linked tickets` : 'On its own',
       'Assigned to': r.assignee || 'Not assigned',
     }));
+    const flagged = await attentionCheck();
     const page = await teams.teamTickets(req.scope, Number(req.params.id), {
       assignee: req.query.assignee || null, kind: req.query.kind || null, matches,
       offset: req.query.offset, limit: req.query.limit, sort,
+      flagged, attentionOnly: req.query.attention === '1',
     });
     // The numbers are already this person's to see, so their summaries come straight from Cube
     const summaries = await ticketSummaries(page.tickets.map(t => t.number), runCubeQuery)
       .catch(error => { console.error('👥 Could not load ticket summaries:', error.message); return new Map(); });
-    res.json({ total: page.total, before: page.before, tickets: page.tickets.map(t => ({ ...summaries.get(t.number), ...t })) });
+    res.json({
+      total: page.total, before: page.before, attention: page.attention,
+      tickets: page.tickets.map(t => ({ ...summaries.get(t.number), ...t, flags: flagged(t.number, Boolean(t.assignee)) })),
+    });
   } catch (error) {
     teamsFailed(res, error, 'Loading the team\'s tickets');
   }
