@@ -48,6 +48,7 @@ const FILES = [
   'checks/ticket-order.mjs', '.github/workflows/ci.yml', '.dockerignore', 'public/accessibility.js',
   'architecture.mjs', 'public/architecture.js', 'checks/architecture.mjs', 'health.mjs', 'issues.mjs', 'checks/issues.mjs', 'checks/attention.mjs',
   'usage.mjs', 'scripts/usage.mjs', 'scripts/eval-translation.mjs', 'checks/usage.mjs',
+  'demo/gate.config.json',
 ];
 
 // Not copied in, and why (shown in the appendix)

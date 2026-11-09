@@ -43,3 +43,6 @@ CLAUDE.local.md
 
 # AI assistant evals (scripts/eval-translation.mjs): answers and costs, kept locally
 eval-results/
+
+# The AI assistant's saved answers (server.mjs ANSWER_CACHE_FILE), so a restart keeps the warm-up
+.cache/

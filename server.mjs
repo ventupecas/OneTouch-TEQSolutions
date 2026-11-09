@@ -1,6 +1,8 @@
 import dns from 'node:dns/promises';
 import { createHash, createHmac } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
+import { mkdir, rename, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import express from 'express';
 import dotenv from 'dotenv';
 import Anthropic from '@anthropic-ai/sdk';
@@ -375,6 +377,7 @@ app.get('/api/architecture/health', async (req, res) => {
     fetch,
     listClaudeModels: () => anthropic.models.list({ limit: 1 }),
     hasClaudeKey: Boolean(process.env.ANTHROPIC_API_KEY),
+    claudeOffline: DEMO_OFFLINE,
     mailEnabled: mailEnabled(),
     publicUrl: (process.env.ONETOUCH_PUBLIC_URL || process.env.APP_URL || '').replace(/\/+$/, ''),
     metabaseUrl: METABASE_URL,
@@ -588,10 +591,24 @@ if (!anthropicKey || anthropicKey.startsWith('REPLACE_WITH')) {
 
 const anthropicWorkspaceId = (process.env.ANTHROPIC_WORKSPACE_ID || '').trim();
 
+// A short timeout: answers take 2-5 s, and on a bad network a question that
+// fails in 20 s beats one that hangs for the SDK's default 10 minutes
+const CLAUDE_TIMEOUT_MS = Number(process.env.CLAUDE_TIMEOUT_MS) || 20 * 1000;
+
 const anthropic = new Anthropic({
   apiKey: anthropicKey,
   defaultHeaders: anthropicWorkspaceId ? { 'anthropic-workspace-id': anthropicWorkspaceId } : undefined,
+  timeout: CLAUDE_TIMEOUT_MS,
+  maxRetries: 1,
 });
+
+// DEMO_MODE=offline in .env (then docker restart analytics_node_app): the
+// emergency switch for a presentation on a bad network. The AI assistant
+// never asks Claude; questions asked before (npm run warmup) still answer
+// from the saved answers, every answer says it's offline, and anything new
+// gets a list of questions that work instead of an error.
+const DEMO_OFFLINE = (process.env.DEMO_MODE || '').trim().toLowerCase() === 'offline';
+if (DEMO_OFFLINE) console.log('🔌 DEMO_MODE=offline: the AI assistant only answers questions asked before');
 
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-5-5';
 // How hard Claude thinks before translating a question (low | medium | high).
@@ -651,6 +668,7 @@ async function translateToQuery(conversation, userPrompt) {
   const userTurn = { role: 'user', content: note + buildUserMessage(userPrompt, referenceToday()) };
 
   const started = Date.now();
+  if (DEMO_OFFLINE) throw new Error('Offline mode: Claude is not asked'); // answerQuestion stops before this
   const stream = anthropic.messages.stream({
     model: CLAUDE_MODEL,
     max_tokens: 4000,
@@ -664,7 +682,15 @@ async function translateToQuery(conversation, userPrompt) {
     messages: [...conversation.messages, userTurn],
     output_config: { format: { type: 'json_schema', schema: OUTPUT_SCHEMA }, effort: CLAUDE_EFFORT },
   });
-  const message = await stream.finalMessage();
+  // The client's timeout covers waiting for Claude to start answering; this
+  // covers an answer that starts and then stalls (the network drops mid-way)
+  const stalled = setTimeout(() => stream.abort(), 2 * CLAUDE_TIMEOUT_MS);
+  let message;
+  try {
+    message = await stream.finalMessage();
+  } finally {
+    clearTimeout(stalled);
+  }
   const ms = Date.now() - started;
 
   // A failed call leaves the conversation as it was, so the user can just ask again
@@ -693,19 +719,33 @@ async function translateToQuery(conversation, userPrompt) {
 // translation from then: it answers in a fraction of a second instead of
 // a few. Follow-ups depend on the conversation, so they always go to Claude.
 // A reused translation still goes through normalizeAndValidate every time.
+//
+// They're also saved to ANSWER_CACHE_FILE (git-ignored), so a restart (for
+// example to switch DEMO_MODE) keeps the morning's warm-up. Only Claude's
+// translations and empty-result explanations are kept, never ticket rows:
+// every reuse runs the query again, for the tickets the person asking may see.
 // =====================================================================
 
 const ANSWER_CACHE_SIZE = 500;
-// key -> { userTurn, content, parsed, explanation }; Map order = least recently used first
+const ANSWER_CACHE_FILE = process.env.ANSWER_CACHE_FILE || '.cache/answers.json';
+// key -> { userTurn, content, parsed, explanations }; Map order = least recently used first
 const answerCache = new Map();
 
+// A changed prompt or output schema must not reuse translations made for the old one
+const PROMPT_VERSION = createHash('sha256').update(SYSTEM_PROMPT).update(JSON.stringify(OUTPUT_SCHEMA)).digest('hex').slice(0, 12);
+
 // Same question = same words, ignoring capitals, spacing and the closing "?",
-// asked on the same "today" (the turn Claude saw carries the date) of the same model
-function answerCacheKey(conversation, userPrompt) {
-  if (conversation.messages.length || conversation.pendingNote) return null;
+// asked on the same "today" (the turn Claude saw carries the date) of the same
+// model and prompt
+function questionKey(userPrompt) {
   const question = userPrompt.toLowerCase().replace(/\s+/g, ' ').trim().replace(/[\s?.!]+$/, '');
   if (!question) return null;
-  return JSON.stringify([CLAUDE_MODEL, referenceToday().toISOString().slice(0, 10), question]);
+  return JSON.stringify([CLAUDE_MODEL, PROMPT_VERSION, referenceToday().toISOString().slice(0, 10), question]);
+}
+
+function answerCacheKey(conversation, userPrompt) {
+  if (conversation.messages.length || conversation.pendingNote) return null;
+  return questionKey(userPrompt);
 }
 
 function cachedAnswer(key) {
@@ -717,6 +757,64 @@ function cachedAnswer(key) {
 function rememberAnswer(key, entry) {
   answerCache.set(key, entry);
   if (answerCache.size > ANSWER_CACHE_SIZE) answerCache.delete(answerCache.keys().next().value);
+  saveAnswersSoon();
+}
+
+// Only today's answers for this model and prompt are written, so the file
+// holds what can still be reused (the quality gate counts them)
+function usableKey(key) {
+  const [model, version, day] = JSON.parse(key);
+  return model === CLAUDE_MODEL && version === PROMPT_VERSION && day === referenceToday().toISOString().slice(0, 10);
+}
+
+function loadAnswers() {
+  try {
+    const saved = JSON.parse(readFileSync(ANSWER_CACHE_FILE, 'utf8'));
+    for (const { key, userTurn, content, parsed, explanations } of saved.answers || []) {
+      if (key && usableKey(key)) answerCache.set(key, { userTurn, content, parsed, explanations: explanations || {} });
+    }
+    console.log(`⚡ ${answerCache.size} saved answers loaded from ${ANSWER_CACHE_FILE}`);
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.error(`⚡ Could not read ${ANSWER_CACHE_FILE}:`, error.message);
+  }
+}
+
+// Written a second after the last change, to a temporary file first, so a
+// burst of answers (the warm-up) is one write and a crash never leaves half a file
+let saveTimer = null;
+function saveAnswersSoon() {
+  if (saveTimer) return;
+  saveTimer = setTimeout(async () => {
+    saveTimer = null;
+    const answers = [...answerCache].filter(([key]) => usableKey(key))
+      .map(([key, entry]) => ({ key, question: JSON.parse(key)[3], ...entry }));
+    try {
+      await mkdir(dirname(ANSWER_CACHE_FILE), { recursive: true });
+      await writeFile(`${ANSWER_CACHE_FILE}.tmp`, JSON.stringify({ savedAt: new Date().toISOString(), model: CLAUDE_MODEL, answers }));
+      await rename(`${ANSWER_CACHE_FILE}.tmp`, ANSWER_CACHE_FILE);
+    } catch (error) {
+      console.error(`⚡ Could not save the answers to ${ANSWER_CACHE_FILE}:`, error.message);
+    }
+  }, 1000);
+  saveTimer.unref();
+}
+
+loadAnswers();
+
+// What offline mode suggests instead: questions from the warm-up list that
+// have a saved answer (never other people's questions, which may be private)
+function offlineSuggestions(limit = 6) {
+  let lines = [];
+  try {
+    lines = readFileSync('scripts/warmup-questions.txt', 'utf8').split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+  } catch { /* no list: no suggestions */ }
+  return lines.filter(line => answerCache.has(questionKey(line))).slice(0, limit);
+}
+
+function offlineMessage() {
+  const ideas = offlineSuggestions();
+  return 'OneTouch is in offline mode for this presentation, so the AI assistant can only answer questions it has answered before.' +
+    (ideas.length ? ` Try one of these: ${ideas.map(q => `"${q}"`).join(' · ')}` : ' None are saved yet: run npm run warmup while online.');
 }
 
 // =====================================================================
@@ -846,6 +944,16 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
       });
     }
 
+    // Offline mode: anything without a saved answer (new questions, follow-ups)
+    // gets the questions that do work, at once, instead of waiting on Claude
+    if (DEMO_OFFLINE && !cached) {
+      console.log('🔌 Offline mode: no saved answer, Claude not asked');
+      return reply.send(200, {
+        intent: 'unsupported', message: offlineMessage(), assumptions: [], sections: [], results: [],
+        elapsedMs: Date.now() - started, fromCache: false, offline: true,
+      });
+    }
+
     let parsed, memoryReset = false, fresh = null;
     if (cached) {
       // The conversation gets the original question and Claude's original reply,
@@ -865,7 +973,7 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
     }
     remembered = true;
     // Timing and whether Claude was skipped, for the page's "Answered in …" line
-    const timing = () => ({ elapsedMs: Date.now() - started, fromCache: Boolean(cached) });
+    const timing = () => ({ elapsedMs: Date.now() - started, fromCache: Boolean(cached), offline: DEMO_OFFLINE });
 
     const verdict = normalizeAndValidate(parsed);
     if (!verdict.ok) {
@@ -924,6 +1032,8 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
     if (toExplain.length && !explanation && !scope.all && !scope.count) {
       // No tickets at all: nothing to diagnose, and no reason to ask Claude
       explanation = teams.scopeNote(scope);
+    } else if (toExplain.length && !explanation && DEMO_OFFLINE) {
+      explanation = 'Nothing matched. (Offline mode: OneTouch isn\'t asking Claude to explain why right now.)';
     } else if (toExplain.length && !explanation) {
       reply.progress('explaining');
       try {
@@ -938,7 +1048,10 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
           onUsage: (u, ms) => usage.recordUsage({ kind: 'explain', model: CLAUDE_SMALL_MODEL, effort: 'low', userId: user.id, question: userPrompt, usage: u, ms }),
         });
         console.log(`🔎 Explained: ${explanation}`);
-        if (cached) cached.explanations = { ...cached.explanations, [scope.key]: explanation };
+        if (cached) {
+          cached.explanations = { ...cached.explanations, [scope.key]: explanation };
+          saveAnswersSoon();
+        }
       } catch (error) {
         console.error('🔎 Could not diagnose the empty result:', error.message);
       }
@@ -996,6 +1109,12 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
 
   } catch (error) {
     if (remembered) conversation.pendingNote = `it failed when run: ${error.message}`;
+    // No answer from Claude at all (network down, timed out): say so plainly,
+    // and what still works, rather than "Claude API error (undefined)"
+    if (error instanceof Anthropic.APIConnectionError || error instanceof Anthropic.APIUserAbortError) {
+      console.error('📋 Claude did not answer:', error.message);
+      return reply.send(504, { error: 'The AI assistant couldn\'t reach Claude just now, so this question wasn\'t answered. Questions asked before still answer at once; please try again in a moment.' });
+    }
     if (error instanceof Anthropic.APIError) {
       console.error(`📋 Claude API error ${error.status}:`, error.message);
       return reply.send(502, { error: `Claude API error (${error.status}). Please try again.` });

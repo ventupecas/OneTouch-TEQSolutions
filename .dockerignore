@@ -13,6 +13,7 @@ servicenow-sync/node_modules/
 .github/
 .claude/
 .cubestore/
+.cache/
 CLAUDE.local.md
 diag*.txt
 curl.txt

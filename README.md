@@ -218,12 +218,15 @@ which is why Metabase keeps each chart's result (see [Dashboards](#dashboards-me
    ```
    It signs in as the **warmup** account (username `warmup`, password from
    `WARMUP_PASSWORD` in `.env`, or it asks), then asks every question in
-   `scripts/warmup-questions.txt` and opens every dashboard. The 55 questions cover
-   incidents (priority, teams, channels, sites, on-hold, SLA breaches, causes, reassignment),
-   problem records and parent / child tickets, changes (type, risk, failures, approvals,
-   upcoming work, outages, SAP and breweries), approvals, requests and catalog tasks,
-   whole-team views across ticket types, and one each of "nothing found", "outside the
-   data's dates" and "not in the data". From scratch that takes about two minutes.
+   `scripts/warmup-questions.txt` and opens every dashboard. The 114 questions cover
+   incidents (priority, state, impact and urgency, teams, channels, monitoring, sites,
+   categories, configuration items, on-hold, SLA breaches, causes, close codes, reopens,
+   reassignment, outages), problem records and parent / child tickets, changes (type, state,
+   environment, risk, projects, successes and failures, approvals, upcoming work, outages,
+   SAP and breweries), change and request approvals, requests, orders and catalog tasks,
+   whole-team views across ticket types, the [Demo] tickets, and one each of "nothing
+   found", "outside the data's dates" and "not in the data". From scratch that takes about
+   four minutes.
    To use another account instead: `npm run warmup -- --user <username>`.
    Afterwards those questions answer instantly for everyone, provided they're asked with
    the same words (capitals, spacing and a closing "?" don't matter), and every dashboard
@@ -19534,6 +19537,25 @@ What causes the most incidents?
 Which incidents were P1 at some point but are not P1 now?
 How many incidents were reassigned at least once, by team?
 List the P2 incidents for the ACN-INFRA-CLOUD-WINTEL team
+How many incidents are there by impact and urgency?
+How many incidents are open by state?
+List the open P1 incidents
+List the open P2 incidents
+How many P1 and P2 incidents were opened in August 2026?
+How many incidents were opened each day in August 2026?
+How many incidents were closed each month?
+What are the most common incident categories?
+Which configuration items have the most incidents?
+How many incidents were caused by a change?
+How many incidents have a knowledge article?
+How many global incidents are there?
+How many incidents caused a business outage?
+What are the most common close codes for incidents?
+What are the most common cause codes for incidents?
+Which teams have the most reopened incidents?
+Which incidents were reassigned the most?
+How many incidents came from monitoring?
+How many incidents mention SAP?
 
 # Problems and related tickets
 Which problem records have the most incidents?
@@ -19555,11 +19577,30 @@ Which teams own the most changes?
 How many production changes had an outage?
 How many changes affect SAP?
 How many changes touch breweries?
+How many changes are there by state?
+How many changes are there by environment?
+How many changes were successful?
+What are the most common failure codes for changes?
+Which changes needed an SAP transport?
+How many changes are in each project?
+Which changes were raised to fix an incident?
+List the high risk changes planned for September 2026
+How many changes are planned to start each month?
+Which configuration items have the most changes?
+How many changes were created each week in August 2026?
+Which changes are linked to a problem?
+How many changes had a process failure?
+Who requested the most changes?
 
 # Approvals
 Which groups approve the most changes?
 How many requests were rejected?
 How many requests are still waiting for approval?
+How many change approvals are there by state?
+How many change approvals were created each week in August 2026?
+Which groups approve the most requests?
+How many request approvals were approved, rejected or are still waiting?
+List the requests waiting for approval
 
 # Requests and catalog tasks
 What are the top 5 most requested catalog items?
@@ -19573,6 +19614,14 @@ Show me request RITM0440498
 Show me catalog task SCTASK0595823
 How many catalog tasks were created each week in August 2026?
 Which catalog items create the most tasks?
+How many requests are open by state?
+How many requests were opened each week in August 2026?
+How many requests were closed each month?
+Which order guides are used the most?
+Which catalog items have the most open requests?
+How many catalog tasks are open by state?
+How many catalog tasks breached SLA, by team?
+How many catalog tasks are still active?
 
 # Across ticket types
 How many incidents, changes and requests were opened in August 2026?
@@ -19580,6 +19629,20 @@ How many requests and incidents were opened each week in August 2026?
 How many tickets of each type are open right now?
 Show open tickets for the ACN-INFRA-CLOUD-WINTEL team
 How many tickets were opened at Milwaukee Brewery in August 2026?
+How many tickets were opened each week in August 2026?
+How many tickets were closed in August 2026, by type?
+Which teams have the most open tickets?
+How many tickets are there of each type?
+How many tickets were opened in July 2026?
+
+# The [Demo] tickets (db/demo-tickets.sql), for the live assigning demo
+Show me incident INC9900001
+Show me the child incidents of INC9900001
+Show me incident INC9900007
+Show me change CHG9900001
+Show me request RITM9900001
+Show me the catalog tasks for RITM9900001
+Show me order REQ9900001
 
 # Nothing found: OneTouch works out why and says so
 Show me changes owned by the TCS-ServiceDesk-L1-NA-WE team

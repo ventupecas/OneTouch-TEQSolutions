@@ -45,7 +45,7 @@ const fail = (text, detail) => {
   return problem;
 };
 
-// tools: { db(sql) -> rows, cubeQuery(query), fetch, listClaudeModels(), hasClaudeKey,
+// tools: { db(sql) -> rows, cubeQuery(query), fetch, listClaudeModels(), hasClaudeKey, claudeOffline,
 //          mailEnabled, publicUrl, metabaseUrl, dashboardsReady(), listening() }
 // Each check returns a sentence when all is well, or { off: sentence }, or throws.
 export function buildChecks(tools) {
@@ -94,6 +94,7 @@ export function buildChecks(tools) {
       id: 'claude', node: 'claude', name: 'AI assistant (Claude API)', keepMs: KEEP_OUTSIDE_MS, failText: 'The Claude API refused this server\'s key or didn\'t answer.',
       effect: 'New questions can\'t be answered. Repeated ones still can.',
       async run() {
+        if (tools.claudeOffline) return { off: 'Offline mode (DEMO_MODE=offline): Claude isn\'t asked, and only questions asked before are answered.' };
         if (!tools.hasClaudeKey) throw fail('No ANTHROPIC_API_KEY is set.');
         await tools.listClaudeModels();
         return 'The Claude API accepts this server\'s key.';

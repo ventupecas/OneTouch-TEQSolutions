@@ -1,0 +1,19 @@
+{
+  "description": "Demo quality gate for OneTouch (i.c.stars T11A). Run from this repo: node ../tech-foundations/t11a-demo-engineering/tools/gate.js demo/gate.config.json. Paths are relative to this file. Run npm run warmup first: it checks the Claude key end to end (the gate can't send the workspace header Claude needs) and fills the saved answers this gate counts. The public address goes RED when the venue's internet is down: present from http://localhost:8000 on the server laptop and switch DEMO_MODE=offline.",
+  "env": {
+    "file": "../.env",
+    "required": [
+      "ANTHROPIC_API_KEY", "ANTHROPIC_WORKSPACE_ID", "POSTGRES_PASSWORD", "CUBEJS_API_SECRET",
+      "CUBE_DB_PASSWORD", "AUTH_DB_PASSWORD", "METABASE_EMBEDDING_SECRET", "WARMUP_PASSWORD",
+      "BREVO_API_KEY", "DEMO_MODE"
+    ]
+  },
+  "data": { "file": "../.cache/answers.json", "arrayPath": "answers", "minRecords": 100 },
+  "credentials": { "url": "https://api.brevo.com/v3/account", "header": "api-key", "envVar": "BREVO_API_KEY" },
+  "health": [
+    { "name": "OneTouch app (sign-in page)", "url": "http://localhost:8000/" },
+    { "name": "Cube (ticket data)", "url": "http://localhost:4000/readyz" },
+    { "name": "Metabase (dashboards)", "url": "http://localhost:3000/api/health" },
+    { "name": "Public address (Cloudflare tunnel)", "url": "https://onetouch.fyi/" }
+  ]
+}
