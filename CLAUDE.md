@@ -231,7 +231,9 @@ report on the live server: it emails the real admins.**
 change commits, retried up to 5 times, never older than an hour. Only to people with
 `users.email` set (an admin sets it: `npm run users -- email|emails`; never in
 `db/accounts.json`) who haven't unticked "Email me these too" in the 🔔 panel; never test
-or service accounts; only `MAIL_ONLY_TO` while that's set. An email holds who did what
+or service accounts; only `MAIL_ONLY_TO` while that's set, unless a permanent admin has
+switched on **Email everyone** (the 🎬 card's "Demo day", `PUT /api/email-everyone`,
+`teams.setEmailEveryone`, saved in `app_settings`). An email holds who did what
 and the ticket numbers, never summaries or notes. No `BREVO_API_KEY` in `.env`: off.
 
 **Families decide teams.** Tickets linked to each other form one family: a

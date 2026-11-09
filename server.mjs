@@ -23,7 +23,7 @@ import * as shares from './shares.mjs';
 import * as chats from './chats.mjs';
 import * as teams from './teams.mjs';
 import * as notifications from './notifications.mjs';
-import { startMail, mailEnabled } from './mail.mjs';
+import { startMail, mailEnabled, mailConfig } from './mail.mjs';
 import * as kpis from './kpis.mjs';
 import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
 import { architectureMap, pushState } from './architecture.mjs';
@@ -345,7 +345,7 @@ function scopedRunner(scope) {
   return run;
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families', '/api/notifications', '/api/my-tickets', '/api/kpis', '/api/ticket-statuses', '/api/demo-tickets', '/api/everyone-admin', '/api/architecture', '/api/issues'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families', '/api/notifications', '/api/my-tickets', '/api/kpis', '/api/ticket-statuses', '/api/demo-tickets', '/api/everyone-admin', '/api/email-everyone','/api/architecture', '/api/issues'], requireLogin);
 
 // 🧊 Architecture (architecture.mjs): admins only, for everything under this
 // path. The page's script holds no facts, so this is the whole lock.
@@ -1677,7 +1677,18 @@ function teamsFailed(res, error, what) {
 
 app.get('/api/teams', async (req, res) => {
   try {
-    res.json(await teams.listTeams(req.scope));
+    const result = await teams.listTeams(req.scope);
+    // The 🎬 card's "Email everyone" (admins see it; the permanent admins switch it)
+    if (result.presentation) {
+      const cfg = mailConfig();
+      result.presentation.email = {
+        enabled: Boolean(cfg.key), limited: cfg.onlyTo.length > 0, on: teams.emailsEveryone(),
+        // The addresses themselves only to the permanent admins
+        onlyTo: req.scope.access.permanentAdmin ? cfg.onlyTo : [],
+        people: await teams.emailablePeople(), canSwitch: req.scope.access.permanentAdmin,
+      };
+    }
+    res.json(result);
   } catch (error) {
     teamsFailed(res, error, 'Loading the teams');
   }
@@ -1904,6 +1915,19 @@ app.put('/api/everyone-admin', async (req, res) => {
     res.json(done);
   } catch (error) {
     teamsFailed(res, error, 'Changing who is an admin');
+  }
+});
+
+// The permanent admins, on demo day: { on } -> every person with an address is
+// emailed, whatever MAIL_ONLY_TO says, or back to MAIL_ONLY_TO -> { on, people }
+app.put('/api/email-everyone', async (req, res) => {
+  if (typeof req.body?.on !== 'boolean') return res.status(400).json({ error: 'Say whether everyone is emailed: { "on": true } or { "on": false }.' });
+  try {
+    const done = await teams.setEmailEveryone(req.scope, req.body.on);
+    console.log(`✉️  ${req.user.username} ${done.on ? `switched on emails to everyone (${done.people} people)` : 'limited emails to MAIL_ONLY_TO again'}`);
+    res.json(done);
+  } catch (error) {
+    teamsFailed(res, error, 'Changing who is emailed');
   }
 });
 

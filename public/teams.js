@@ -645,7 +645,42 @@ function presentationHtml() {
         '<ul class="presentation-steps">' +
         `<li><span>${escapeHtml(statuses)}</span><button type="button" class="home-action danger" data-undo-statuses="${p.statuses}"${p.statuses ? '' : ' disabled'}>↩ Undo every status</button></li>` +
         `<li><span>${escapeHtml(demo)}</span><button type="button" class="home-action danger" data-reset-demo="${d.tickets}"${d.tickets ? '' : ' disabled'}>🧹 Put the demo tickets back</button></li>` +
-        '</ul>' + everyoneAdminHtml(p.everyoneAdmin);
+        '</ul>' + emailEveryoneHtml(p.email) + everyoneAdminHtml(p.everyoneAdmin);
+}
+
+// ✉️ Demo day: everyone with an address emailed, though MAIL_ONLY_TO in .env
+// limits it the rest of the time (teams.mjs setEmailEveryone)
+function emailEveryoneHtml(m) {
+    if (!m) return '';
+    let text, button = '';
+    if (!m.enabled) text = 'Email is off on this server (no Brevo key), so nobody is emailed.';
+    else if (!m.limited) text = `Everyone with an address is emailed (${howMany(m.people, 'person', 'people')}): nothing in .env limits it.`;
+    else if (m.on) {
+        text = `Everyone with an address is emailed (${howMany(m.people, 'person', 'people')}).`;
+        button = m.canSwitch ? '<button type="button" class="home-action" data-email-everyone="off">Only email me again</button>' : '';
+    } else {
+        text = `Emails only go to ${m.onlyTo.length ? m.onlyTo.join(', ') : 'the test addresses'}. On demo day, email everyone with an address (${howMany(m.people, 'person', 'people')}).`;
+        button = m.canSwitch ? `<button type="button" class="home-action danger" data-email-everyone="on" data-people="${m.people}">✉️ Email everyone</button>` : '';
+    }
+    if (m.enabled && m.limited && !m.canSwitch) button = '<span class="home-status">Only the permanent admins can switch this.</span>';
+    return '<h3>Demo day</h3>' +
+        `<ul class="presentation-steps"><li${m.on && m.limited ? ' class="everyone-admin-on"' : ''}><span>${escapeHtml(text)}</span>${button}</li></ul>`;
+}
+
+async function setEmailEveryone(on, people) {
+    const question = on
+        ? `Email everyone? From now on, each notification is also emailed to the person it's for: ${howMany(people, 'person has', 'people have')} an address. ` +
+            'Notifications from before stay unsent. Switch it back after the demo.'
+        : 'Only email the test addresses in .env again? Everyone else stops getting emails (their notifications still show under the 🔔).';
+    if (!confirm(question)) return;
+    try {
+        const data = await teamsFetch('/api/email-everyone', { method: 'PUT', body: JSON.stringify({ on }) });
+        if (!data) return;
+        showToast(data.on ? `Everyone with an address is emailed now (${howMany(data.people, 'person', 'people')})` : 'Emails only go to the test addresses again');
+        loadTeams();
+    } catch (err) {
+        showToast(`${err.message}`, 'error');
+    }
 }
 
 // 👑 After the presentation: everyone an admin, so stakeholders can try every
@@ -808,7 +843,9 @@ document.getElementById('teams-view').addEventListener('click', e => {
     const demo = e.target.closest('[data-reset-demo]');
     if (demo) { resetDemoTickets(Number(demo.dataset.resetDemo)); return; }
     const everyone = e.target.closest('[data-everyone-admin]');
-    if (everyone) setEveryoneAdmin(everyone.dataset.everyoneAdmin === 'on', Number(everyone.dataset.people));
+    if (everyone) { setEveryoneAdmin(everyone.dataset.everyoneAdmin === 'on', Number(everyone.dataset.people)); return; }
+    const email = e.target.closest('[data-email-everyone]');
+    if (email) setEmailEveryone(email.dataset.emailEveryone === 'on', Number(email.dataset.people));
 });
 
 // A name picked in a ticket's box gives it to them; in a family's, the whole family

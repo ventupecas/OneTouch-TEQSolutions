@@ -893,6 +893,12 @@ API keys) and put it in `.env` as `BREVO_API_KEY`; restart the app. While `MAIL_
 `docker exec analytics_node_app npm run mail-test -- <address>`, then delete the line and
 restart to email everyone. Brevo's free plan sends 300 emails a day.
 
+**Demo day: email everyone** (the Team tab's 🎬 card, under "Demo day"). While
+`MAIL_ONLY_TO` limits the emails, a permanent admin can press **✉️ Email everyone**: from then
+on every person with an address is emailed, with no restart, and **Only email me again** goes
+back to `MAIL_ONLY_TO`. Notifications made while it was off stay unsent. The switch is saved
+(`app_settings`), so a restart keeps it.
+
 **Families stay together.** Tickets linked to each other (a parent incident and its
 children, a request and its tasks, an order, everything on one problem, a change and its
 incidents) form one family, and a family always belongs to one team. So moving a ticket to
@@ -6504,7 +6510,7 @@ import * as shares from './shares.mjs';
 import * as chats from './chats.mjs';
 import * as teams from './teams.mjs';
 import * as notifications from './notifications.mjs';
-import { startMail, mailEnabled } from './mail.mjs';
+import { startMail, mailEnabled, mailConfig } from './mail.mjs';
 import * as kpis from './kpis.mjs';
 import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
 import { architectureMap, pushState } from './architecture.mjs';
@@ -6826,7 +6832,7 @@ function scopedRunner(scope) {
   return run;
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families', '/api/notifications', '/api/my-tickets', '/api/kpis', '/api/ticket-statuses', '/api/demo-tickets', '/api/everyone-admin', '/api/architecture', '/api/issues'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families', '/api/notifications', '/api/my-tickets', '/api/kpis', '/api/ticket-statuses', '/api/demo-tickets', '/api/everyone-admin', '/api/email-everyone','/api/architecture', '/api/issues'], requireLogin);
 
 // 🧊 Architecture (architecture.mjs): admins only, for everything under this
 // path. The page's script holds no facts, so this is the whole lock.
@@ -8158,7 +8164,18 @@ function teamsFailed(res, error, what) {
 
 app.get('/api/teams', async (req, res) => {
   try {
-    res.json(await teams.listTeams(req.scope));
+    const result = await teams.listTeams(req.scope);
+    // The 🎬 card's "Email everyone" (admins see it; the permanent admins switch it)
+    if (result.presentation) {
+      const cfg = mailConfig();
+      result.presentation.email = {
+        enabled: Boolean(cfg.key), limited: cfg.onlyTo.length > 0, on: teams.emailsEveryone(),
+        // The addresses themselves only to the permanent admins
+        onlyTo: req.scope.access.permanentAdmin ? cfg.onlyTo : [],
+        people: await teams.emailablePeople(), canSwitch: req.scope.access.permanentAdmin,
+      };
+    }
+    res.json(result);
   } catch (error) {
     teamsFailed(res, error, 'Loading the teams');
   }
@@ -8385,6 +8402,19 @@ app.put('/api/everyone-admin', async (req, res) => {
     res.json(done);
   } catch (error) {
     teamsFailed(res, error, 'Changing who is an admin');
+  }
+});
+
+// The permanent admins, on demo day: { on } -> every person with an address is
+// emailed, whatever MAIL_ONLY_TO says, or back to MAIL_ONLY_TO -> { on, people }
+app.put('/api/email-everyone', async (req, res) => {
+  if (typeof req.body?.on !== 'boolean') return res.status(400).json({ error: 'Say whether everyone is emailed: { "on": true } or { "on": false }.' });
+  try {
+    const done = await teams.setEmailEveryone(req.scope, req.body.on);
+    console.log(`✉️  ${req.user.username} ${done.on ? `switched on emails to everyone (${done.people} people)` : 'limited emails to MAIL_ONLY_TO again'}`);
+    res.json(done);
+  } catch (error) {
+    teamsFailed(res, error, 'Changing who is emailed');
   }
 });
 
@@ -24390,7 +24420,7 @@ export async function ensureTeamsSchema() {
         GRANT SELECT ON ticket_access TO access_reader;
       END IF;
     END $$;
-    -- Switches an admin flips on the Team tab (today only 'everyone_admin')
+    -- Switches the permanent admins flip on the Team tab: 'everyone_admin', 'email_everyone'
     CREATE TABLE IF NOT EXISTS app_settings (
       key         text PRIMARY KEY,
       value       jsonb NOT NULL,
@@ -24398,9 +24428,20 @@ export async function ensureTeamsSchema() {
       updated_by  integer REFERENCES users(id) ON DELETE SET NULL
     );
   `);
-  const { rows: [s] } = await pool.query('SELECT value FROM app_settings WHERE key = \'everyone_admin\'');
-  everyoneAdmin = s?.value === true;
+  const { rows } = await pool.query('SELECT key, value FROM app_settings');
+  const saved = Object.fromEntries(rows.map(r => [r.key, r.value]));
+  everyoneAdmin = saved.everyone_admin === true;
+  emailEveryone = saved.email_everyone === true;
   if (everyoneAdmin) console.log('👑 Everyone is an admin (the Team tab\'s "After the presentation" switches it back)');
+  if (emailEveryone) console.log('✉️  Demo day: everyone with an address is emailed, whatever MAIL_ONLY_TO says (the Team tab switches it back)');
+}
+
+// One of the switches above, saved in the name of whoever flipped it
+async function saveSetting(key, value, userId) {
+  await pool.query(
+    `INSERT INTO app_settings (key, value, updated_by) VALUES ($1, $2::jsonb, $3)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`,
+    [key, JSON.stringify(value), userId]);
 }
 
 // ---------------------------------------------------------------------
@@ -24418,10 +24459,7 @@ const isPermanentAdmin = user => ADMIN_USERNAMES.includes(user.username);
 export async function setEveryoneAdmin(scope, on) {
   if (!scope.access.permanentAdmin) throw new AccessError('Only the permanent admins can switch that.');
   if (typeof on !== 'boolean') throw new AccessError('Say whether everyone is an admin: { "on": true } or { "on": false }.');
-  await pool.query(
-    `INSERT INTO app_settings (key, value, updated_by) VALUES ('everyone_admin', $1::jsonb, $2)
-     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`,
-    [JSON.stringify(on), scope.access.userId]);
+  await saveSetting('everyone_admin', on, scope.access.userId);
   everyoneAdmin = on;
   changed();
   return { on, people: await everyoneAdminCount() };
@@ -24431,6 +24469,34 @@ export async function setEveryoneAdmin(scope, on) {
 async function everyoneAdminCount() {
   const { rows: [r] } = await pool.query(
     'SELECT count(*)::int AS n FROM users WHERE is_active AND username <> ALL($1::text[])', [[...ADMIN_USERNAMES, ...SERVICE_ACCOUNTS]]);
+  return r.n;
+}
+
+// ---------------------------------------------------------------------
+// EMAIL EVERYONE, on demo day: while MAIL_ONLY_TO in .env limits the emails
+// to a few addresses (for trying things out), this switch lets every person
+// with an address be emailed again (mail.mjs skipReason reads emailsEveryone).
+// Only the permanent admins may switch it. Saved in app_settings.
+// ---------------------------------------------------------------------
+
+let emailEveryone = false;
+export const emailsEveryone = () => emailEveryone;
+
+// { on } -> { on, people }: how many people would be emailed with it on
+export async function setEmailEveryone(scope, on) {
+  if (!scope.access.permanentAdmin) throw new AccessError('Only the permanent admins can switch that.');
+  if (typeof on !== 'boolean') throw new AccessError('Say whether everyone is emailed: { "on": true } or { "on": false }.');
+  await saveSetting('email_everyone', on, scope.access.userId);
+  emailEveryone = on;
+  return { on, people: await emailablePeople() };
+}
+
+// People with an address who haven't turned email off (test and service accounts never are)
+export async function emailablePeople() {
+  const { rows: [r] } = await pool.query(
+    `SELECT count(*)::int AS n FROM users
+      WHERE is_active AND email IS NOT NULL AND email_notifications AND username <> ALL($1::text[]) AND username !~ $2`,
+    [SERVICE_ACCOUNTS, TEST_ACCOUNT]);
   return r.n;
 }
 
@@ -26084,7 +26150,42 @@ function presentationHtml() {
         '<ul class="presentation-steps">' +
         `<li><span>${escapeHtml(statuses)}</span><button type="button" class="home-action danger" data-undo-statuses="${p.statuses}"${p.statuses ? '' : ' disabled'}>↩ Undo every status</button></li>` +
         `<li><span>${escapeHtml(demo)}</span><button type="button" class="home-action danger" data-reset-demo="${d.tickets}"${d.tickets ? '' : ' disabled'}>🧹 Put the demo tickets back</button></li>` +
-        '</ul>' + everyoneAdminHtml(p.everyoneAdmin);
+        '</ul>' + emailEveryoneHtml(p.email) + everyoneAdminHtml(p.everyoneAdmin);
+}
+
+// ✉️ Demo day: everyone with an address emailed, though MAIL_ONLY_TO in .env
+// limits it the rest of the time (teams.mjs setEmailEveryone)
+function emailEveryoneHtml(m) {
+    if (!m) return '';
+    let text, button = '';
+    if (!m.enabled) text = 'Email is off on this server (no Brevo key), so nobody is emailed.';
+    else if (!m.limited) text = `Everyone with an address is emailed (${howMany(m.people, 'person', 'people')}): nothing in .env limits it.`;
+    else if (m.on) {
+        text = `Everyone with an address is emailed (${howMany(m.people, 'person', 'people')}).`;
+        button = m.canSwitch ? '<button type="button" class="home-action" data-email-everyone="off">Only email me again</button>' : '';
+    } else {
+        text = `Emails only go to ${m.onlyTo.length ? m.onlyTo.join(', ') : 'the test addresses'}. On demo day, email everyone with an address (${howMany(m.people, 'person', 'people')}).`;
+        button = m.canSwitch ? `<button type="button" class="home-action danger" data-email-everyone="on" data-people="${m.people}">✉️ Email everyone</button>` : '';
+    }
+    if (m.enabled && m.limited && !m.canSwitch) button = '<span class="home-status">Only the permanent admins can switch this.</span>';
+    return '<h3>Demo day</h3>' +
+        `<ul class="presentation-steps"><li${m.on && m.limited ? ' class="everyone-admin-on"' : ''}><span>${escapeHtml(text)}</span>${button}</li></ul>`;
+}
+
+async function setEmailEveryone(on, people) {
+    const question = on
+        ? `Email everyone? From now on, each notification is also emailed to the person it's for: ${howMany(people, 'person has', 'people have')} an address. ` +
+            'Notifications from before stay unsent. Switch it back after the demo.'
+        : 'Only email the test addresses in .env again? Everyone else stops getting emails (their notifications still show under the 🔔).';
+    if (!confirm(question)) return;
+    try {
+        const data = await teamsFetch('/api/email-everyone', { method: 'PUT', body: JSON.stringify({ on }) });
+        if (!data) return;
+        showToast(data.on ? `Everyone with an address is emailed now (${howMany(data.people, 'person', 'people')})` : 'Emails only go to the test addresses again');
+        loadTeams();
+    } catch (err) {
+        showToast(`${err.message}`, 'error');
+    }
 }
 
 // 👑 After the presentation: everyone an admin, so stakeholders can try every
@@ -26247,7 +26348,9 @@ document.getElementById('teams-view').addEventListener('click', e => {
     const demo = e.target.closest('[data-reset-demo]');
     if (demo) { resetDemoTickets(Number(demo.dataset.resetDemo)); return; }
     const everyone = e.target.closest('[data-everyone-admin]');
-    if (everyone) setEveryoneAdmin(everyone.dataset.everyoneAdmin === 'on', Number(everyone.dataset.people));
+    if (everyone) { setEveryoneAdmin(everyone.dataset.everyoneAdmin === 'on', Number(everyone.dataset.people)); return; }
+    const email = e.target.closest('[data-email-everyone]');
+    if (email) setEmailEveryone(email.dataset.emailEveryone === 'on', Number(email.dataset.people));
 });
 
 // A name picked in a ticket's box gives it to them; in a family's, the whole family
@@ -26535,7 +26638,9 @@ report on the live server: it emails the real admins.**
 change commits, retried up to 5 times, never older than an hour. Only to people with
 `users.email` set (an admin sets it: `npm run users -- email|emails`; never in
 `db/accounts.json`) who haven't unticked "Email me these too" in the 🔔 panel; never test
-or service accounts; only `MAIL_ONLY_TO` while that's set. An email holds who did what
+or service accounts; only `MAIL_ONLY_TO` while that's set, unless a permanent admin has
+switched on **Email everyone** (the 🎬 card's "Demo day", `PUT /api/email-everyone`,
+`teams.setEmailEveryone`, saved in `app_settings`). An email holds who did what
 and the ticket numbers, never summaries or notes. No `BREVO_API_KEY` in `.env`: off.
 
 **Families decide teams.** Tickets linked to each other form one family: a
@@ -28244,12 +28349,13 @@ document.addEventListener('keydown', e => {
 //   MAIL_FROM       the sender, on a domain authenticated in Brevo (notifications@onetouch.fyi)
 //   MAIL_FROM_NAME  the name it shows (OneTouch)
 //   APP_URL         where the emails link to (https://onetouch.fyi)
-//   MAIL_ONLY_TO    comma-separated addresses: while it's set, nobody else is emailed
+//   MAIL_ONLY_TO    comma-separated addresses: while it's set, nobody else is emailed,
+//                   unless a permanent admin switches on "Email everyone" (Team tab, demo day)
 // For tests only: BREVO_API_URL (a stand-in for Brevo), MAIL_INTERVAL_MS, MAIL_RETRY_MS.
 // =====================================================================
 
 import { pool } from './auth.mjs';
-import { isTestOrServiceAccount } from './teams.mjs';
+import { isTestOrServiceAccount, emailsEveryone } from './teams.mjs';
 
 const BREVO_URL = 'https://api.brevo.com/v3/smtp/email';
 const BATCH = 20;                  // emails per round, well inside Brevo's limits
@@ -28330,7 +28436,8 @@ export function skipReason(n, cfg = mailConfig(), now = Date.now()) {
   if (!n.is_active) return 'the account is deactivated';
   if (!n.email) return 'no email address on file';
   if (!n.email_notifications) return 'they turned email off';
-  if (cfg.onlyTo.length && !cfg.onlyTo.includes(String(n.email).toLowerCase())) return 'not on MAIL_ONLY_TO';
+  // The Team tab's "Email everyone" (demo day) lifts MAIL_ONLY_TO while it's on
+  if (cfg.onlyTo.length && !emailsEveryone() && !cfg.onlyTo.includes(String(n.email).toLowerCase())) return 'not on MAIL_ONLY_TO';
   if (now - new Date(n.created_at).getTime() > MAX_AGE_MS) return 'too old by the time it could be sent';
   return '';
 }
@@ -30632,7 +30739,7 @@ export const NODES = [
       ['Outbox', 'Checked every 30 seconds, retried up to 5 times, never sent if older than an hour'],
       ['An email holds', 'Who did what and the ticket numbers, never summaries or notes'],
     ],
-    secure: 'Test and service accounts are never emailed. MAIL_ONLY_TO limits who gets email while trying it out.',
+    secure: 'Test and service accounts are never emailed. MAIL_ONLY_TO limits who gets email while trying it out, until a permanent admin switches on Email everyone (Team tab, demo day).',
     files: ['notifications.mjs', 'mail.mjs', 'issues.mjs', 'public/notifications.js'],
   },
   {
