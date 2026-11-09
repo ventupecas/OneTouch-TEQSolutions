@@ -221,7 +221,7 @@
         }
         const flows = map.flows.map(f => `<button type="button" class="arch-rail-btn${f.pending ? ' arch-rail-pending' : ''}${player.flow?.id === f.id ? ' is-on' : ''}"
                 data-flow="${esc(f.id)}" aria-pressed="${player.flow?.id === f.id}">
-                <span aria-hidden="true">${esc(f.icon)}</span> ${esc(f.name)}${f.pending && !receiving() ? ' <span class="arch-lock" title="Needs ServiceNow authentication">🔒</span>' : ''}</button>`).join('');
+                ${esc(f.name)}${f.pending && !receiving() ? ' <span class="arch-lock" title="Needs ServiceNow authentication">🔒</span>' : ''}</button>`).join('');
         const layers = map.layers.map(l => `<button type="button" class="arch-rail-btn${focusLayer === l.id ? ' is-on' : ''}" data-layer="${esc(l.id)}"
                 aria-pressed="${focusLayer === l.id}" title="${esc(l.hint)}" style="--arch-c: ${colorVar(l.color)}">
                 <span class="arch-swatch" aria-hidden="true"></span> ${esc(l.name)}</button>`).join('');
@@ -377,7 +377,7 @@
         box.className = `arch-step${step.stop ? ' arch-step-stop' : ''}`;
         box.innerHTML = `
             <div class="arch-step-head">
-                <span><span aria-hidden="true">${esc(flow.icon)}</span> <b>${esc(flow.name)}</b></span>
+                <span><b>${esc(flow.name)}</b></span>
                 <span class="arch-step-count">Step ${player.index + 1} of ${flow.steps.length}</span>
                 <button type="button" class="arch-icon-btn" data-do="close" aria-label="Stop following this">✕</button>
             </div>
@@ -397,7 +397,7 @@
         if (!list) return;
         const flows = map.flows.map(f => `
             <article class="arch-item" id="arch-flow-${esc(f.id)}" tabindex="-1">
-                <h4 class="arch-node-name"><span aria-hidden="true">${esc(f.icon)}</span> ${esc(f.name)}</h4>
+                <h4 class="arch-node-name">${esc(f.name)}</h4>
                 <ol class="arch-needs">${f.steps.map(s => `<li><b>${esc(s.title)}</b> ${esc(s.text)}</li>`).join('')}</ol>
             </article>`).join('');
         const layers = map.layers.map(l => {

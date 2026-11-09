@@ -416,7 +416,7 @@ export const LINKS = [
 // 'stop' (where it stops today) or 'after' (built, runs once authenticated).
 export const FLOWS = [
   {
-    id: 'signin', icon: '🔑', name: 'Someone signs in',
+    id: 'signin', name: 'Someone signs in',
     steps: [
       { path: ['browser', 'tunnel', 'express'], title: 'The page sends the email and password',
         text: 'POST /api/login, over HTTPS as far as Cloudflare, then through the tunnel to the Node server.' },
@@ -429,7 +429,7 @@ export const FLOWS = [
     ],
   },
   {
-    id: 'ask', icon: '💬', name: 'Someone asks Claude',
+    id: 'ask', name: 'Someone asks Claude',
     steps: [
       { path: ['browser', 'tunnel', 'express'], title: 'The question reaches the server',
         text: 'POST /api/query. requireLogin finds the person and which tickets they may see. A question naming only tickets they can\'t see is refused here.' },
@@ -446,7 +446,7 @@ export const FLOWS = [
     ],
   },
   {
-    id: 'dashboard', icon: '📈', name: 'Someone opens a dashboard',
+    id: 'dashboard', name: 'Someone opens a dashboard',
     steps: [
       { path: ['browser', 'tunnel', 'express'], title: 'The server signs a link for this person',
         text: 'GET /api/dashboards returns one link per dashboard, signed with METABASE_EMBEDDING_SECRET, with the viewer filter locked to them. It lasts 12 hours.' },
@@ -461,7 +461,7 @@ export const FLOWS = [
     ],
   },
   {
-    id: 'assign', icon: '🔔', name: 'A ticket is assigned',
+    id: 'assign', name: 'A ticket is assigned',
     steps: [
       { path: ['browser', 'tunnel', 'express'], title: 'A project manager picks a name',
         text: 'They type part of a team member\'s name. Only the people on that family\'s team can be picked.' },
@@ -474,7 +474,7 @@ export const FLOWS = [
     ],
   },
   {
-    id: 'issue', icon: '🚩', name: 'Someone reports a problem',
+    id: 'issue', name: 'Someone reports a problem',
     steps: [
       { path: ['browser', 'tunnel', 'express'], title: 'The report reaches the server',
         text: 'Anyone signed in can send one with the 🚩 in the header: POST /api/issues, with the kind of problem and what happened. One person can send 5 in 10 minutes.' },
@@ -487,7 +487,7 @@ export const FLOWS = [
     ],
   },
   {
-    id: 'servicenow', icon: '🔌', name: 'ServiceNow live push', pending: true,
+    id: 'servicenow', name: 'ServiceNow live push', pending: true,
     steps: [
       { path: ['servicenow'], phase: 'needs', title: 'A ticket is saved in ServiceNow',
         text: 'An async Business Rule runs after the save, so nobody saving a ticket waits. The rules, the Script Include and the REST Message are written out in the blueprint, and still have to be created in ServiceNow.' },
