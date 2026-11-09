@@ -29,7 +29,7 @@
     let active = false;
     let loading = null;    // the first opening, while it's still under way
     let opening = 0;       // goes up at sign-out, so a late answer can't draw the map for the next person
-    let mode = '3d';       // '3d', '2d' or 'list'
+    let mode = '2d';       // '2d', '3d' or 'list'
     let sideTab = 'details';
     let selected = null;   // a block's id
     let focusLayer = null; // a layer's id
@@ -69,12 +69,6 @@
         return `
             <div class="arch-status" id="arch-status" role="status"></div>
             <nav class="arch-rail" id="arch-rail" aria-label="Architecture map"></nav>
-            <div class="arch-stage" id="arch-stage" tabindex="0" role="group"
-                 aria-label="3D map of OneTouch. Arrow keys turn it, plus and minus zoom, 0 resets the view. Each block is a button. The List view has the same information.">
-                <canvas id="arch-canvas" aria-hidden="true"></canvas>
-                <div class="arch-tags" id="arch-tags"></div>
-                <p class="arch-hint">Drag to turn · scroll to zoom · Shift+drag to move · click a block. Moving dots show which way data goes, not live traffic.</p>
-            </div>
             <div class="arch-plan" id="arch-plan" tabindex="0" role="group" hidden
                  aria-label="2D map of OneTouch. Arrow keys move it, plus and minus zoom, 0 resets the view. Each block is a button that says what it does. The List view has the same information.">
                 <div class="arch-plan-sheet" id="arch-plan-sheet"></div>
@@ -88,6 +82,12 @@
                     <button type="button" class="arch-btn" id="arch-plan-labels" data-do="labels"></button>
                     <p class="arch-hint arch-plan-hint">Drag to move · scroll to zoom · click a block for its details · point at a line to trace it. Moving dots show which way data goes, not live traffic.</p>
                 </div>
+            </div>
+            <div class="arch-stage" id="arch-stage" tabindex="0" role="group"
+                 aria-label="3D map of OneTouch. Arrow keys turn it, plus and minus zoom, 0 resets the view. Each block is a button. The List view has the same information.">
+                <canvas id="arch-canvas" aria-hidden="true"></canvas>
+                <div class="arch-tags" id="arch-tags"></div>
+                <p class="arch-hint">Drag to turn · scroll to zoom · Shift+drag to move · click a block. Moving dots show which way data goes, not live traffic.</p>
             </div>
             <div class="arch-list" id="arch-list" hidden></div>
             <section class="arch-step" id="arch-step" aria-live="polite" hidden></section>
@@ -227,8 +227,8 @@
                 <span class="arch-swatch" aria-hidden="true"></span> ${esc(l.name)}</button>`).join('');
         return `
             <div class="arch-mode" role="group" aria-label="How to show the map">
-                <button type="button" class="arch-btn${mode === '3d' ? ' is-on' : ''}" data-do="3d" aria-pressed="${mode === '3d'}"${world ? '' : ' disabled title="This browser can\'t draw 3D here"'}>🧊 3D</button>
                 <button type="button" class="arch-btn${mode === '2d' ? ' is-on' : ''}" data-do="2d" aria-pressed="${mode === '2d'}">🗺️ 2D</button>
+                <button type="button" class="arch-btn${mode === '3d' ? ' is-on' : ''}" data-do="3d" aria-pressed="${mode === '3d'}"${world ? '' : ' disabled title="This browser can\'t draw 3D here"'}>🧊 3D</button>
                 <button type="button" class="arch-btn${mode === 'list' ? ' is-on' : ''}" data-do="list" aria-pressed="${mode === 'list'}">📝 List</button>
                 <button type="button" class="arch-btn" data-do="reset" title="Back to the whole map"${scene() ? '' : ' disabled'}>↺</button>
                 <button type="button" class="arch-btn" data-do="rail" aria-expanded="true" aria-label="Hide the views and layers" title="Hide the views and layers">◀</button>
@@ -330,7 +330,7 @@
             <p>${esc(map.overview)}</p>
             <h4>Find your way around</h4>
             <ul class="arch-built">
-                <li><b>3D</b>, <b>2D</b> and <b>List</b> are the same map. 2D writes on every block and line what it's doing.</li>
+                <li><b>2D</b>, <b>3D</b> and <b>List</b> are the same map. 2D writes on every block and line what it's doing.</li>
                 <li>Click any block for what it does, how it's protected and where its code is.</li>
                 <li>Pick a <b>What happens when…</b> to follow a real request through the system, step by step.</li>
                 <li>Moving dots show which way data goes. They aren't live traffic.</li>
@@ -447,9 +447,9 @@
     function savedMode() {
         try {
             const saved = localStorage.getItem(MODE_KEY);
-            return ['3d', '2d', 'list'].includes(saved) ? saved : '3d';
+            return ['2d', '3d', 'list'].includes(saved) ? saved : '2d';
         } catch {
-            return '3d';
+            return '2d';
         }
     }
 
@@ -850,6 +850,20 @@
         const camera = new THREE.PerspectiveCamera(30, 1, 1, 600);
         const size = { w: 1, h: 1 };
         const clock = { last: performance.now(), t: 0 };
+
+        // Room between the blocks: the map's positions, spread out. Blocks keep their
+        // size, so only the gaps grow. Inside the Docker frame everything spreads;
+        // what's outside it (the outside services, the ServiceNow push) moves out
+        // with the frame's edge and keeps its own spacing, so the map gets only a
+        // little wider and the blocks stay big on screen. Everything placed from
+        // the map goes through at(), so blocks, floors, the frame and the camera's
+        // home all stay in step.
+        const SPREAD = { x: 1.4, y: 1.25, z: 1.5 };
+        const [frameLeft, frameRight] = [map.compose.min[0], map.compose.max[0]];
+        const spreadX = x => x > frameRight ? frameRight * SPREAD.x + (x - frameRight)
+            : x < frameLeft ? frameLeft * SPREAD.x + (x - frameLeft)
+            : x * SPREAD.x;
+        const at = ([x, y, z]) => new THREE.Vector3(spreadX(x), y * SPREAD.y, z * SPREAD.z);
         let raf = null;
         let dirty = true;
 
@@ -896,7 +910,7 @@
         sun.position.set(18, 42, 26);
         sun.castShadow = true;
         sun.shadow.mapSize.set(2048, 2048);
-        Object.assign(sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40, near: 1, far: 120 });
+        Object.assign(sun.shadow.camera, { left: -50, right: 50, top: 50, bottom: -50, near: 1, far: 140 });
         sun.shadow.bias = -0.0015;
         scene.add(sun);
 
@@ -1072,28 +1086,28 @@
         const plates = [];
         for (const layer of map.layers) {
             if (layer.y === null || !layer.plate) continue;
-            const [px, pz] = layer.plate;
+            const { x: px, y, z: pz } = at([layer.plate[0], layer.y, layer.plate[1]]);
             const material = new THREE.MeshStandardMaterial({ transparent: true, opacity: 0.2, roughness: 0.9, depthWrite: false });
             paint(material, layer.color, 'panel-bg', 0.45);
             const mesh = new THREE.Mesh(roundedBox(px * 2, 0.14, pz * 2, 0.6), material);
-            mesh.position.set(0, layer.y - 0.14, 0);
+            mesh.position.set(0, y - 0.14, 0);
             mesh.receiveShadow = true;
             const line = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(px * 2, 0.01, pz * 2)), new THREE.LineBasicMaterial({ transparent: true, opacity: 0.55 }));
             paint(line.material, layer.color);
-            line.position.set(0, layer.y, 0);
+            line.position.set(0, y, 0);
             scene.add(mesh, line);
             plates.push({ layer, mesh, line, dim: 1, dimTo: 1 });
         }
         {
-            const { min, max } = map.compose;
-            const w = max[0] - min[0], h = max[1] - min[1], d = max[2] - min[2];
-            const frame = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d)), new THREE.LineDashedMaterial({ dashSize: 0.5, gapSize: 0.32, transparent: true, opacity: 0.6 }));
+            const min = at(map.compose.min), max = at(map.compose.max);
+            const box = max.clone().sub(min);
+            const frame = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(box.x, box.y, box.z)), new THREE.LineDashedMaterial({ dashSize: 0.5, gapSize: 0.32, transparent: true, opacity: 0.6 }));
             frame.computeLineDistances();
-            frame.position.set((min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2);
+            frame.position.copy(min).add(max).multiplyScalar(0.5);
             paint(frame.material, 'muted');
             scene.add(frame);
-            const grid = new THREE.GridHelper(120, 60);
-            grid.position.y = min[1] - 0.2;
+            const grid = new THREE.GridHelper(160, 80);
+            grid.position.y = min.y - 0.2;
             grid.material.transparent = true;
             grid.material.opacity = 0.5;
             grid.material.vertexColors = false;
@@ -1109,9 +1123,9 @@
             const parts = makeParts(layerById(data.layer).color);
             const node = { data, mats: parts.mats, group: parts.group, dim: 1, dimTo: 1, glow: 0, glowTo: 0 };
             const shape = (SHAPES[data.shape] || SHAPES.module)(parts, node);
-            node.group.position.set(...data.pos);
-            node.center = new THREE.Vector3(...data.pos).add(new THREE.Vector3(0, shape.center, 0));
-            node.top = new THREE.Vector3(...data.pos).add(new THREE.Vector3(0, shape.height + 0.15, 0));
+            node.group.position.copy(at(data.pos));
+            node.center = at(data.pos).add(new THREE.Vector3(0, shape.center, 0));
+            node.top = at(data.pos).add(new THREE.Vector3(0, shape.height + 0.15, 0));
             node.spin = shape.spin || null;
             node.group.traverse(o => {
                 if (o.isMesh) {
@@ -1284,16 +1298,16 @@
             el.className = 'arch-layer-tag';
             el.style.setProperty('--arch-c', colorVar(plate.layer.color));
             el.textContent = plate.layer.name;
-            const [px, pz] = plate.layer.plate;
-            plate.tag = addTag(el, new THREE.Vector3(-px + 0.3, plate.layer.y, pz), 1);
+            const corner = at([-plate.layer.plate[0], plate.layer.y, plate.layer.plate[1]]);
+            plate.tag = addTag(el, corner.setX(corner.x + 0.3), 1);
         }
         {
-            const { min, max } = map.compose;
+            const min = at(map.compose.min), max = at(map.compose.max);
             const el = document.createElement('span');
             el.className = 'arch-layer-tag arch-frame-tag';
             el.textContent = map.compose.name;
             el.title = map.compose.note;
-            addTag(el, new THREE.Vector3(max[0] - 3, max[1], min[2]), 2);
+            addTag(el, new THREE.Vector3(max.x - 3, max.y, min.z), 2);
         }
 
         function measureTags() {
@@ -1334,8 +1348,11 @@
 
         // ---- The camera: drag, wheel, pinch and keys all move the goal, and it eases there ----
 
-        const SCENE_CENTER = new THREE.Vector3(3, 12.6, 0);
-        const SCENE_HALF = { w: 21.5, h: 16.2 };
+        // Spread with the blocks, so the whole map still fits the view at home:
+        // it's wider by as much as the frame's edges moved out
+        const grow = { left: frameLeft * (SPREAD.x - 1), right: frameRight * (SPREAD.x - 1) };
+        const SCENE_CENTER = new THREE.Vector3(3 + (grow.left + grow.right) / 2, 12.6 * SPREAD.y, 0);
+        const SCENE_HALF = { w: 21.5 + (grow.right - grow.left) / 2, h: 16.2 * SPREAD.y };
         const HOME = { theta: 0.2, phi: 1.2 };
         const orbit = { ...HOME, radius: 90, target: SCENE_CENTER.clone() };
         const goal = { ...HOME, radius: 90, target: SCENE_CENTER.clone() };
@@ -1350,7 +1367,7 @@
         }
         const clampGoal = () => {
             goal.phi = THREE.MathUtils.clamp(goal.phi, 0.25, Math.PI / 2 + 0.25);
-            goal.radius = THREE.MathUtils.clamp(goal.radius, 12, 240);
+            goal.radius = THREE.MathUtils.clamp(goal.radius, 12, 340);
         };
 
         // The part of the canvas no panel is floating over
