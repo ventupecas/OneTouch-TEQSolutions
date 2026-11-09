@@ -159,8 +159,11 @@ admins only): a 3D map of how OneTouch is built, drawn with three.js (unchanged,
 `public/vendor/three-0.186.1/`, loaded the first time an admin opens the map), with the same
 content in a list for screen readers. **🗺️ 2D** (`buildPlanView`, no three.js) draws the same
 blocks, links, flows and health on a flat sheet, with each block's `doing` sentence and each link's
-label written on it; browsers that can't draw 3D get it. It and the 3D scene answer to the same calls
-(`scene()`), so the page's buttons and steps don't care which is showing. `public/` can be read
+label written on it; browsers that can't draw 3D get it. It comes first (2D, 3D, List) and is
+the view a browser opens on until someone picks another. It and the 3D scene answer to the same calls
+(`scene()`), so the page's buttons and steps don't care which is showing. The 3D scene doesn't draw
+`pos` as written: `at()` in `buildWorld` spreads it (`SPREAD`) inside the Docker frame and moves what's
+outside the frame out with its edge, so blocks have room without the map getting much wider. `public/` can be read
 without signing in, so everything the map says is in `architecture.mjs` and comes from
 `GET /api/architecture` (401 signed out, 403 for anyone who isn't an admin); the page's
 script only draws. Versions are read from `package-lock.json` and `docker-compose.yml`.
