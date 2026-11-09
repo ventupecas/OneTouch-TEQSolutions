@@ -234,11 +234,27 @@ which is why Metabase keeps each chart's result (see [Dashboards](#dashboards-me
    as a final check that everything works.
 3. Demo with the questions in that file. Edit the file to add your own (one per line) and
    run `npm run warmup` again; questions it has already asked come back instantly, and the answer says it was asked before.
-4. **Don't restart OneTouch afterwards.** A restart (including `docker compose up` after
-   editing `.env`) forgets the remembered questions. They are also tied to the date
-   Claude sees as "today", which is the real date in UTC unless `ASSUME_TODAY` is set, so
-   warm up on the day itself. A presentation that runs past 7 PM Central crosses into the
-   next UTC day; run the warm-up again then.
+4. The remembered questions are saved in `.cache/answers.json` (not in git), so a restart
+   keeps them. They are tied to the date Claude sees as "today", which is the real date in
+   UTC unless `ASSUME_TODAY` is set, so warm up on the day itself. A presentation that runs
+   past 7 PM Central crosses into the next UTC day; run the warm-up again then. Changing
+   the model or the AI's instructions (`business_logic.mjs`) starts them over too.
+5. Run the quality gate (from this folder, with the class's `tech-foundations` repo next to
+   it): `node ../tech-foundations/t11a-demo-engineering/tools/gate.js demo/gate.config.json`.
+   It checks the `.env` keys, that at least 100 answers are saved, the email key, and that
+   the app, Cube, Metabase and the public address answer. Don't start until it's all green.
+
+**If the internet fails during the presentation.** Everything but the AI assistant runs on
+this computer: open **http://localhost:8000** on it instead of the public address, and
+sign-in, ticket lists, assigning, notifications, the architecture map and the dashboards
+keep working. The AI assistant still answers every question asked before at once; a new one
+gives up after 20 seconds (`CLAUDE_TIMEOUT_MS`) and says Claude couldn't be reached, instead
+of hanging. If the network looks bad before you start, flip the **emergency switch**: set
+`DEMO_MODE=offline` in `.env` and run `docker restart analytics_node_app` (a few seconds;
+the saved answers are kept). Then the assistant never asks Claude: saved answers say
+**🔌 Offline mode: a saved answer**, and anything new gets a list of warm-up questions that
+work. 🧊 Architecture's 🩺 Health shows the Claude check as off. Set `DEMO_MODE=live` and
+restart again to go back.
 
 Follow-up questions ("same but for changes") always go to Claude, so they take the usual
 few seconds. The warm-up's answers list tickets like anyone's do, so they fill the Ticket
@@ -1284,6 +1300,8 @@ was carried over.
 | "The translation was cut off; try a shorter question." | The answer ran out of room |
 | "Cube.dev is still initializing…" | Cube is starting; try again in a few seconds |
 | "Could not talk to backend server orchestration framework." | The page couldn't reach the server |
+| "The AI assistant couldn't reach Claude just now…" | No answer from Claude within `CLAUDE_TIMEOUT_MS` (20 s), or the network is down; questions asked before still work |
+| "OneTouch is in offline mode for this presentation…" | `DEMO_MODE=offline`: only questions asked before are answered (see [Presentation day](#presentation-day-many-people-at-once)) |
 
 ## 2.4 Explanations for empty results
 
@@ -2408,6 +2426,7 @@ Create each file at the path shown, with exactly this content. Files are in the 
 - [B.90 `scripts/usage.mjs`](#b90)
 - [B.91 `scripts/eval-translation.mjs`](#b91)
 - [B.92 `checks/usage.mjs`](#b92)
+- [B.93 `demo/gate.config.json`](#b93)
 
 <a id="b1"></a>
 ### B.1 `.gitignore`
@@ -2458,6 +2477,9 @@ CLAUDE.local.md
 
 # AI assistant evals (scripts/eval-translation.mjs): answers and costs, kept locally
 eval-results/
+
+# The AI assistant's saved answers (server.mjs ANSWER_CACHE_FILE), so a restart keeps the warm-up
+.cache/
 ```
 
 <a id="b2"></a>
@@ -2611,6 +2633,12 @@ CLAUDE_MODEL=
 CLAUDE_EFFORT=
 # Model for the short "why nothing was found" explanations (default claude-haiku-5-5)
 CLAUDE_SMALL_MODEL=
+# How long to wait for Claude before giving up, in milliseconds (default 20000)
+CLAUDE_TIMEOUT_MS=
+# live = ask Claude as usual. offline = the presentation's emergency switch: the AI assistant
+# never asks Claude and answers only questions asked before (npm run warmup), labelled
+# "Offline mode". Change it, then: docker restart analytics_node_app (saved answers are kept).
+DEMO_MODE=live
 
 # Database / Cube secrets (docker-compose.yml reads these; it refuses to start without them).
 # Long random values, e.g.: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
@@ -6491,6 +6519,8 @@ try {
 import dns from 'node:dns/promises';
 import { createHash, createHmac } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
+import { mkdir, rename, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import express from 'express';
 import dotenv from 'dotenv';
 import Anthropic from '@anthropic-ai/sdk';
@@ -6865,6 +6895,7 @@ app.get('/api/architecture/health', async (req, res) => {
     fetch,
     listClaudeModels: () => anthropic.models.list({ limit: 1 }),
     hasClaudeKey: Boolean(process.env.ANTHROPIC_API_KEY),
+    claudeOffline: DEMO_OFFLINE,
     mailEnabled: mailEnabled(),
     publicUrl: (process.env.ONETOUCH_PUBLIC_URL || process.env.APP_URL || '').replace(/\/+$/, ''),
     metabaseUrl: METABASE_URL,
@@ -7078,10 +7109,24 @@ if (!anthropicKey || anthropicKey.startsWith('REPLACE_WITH')) {
 
 const anthropicWorkspaceId = (process.env.ANTHROPIC_WORKSPACE_ID || '').trim();
 
+// A short timeout: answers take 2-5 s, and on a bad network a question that
+// fails in 20 s beats one that hangs for the SDK's default 10 minutes
+const CLAUDE_TIMEOUT_MS = Number(process.env.CLAUDE_TIMEOUT_MS) || 20 * 1000;
+
 const anthropic = new Anthropic({
   apiKey: anthropicKey,
   defaultHeaders: anthropicWorkspaceId ? { 'anthropic-workspace-id': anthropicWorkspaceId } : undefined,
+  timeout: CLAUDE_TIMEOUT_MS,
+  maxRetries: 1,
 });
+
+// DEMO_MODE=offline in .env (then docker restart analytics_node_app): the
+// emergency switch for a presentation on a bad network. The AI assistant
+// never asks Claude; questions asked before (npm run warmup) still answer
+// from the saved answers, every answer says it's offline, and anything new
+// gets a list of questions that work instead of an error.
+const DEMO_OFFLINE = (process.env.DEMO_MODE || '').trim().toLowerCase() === 'offline';
+if (DEMO_OFFLINE) console.log('🔌 DEMO_MODE=offline: the AI assistant only answers questions asked before');
 
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-5-5';
 // How hard Claude thinks before translating a question (low | medium | high).
@@ -7141,6 +7186,7 @@ async function translateToQuery(conversation, userPrompt) {
   const userTurn = { role: 'user', content: note + buildUserMessage(userPrompt, referenceToday()) };
 
   const started = Date.now();
+  if (DEMO_OFFLINE) throw new Error('Offline mode: Claude is not asked'); // answerQuestion stops before this
   const stream = anthropic.messages.stream({
     model: CLAUDE_MODEL,
     max_tokens: 4000,
@@ -7154,7 +7200,15 @@ async function translateToQuery(conversation, userPrompt) {
     messages: [...conversation.messages, userTurn],
     output_config: { format: { type: 'json_schema', schema: OUTPUT_SCHEMA }, effort: CLAUDE_EFFORT },
   });
-  const message = await stream.finalMessage();
+  // The client's timeout covers waiting for Claude to start answering; this
+  // covers an answer that starts and then stalls (the network drops mid-way)
+  const stalled = setTimeout(() => stream.abort(), 2 * CLAUDE_TIMEOUT_MS);
+  let message;
+  try {
+    message = await stream.finalMessage();
+  } finally {
+    clearTimeout(stalled);
+  }
   const ms = Date.now() - started;
 
   // A failed call leaves the conversation as it was, so the user can just ask again
@@ -7183,19 +7237,35 @@ async function translateToQuery(conversation, userPrompt) {
 // translation from then: it answers in a fraction of a second instead of
 // a few. Follow-ups depend on the conversation, so they always go to Claude.
 // A reused translation still goes through normalizeAndValidate every time.
+//
+// They're also saved to ANSWER_CACHE_FILE (git-ignored), so a restart (for
+// example to switch DEMO_MODE) keeps the morning's warm-up. Only Claude's
+// translations and empty-result explanations are kept, never ticket rows:
+// every reuse runs the query again, for the tickets the person asking may see.
 // =====================================================================
 
 const ANSWER_CACHE_SIZE = 500;
-// key -> { userTurn, content, parsed, explanation }; Map order = least recently used first
+const ANSWER_CACHE_FILE = process.env.ANSWER_CACHE_FILE || '.cache/answers.json';
+// key -> { userTurn, content, parsed, explanations }; Map order = least recently used first
 const answerCache = new Map();
 
+// A changed prompt, question wrapper or output schema must not reuse
+// translations made for the old one (they're saved across restarts)
+const PROMPT_VERSION = createHash('sha256').update(SYSTEM_PROMPT).update(String(buildUserMessage))
+  .update(JSON.stringify(OUTPUT_SCHEMA)).digest('hex').slice(0, 12);
+
 // Same question = same words, ignoring capitals, spacing and the closing "?",
-// asked on the same "today" (the turn Claude saw carries the date) of the same model
-function answerCacheKey(conversation, userPrompt) {
-  if (conversation.messages.length || conversation.pendingNote) return null;
+// asked on the same "today" (the turn Claude saw carries the date) of the same
+// model and prompt
+function questionKey(userPrompt) {
   const question = userPrompt.toLowerCase().replace(/\s+/g, ' ').trim().replace(/[\s?.!]+$/, '');
   if (!question) return null;
-  return JSON.stringify([CLAUDE_MODEL, referenceToday().toISOString().slice(0, 10), question]);
+  return JSON.stringify([CLAUDE_MODEL, PROMPT_VERSION, referenceToday().toISOString().slice(0, 10), question]);
+}
+
+function answerCacheKey(conversation, userPrompt) {
+  if (conversation.messages.length || conversation.pendingNote) return null;
+  return questionKey(userPrompt);
 }
 
 function cachedAnswer(key) {
@@ -7207,6 +7277,64 @@ function cachedAnswer(key) {
 function rememberAnswer(key, entry) {
   answerCache.set(key, entry);
   if (answerCache.size > ANSWER_CACHE_SIZE) answerCache.delete(answerCache.keys().next().value);
+  saveAnswersSoon();
+}
+
+// Only today's answers for this model and prompt are written, so the file
+// holds what can still be reused (the quality gate counts them)
+function usableKey(key) {
+  const [model, version, day] = JSON.parse(key);
+  return model === CLAUDE_MODEL && version === PROMPT_VERSION && day === referenceToday().toISOString().slice(0, 10);
+}
+
+function loadAnswers() {
+  try {
+    const saved = JSON.parse(readFileSync(ANSWER_CACHE_FILE, 'utf8'));
+    for (const { key, userTurn, content, parsed, explanations } of saved.answers || []) {
+      if (key && usableKey(key)) answerCache.set(key, { userTurn, content, parsed, explanations: explanations || {} });
+    }
+    console.log(`⚡ ${answerCache.size} saved answers loaded from ${ANSWER_CACHE_FILE}`);
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.error(`⚡ Could not read ${ANSWER_CACHE_FILE}:`, error.message);
+  }
+}
+
+// Written a second after the last change, to a temporary file first, so a
+// burst of answers (the warm-up) is one write and a crash never leaves half a file
+let saveTimer = null;
+function saveAnswersSoon() {
+  if (saveTimer) return;
+  saveTimer = setTimeout(async () => {
+    saveTimer = null;
+    const answers = [...answerCache].filter(([key]) => usableKey(key))
+      .map(([key, entry]) => ({ key, question: JSON.parse(key)[3], ...entry }));
+    try {
+      await mkdir(dirname(ANSWER_CACHE_FILE), { recursive: true });
+      await writeFile(`${ANSWER_CACHE_FILE}.tmp`, JSON.stringify({ savedAt: new Date().toISOString(), model: CLAUDE_MODEL, answers }));
+      await rename(`${ANSWER_CACHE_FILE}.tmp`, ANSWER_CACHE_FILE);
+    } catch (error) {
+      console.error(`⚡ Could not save the answers to ${ANSWER_CACHE_FILE}:`, error.message);
+    }
+  }, 1000);
+  saveTimer.unref();
+}
+
+loadAnswers();
+
+// What offline mode suggests instead: questions from the warm-up list that
+// have a saved answer (never other people's questions, which may be private)
+function offlineSuggestions(limit = 6) {
+  let lines = [];
+  try {
+    lines = readFileSync('scripts/warmup-questions.txt', 'utf8').split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+  } catch { /* no list: no suggestions */ }
+  return lines.filter(line => answerCache.has(questionKey(line))).slice(0, limit);
+}
+
+function offlineMessage() {
+  const ideas = offlineSuggestions();
+  return 'OneTouch is in offline mode for this presentation, so the AI assistant can only answer questions it has answered before.' +
+    (ideas.length ? ` Try one of these: ${ideas.map(q => `"${q}"`).join(' · ')}` : ' None are saved yet: run npm run warmup while online.');
 }
 
 // =====================================================================
@@ -7336,6 +7464,16 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
       });
     }
 
+    // Offline mode: anything without a saved answer (new questions, follow-ups)
+    // gets the questions that do work, at once, instead of waiting on Claude
+    if (DEMO_OFFLINE && !cached) {
+      console.log('🔌 Offline mode: no saved answer, Claude not asked');
+      return reply.send(200, {
+        intent: 'unsupported', message: offlineMessage(), assumptions: [], sections: [], results: [],
+        elapsedMs: Date.now() - started, fromCache: false, offline: true,
+      });
+    }
+
     let parsed, memoryReset = false, fresh = null;
     if (cached) {
       // The conversation gets the original question and Claude's original reply,
@@ -7355,7 +7493,7 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
     }
     remembered = true;
     // Timing and whether Claude was skipped, for the page's "Answered in …" line
-    const timing = () => ({ elapsedMs: Date.now() - started, fromCache: Boolean(cached) });
+    const timing = () => ({ elapsedMs: Date.now() - started, fromCache: Boolean(cached), offline: DEMO_OFFLINE });
 
     const verdict = normalizeAndValidate(parsed);
     if (!verdict.ok) {
@@ -7414,6 +7552,8 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
     if (toExplain.length && !explanation && !scope.all && !scope.count) {
       // No tickets at all: nothing to diagnose, and no reason to ask Claude
       explanation = teams.scopeNote(scope);
+    } else if (toExplain.length && !explanation && DEMO_OFFLINE) {
+      explanation = 'Nothing matched. (Offline mode: OneTouch isn\'t asking Claude to explain why right now.)';
     } else if (toExplain.length && !explanation) {
       reply.progress('explaining');
       try {
@@ -7428,7 +7568,10 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
           onUsage: (u, ms) => usage.recordUsage({ kind: 'explain', model: CLAUDE_SMALL_MODEL, effort: 'low', userId: user.id, question: userPrompt, usage: u, ms }),
         });
         console.log(`🔎 Explained: ${explanation}`);
-        if (cached) cached.explanations = { ...cached.explanations, [scope.key]: explanation };
+        if (cached) {
+          cached.explanations = { ...cached.explanations, [scope.key]: explanation };
+          saveAnswersSoon();
+        }
       } catch (error) {
         console.error('🔎 Could not diagnose the empty result:', error.message);
       }
@@ -7486,6 +7629,12 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
 
   } catch (error) {
     if (remembered) conversation.pendingNote = `it failed when run: ${error.message}`;
+    // No answer from Claude at all (network down, timed out): say so plainly,
+    // and what still works, rather than "Claude API error (undefined)"
+    if (error instanceof Anthropic.APIConnectionError || error instanceof Anthropic.APIUserAbortError) {
+      console.error('📋 Claude did not answer:', error.message);
+      return reply.send(504, { error: 'The AI assistant couldn\'t reach Claude just now, so this question wasn\'t answered. Questions asked before still answer at once; please try again in a moment.' });
+    }
     if (error instanceof Anthropic.APIError) {
       console.error(`📋 Claude API error ${error.status}:`, error.message);
       return reply.send(502, { error: `Claude API error (${error.status}). Please try again.` });
@@ -10394,6 +10543,15 @@ tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
 .ai-msg.wide { max-width: 100%; width: 100%; box-sizing: border-box; }
 /* "Answered in 2.8 s" under each answer */
 .result-timing { margin-top: 8px; color: var(--faint); font-size: 0.78rem; }
+/* DEMO_MODE=offline: every answer says it's a saved one, so the room can tell */
+.result-timing.offline {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: var(--warn-soft);
+    color: var(--warn-ink);
+    font-weight: 600;
+}
 
 .result-title { font-weight: 600; margin-bottom: 8px; }
 /* Not the full report, or not answered: tickets they don't have permission to see */
@@ -13470,7 +13628,7 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
 
     // About tickets they don't have permission to see: not answered (server.mjs)
     if (data.intent === 'denied') {
-        appendMessage('ai-msg', `<div class="result-restricted">${linkTicketsHtml(data.message)}</div>` + answerTimingHtml(seconds, data.fromCache));
+        appendMessage('ai-msg', `<div class="result-restricted">${linkTicketsHtml(data.message)}</div>` + answerTimingHtml(seconds, data.fromCache, data.offline));
         return;
     }
 
@@ -13478,7 +13636,7 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
     if (data.intent === 'clarify' || data.intent === 'unsupported') {
         const message = data.message || 'I need a little more detail to run that.';
         const download = downloadBarHtml(registerExport({ title: 'OneTouch answer', question: userPromptText, tables: buildExportTables(data, message) }));
-        appendMessage('ai-msg', `${linkTicketsHtml(message)}` + download + answerTimingHtml(seconds, data.fromCache));
+        appendMessage('ai-msg', `${linkTicketsHtml(message)}` + download + answerTimingHtml(seconds, data.fromCache, data.offline));
         return;
     }
 
@@ -13538,7 +13696,7 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
         }), 'Download as', { pictures: Boolean(answer.model) });
     }
 
-    const answerId = appendMessage('ai-msg wide', html + answerTimingHtml(seconds, data.fromCache));
+    const answerId = appendMessage('ai-msg wide', html + answerTimingHtml(seconds, data.fromCache, data.offline));
     const answerEl = document.getElementById(answerId);
     answerEl._answer = answer;
     paintPictureOptions(answerEl);
@@ -13633,8 +13791,14 @@ async function readQueryResponse(response, onStep) {
 }
 
 // "Answered in 2.8 s", or for a repeated question "Answered in 0.2 s …"
-// (nothing for a saved answer whose time wasn't kept)
-function answerTimingHtml(seconds, fromCache) {
+// (nothing for a saved answer whose time wasn't kept). offline: the server
+// is in DEMO_MODE=offline, which every answer says plainly.
+function answerTimingHtml(seconds, fromCache, offline) {
+    if (offline) {
+        return fromCache
+            ? '<div class="result-timing offline">🔌 Offline mode: a saved answer (Claude isn\'t being asked right now)</div>'
+            : '<div class="result-timing offline">🔌 Offline mode: only questions asked before can be answered</div>';
+    }
     if (seconds == null) return '';
     const time = `${seconds.toFixed(1)} s`;
     return fromCache
@@ -18304,7 +18468,7 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 - **Claude conversation history is append-only.** Never edit or drop earlier turns, and pass assistant `content` back exactly as returned (thinking blocks included); Sonnet 5.5 rejects or ignores altered history. New context goes into the next user turn (see `pendingNote`).
 - **Claude Sonnet 5.5 API rules:** forced `tool_choice` (`any`/`tool`) and `thinking: {type: "disabled"}` return 400. Steer with the prompt; control depth with `output_config.effort`.
 - **Every model-built query goes through `normalizeAndValidate`.** Don't add a path that sends model output to Cube unvalidated (the repeated-question cache in `server.mjs` re-validates its stored translation on every reuse).
-- **Repeated questions skip Claude.** A conversation-opening question asked before reuses the stored user turn *and* Claude's reply as the conversation's history, so follow-ups see exactly what Claude produced. Changing `buildSystemPrompt()`, `buildUserMessage()` or the output schema needs a server restart, which empties that cache. `/api/query` streams `progress` / `result` server-sent events when asked for `text/event-stream`.
+- **Repeated questions skip Claude.** A conversation-opening question asked before reuses the stored user turn *and* Claude's reply as the conversation's history, so follow-ups see exactly what Claude produced. The cache is saved to `.cache/answers.json` (`ANSWER_CACHE_FILE`, git-ignored) and reloaded on start; its key includes a hash of the system prompt, `buildUserMessage`'s source and the output schema (`PROMPT_VERSION`), so changing any of them (plus a restart) starts it over. `DEMO_MODE=offline` (presentation emergency switch) answers only from this cache and never calls Claude; `CLAUDE_TIMEOUT_MS` (20 s) bounds every Claude call. `/api/query` streams `progress` / `result` server-sent events when asked for `text/event-stream`.
 - **Accounts:** after changing accounts, run `node scripts/users.mjs export` and commit `db/accounts.json` (hashes only), so clones get them.
 - **Cloudflare makes browsers keep `.js` / `.css` for 4 hours** (it rewrites `max-age=0` to `max-age=14400`). `server.mjs` serves `index.html` itself, adding `?v=<content hash>` to each `<script src="x.js">` and `<link rel="stylesheet" href="x.css">`, so changed files reach browsers at once. Add new page files in exactly that form, or they skip the versioning and can be stale for hours.
 - **Test as `tester1` (and `tester2` when a second person is needed), passwords `TESTER1_PASSWORD` / `TESTER2_PASSWORD` in `.env`.** Never test as a real person (a wrong-password check counts toward locking them out, and their stars, lists and last sign-in change) or as `warmup` (the warm-up fills its Ticket results). Put back what a test changes on the test accounts; both have the Home and Dashboards tours marked as seen. The test accounts are on no team (`teams.mjs` only lets test accounts, `tester*` and `test.<name>`, join a test team such as the Milwaukee Brewers), so they see no tickets: to test teams, assignments or notifications, use a throwaway database (`CREATE DATABASE onetouch_auth_test OWNER onetouch_app`, run the server on another port with `AUTH_DB_NAME=onetouch_auth_test AUTH_DB_HOST=localhost ACCOUNTS_FILE=`, fill in a team or two by hand, then drop it), never real people's assignments. Start that server with `BREVO_API_KEY=` too, since `.env` has the real key and the test accounts may carry a real address. Its `starred_tickets` and `seen_tickets` tables only exist once the server has started on it, so add the demo families (the part of `db/demo-tickets.sql` after `\connect onetouch_auth`) after that.
@@ -18471,6 +18635,7 @@ const FILES = [
   'checks/ticket-order.mjs', '.github/workflows/ci.yml', '.dockerignore', 'public/accessibility.js',
   'architecture.mjs', 'public/architecture.js', 'checks/architecture.mjs', 'health.mjs', 'issues.mjs', 'checks/issues.mjs', 'checks/attention.mjs',
   'usage.mjs', 'scripts/usage.mjs', 'scripts/eval-translation.mjs', 'checks/usage.mjs',
+  'demo/gate.config.json',
 ];
 
 // Not copied in, and why (shown in the appendix)
@@ -29905,6 +30070,7 @@ servicenow-sync/node_modules/
 .github/
 .claude/
 .cubestore/
+.cache/
 CLAUDE.local.md
 diag*.txt
 curl.txt
@@ -34154,7 +34320,7 @@ const fail = (text, detail) => {
   return problem;
 };
 
-// tools: { db(sql) -> rows, cubeQuery(query), fetch, listClaudeModels(), hasClaudeKey,
+// tools: { db(sql) -> rows, cubeQuery(query), fetch, listClaudeModels(), hasClaudeKey, claudeOffline,
 //          mailEnabled, publicUrl, metabaseUrl, dashboardsReady(), listening() }
 // Each check returns a sentence when all is well, or { off: sentence }, or throws.
 export function buildChecks(tools) {
@@ -34203,6 +34369,7 @@ export function buildChecks(tools) {
       id: 'claude', node: 'claude', name: 'AI assistant (Claude API)', keepMs: KEEP_OUTSIDE_MS, failText: 'The Claude API refused this server\'s key or didn\'t answer.',
       effect: 'New questions can\'t be answered. Repeated ones still can.',
       async run() {
+        if (tools.claudeOffline) return { off: 'Offline mode (DEMO_MODE=offline): Claude isn\'t asked, and only questions asked before are answered.' };
         if (!tools.hasClaudeKey) throw fail('No ANTHROPIC_API_KEY is set.');
         await tools.listClaudeModels();
         return 'The Claude API accepts this server\'s key.';
@@ -35003,6 +35170,31 @@ assert.equal(costUsd('claude-unknown', { input_tokens: 5, output_tokens: 5 }), n
 assert.equal(costUsd('claude-sonnet-5-5', null), null);
 
 console.log('usage: 9 checks passed');
+```
+
+<a id="b93"></a>
+### B.93 `demo/gate.config.json`
+
+```json
+{
+  "description": "Demo quality gate for OneTouch (i.c.stars T11A). Run from this repo: node ../tech-foundations/t11a-demo-engineering/tools/gate.js demo/gate.config.json. Paths are relative to this file. Run npm run warmup first: it checks the Claude key end to end (the gate can't send the workspace header Claude needs) and fills the saved answers this gate counts. The public address goes RED when the venue's internet is down: present from http://localhost:8000 on the server laptop and switch DEMO_MODE=offline.",
+  "env": {
+    "file": "../.env",
+    "required": [
+      "ANTHROPIC_API_KEY", "ANTHROPIC_WORKSPACE_ID", "POSTGRES_PASSWORD", "CUBEJS_API_SECRET",
+      "CUBE_DB_PASSWORD", "AUTH_DB_PASSWORD", "METABASE_EMBEDDING_SECRET", "WARMUP_PASSWORD",
+      "BREVO_API_KEY", "DEMO_MODE"
+    ]
+  },
+  "data": { "file": "../.cache/answers.json", "arrayPath": "answers", "minRecords": 100 },
+  "credentials": { "url": "https://api.brevo.com/v3/account", "header": "api-key", "envVar": "BREVO_API_KEY" },
+  "health": [
+    { "name": "OneTouch app (sign-in page)", "url": "http://localhost:8000/" },
+    { "name": "Cube (ticket data)", "url": "http://localhost:4000/readyz" },
+    { "name": "Metabase (dashboards)", "url": "http://localhost:3000/api/health" },
+    { "name": "Public address (Cloudflare tunnel)", "url": "https://onetouch.fyi/" }
+  ]
+}
 ```
 
 ## Appendix C: images

@@ -731,8 +731,10 @@ const ANSWER_CACHE_FILE = process.env.ANSWER_CACHE_FILE || '.cache/answers.json'
 // key -> { userTurn, content, parsed, explanations }; Map order = least recently used first
 const answerCache = new Map();
 
-// A changed prompt or output schema must not reuse translations made for the old one
-const PROMPT_VERSION = createHash('sha256').update(SYSTEM_PROMPT).update(JSON.stringify(OUTPUT_SCHEMA)).digest('hex').slice(0, 12);
+// A changed prompt, question wrapper or output schema must not reuse
+// translations made for the old one (they're saved across restarts)
+const PROMPT_VERSION = createHash('sha256').update(SYSTEM_PROMPT).update(String(buildUserMessage))
+  .update(JSON.stringify(OUTPUT_SCHEMA)).digest('hex').slice(0, 12);
 
 // Same question = same words, ignoring capitals, spacing and the closing "?",
 // asked on the same "today" (the turn Claude saw carries the date) of the same
