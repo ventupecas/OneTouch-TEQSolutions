@@ -345,7 +345,7 @@ function scopedRunner(scope) {
   return run;
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families', '/api/notifications', '/api/my-tickets', '/api/kpis', '/api/ticket-statuses', '/api/demo-tickets', '/api/architecture', '/api/issues'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families', '/api/notifications', '/api/my-tickets', '/api/kpis', '/api/ticket-statuses', '/api/demo-tickets', '/api/everyone-admin', '/api/architecture', '/api/issues'], requireLogin);
 
 // 🧊 Architecture (architecture.mjs): admins only, for everything under this
 // path. The page's script holds no facts, so this is the whole lock.
@@ -1891,6 +1891,19 @@ app.post('/api/demo-tickets/reset', async (req, res) => {
     res.json(done);
   } catch (error) {
     teamsFailed(res, error, 'Putting the demo tickets back');
+  }
+});
+
+// The permanent admins, after a presentation: { on } -> everyone is an admin, or
+// back to normal (teams.setEveryoneAdmin) -> { on, people }
+app.put('/api/everyone-admin', async (req, res) => {
+  if (typeof req.body?.on !== 'boolean') return res.status(400).json({ error: 'Say whether everyone is an admin: { "on": true } or { "on": false }.' });
+  try {
+    const done = await teams.setEveryoneAdmin(req.scope, req.body.on);
+    console.log(`👑 ${req.user.username} ${done.on ? `made everyone an admin (${done.people} accounts)` : 'put admins back to normal'}`);
+    res.json(done);
+  } catch (error) {
+    teamsFailed(res, error, 'Changing who is an admin');
   }
 });
 

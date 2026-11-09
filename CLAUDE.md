@@ -67,6 +67,12 @@ replacing that.
   gone) and undoes every status (`POST /api/ticket-statuses/undo-all`,
   `teams.undoAllStatuses`: all of `ticket_reports` and the 'report'
   notifications). Real tickets keep their teams and people.
+- **Everyone an admin, after a presentation** (the same card's "After the presentation",
+  `PUT /api/everyone-admin` `{ on }`, `teams.setEveryoneAdmin`): every account but the
+  service accounts gets an admin's scope (`access.admin`), so stakeholders can try every
+  feature. Only the permanent admins (`access.permanentAdmin`, `ADMIN_USERNAMES`) can
+  switch it; 🚩 reports still go only to them. Saved in `app_settings` ('everyone_admin'),
+  so it survives a restart. Teams, roles and assignments never change.
 
 **Assigned to me** (Home's first tab, `GET /api/my-tickets`): everyone's
 OneTouch tickets, most urgent first, then oldest (`ticketsByPriority` in

@@ -856,6 +856,17 @@ demo tickets back** puts the 11 [Demo] tickets back on no team, assigned to nobo
 statuses, notifications, stars and ticket results gone, ready to move to a team and hand out
 live. Every real ticket stays on its team, by family, with whoever has it. No restart needed.
 
+**After the presentation** (same card): **👑 Make everyone an admin** lets stakeholders try
+every feature. After asking, every account except the `warmup` service account gets an admin's
+access: every ticket, 🧊 Architecture, 📥 Not assigned yet, the Metabase dashboards over every
+ticket, and every admin change (moving families, teams and roles, assigning any ticket, these
+presentation buttons). People already signed in see the admin buttons when they reload the
+page. Only the permanent admins (`ADMIN_USERNAMES` in `teams.mjs`) can switch it, and
+**Back to normal** puts everyone back to their own tickets (project managers: their team's).
+Nobody's team, role or tickets change either way, 🚩 problem reports still go only to the
+permanent admins, and the switch is saved (`app_settings` in onetouch_auth), so a restart
+keeps it.
+
 **Clearing notifications.** Each notification in the 🔔 panel has a **Clear** button that
 takes it off the list, and **Clear all** (next to the ✕ at the top) clears every one after
 asking. Clear all only clears what the list was showing, so one that arrives at that moment
@@ -6815,7 +6826,7 @@ function scopedRunner(scope) {
   return run;
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families', '/api/notifications', '/api/my-tickets', '/api/kpis', '/api/ticket-statuses', '/api/demo-tickets', '/api/architecture', '/api/issues'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families', '/api/notifications', '/api/my-tickets', '/api/kpis', '/api/ticket-statuses', '/api/demo-tickets', '/api/everyone-admin', '/api/architecture', '/api/issues'], requireLogin);
 
 // 🧊 Architecture (architecture.mjs): admins only, for everything under this
 // path. The page's script holds no facts, so this is the whole lock.
@@ -8361,6 +8372,19 @@ app.post('/api/demo-tickets/reset', async (req, res) => {
     res.json(done);
   } catch (error) {
     teamsFailed(res, error, 'Putting the demo tickets back');
+  }
+});
+
+// The permanent admins, after a presentation: { on } -> everyone is an admin, or
+// back to normal (teams.setEveryoneAdmin) -> { on, people }
+app.put('/api/everyone-admin', async (req, res) => {
+  if (typeof req.body?.on !== 'boolean') return res.status(400).json({ error: 'Say whether everyone is an admin: { "on": true } or { "on": false }.' });
+  try {
+    const done = await teams.setEveryoneAdmin(req.scope, req.body.on);
+    console.log(`👑 ${req.user.username} ${done.on ? `made everyone an admin (${done.people} accounts)` : 'put admins back to normal'}`);
+    res.json(done);
+  } catch (error) {
+    teamsFailed(res, error, 'Changing who is an admin');
   }
 });
 
@@ -10618,6 +10642,8 @@ tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
 .presentation-steps li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px;
     padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
 .presentation-steps span { flex: 1 1 260px; }
+.presentation-steps li.everyone-admin-on { border-color: var(--accent); }
+.presentation-steps + h3 { margin-top: 18px; }
 
 /* Radio buttons drawn as pills and color swatches (the real input stays, for keyboards) */
 .choice-row { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -24364,7 +24390,48 @@ export async function ensureTeamsSchema() {
         GRANT SELECT ON ticket_access TO access_reader;
       END IF;
     END $$;
+    -- Switches an admin flips on the Team tab (today only 'everyone_admin')
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key         text PRIMARY KEY,
+      value       jsonb NOT NULL,
+      updated_at  timestamptz NOT NULL DEFAULT now(),
+      updated_by  integer REFERENCES users(id) ON DELETE SET NULL
+    );
   `);
+  const { rows: [s] } = await pool.query('SELECT value FROM app_settings WHERE key = \'everyone_admin\'');
+  everyoneAdmin = s?.value === true;
+  if (everyoneAdmin) console.log('👑 Everyone is an admin (the Team tab\'s "After the presentation" switches it back)');
+}
+
+// ---------------------------------------------------------------------
+// EVERYONE AN ADMIN, after a presentation, so stakeholders can try every
+// feature: every account but the service accounts gets an admin's scope
+// (every ticket, every admin page and change). Only the permanent admins
+// (ADMIN_USERNAMES) may switch it, and 🚩 problem reports still go only to
+// them (issues.mjs). Saved in app_settings, so it survives a restart.
+// ---------------------------------------------------------------------
+
+let everyoneAdmin = false;
+const isPermanentAdmin = user => ADMIN_USERNAMES.includes(user.username);
+
+// { on } -> { on, people }: how many accounts it makes admins
+export async function setEveryoneAdmin(scope, on) {
+  if (!scope.access.permanentAdmin) throw new AccessError('Only the permanent admins can switch that.');
+  if (typeof on !== 'boolean') throw new AccessError('Say whether everyone is an admin: { "on": true } or { "on": false }.');
+  await pool.query(
+    `INSERT INTO app_settings (key, value, updated_by) VALUES ('everyone_admin', $1::jsonb, $2)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`,
+    [JSON.stringify(on), scope.access.userId]);
+  everyoneAdmin = on;
+  changed();
+  return { on, people: await everyoneAdminCount() };
+}
+
+// The accounts the switch makes admins (not the permanent admins, who are already)
+async function everyoneAdminCount() {
+  const { rows: [r] } = await pool.query(
+    'SELECT count(*)::int AS n FROM users WHERE is_active AND username <> ALL($1::text[])', [[...ADMIN_USERNAMES, ...SERVICE_ACCOUNTS]]);
+  return r.n;
 }
 
 // Who someone is to the Metabase dashboards (a locked filter in their signed
@@ -24550,7 +24617,8 @@ export async function scopeFor(user) {
     'SELECT m.role, t.id, t.name FROM team_members m JOIN teams t ON t.id = m.team_id WHERE m.user_id = $1', [user.id]);
   const access = {
     userId: user.id,
-    admin: ADMIN_USERNAMES.includes(user.username),
+    admin: isPermanentAdmin(user) || (everyoneAdmin && !SERVICE_ACCOUNTS.includes(user.username)),
+    permanentAdmin: isPermanentAdmin(user),
     role: m?.role || null,
     team: m ? { id: m.id, name: m.name } : null,
   };
@@ -24730,7 +24798,10 @@ export async function listTeams(scope) {
               count(*) FILTER (WHERE f.team_id IS NOT NULL)::int AS on_team
          FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id WHERE a.number ~ $1`, [DEMO_TICKET]);
     const { rows: [s] } = await pool.query('SELECT count(DISTINCT number)::int AS tickets FROM ticket_reports');
-    result.presentation = { demo: { tickets: d.tickets, assigned: d.assigned, onTeam: d.on_team }, statuses: s.tickets };
+    result.presentation = {
+      demo: { tickets: d.tickets, assigned: d.assigned, onTeam: d.on_team }, statuses: s.tickets,
+      everyoneAdmin: { on: everyoneAdmin, people: await everyoneAdminCount(), canSwitch: access.permanentAdmin },
+    };
   }
   return result;
 }
@@ -26013,7 +26084,39 @@ function presentationHtml() {
         '<ul class="presentation-steps">' +
         `<li><span>${escapeHtml(statuses)}</span><button type="button" class="home-action danger" data-undo-statuses="${p.statuses}"${p.statuses ? '' : ' disabled'}>↩ Undo every status</button></li>` +
         `<li><span>${escapeHtml(demo)}</span><button type="button" class="home-action danger" data-reset-demo="${d.tickets}"${d.tickets ? '' : ' disabled'}>🧹 Put the demo tickets back</button></li>` +
-        '</ul>';
+        '</ul>' + everyoneAdminHtml(p.everyoneAdmin);
+}
+
+// 👑 After the presentation: everyone an admin, so stakeholders can try every
+// feature; only the permanent admins can switch it (teams.mjs setEveryoneAdmin)
+function everyoneAdminHtml(e) {
+    if (!e) return '';
+    const text = e.on
+        ? `Everyone is an admin: ${howMany(e.people, 'account sees', 'accounts see')} every ticket and every admin feature, and can make admin changes.`
+        : `Only the permanent admins see everything. Make everyone an admin so stakeholders can try every feature (${howMany(e.people, 'account', 'accounts')}).`;
+    const button = !e.canSwitch
+        ? '<span class="home-status">Only the permanent admins can switch this back.</span>'
+        : e.on
+            ? `<button type="button" class="home-action" data-everyone-admin="off" data-people="${e.people}">Back to normal</button>`
+            : `<button type="button" class="home-action danger" data-everyone-admin="on" data-people="${e.people}">👑 Make everyone an admin</button>`;
+    return '<h3>After the presentation</h3>' +
+        `<ul class="presentation-steps"><li${e.on ? ' class="everyone-admin-on"' : ''}><span>${escapeHtml(text)}</span>${button}</li></ul>`;
+}
+
+async function setEveryoneAdmin(on, people) {
+    const question = on
+        ? `Make everyone an admin? ${howMany(people, 'account', 'accounts')} will see every ticket, 🧊 Architecture and every admin card, and can move families, ` +
+            'change teams and roles, assign any ticket and undo statuses, until you switch it back. People already signed in see the admin buttons when they reload the page.'
+        : 'Back to normal? Everyone but the permanent admins goes back to seeing only their own tickets (project managers: their team\'s).';
+    if (!confirm(question)) return;
+    try {
+        const data = await teamsFetch('/api/everyone-admin', { method: 'PUT', body: JSON.stringify({ on }) });
+        if (!data) return;
+        showToast(data.on ? `Everyone is an admin (${howMany(data.people, 'account', 'accounts')})` : 'Back to normal: only the permanent admins see everything');
+        loadTeams();
+    } catch (err) {
+        showToast(`${err.message}`, 'error');
+    }
 }
 
 async function undoAllStatuses(count) {
@@ -26142,7 +26245,9 @@ document.getElementById('teams-view').addEventListener('click', e => {
     const undo = e.target.closest('[data-undo-statuses]');
     if (undo) { undoAllStatuses(Number(undo.dataset.undoStatuses)); return; }
     const demo = e.target.closest('[data-reset-demo]');
-    if (demo) resetDemoTickets(Number(demo.dataset.resetDemo));
+    if (demo) { resetDemoTickets(Number(demo.dataset.resetDemo)); return; }
+    const everyone = e.target.closest('[data-everyone-admin]');
+    if (everyone) setEveryoneAdmin(everyone.dataset.everyoneAdmin === 'on', Number(everyone.dataset.people));
 });
 
 // A name picked in a ticket's box gives it to them; in a family's, the whole family
@@ -26266,6 +26371,12 @@ replacing that.
   gone) and undoes every status (`POST /api/ticket-statuses/undo-all`,
   `teams.undoAllStatuses`: all of `ticket_reports` and the 'report'
   notifications). Real tickets keep their teams and people.
+- **Everyone an admin, after a presentation** (the same card's "After the presentation",
+  `PUT /api/everyone-admin` `{ on }`, `teams.setEveryoneAdmin`): every account but the
+  service accounts gets an admin's scope (`access.admin`), so stakeholders can try every
+  feature. Only the permanent admins (`access.permanentAdmin`, `ADMIN_USERNAMES`) can
+  switch it; 🚩 reports still go only to them. Saved in `app_settings` ('everyone_admin'),
+  so it survives a restart. Teams, roles and assignments never change.
 
 **Assigned to me** (Home's first tab, `GET /api/my-tickets`): everyone's
 OneTouch tickets, most urgent first, then oldest (`ticketsByPriority` in

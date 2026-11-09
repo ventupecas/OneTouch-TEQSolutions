@@ -645,7 +645,39 @@ function presentationHtml() {
         '<ul class="presentation-steps">' +
         `<li><span>${escapeHtml(statuses)}</span><button type="button" class="home-action danger" data-undo-statuses="${p.statuses}"${p.statuses ? '' : ' disabled'}>↩ Undo every status</button></li>` +
         `<li><span>${escapeHtml(demo)}</span><button type="button" class="home-action danger" data-reset-demo="${d.tickets}"${d.tickets ? '' : ' disabled'}>🧹 Put the demo tickets back</button></li>` +
-        '</ul>';
+        '</ul>' + everyoneAdminHtml(p.everyoneAdmin);
+}
+
+// 👑 After the presentation: everyone an admin, so stakeholders can try every
+// feature; only the permanent admins can switch it (teams.mjs setEveryoneAdmin)
+function everyoneAdminHtml(e) {
+    if (!e) return '';
+    const text = e.on
+        ? `Everyone is an admin: ${howMany(e.people, 'account sees', 'accounts see')} every ticket and every admin feature, and can make admin changes.`
+        : `Only the permanent admins see everything. Make everyone an admin so stakeholders can try every feature (${howMany(e.people, 'account', 'accounts')}).`;
+    const button = !e.canSwitch
+        ? '<span class="home-status">Only the permanent admins can switch this back.</span>'
+        : e.on
+            ? `<button type="button" class="home-action" data-everyone-admin="off" data-people="${e.people}">Back to normal</button>`
+            : `<button type="button" class="home-action danger" data-everyone-admin="on" data-people="${e.people}">👑 Make everyone an admin</button>`;
+    return '<h3>After the presentation</h3>' +
+        `<ul class="presentation-steps"><li${e.on ? ' class="everyone-admin-on"' : ''}><span>${escapeHtml(text)}</span>${button}</li></ul>`;
+}
+
+async function setEveryoneAdmin(on, people) {
+    const question = on
+        ? `Make everyone an admin? ${howMany(people, 'account', 'accounts')} will see every ticket, 🧊 Architecture and every admin card, and can move families, ` +
+            'change teams and roles, assign any ticket and undo statuses, until you switch it back. People already signed in see the admin buttons when they reload the page.'
+        : 'Back to normal? Everyone but the permanent admins goes back to seeing only their own tickets (project managers: their team\'s).';
+    if (!confirm(question)) return;
+    try {
+        const data = await teamsFetch('/api/everyone-admin', { method: 'PUT', body: JSON.stringify({ on }) });
+        if (!data) return;
+        showToast(data.on ? `Everyone is an admin (${howMany(data.people, 'account', 'accounts')})` : 'Back to normal: only the permanent admins see everything');
+        loadTeams();
+    } catch (err) {
+        showToast(`${err.message}`, 'error');
+    }
 }
 
 async function undoAllStatuses(count) {
@@ -774,7 +806,9 @@ document.getElementById('teams-view').addEventListener('click', e => {
     const undo = e.target.closest('[data-undo-statuses]');
     if (undo) { undoAllStatuses(Number(undo.dataset.undoStatuses)); return; }
     const demo = e.target.closest('[data-reset-demo]');
-    if (demo) resetDemoTickets(Number(demo.dataset.resetDemo));
+    if (demo) { resetDemoTickets(Number(demo.dataset.resetDemo)); return; }
+    const everyone = e.target.closest('[data-everyone-admin]');
+    if (everyone) setEveryoneAdmin(everyone.dataset.everyoneAdmin === 'on', Number(everyone.dataset.people));
 });
 
 // A name picked in a ticket's box gives it to them; in a family's, the whole family

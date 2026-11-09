@@ -137,7 +137,48 @@ export async function ensureTeamsSchema() {
         GRANT SELECT ON ticket_access TO access_reader;
       END IF;
     END $$;
+    -- Switches an admin flips on the Team tab (today only 'everyone_admin')
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key         text PRIMARY KEY,
+      value       jsonb NOT NULL,
+      updated_at  timestamptz NOT NULL DEFAULT now(),
+      updated_by  integer REFERENCES users(id) ON DELETE SET NULL
+    );
   `);
+  const { rows: [s] } = await pool.query('SELECT value FROM app_settings WHERE key = \'everyone_admin\'');
+  everyoneAdmin = s?.value === true;
+  if (everyoneAdmin) console.log('👑 Everyone is an admin (the Team tab\'s "After the presentation" switches it back)');
+}
+
+// ---------------------------------------------------------------------
+// EVERYONE AN ADMIN, after a presentation, so stakeholders can try every
+// feature: every account but the service accounts gets an admin's scope
+// (every ticket, every admin page and change). Only the permanent admins
+// (ADMIN_USERNAMES) may switch it, and 🚩 problem reports still go only to
+// them (issues.mjs). Saved in app_settings, so it survives a restart.
+// ---------------------------------------------------------------------
+
+let everyoneAdmin = false;
+const isPermanentAdmin = user => ADMIN_USERNAMES.includes(user.username);
+
+// { on } -> { on, people }: how many accounts it makes admins
+export async function setEveryoneAdmin(scope, on) {
+  if (!scope.access.permanentAdmin) throw new AccessError('Only the permanent admins can switch that.');
+  if (typeof on !== 'boolean') throw new AccessError('Say whether everyone is an admin: { "on": true } or { "on": false }.');
+  await pool.query(
+    `INSERT INTO app_settings (key, value, updated_by) VALUES ('everyone_admin', $1::jsonb, $2)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`,
+    [JSON.stringify(on), scope.access.userId]);
+  everyoneAdmin = on;
+  changed();
+  return { on, people: await everyoneAdminCount() };
+}
+
+// The accounts the switch makes admins (not the permanent admins, who are already)
+async function everyoneAdminCount() {
+  const { rows: [r] } = await pool.query(
+    'SELECT count(*)::int AS n FROM users WHERE is_active AND username <> ALL($1::text[])', [[...ADMIN_USERNAMES, ...SERVICE_ACCOUNTS]]);
+  return r.n;
 }
 
 // Who someone is to the Metabase dashboards (a locked filter in their signed
@@ -323,7 +364,8 @@ export async function scopeFor(user) {
     'SELECT m.role, t.id, t.name FROM team_members m JOIN teams t ON t.id = m.team_id WHERE m.user_id = $1', [user.id]);
   const access = {
     userId: user.id,
-    admin: ADMIN_USERNAMES.includes(user.username),
+    admin: isPermanentAdmin(user) || (everyoneAdmin && !SERVICE_ACCOUNTS.includes(user.username)),
+    permanentAdmin: isPermanentAdmin(user),
     role: m?.role || null,
     team: m ? { id: m.id, name: m.name } : null,
   };
@@ -503,7 +545,10 @@ export async function listTeams(scope) {
               count(*) FILTER (WHERE f.team_id IS NOT NULL)::int AS on_team
          FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id WHERE a.number ~ $1`, [DEMO_TICKET]);
     const { rows: [s] } = await pool.query('SELECT count(DISTINCT number)::int AS tickets FROM ticket_reports');
-    result.presentation = { demo: { tickets: d.tickets, assigned: d.assigned, onTeam: d.on_team }, statuses: s.tickets };
+    result.presentation = {
+      demo: { tickets: d.tickets, assigned: d.assigned, onTeam: d.on_team }, statuses: s.tickets,
+      everyoneAdmin: { on: everyoneAdmin, people: await everyoneAdminCount(), canSwitch: access.permanentAdmin },
+    };
   }
   return result;
 }
