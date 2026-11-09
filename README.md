@@ -1097,11 +1097,12 @@ last 500 such questions in memory; restarting it starts the list over.
 
 1. **Claude translates it**, unless it is a repeated question (see above), in which case
    the earlier translation is reused and the steps below still run. The model is
-   `claude-sonnet-5-5` unless `CLAUDE_MODEL` says otherwise, and it returns a structured JSON answer whose shape the API enforces: an `intent`, up
+   `claude-sonnet-5-5` unless `CLAUDE_MODEL` says otherwise, thinking at `low` effort unless `CLAUDE_EFFORT`
+   says otherwise (see "What the AI assistant costs"), and it returns a structured JSON answer whose shape the API enforces: an `intent`, up
    to one query per table, a one-sentence restatement, and the list of assumptions made.
    The instructions (`business_logic.mjs`) describe the six tables, every column, the
    exact values coded columns hold, ITIL vocabulary, and worked examples. They are sent
-   with prompt caching, so repeated questions cost less. Today's date is added to every
+   with prompt caching, kept for an hour, so repeated questions cost less. Today's date is added to every
    question (or `ASSUME_TODAY`, see 2.9).
 2. **The server checks Claude's answer** (`normalizeAndValidate`) before anything runs:
    - only known columns, the `count` measure, and these operators: equals, notEquals,
@@ -1273,7 +1274,8 @@ why instead of just saying "no records" (`empty_results.mjs`):
 2. It removes the filters one at a time (up to 6) and counts what each removal brings
    back. Where something comes back, it groups those rows by the removed filter's column
    (dates by month, top 8 values) to show what the filter was hiding.
-3. Claude turns those facts into 1 to 3 plain sentences that start with the direct
+3. Claude (`claude-haiku-5-5` unless `CLAUDE_SMALL_MODEL` says otherwise: it explained these as
+   well as Sonnet in the eval, for about a twentieth of the price) turns those facts into 1 to 3 plain sentences that start with the direct
    answer, e.g. "There are no open P1 incidents right now: all 3 P1 incidents in the
    data are closed." If a table is empty because no data was loaded, it says so. It ends
    with a nearby question that would return data.
@@ -1533,7 +1535,7 @@ inside the data. Leave it empty to use the real date.
 | Starts with | Means |
 |---|---|
 | 💬 | A question arrived, with its turn number |
-| 🧠 | Claude's token use: input, cached, output |
+| 🧠 | Claude's token use: input, read from the cache, written to the cache, output, and what it cost |
 | ⚡ | A repeated question answered without Claude (its earlier translation reused) |
 | 🤖 | Each Cube query that ran |
 | 🙋 | A clarify or unsupported answer |
@@ -1542,6 +1544,50 @@ inside the data. Leave it empty to use the real date.
 | 🔐 | Sign-ins (with the address), sign-in failures, account database status, sessions cleaned up |
 | 📊 | Metabase unreachable |
 | ⚠️ / 📋 / ❌ | Validator rejections, failures, a missing API key |
+
+### What the AI assistant costs
+
+Every call to Claude is saved in the `claude_usage` table (`usage.mjs`: when, which
+model and effort, who asked, the question, token counts, its cost in dollars, how long it
+took; kept 180 days). To see the bill per day:
+
+```
+docker exec analytics_node_app npm run usage          # last 30 days
+docker exec analytics_node_app npm run usage -- 7     # last 7 days
+```
+
+Where the money goes: the business logic is about 22,400 tokens and goes with every
+question. Read from the cache it costs about $0.0045; written to it (the first question
+after the cache expires) about $0.09, since it's kept an hour (2x the input price instead
+of 1.25x for 5 minutes; one write an hour is cheaper than one every 5 quiet minutes).
+Claude's answer is only about 250 tokens. So a question costs about $0.007 with a warm
+cache, and the first one in an hour about $0.09. A repeated question costs nothing.
+
+**Checking a cheaper setting:** `scripts/eval-translation.mjs` asks the 55 warmup questions
+and 4 follow-up conversations with several settings, runs every query in Cube, and compares
+each answer with today's setting (the same query, the same rows, or different, listed side
+by side for a person to judge). Today's setting runs twice, so normal variation is known.
+It costs about $2 and runs only with `--yes`:
+
+```
+docker exec analytics_node_app npm run eval-ai -- --yes
+docker exec analytics_node_app npm run eval-ai -- --yes --only=sonnet-low --limit=10
+```
+
+Results go to `eval-results/` (not in git). The run on 9 Nov 2026 (66 questions):
+
+| Setting | Same as Sonnet at high (query or rows) | Different | Cost a question (warm cache) | Median time |
+|---|---|---|---|---|
+| Sonnet 5.5, high (the setting before), asked again | 63 | 3 | $0.0075 | 2.1 s |
+| Sonnet 5.5, medium | 61 | 5 | $0.0073 | 2.1 s |
+| Sonnet 5.5, **low** (chosen) | 64 | 2 | $0.0072 | 2.1 s |
+| Haiku 5.5, medium | 58 | 8 | $0.0005 | 3.2 s |
+
+Lower effort barely changes the price, because Claude hardly thinks on these questions at
+any effort. Haiku is about 15 times cheaper but slower, and differs more often (some
+answers better, e.g. counting changes too in "tickets at Milwaukee Brewery", one worse:
+it dropped "still open" from "requests still waiting for approval"). To try it:
+`CLAUDE_MODEL=claude-haiku-5-5` in `.env` and restart.
 
 ## 2.11 Development tools
 
@@ -1705,6 +1751,8 @@ Fill in `.env`:
 | `METABASE_ADMIN_EMAIL`, `METABASE_ADMIN_PASSWORD` | the Metabase admin login to create (password at least 8 characters) |
 | `ASSUME_TODAY` | optional, e.g. `2026-09-02`, so "last month" falls inside the export (roughly 2026-06-01 to 2026-09-01) |
 | `CLAUDE_MODEL` | optional; empty means `claude-sonnet-5-5` |
+| `CLAUDE_EFFORT` | optional; `low` (the default), `medium` or `high`: how hard Claude thinks before translating a question |
+| `CLAUDE_SMALL_MODEL` | optional; empty means `claude-haiku-5-5`, used for the empty-result explanations |
 
 A random value: `node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"`
 
@@ -2336,6 +2384,10 @@ Create each file at the path shown, with exactly this content. Files are in the 
 - [B.86 `issues.mjs`](#b86)
 - [B.87 `checks/issues.mjs`](#b87)
 - [B.88 `checks/attention.mjs`](#b88)
+- [B.89 `usage.mjs`](#b89)
+- [B.90 `scripts/usage.mjs`](#b90)
+- [B.91 `scripts/eval-translation.mjs`](#b91)
+- [B.92 `checks/usage.mjs`](#b92)
 
 <a id="b1"></a>
 ### B.1 `.gitignore`
@@ -2383,6 +2435,9 @@ desktop.ini
 
 # 📝 Personal Claude Code notes: our chats and progress (CLAUDE.local.md), never shared
 CLAUDE.local.md
+
+# AI assistant evals (scripts/eval-translation.mjs): answers and costs, kept locally
+eval-results/
 ```
 
 <a id="b2"></a>
@@ -2491,7 +2546,7 @@ public/vendor/** -text
     "wrappy": "^1.0.2"
   },
   "scripts": {
-    "test": "node checks/ticket-order.mjs && node checks/architecture.mjs && node checks/issues.mjs && node checks/attention.mjs",
+    "test": "node checks/ticket-order.mjs && node checks/architecture.mjs && node checks/issues.mjs && node checks/attention.mjs && node checks/usage.mjs",
     "build": "node scripts/check.mjs",
     "check": "node scripts/check.mjs",
     "docs": "node scripts/build-docs.mjs",
@@ -2500,7 +2555,9 @@ public/vendor/** -text
     "remote": "node remote.mjs",
     "share": "node scripts/share.mjs",
     "warmup": "node scripts/warmup.mjs",
-    "mail-test": "node scripts/mail-test.mjs"
+    "mail-test": "node scripts/mail-test.mjs",
+    "usage": "node scripts/usage.mjs",
+    "eval-ai": "node scripts/eval-translation.mjs"
   },
   "repository": {
     "type": "git",
@@ -2530,6 +2587,10 @@ CUBE_API_URL=http://localhost:4000/cubejs-api/v1/load
 ASSUME_TODAY=
 # Optional: override the Claude model used for translation (defaults to claude-sonnet-5-5).
 CLAUDE_MODEL=
+# low (default) | medium | high: how hard Claude thinks before translating a question
+CLAUDE_EFFORT=
+# Model for the short "why nothing was found" explanations (default claude-haiku-5-5)
+CLAUDE_SMALL_MODEL=
 
 # Database / Cube secrets (docker-compose.yml reads these; it refuses to start without them).
 # Long random values, e.g.: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
@@ -5176,9 +5237,11 @@ If a table is empty because no data is loaded, say the data has not been loaded 
 End with one short suggestion of a nearby question that would return data, when there is one. Use only the facts given; do not guess.`;
 
 // Short explanation for the user; falls back to plain facts if Claude can't answer
-export async function explainEmpty({ anthropic, model, question, searchedFor, facts }) {
+// onUsage(usage, ms): called with the call's token counts (usage.mjs saves them)
+export async function explainEmpty({ anthropic, model, question, searchedFor, facts, onUsage }) {
   const fallback = `No matching records were found. ${facts.filter(f => / runs from | is empty/.test(f)).join(' ')}`.trim();
   try {
+    const started = Date.now();
     const message = await anthropic.messages.create({
       model,
       max_tokens: 2000,
@@ -5189,6 +5252,7 @@ export async function explainEmpty({ anthropic, model, question, searchedFor, fa
         content: `Question: """${question}"""\nWhat was searched for: ${searchedFor}\n\nFacts:\n${facts.map(f => `- ${f}`).join('\n')}`,
       }],
     });
+    onUsage?.(message.usage, Date.now() - started);
     if (message.stop_reason === 'refusal') return fallback;
     const text = message.content.filter(b => b.type === 'text').map(b => b.text).join('').trim();
     return text || fallback;
@@ -6435,6 +6499,8 @@ import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs'
 import { architectureMap, pushState } from './architecture.mjs';
 import { makeHealth, noteResponse } from './health.mjs';
 import * as issues from './issues.mjs';
+import * as usage from './usage.mjs';
+import { costUsd } from './usage.mjs';
 
 dotenv.config();
 
@@ -6998,6 +7064,11 @@ const anthropic = new Anthropic({
 });
 
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-5-5';
+// How hard Claude thinks before translating a question (low | medium | high).
+// Chosen with scripts/eval-translation.mjs: see README "What the AI assistant costs".
+const CLAUDE_EFFORT = ['low', 'medium', 'high', 'xhigh', 'max'].includes(process.env.CLAUDE_EFFORT) ? process.env.CLAUDE_EFFORT : 'low';
+// The short "why nothing was found" explanations need no more than this
+const CLAUDE_SMALL_MODEL = process.env.CLAUDE_SMALL_MODEL || 'claude-haiku-5-5';
 
 // The CSV export is a frozen snapshot (roughly 2026-06-01 to 2026-09-01).
 // Relative phrases like "last month" are computed from TODAY, which drifts
@@ -7049,18 +7120,22 @@ async function translateToQuery(conversation, userPrompt) {
   const note = conversation.pendingNote ? `[Result of your previous answer: ${conversation.pendingNote}]\n\n` : '';
   const userTurn = { role: 'user', content: note + buildUserMessage(userPrompt, referenceToday()) };
 
+  const started = Date.now();
   const stream = anthropic.messages.stream({
     model: CLAUDE_MODEL,
     max_tokens: 4000,
     system: [
-      { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+      // Kept an hour (writing it costs 2x instead of 1.25x, but questions are
+      // often more than 5 minutes apart, and each miss rewrites ~15k tokens)
+      { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral', ttl: '1h' } },
     ],
     // Caches the conversation so far, so each follow-up only pays full price for the new turn
     cache_control: { type: 'ephemeral' },
     messages: [...conversation.messages, userTurn],
-    output_config: { format: { type: 'json_schema', schema: OUTPUT_SCHEMA } },
+    output_config: { format: { type: 'json_schema', schema: OUTPUT_SCHEMA }, effort: CLAUDE_EFFORT },
   });
   const message = await stream.finalMessage();
+  const ms = Date.now() - started;
 
   // A failed call leaves the conversation as it was, so the user can just ask again
   if (message.stop_reason === 'refusal') {
@@ -7079,7 +7154,7 @@ async function translateToQuery(conversation, userPrompt) {
   conversation.turns += 1;
   conversation.pendingNote = null;
 
-  return { parsed, usage: message.usage, memoryReset, userTurn, content: message.content };
+  return { parsed, usage: message.usage, ms, memoryReset, userTurn, content: message.content };
 }
 
 // =====================================================================
@@ -7255,7 +7330,8 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
       const t = await translateToQuery(conversation, userPrompt);
       ({ parsed, memoryReset } = t);
       fresh = { userTurn: t.userTurn, content: t.content, parsed };
-      console.log(`🧠 tokens in=${t.usage.input_tokens} cached=${t.usage.cache_read_input_tokens ?? 0} out=${t.usage.output_tokens}`);
+      console.log(`🧠 tokens in=${t.usage.input_tokens} cached=${t.usage.cache_read_input_tokens ?? 0} written=${t.usage.cache_creation_input_tokens ?? 0} out=${t.usage.output_tokens} $${(costUsd(CLAUDE_MODEL, t.usage) ?? 0).toFixed(4)}`);
+      usage.recordUsage({ kind: 'translate', model: CLAUDE_MODEL, effort: CLAUDE_EFFORT, userId: user.id, question: userPrompt, usage: t.usage, ms: t.ms });
     }
     remembered = true;
     // Timing and whether Claude was skipped, for the page's "Answered in …" line
@@ -7327,7 +7403,10 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
         if (!scope.all && hiddenEach) facts.push('No ticket in the whole data matches either, not even one this person cannot see: say plainly that the data has none, without mentioning permissions.');
         else if (!scope.all) facts.push(`This person only sees some tickets: ${teams.scopeNote(scope)}`);
         console.log('🔎 Empty result facts:\n   ' + facts.join('\n   '));
-        explanation = await explainEmpty({ anthropic, model: CLAUDE_MODEL, question: userPrompt, searchedFor: verdict.message, facts });
+        explanation = await explainEmpty({
+          anthropic, model: CLAUDE_SMALL_MODEL, question: userPrompt, searchedFor: verdict.message, facts,
+          onUsage: (u, ms) => usage.recordUsage({ kind: 'explain', model: CLAUDE_SMALL_MODEL, effort: 'low', userId: user.id, question: userPrompt, usage: u, ms }),
+        });
         console.log(`🔎 Explained: ${explanation}`);
         if (cached) cached.explanations = { ...cached.explanations, [scope.key]: explanation };
       } catch (error) {
@@ -8360,6 +8439,7 @@ async function prepareAccounts(attempt = 1) {
     await teams.ensureTeamsSchema();
     await notifications.ensureNotificationsSchema();
     await issues.ensureIssuesSchema();
+    await usage.ensureUsageSchema();
   } catch (error) {
     const wait = Math.min(attempt * 2, 15);
     console.error(`🔐 Account database not reachable yet (${error.message}); retrying in ${wait}s`);
@@ -18331,6 +18411,7 @@ const FILES = [
   'servicenow-sync/servicenow-blueprint.md',
   'checks/ticket-order.mjs', '.github/workflows/ci.yml', '.dockerignore', 'public/accessibility.js',
   'architecture.mjs', 'public/architecture.js', 'checks/architecture.mjs', 'health.mjs', 'issues.mjs', 'checks/issues.mjs', 'checks/attention.mjs',
+  'usage.mjs', 'scripts/usage.mjs', 'scripts/eval-translation.mjs', 'checks/usage.mjs',
 ];
 
 // Not copied in, and why (shown in the appendix)
@@ -34203,6 +34284,444 @@ check('a flag says why', flagged('CHG0000001', true)[0].value, '3.0 days');
 
 if (failures) process.exit(1);
 console.log('Attention flags: all correct.');
+```
+
+<a id="b89"></a>
+### B.89 `usage.mjs`
+
+```js
+// =====================================================================
+// CLAUDE API USAGE: every call the server makes to Claude (translating a
+// question, explaining an empty result) is saved with its token counts and
+// what it cost, so the bill can be checked against real use:
+//   docker exec analytics_node_app npm run usage            (last 30 days)
+//   docker exec analytics_node_app npm run usage -- 7       (last 7 days)
+// Rows older than KEEP_DAYS are deleted at start. A failure to save one never
+// affects the answer.
+// =====================================================================
+
+// Loaded on first use, so costUsd works without the database (checks/usage.mjs)
+const db = async () => (await import('./auth.mjs')).pool;
+
+const KEEP_DAYS = 180;
+
+// US dollars per million tokens (Anthropic's prices; Haiku's are for prompts under 100K tokens).
+// A model missing here is saved without a cost.
+const PRICES = {
+  'claude-sonnet-5-5': { input: 2, output: 10, cacheRead: 0.2, cacheWrite5m: 2.5, cacheWrite1h: 4 },
+  'claude-haiku-5-5': { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite5m: 0.125, cacheWrite1h: 0.2 },
+  'claude-opus-5-5': { input: 4, output: 20, cacheRead: 0.2, cacheWrite5m: 5, cacheWrite1h: 8 },
+};
+
+// What one call cost, from the API's usage object; null for an unknown model
+export function costUsd(model, usage) {
+  const p = PRICES[model];
+  if (!p || !usage) return null;
+  const written = usage.cache_creation_input_tokens || 0;
+  // Newer responses split cache writes by how long they're kept
+  const w1h = usage.cache_creation?.ephemeral_1h_input_tokens ?? 0;
+  const w5m = usage.cache_creation ? (usage.cache_creation.ephemeral_5m_input_tokens ?? 0) : written;
+  return ((usage.input_tokens || 0) * p.input
+    + (usage.output_tokens || 0) * p.output
+    + (usage.cache_read_input_tokens || 0) * p.cacheRead
+    + w5m * p.cacheWrite5m + w1h * p.cacheWrite1h) / 1e6;
+}
+
+export async function ensureUsageSchema() {
+  await (await db()).query(`
+    CREATE TABLE IF NOT EXISTS claude_usage (
+      id           bigserial PRIMARY KEY,
+      at           timestamptz NOT NULL DEFAULT now(),
+      kind         text NOT NULL,              -- 'translate' | 'explain'
+      model        text NOT NULL,
+      effort       text,
+      user_id      integer REFERENCES users(id) ON DELETE SET NULL,
+      question     text,
+      input        integer NOT NULL,
+      cache_read   integer NOT NULL,
+      cache_write  integer NOT NULL,
+      output       integer NOT NULL,
+      cost_usd     numeric(10, 6),
+      ms           integer
+    );
+    CREATE INDEX IF NOT EXISTS claude_usage_at_idx ON claude_usage (at);
+  `);
+  await (await db()).query(`DELETE FROM claude_usage WHERE at < now() - make_interval(days => $1)`, [KEEP_DAYS]);
+}
+
+// Saves one call; never throws
+export async function recordUsage({ kind, model, effort = null, userId = null, question = null, usage, ms = null }) {
+  if (!usage) return;
+  try {
+    await (await db()).query(
+      `INSERT INTO claude_usage (kind, model, effort, user_id, question, input, cache_read, cache_write, output, cost_usd, ms)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [kind, model, effort, userId, question ? question.slice(0, 2000) : null,
+        usage.input_tokens || 0, usage.cache_read_input_tokens || 0, usage.cache_creation_input_tokens || 0,
+        usage.output_tokens || 0, costUsd(model, usage), ms]);
+  } catch (error) {
+    console.error('🧾 Could not save the Claude usage:', error.message);
+  }
+}
+
+// Per day and in all, for the last `days` days
+export async function usageReport(days = 30) {
+  const { rows } = await (await db()).query(`
+    SELECT to_char(date_trunc('day', at), 'YYYY-MM-DD') AS day, kind, model, coalesce(effort, '-') AS effort,
+           count(*)::int AS calls,
+           count(*) FILTER (WHERE cache_read > 0)::int AS cache_hits,
+           count(*) FILTER (WHERE cache_write > 0)::int AS cache_writes,
+           round(avg(output))::int AS avg_output,
+           round(avg(ms))::int AS avg_ms,
+           round(sum(cost_usd), 4)::float AS cost,
+           round(avg(cost_usd), 4)::float AS avg_cost
+      FROM claude_usage
+     WHERE at >= now() - make_interval(days => $1)
+     GROUP BY 1, 2, 3, 4 ORDER BY 1, 2, 3, 4`, [days]);
+  return rows;
+}
+```
+
+<a id="b90"></a>
+### B.90 `scripts/usage.mjs`
+
+```js
+// What the Claude API cost, per day (see usage.mjs):
+//   docker exec analytics_node_app npm run usage          (last 30 days)
+//   docker exec analytics_node_app npm run usage -- 7     (last 7 days)
+
+import dotenv from 'dotenv';
+dotenv.config();
+const { usageReport } = await import('../usage.mjs');
+const { pool } = await import('../auth.mjs');
+
+const days = Math.max(1, Math.min(365, Number(process.argv[2]) || 30));
+const rows = await usageReport(days);
+if (!rows.length) {
+  console.log(`No Claude API calls in the last ${days} days.`);
+} else {
+  console.table(rows);
+  const total = rows.reduce((a, r) => a + (r.cost || 0), 0);
+  const calls = rows.reduce((a, r) => a + r.calls, 0);
+  const hits = rows.reduce((a, r) => a + r.cache_hits, 0);
+  console.log(`Last ${days} days: ${calls} calls, $${total.toFixed(2)} in all, $${(total / calls).toFixed(4)} a call; the business-logic prompt came from the cache on ${Math.round(100 * hits / calls)}% of calls.`);
+}
+await pool.end?.();
+```
+
+<a id="b91"></a>
+### B.91 `scripts/eval-translation.mjs`
+
+```js
+// =====================================================================
+// EVAL: does a cheaper setting still translate questions the same way?
+//
+// Asks the warmup questions (scripts/warmup-questions.txt) and a few
+// follow-up conversations with several model / effort settings, exactly as
+// translateToQuery in server.mjs does (same system prompt, schema, validator,
+// conversation and "[Result of your previous answer …]" notes). Each answer
+// is compared with today's setting: the same query, or the same rows when
+// both queries are run in Cube, or different (listed for a person to judge).
+// Today's setting runs twice, so the normal run-to-run variation is known.
+//
+// It calls the Claude API (real money: about $5-8 for every setting), so it
+// only runs with --yes:
+//   docker exec analytics_node_app node scripts/eval-translation.mjs --yes
+// Options: --only=sonnet-low,haiku-medium  --limit=10  --max-cost=15
+// Results: eval-results/translation-<time>.json and .md (not in git).
+// Runs as an admin would (every ticket), and never touches onetouch_auth.
+// =====================================================================
+
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHmac } from 'node:crypto';
+import dotenv from 'dotenv';
+import Anthropic from '@anthropic-ai/sdk';
+import { buildSystemPrompt, buildUserMessage, normalizeAndValidate, OUTPUT_SCHEMA } from '../business_logic.mjs';
+import { diagnoseEmpty, explainEmpty, isEmptyResult } from '../empty_results.mjs';
+import { costUsd } from '../usage.mjs';
+
+dotenv.config();
+
+const args = Object.fromEntries(process.argv.slice(2).map(a => {
+  const [k, v] = a.replace(/^--/, '').split('=');
+  return [k, v ?? true];
+}));
+if (!args.yes) {
+  console.log('This asks Claude about 300 questions (about $5-8 per setting). Run again with --yes to go ahead.');
+  process.exit(1);
+}
+
+const SONNET = 'claude-sonnet-5-5';
+const HAIKU = 'claude-haiku-5-5';
+// effort undefined = what server.mjs sends today (Sonnet 5.5's default, high)
+const ALL_SETTINGS = [
+  { name: 'today', model: SONNET, effort: undefined, note: 'Sonnet 5.5, no effort set (high)' },
+  { name: 'today-again', model: SONNET, effort: undefined, note: 'the same, a second time: normal variation' },
+  { name: 'sonnet-medium', model: SONNET, effort: 'medium' },
+  { name: 'sonnet-low', model: SONNET, effort: 'low' },
+  { name: 'haiku-medium', model: HAIKU, effort: 'medium' },
+];
+const BASELINE = 'today';
+const only = args.only ? String(args.only).split(',') : null;
+const SETTINGS = ALL_SETTINGS.filter(s => !only || only.includes(s.name) || s.name === BASELINE);
+const MAX_COST = Number(args['max-cost'] || 15);
+
+// ---------------------------------------------------------------------
+// Questions: each warmup question on its own, plus follow-up conversations
+// ---------------------------------------------------------------------
+const warmup = readFileSync(new URL('./warmup-questions.txt', import.meta.url), 'utf8')
+  .split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+const FOLLOW_UPS = [
+  ['How many open incidents are there by priority?', 'Only the P1s and P2s', 'Same but for changes, by risk'],
+  ['List the emergency changes', 'Which of those caused incidents?'],
+  ['What are the top 5 most requested catalog items?', 'How many of the first one are still open?'],
+  ['Which assignment groups have the most open incidents?', 'List the P2s for the top one', 'How many of them breached SLA?'],
+];
+let chains = [...warmup.map(q => [q]), ...FOLLOW_UPS];
+if (args.limit) chains = chains.slice(0, Number(args.limit));
+const steps = chains.flatMap((chain, c) => chain.map((question, t) => ({ id: `${c}.${t}`, chain: c, turn: t, question })));
+
+// ---------------------------------------------------------------------
+// Claude and Cube, as server.mjs uses them
+// ---------------------------------------------------------------------
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+  defaultHeaders: process.env.ANTHROPIC_WORKSPACE_ID ? { 'anthropic-workspace-id': process.env.ANTHROPIC_WORKSPACE_ID } : undefined,
+  maxRetries: 6,
+});
+const SYSTEM_PROMPT = buildSystemPrompt();
+const pinned = (process.env.ASSUME_TODAY || '').trim();
+const TODAY = /^\d{4}-\d{2}-\d{2}$/.test(pinned) ? new Date(`${pinned}T12:00:00Z`) : new Date();
+
+let spent = 0;
+function charge(model, usage) {
+  const c = costUsd(model, usage) ?? 0;
+  spent += c;
+  if (spent > MAX_COST) {
+    console.error(`💸 Stopped: over the $${MAX_COST} limit ($${spent.toFixed(2)}).`);
+    process.exit(2);
+  }
+  return c;
+}
+
+async function translate(setting, conversation, question) {
+  const note = conversation.pendingNote ? `[Result of your previous answer: ${conversation.pendingNote}]\n\n` : '';
+  const userTurn = { role: 'user', content: note + buildUserMessage(question, TODAY) };
+  const started = Date.now();
+  const message = await anthropic.messages.stream({
+    model: setting.model,
+    max_tokens: 4000,
+    system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+    cache_control: { type: 'ephemeral' },
+    messages: [...conversation.messages, userTurn],
+    output_config: { format: { type: 'json_schema', schema: OUTPUT_SCHEMA }, ...(setting.effort ? { effort: setting.effort } : {}) },
+  }).finalMessage();
+  const ms = Date.now() - started;
+  const cost = charge(setting.model, message.usage);
+  if (message.stop_reason !== 'end_turn') return { error: `stopped: ${message.stop_reason}`, usage: message.usage, cost, ms };
+  const parsed = JSON.parse(message.content.filter(b => b.type === 'text').map(b => b.text).join(''));
+  conversation.messages.push(userTurn, { role: 'assistant', content: message.content });
+  conversation.pendingNote = null;
+  return { parsed, usage: message.usage, cost, ms };
+}
+
+const CUBE_URL = process.env.CUBE_API_URL || 'http://localhost:4000/cubejs-api/v1/load';
+function cubeToken() {
+  const now = Math.floor(Date.now() / 1000);
+  const b64 = o => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const body = `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ iat: now, exp: now + 3600 })}`;
+  return `${body}.${createHmac('sha256', process.env.CUBEJS_API_SECRET).update(body).digest('base64url')}`;
+}
+const cubeCache = new Map();
+async function runCube(query) {
+  const key = JSON.stringify(query);
+  if (!cubeCache.has(key)) {
+    cubeCache.set(key, (async () => {
+      const giveUpAt = Date.now() + 120_000;
+      for (;;) {
+        const res = await fetch(CUBE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: cubeToken() }, body: JSON.stringify({ query }) });
+        const data = await res.json();
+        if (data.error === 'Continue wait' && Date.now() < giveUpAt) { await new Promise(r => setTimeout(r, 500)); continue; }
+        if (data.error) throw new Error(data.error);
+        return data.data || [];
+      }
+    })());
+  }
+  return cubeCache.get(key);
+}
+
+// ---------------------------------------------------------------------
+// One setting through every question
+// ---------------------------------------------------------------------
+async function runSetting(setting) {
+  const out = {};
+  for (const chain of chains.map((_, c) => steps.filter(s => s.chain === c))) {
+    const conversation = { messages: [], pendingNote: null };
+    for (const step of chain) {
+      const r = { question: step.question };
+      try {
+        const t = await translate(setting, conversation, step.question);
+        Object.assign(r, { usage: t.usage, cost: t.cost, ms: t.ms });
+        if (t.error) { r.outcome = 'error'; r.error = t.error; out[step.id] = r; break; }
+        const verdict = normalizeAndValidate(t.parsed);
+        r.parsed = t.parsed;
+        if (!verdict.ok) {
+          r.outcome = 'rejected'; r.error = verdict.error;
+          conversation.pendingNote = `it was rejected before running: ${verdict.error}`;
+        } else {
+          r.intent = verdict.intent; r.message = verdict.message;
+          if (verdict.intent === 'query') {
+            r.queries = verdict.queries;
+            r.rows = await Promise.all(verdict.queries.map(q => runCube(q.cubeQuery)));
+            r.outcome = 'ran';
+            conversation.pendingNote = verdict.queries.map((q, i) => `${q.entity} query returned ${r.rows[i].length} ${r.rows[i].length === 1 ? 'row' : 'rows'}`).join('; ') + '.';
+          } else {
+            r.outcome = verdict.intent;
+          }
+        }
+      } catch (error) {
+        r.outcome = 'error'; r.error = error.message;
+        out[step.id] = r;
+        break; // the rest of this conversation can't be compared
+      }
+      out[step.id] = r;
+      process.stdout.write(`${setting.name} ${step.id} ${r.outcome} $${(r.cost ?? 0).toFixed(4)} ${r.ms ?? '-'}ms\n`);
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------
+// Comparing with today's setting
+// ---------------------------------------------------------------------
+const canon = v => Array.isArray(v) ? `[${v.map(canon).join(',')}]`
+  : v && typeof v === 'object' ? `{${Object.keys(v).sort().map(k => `${JSON.stringify(k)}:${canon(v[k])}`).join(',')}}`
+  : JSON.stringify(v);
+// Rows compared by their values only (a measure's name may differ), in any order
+const rowsKey = rows => rows.map(set => set.map(row => Object.values(row).map(String).sort().join('|')).sort().join('\n')).join('\n---\n');
+
+function compare(base, other) {
+  if (!base || !other) return 'missing';
+  if (base.outcome === 'error' || other.outcome === 'error') return other.outcome === 'error' ? 'error' : 'baseline-error';
+  if (other.outcome === 'rejected') return 'rejected';
+  if (base.outcome === 'rejected') return 'baseline-rejected';
+  if (base.intent !== other.intent) return 'different';
+  if (base.intent !== 'query') return 'same';
+  if (canon(base.queries) === canon(other.queries)) return 'same';
+  if (rowsKey(base.rows) === rowsKey(other.rows)) return 'same-rows';
+  return 'different';
+}
+
+// ---------------------------------------------------------------------
+// Empty results: today's explanation (Sonnet) next to Haiku's
+// ---------------------------------------------------------------------
+async function compareExplanations(baseline) {
+  const out = [];
+  for (const [id, r] of Object.entries(baseline)) {
+    if (r.outcome !== 'ran') continue;
+    const empty = r.queries.filter((_, i) => isEmptyResult(r.rows[i]));
+    if (!empty.length) continue;
+    const facts = (await Promise.all(empty.map(q => diagnoseEmpty(q.entity, q.cubeQuery, runCube)))).flat();
+    const texts = {};
+    for (const model of [SONNET, HAIKU]) {
+      texts[model] = await explainEmpty({
+        anthropic, model, question: r.question, searchedFor: r.message, facts,
+        onUsage: usage => charge(model, usage),
+      });
+    }
+    out.push({ id, question: r.question, facts, texts });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------
+const startedAt = new Date();
+console.log(`Asking ${steps.length} questions (${chains.length} conversations) with ${SETTINGS.map(s => s.name).join(', ')}; limit $${MAX_COST}`);
+const results = Object.fromEntries(await Promise.all(SETTINGS.map(async s => [s.name, await runSetting(s)])));
+const explanations = await compareExplanations(results[BASELINE]);
+
+const median = xs => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : 0; };
+const summary = SETTINGS.map(s => {
+  const rs = Object.values(results[s.name]);
+  const verdicts = steps.map(st => s.name === BASELINE ? 'baseline' : compare(results[BASELINE][st.id], results[s.name][st.id]));
+  const count = v => verdicts.filter(x => x === v).length;
+  // Cost per question with the business-logic prompt already cached (as in steady use)
+  const warm = rs.map(r => r.usage ? costUsd(s.model, { ...r.usage, cache_read_input_tokens: (r.usage.cache_read_input_tokens || 0) + (r.usage.cache_creation_input_tokens || 0), cache_creation_input_tokens: 0, cache_creation: undefined }) : 0);
+  return {
+    setting: s.name, model: s.model, effort: s.effort ?? '(default: high)', note: s.note || '',
+    same: count('same'), sameRows: count('same-rows'), different: count('different'),
+    rejected: rs.filter(r => r.outcome === 'rejected').length, errors: rs.filter(r => r.outcome === 'error').length,
+    answered: rs.length,
+    medianOutputTokens: median(rs.filter(r => r.usage).map(r => r.usage.output_tokens)),
+    avgWarmCost: warm.reduce((a, b) => a + b, 0) / (warm.length || 1),
+    medianMs: median(rs.filter(r => r.ms).map(r => r.ms)),
+    spent: rs.reduce((a, r) => a + (r.cost || 0), 0),
+  };
+});
+
+mkdirSync('eval-results', { recursive: true });
+const stamp = startedAt.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+const base = `eval-results/translation-${stamp}`;
+writeFileSync(`${base}.json`, JSON.stringify({ startedAt, today: TODAY, settings: SETTINGS, steps, summary, results, explanations }, null, 2));
+
+// Markdown: the table, then every question some setting answered differently
+const md = [];
+md.push(`# Translation eval ${startedAt.toISOString()}`, '', `${steps.length} questions, ${chains.length} conversations. Compared with **${BASELINE}**. Spent $${spent.toFixed(2)}.`, '');
+md.push('| Setting | Same query | Same rows | Different | Rejected | Errors | Median output tokens | Avg cost / question (warm cache) | Median time |');
+md.push('|---|---|---|---|---|---|---|---|---|');
+for (const s of summary) md.push(`| ${s.setting} ${s.note ? `(${s.note})` : ''} | ${s.setting === BASELINE ? '-' : s.same} | ${s.setting === BASELINE ? '-' : s.sameRows} | ${s.setting === BASELINE ? '-' : s.different} | ${s.rejected} | ${s.errors} | ${s.medianOutputTokens} | $${s.avgWarmCost.toFixed(4)} | ${(s.medianMs / 1000).toFixed(1)} s |`);
+md.push('', '## Questions answered differently', '');
+for (const st of steps) {
+  const diff = SETTINGS.filter(s => s.name !== BASELINE && !['same', 'same-rows'].includes(compare(results[BASELINE][st.id], results[s.name][st.id])));
+  if (!diff.length) continue;
+  md.push(`### ${st.id} ${st.question}`, '');
+  for (const s of [SETTINGS.find(x => x.name === BASELINE), ...diff]) {
+    const r = results[s.name][st.id];
+    if (!r) { md.push(`- **${s.name}**: (not asked: an earlier turn failed)`); continue; }
+    const rows = r.rows ? ` → ${r.rows.map(x => x.length).join(' + ')} rows` : '';
+    md.push(`- **${s.name}** [${r.outcome}${s.name === BASELINE ? '' : `, ${compare(results[BASELINE][st.id], r)}`}]: ${r.message || r.error || ''}${rows}`);
+    if (r.queries) md.push(`  \`${JSON.stringify(r.queries.map(q => q.cubeQuery))}\``);
+  }
+  md.push('');
+}
+md.push('## Empty-result explanations: Sonnet vs Haiku', '');
+for (const e of explanations) md.push(`### ${e.id} ${e.question}`, '', `- **Sonnet**: ${e.texts[SONNET]}`, `- **Haiku**: ${e.texts[HAIKU]}`, '');
+writeFileSync(`${base}.md`, md.join('\n'));
+
+console.table(summary.map(({ note, ...s }) => ({ ...s, avgWarmCost: s.avgWarmCost.toFixed(4), spent: s.spent.toFixed(2) })));
+console.log(`Spent $${spent.toFixed(2)}. Written: ${base}.md and .json`);
+```
+
+<a id="b92"></a>
+### B.92 `checks/usage.mjs`
+
+```js
+// What a Claude call cost (usage.mjs costUsd), from made-up usage objects.
+// No database or API needed: npm test.
+import assert from 'node:assert/strict';
+import { costUsd } from '../usage.mjs';
+
+const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} != ${b}`);
+
+// Sonnet 5.5: $2 in, $10 out, $0.20 cache read, $2.50 / $4 cache write (5 min / 1 h)
+near(costUsd('claude-sonnet-5-5', { input_tokens: 1_000_000, output_tokens: 0 }), 2);
+near(costUsd('claude-sonnet-5-5', { input_tokens: 0, output_tokens: 1_000_000 }), 10);
+near(costUsd('claude-sonnet-5-5', { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 1_000_000 }), 0.2);
+// An older response with only the total written: priced as 5-minute writes
+near(costUsd('claude-sonnet-5-5', { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 1_000_000 }), 2.5);
+// Split by how long they're kept
+near(costUsd('claude-sonnet-5-5', {
+  input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 2_000_000,
+  cache_creation: { ephemeral_5m_input_tokens: 1_000_000, ephemeral_1h_input_tokens: 1_000_000 },
+}), 6.5);
+// A typical warm translation: 20k cached, 300 new, 220 out
+near(costUsd('claude-sonnet-5-5', { input_tokens: 300, output_tokens: 220, cache_read_input_tokens: 20_000 }), (300 * 2 + 220 * 10 + 20_000 * 0.2) / 1e6);
+// Haiku 5.5 is priced too; unknown models and missing usage give null
+near(costUsd('claude-haiku-5-5', { input_tokens: 1_000_000, output_tokens: 1_000_000 }), 0.6);
+assert.equal(costUsd('claude-unknown', { input_tokens: 5, output_tokens: 5 }), null);
+assert.equal(costUsd('claude-sonnet-5-5', null), null);
+
+console.log('usage: 9 checks passed');
 ```
 
 ## Appendix C: images

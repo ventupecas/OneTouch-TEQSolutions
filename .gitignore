@@ -40,3 +40,6 @@ desktop.ini
 
 # 📝 Personal Claude Code notes: our chats and progress (CLAUDE.local.md), never shared
 CLAUDE.local.md
+
+# AI assistant evals (scripts/eval-translation.mjs): answers and costs, kept locally
+eval-results/

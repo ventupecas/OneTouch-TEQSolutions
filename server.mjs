@@ -29,6 +29,8 @@ import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs'
 import { architectureMap, pushState } from './architecture.mjs';
 import { makeHealth, noteResponse } from './health.mjs';
 import * as issues from './issues.mjs';
+import * as usage from './usage.mjs';
+import { costUsd } from './usage.mjs';
 
 dotenv.config();
 
@@ -592,6 +594,11 @@ const anthropic = new Anthropic({
 });
 
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-5-5';
+// How hard Claude thinks before translating a question (low | medium | high).
+// Chosen with scripts/eval-translation.mjs: see README "What the AI assistant costs".
+const CLAUDE_EFFORT = ['low', 'medium', 'high', 'xhigh', 'max'].includes(process.env.CLAUDE_EFFORT) ? process.env.CLAUDE_EFFORT : 'low';
+// The short "why nothing was found" explanations need no more than this
+const CLAUDE_SMALL_MODEL = process.env.CLAUDE_SMALL_MODEL || 'claude-haiku-5-5';
 
 // The CSV export is a frozen snapshot (roughly 2026-06-01 to 2026-09-01).
 // Relative phrases like "last month" are computed from TODAY, which drifts
@@ -643,18 +650,22 @@ async function translateToQuery(conversation, userPrompt) {
   const note = conversation.pendingNote ? `[Result of your previous answer: ${conversation.pendingNote}]\n\n` : '';
   const userTurn = { role: 'user', content: note + buildUserMessage(userPrompt, referenceToday()) };
 
+  const started = Date.now();
   const stream = anthropic.messages.stream({
     model: CLAUDE_MODEL,
     max_tokens: 4000,
     system: [
-      { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+      // Kept an hour (writing it costs 2x instead of 1.25x, but questions are
+      // often more than 5 minutes apart, and each miss rewrites ~15k tokens)
+      { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral', ttl: '1h' } },
     ],
     // Caches the conversation so far, so each follow-up only pays full price for the new turn
     cache_control: { type: 'ephemeral' },
     messages: [...conversation.messages, userTurn],
-    output_config: { format: { type: 'json_schema', schema: OUTPUT_SCHEMA } },
+    output_config: { format: { type: 'json_schema', schema: OUTPUT_SCHEMA }, effort: CLAUDE_EFFORT },
   });
   const message = await stream.finalMessage();
+  const ms = Date.now() - started;
 
   // A failed call leaves the conversation as it was, so the user can just ask again
   if (message.stop_reason === 'refusal') {
@@ -673,7 +684,7 @@ async function translateToQuery(conversation, userPrompt) {
   conversation.turns += 1;
   conversation.pendingNote = null;
 
-  return { parsed, usage: message.usage, memoryReset, userTurn, content: message.content };
+  return { parsed, usage: message.usage, ms, memoryReset, userTurn, content: message.content };
 }
 
 // =====================================================================
@@ -849,7 +860,8 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
       const t = await translateToQuery(conversation, userPrompt);
       ({ parsed, memoryReset } = t);
       fresh = { userTurn: t.userTurn, content: t.content, parsed };
-      console.log(`🧠 tokens in=${t.usage.input_tokens} cached=${t.usage.cache_read_input_tokens ?? 0} out=${t.usage.output_tokens}`);
+      console.log(`🧠 tokens in=${t.usage.input_tokens} cached=${t.usage.cache_read_input_tokens ?? 0} written=${t.usage.cache_creation_input_tokens ?? 0} out=${t.usage.output_tokens} $${(costUsd(CLAUDE_MODEL, t.usage) ?? 0).toFixed(4)}`);
+      usage.recordUsage({ kind: 'translate', model: CLAUDE_MODEL, effort: CLAUDE_EFFORT, userId: user.id, question: userPrompt, usage: t.usage, ms: t.ms });
     }
     remembered = true;
     // Timing and whether Claude was skipped, for the page's "Answered in …" line
@@ -921,7 +933,10 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
         if (!scope.all && hiddenEach) facts.push('No ticket in the whole data matches either, not even one this person cannot see: say plainly that the data has none, without mentioning permissions.');
         else if (!scope.all) facts.push(`This person only sees some tickets: ${teams.scopeNote(scope)}`);
         console.log('🔎 Empty result facts:\n   ' + facts.join('\n   '));
-        explanation = await explainEmpty({ anthropic, model: CLAUDE_MODEL, question: userPrompt, searchedFor: verdict.message, facts });
+        explanation = await explainEmpty({
+          anthropic, model: CLAUDE_SMALL_MODEL, question: userPrompt, searchedFor: verdict.message, facts,
+          onUsage: (u, ms) => usage.recordUsage({ kind: 'explain', model: CLAUDE_SMALL_MODEL, effort: 'low', userId: user.id, question: userPrompt, usage: u, ms }),
+        });
         console.log(`🔎 Explained: ${explanation}`);
         if (cached) cached.explanations = { ...cached.explanations, [scope.key]: explanation };
       } catch (error) {
@@ -1954,6 +1969,7 @@ async function prepareAccounts(attempt = 1) {
     await teams.ensureTeamsSchema();
     await notifications.ensureNotificationsSchema();
     await issues.ensureIssuesSchema();
+    await usage.ensureUsageSchema();
   } catch (error) {
     const wait = Math.min(attempt * 2, 15);
     console.error(`🔐 Account database not reachable yet (${error.message}); retrying in ${wait}s`);
