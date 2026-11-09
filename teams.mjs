@@ -40,6 +40,10 @@ export const ROLES = {
 };
 // Accounts that aren't people (scripts/warmup.mjs) never join a team
 const SERVICE_ACCOUNTS = ['warmup'];
+// The warm-up sees every ticket, as an admin does, so it can ask every question
+// (one naming a ticket is refused before Claude for anyone who can't see it) and
+// fill the dashboards' "all" view. It gets none of an admin's powers.
+const SEES_EVERY_TICKET = ['warmup'];
 // Test accounts (tester1, tester2, ..., and test.<name>, like the Milwaukee
 // Brewers' players) only ever join a test team, never a real one. A Postgres
 // pattern, also used as a RegExp.
@@ -137,7 +141,84 @@ export async function ensureTeamsSchema() {
         GRANT SELECT ON ticket_access TO access_reader;
       END IF;
     END $$;
+    -- Switches the permanent admins flip on the Team tab: 'everyone_admin', 'email_everyone'
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key         text PRIMARY KEY,
+      value       jsonb NOT NULL,
+      updated_at  timestamptz NOT NULL DEFAULT now(),
+      updated_by  integer REFERENCES users(id) ON DELETE SET NULL
+    );
   `);
+  const { rows } = await pool.query('SELECT key, value FROM app_settings');
+  const saved = Object.fromEntries(rows.map(r => [r.key, r.value]));
+  everyoneAdmin = saved.everyone_admin === true;
+  emailEveryone = saved.email_everyone === true;
+  if (everyoneAdmin) console.log('👑 Everyone is an admin (the Team tab\'s "After the presentation" switches it back)');
+  if (emailEveryone) console.log('✉️  Demo day: everyone with an address is emailed, whatever MAIL_ONLY_TO says (the Team tab switches it back)');
+}
+
+// One of the switches above, saved in the name of whoever flipped it
+async function saveSetting(key, value, userId) {
+  await pool.query(
+    `INSERT INTO app_settings (key, value, updated_by) VALUES ($1, $2::jsonb, $3)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`,
+    [key, JSON.stringify(value), userId]);
+}
+
+// ---------------------------------------------------------------------
+// EVERYONE AN ADMIN, after a presentation, so stakeholders can try every
+// feature: every account but the service accounts gets an admin's scope
+// (every ticket, every admin page and change). Only the permanent admins
+// (ADMIN_USERNAMES) may switch it, and 🚩 problem reports still go only to
+// them (issues.mjs). Saved in app_settings, so it survives a restart.
+// ---------------------------------------------------------------------
+
+let everyoneAdmin = false;
+const isPermanentAdmin = user => ADMIN_USERNAMES.includes(user.username);
+
+// { on } -> { on, people }: how many accounts it makes admins
+export async function setEveryoneAdmin(scope, on) {
+  if (!scope.access.permanentAdmin) throw new AccessError('Only the permanent admins can switch that.');
+  if (typeof on !== 'boolean') throw new AccessError('Say whether everyone is an admin: { "on": true } or { "on": false }.');
+  await saveSetting('everyone_admin', on, scope.access.userId);
+  everyoneAdmin = on;
+  changed();
+  return { on, people: await everyoneAdminCount() };
+}
+
+// The accounts the switch makes admins (not the permanent admins, who are already)
+async function everyoneAdminCount() {
+  const { rows: [r] } = await pool.query(
+    'SELECT count(*)::int AS n FROM users WHERE is_active AND username <> ALL($1::text[])', [[...ADMIN_USERNAMES, ...SERVICE_ACCOUNTS]]);
+  return r.n;
+}
+
+// ---------------------------------------------------------------------
+// EMAIL EVERYONE, on demo day: while MAIL_ONLY_TO in .env limits the emails
+// to a few addresses (for trying things out), this switch lets every person
+// with an address be emailed again (mail.mjs skipReason reads emailsEveryone).
+// Only the permanent admins may switch it. Saved in app_settings.
+// ---------------------------------------------------------------------
+
+let emailEveryone = false;
+export const emailsEveryone = () => emailEveryone;
+
+// { on } -> { on, people }: how many people would be emailed with it on
+export async function setEmailEveryone(scope, on) {
+  if (!scope.access.permanentAdmin) throw new AccessError('Only the permanent admins can switch that.');
+  if (typeof on !== 'boolean') throw new AccessError('Say whether everyone is emailed: { "on": true } or { "on": false }.');
+  await saveSetting('email_everyone', on, scope.access.userId);
+  emailEveryone = on;
+  return { on, people: await emailablePeople() };
+}
+
+// People with an address who haven't turned email off (test and service accounts never are)
+export async function emailablePeople() {
+  const { rows: [r] } = await pool.query(
+    `SELECT count(*)::int AS n FROM users
+      WHERE is_active AND email IS NOT NULL AND email_notifications AND username <> ALL($1::text[]) AND username !~ $2`,
+    [SERVICE_ACCOUNTS, TEST_ACCOUNT]);
+  return r.n;
 }
 
 // Who someone is to the Metabase dashboards (a locked filter in their signed
@@ -302,7 +383,8 @@ export async function seedTeams(runQuery) {
 }
 
 // ---------------------------------------------------------------------
-// WHAT SOMEONE MAY SEE. A scope is { all: true } for an admin, otherwise
+// WHAT SOMEONE MAY SEE. A scope is { all: true } for an admin (and the
+// warmup account, without an admin's powers), otherwise
 // their ticket numbers by type. Kept for a minute, and dropped as soon as
 // anything here changes. key names the scope in the caches of charts.mjs
 // and relations.mjs, so two people never share a cached answer they
@@ -323,12 +405,13 @@ export async function scopeFor(user) {
     'SELECT m.role, t.id, t.name FROM team_members m JOIN teams t ON t.id = m.team_id WHERE m.user_id = $1', [user.id]);
   const access = {
     userId: user.id,
-    admin: ADMIN_USERNAMES.includes(user.username),
+    admin: isPermanentAdmin(user) || (everyoneAdmin && !SERVICE_ACCOUNTS.includes(user.username)),
+    permanentAdmin: isPermanentAdmin(user),
     role: m?.role || null,
     team: m ? { id: m.id, name: m.name } : null,
   };
   let scope;
-  if (access.admin) {
+  if (access.admin || SEES_EVERY_TICKET.includes(user.username)) {
     scope = { all: true, key: 'all', count: null };
   } else {
     const { rows } = access.role === 'project_manager'
@@ -503,7 +586,10 @@ export async function listTeams(scope) {
               count(*) FILTER (WHERE f.team_id IS NOT NULL)::int AS on_team
          FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id WHERE a.number ~ $1`, [DEMO_TICKET]);
     const { rows: [s] } = await pool.query('SELECT count(DISTINCT number)::int AS tickets FROM ticket_reports');
-    result.presentation = { demo: { tickets: d.tickets, assigned: d.assigned, onTeam: d.on_team }, statuses: s.tickets };
+    result.presentation = {
+      demo: { tickets: d.tickets, assigned: d.assigned, onTeam: d.on_team }, statuses: s.tickets,
+      everyoneAdmin: { on: everyoneAdmin, people: await everyoneAdminCount(), canSwitch: access.permanentAdmin },
+    };
   }
   return result;
 }

@@ -156,7 +156,7 @@ export const NODES = [
       ['Outbox', 'Checked every 30 seconds, retried up to 5 times, never sent if older than an hour'],
       ['An email holds', 'Who did what and the ticket numbers, never summaries or notes'],
     ],
-    secure: 'Test and service accounts are never emailed. MAIL_ONLY_TO limits who gets email while trying it out.',
+    secure: 'Test and service accounts are never emailed. MAIL_ONLY_TO limits who gets email while trying it out, until a permanent admin switches on Email everyone (Team tab, demo day).',
     files: ['notifications.mjs', 'mail.mjs', 'issues.mjs', 'public/notifications.js'],
   },
   {

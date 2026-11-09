@@ -90,7 +90,7 @@
     "wrappy": "^1.0.2"
   },
   "scripts": {
-    "test": "node checks/ticket-order.mjs && node checks/architecture.mjs && node checks/issues.mjs && node checks/attention.mjs",
+    "test": "node checks/ticket-order.mjs && node checks/architecture.mjs && node checks/issues.mjs && node checks/attention.mjs && node checks/usage.mjs",
     "build": "node scripts/check.mjs",
     "check": "node scripts/check.mjs",
     "docs": "node scripts/build-docs.mjs",
@@ -99,7 +99,9 @@
     "remote": "node remote.mjs",
     "share": "node scripts/share.mjs",
     "warmup": "node scripts/warmup.mjs",
-    "mail-test": "node scripts/mail-test.mjs"
+    "mail-test": "node scripts/mail-test.mjs",
+    "usage": "node scripts/usage.mjs",
+    "eval-ai": "node scripts/eval-translation.mjs"
   },
   "repository": {
     "type": "git",

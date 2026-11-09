@@ -882,7 +882,7 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
 
     // About tickets they don't have permission to see: not answered (server.mjs)
     if (data.intent === 'denied') {
-        appendMessage('ai-msg', `<div class="result-restricted">${linkTicketsHtml(data.message)}</div>` + answerTimingHtml(seconds, data.fromCache));
+        appendMessage('ai-msg', `<div class="result-restricted">${linkTicketsHtml(data.message)}</div>` + answerTimingHtml(seconds, data.fromCache, data.offline));
         return;
     }
 
@@ -890,7 +890,7 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
     if (data.intent === 'clarify' || data.intent === 'unsupported') {
         const message = data.message || 'I need a little more detail to run that.';
         const download = downloadBarHtml(registerExport({ title: 'OneTouch answer', question: userPromptText, tables: buildExportTables(data, message) }));
-        appendMessage('ai-msg', `${linkTicketsHtml(message)}` + download + answerTimingHtml(seconds, data.fromCache));
+        appendMessage('ai-msg', `${linkTicketsHtml(message)}` + download + answerTimingHtml(seconds, data.fromCache, data.offline));
         return;
     }
 
@@ -950,7 +950,7 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
         }), 'Download as', { pictures: Boolean(answer.model) });
     }
 
-    const answerId = appendMessage('ai-msg wide', html + answerTimingHtml(seconds, data.fromCache));
+    const answerId = appendMessage('ai-msg wide', html + answerTimingHtml(seconds, data.fromCache, data.offline));
     const answerEl = document.getElementById(answerId);
     answerEl._answer = answer;
     paintPictureOptions(answerEl);
@@ -1045,8 +1045,14 @@ async function readQueryResponse(response, onStep) {
 }
 
 // "Answered in 2.8 s", or for a repeated question "Answered in 0.2 s …"
-// (nothing for a saved answer whose time wasn't kept)
-function answerTimingHtml(seconds, fromCache) {
+// (nothing for a saved answer whose time wasn't kept). offline: the server
+// is in DEMO_MODE=offline, which every answer says plainly.
+function answerTimingHtml(seconds, fromCache, offline) {
+    if (offline) {
+        return fromCache
+            ? '<div class="result-timing offline">🔌 Offline mode: a saved answer (Claude isn\'t being asked right now)</div>'
+            : '<div class="result-timing offline">🔌 Offline mode: only questions asked before can be answered</div>';
+    }
     if (seconds == null) return '';
     const time = `${seconds.toFixed(1)} s`;
     return fromCache

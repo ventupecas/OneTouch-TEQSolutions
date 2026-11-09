@@ -1082,6 +1082,15 @@ tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
 .ai-msg.wide { max-width: 100%; width: 100%; box-sizing: border-box; }
 /* "Answered in 2.8 s" under each answer */
 .result-timing { margin-top: 8px; color: var(--faint); font-size: 0.78rem; }
+/* DEMO_MODE=offline: every answer says it's a saved one, so the room can tell */
+.result-timing.offline {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: var(--warn-soft);
+    color: var(--warn-ink);
+    font-weight: 600;
+}
 
 .result-title { font-weight: 600; margin-bottom: 8px; }
 /* Not the full report, or not answered: tickets they don't have permission to see */
@@ -1363,6 +1372,8 @@ tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
 .presentation-steps li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px;
     padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
 .presentation-steps span { flex: 1 1 260px; }
+.presentation-steps li.everyone-admin-on { border-color: var(--accent); }
+.presentation-steps + h3 { margin-top: 18px; }
 
 /* Radio buttons drawn as pills and color swatches (the real input stays, for keyboards) */
 .choice-row { display: flex; flex-wrap: wrap; gap: 6px; }

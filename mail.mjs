@@ -28,12 +28,13 @@
 //   MAIL_FROM       the sender, on a domain authenticated in Brevo (notifications@onetouch.fyi)
 //   MAIL_FROM_NAME  the name it shows (OneTouch)
 //   APP_URL         where the emails link to (https://onetouch.fyi)
-//   MAIL_ONLY_TO    comma-separated addresses: while it's set, nobody else is emailed
+//   MAIL_ONLY_TO    comma-separated addresses: while it's set, nobody else is emailed,
+//                   unless a permanent admin switches on "Email everyone" (Team tab, demo day)
 // For tests only: BREVO_API_URL (a stand-in for Brevo), MAIL_INTERVAL_MS, MAIL_RETRY_MS.
 // =====================================================================
 
 import { pool } from './auth.mjs';
-import { isTestOrServiceAccount } from './teams.mjs';
+import { isTestOrServiceAccount, emailsEveryone } from './teams.mjs';
 
 const BREVO_URL = 'https://api.brevo.com/v3/smtp/email';
 const BATCH = 20;                  // emails per round, well inside Brevo's limits
@@ -114,7 +115,8 @@ export function skipReason(n, cfg = mailConfig(), now = Date.now()) {
   if (!n.is_active) return 'the account is deactivated';
   if (!n.email) return 'no email address on file';
   if (!n.email_notifications) return 'they turned email off';
-  if (cfg.onlyTo.length && !cfg.onlyTo.includes(String(n.email).toLowerCase())) return 'not on MAIL_ONLY_TO';
+  // The Team tab's "Email everyone" (demo day) lifts MAIL_ONLY_TO while it's on
+  if (cfg.onlyTo.length && !emailsEveryone() && !cfg.onlyTo.includes(String(n.email).toLowerCase())) return 'not on MAIL_ONLY_TO';
   if (now - new Date(n.created_at).getTime() > MAX_AGE_MS) return 'too old by the time it could be sent';
   return '';
 }

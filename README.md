@@ -218,24 +218,50 @@ which is why Metabase keeps each chart's result (see [Dashboards](#dashboards-me
    ```
    It signs in as the **warmup** account (username `warmup`, password from
    `WARMUP_PASSWORD` in `.env`, or it asks), then asks every question in
-   `scripts/warmup-questions.txt` and opens every dashboard. The 55 questions cover
-   incidents (priority, teams, channels, sites, on-hold, SLA breaches, causes, reassignment),
-   problem records and parent / child tickets, changes (type, risk, failures, approvals,
-   upcoming work, outages, SAP and breweries), approvals, requests and catalog tasks,
-   whole-team views across ticket types, and one each of "nothing found", "outside the
-   data's dates" and "not in the data". From scratch that takes about two minutes.
-   To use another account instead: `npm run warmup -- --user <username>`.
+   `scripts/warmup-questions.txt` and opens every dashboard. The 114 questions cover
+   incidents (priority, state, impact and urgency, teams, channels, monitoring, sites,
+   categories, configuration items, on-hold, SLA breaches, causes, close codes, reopens,
+   reassignment, outages), problem records and parent / child tickets, changes (type, state,
+   environment, risk, projects, successes and failures, approvals, upcoming work, outages,
+   SAP and breweries), change and request approvals, requests, orders and catalog tasks,
+   whole-team views across ticket types, the [Demo] tickets, and one each of "nothing
+   found", "outside the data's dates" and "not in the data". From scratch that takes about
+   four minutes. On Windows, `npm.cmd run warmup` if PowerShell won't run `npm`, after
+   `npm ci` (or run it in the container: `docker exec -it analytics_node_app npm run warmup`).
+   The warmup account sees every ticket, as an admin does, but has none of an admin's
+   powers, so it can ask every question (one naming a ticket is refused before Claude for
+   anyone who can't see that ticket) and fills the dashboards' "all" view, the one admins
+   see. Only Claude's reading of a question is kept, never rows, so everyone else's answers
+   still show only their own tickets. Another account: `npm run warmup -- --user <username>`
+   (it asks for the password); questions it can't ask are listed. Each question's chat is
+   deleted afterwards, so it leaves nothing in that account's chat history.
    Afterwards those questions answer instantly for everyone, provided they're asked with
    the same words (capitals, spacing and a closing "?" don't matter), and every dashboard
    opens from Metabase's cache. It ends with a list of anything that failed, so it doubles
    as a final check that everything works.
 3. Demo with the questions in that file. Edit the file to add your own (one per line) and
    run `npm run warmup` again; questions it has already asked come back instantly, and the answer says it was asked before.
-4. **Don't restart OneTouch afterwards.** A restart (including `docker compose up` after
-   editing `.env`) forgets the remembered questions. They are also tied to the date
-   Claude sees as "today", which is the real date in UTC unless `ASSUME_TODAY` is set, so
-   warm up on the day itself. A presentation that runs past 7 PM Central crosses into the
-   next UTC day; run the warm-up again then.
+4. The remembered questions are saved in `.cache/answers.json` (not in git), so a restart
+   keeps them. They are tied to the date Claude sees as "today", which is the real date in
+   UTC unless `ASSUME_TODAY` is set, so warm up on the day itself. A presentation that runs
+   past 7 PM Central crosses into the next UTC day; run the warm-up again then. Changing
+   the model or the AI's instructions (`business_logic.mjs`) starts them over too.
+5. Run the quality gate (from this folder, with the class's `tech-foundations` repo next to
+   it): `node ../tech-foundations/t11a-demo-engineering/tools/gate.js demo/gate.config.json`.
+   It checks the `.env` keys, that at least 100 answers are saved, the email key, and that
+   the app, Cube, Metabase and the public address answer. Don't start until it's all green.
+
+**If the internet fails during the presentation.** Everything but the AI assistant runs on
+this computer: open **http://localhost:8000** on it instead of the public address, and
+sign-in, ticket lists, assigning, notifications, the architecture map and the dashboards
+keep working. The AI assistant still answers every question asked before at once; a new one
+gives up after 20 seconds (`CLAUDE_TIMEOUT_MS`) and says Claude couldn't be reached, instead
+of hanging. If the network looks bad before you start, flip the **emergency switch**: set
+`DEMO_MODE=offline` in `.env` and run `docker restart analytics_node_app` (a few seconds;
+the saved answers are kept). Then the assistant never asks Claude: saved answers say
+**🔌 Offline mode: a saved answer**, and anything new gets a list of warm-up questions that
+work. 🧊 Architecture's 🩺 Health shows the Claude check as off. Set `DEMO_MODE=live` and
+restart again to go back.
 
 Follow-up questions ("same but for changes") always go to Claude, so they take the usual
 few seconds. The warm-up's answers list tickets like anyone's do, so they fill the Ticket
@@ -856,6 +882,17 @@ demo tickets back** puts the 11 [Demo] tickets back on no team, assigned to nobo
 statuses, notifications, stars and ticket results gone, ready to move to a team and hand out
 live. Every real ticket stays on its team, by family, with whoever has it. No restart needed.
 
+**After the presentation** (same card): **👑 Make everyone an admin** lets stakeholders try
+every feature. After asking, every account except the `warmup` service account gets an admin's
+access: every ticket, 🧊 Architecture, 📥 Not assigned yet, the Metabase dashboards over every
+ticket, and every admin change (moving families, teams and roles, assigning any ticket, these
+presentation buttons). People already signed in see the admin buttons when they reload the
+page. Only the permanent admins (`ADMIN_USERNAMES` in `teams.mjs`) can switch it, and
+**Back to normal** puts everyone back to their own tickets (project managers: their team's).
+Nobody's team, role or tickets change either way, 🚩 problem reports still go only to the
+permanent admins, and the switch is saved (`app_settings` in onetouch_auth), so a restart
+keeps it.
+
 **Clearing notifications.** Each notification in the 🔔 panel has a **Clear** button that
 takes it off the list, and **Clear all** (next to the ✕ at the top) clears every one after
 asking. Clear all only clears what the list was showing, so one that arrives at that moment
@@ -881,6 +918,12 @@ API keys) and put it in `.env` as `BREVO_API_KEY`; restart the app. While `MAIL_
 `.env` lists addresses, only those are emailed: try it out that way, check with
 `docker exec analytics_node_app npm run mail-test -- <address>`, then delete the line and
 restart to email everyone. Brevo's free plan sends 300 emails a day.
+
+**Demo day: email everyone** (the Team tab's 🎬 card, under "Demo day"). While
+`MAIL_ONLY_TO` limits the emails, a permanent admin can press **✉️ Email everyone**: from then
+on every person with an address is emailed, with no restart, and **Only email me again** goes
+back to `MAIL_ONLY_TO`. Notifications made while it was off stay unsent. The switch is saved
+(`app_settings`), so a restart keeps it.
 
 **Families stay together.** Tickets linked to each other (a parent incident and its
 children, a request and its tasks, an order, everything on one problem, a change and its
@@ -1097,11 +1140,12 @@ last 500 such questions in memory; restarting it starts the list over.
 
 1. **Claude translates it**, unless it is a repeated question (see above), in which case
    the earlier translation is reused and the steps below still run. The model is
-   `claude-sonnet-5-5` unless `CLAUDE_MODEL` says otherwise, and it returns a structured JSON answer whose shape the API enforces: an `intent`, up
+   `claude-sonnet-5-5` unless `CLAUDE_MODEL` says otherwise, thinking at `low` effort unless `CLAUDE_EFFORT`
+   says otherwise (see "What the AI assistant costs"), and it returns a structured JSON answer whose shape the API enforces: an `intent`, up
    to one query per table, a one-sentence restatement, and the list of assumptions made.
    The instructions (`business_logic.mjs`) describe the six tables, every column, the
    exact values coded columns hold, ITIL vocabulary, and worked examples. They are sent
-   with prompt caching, so repeated questions cost less. Today's date is added to every
+   with prompt caching, kept for an hour, so repeated questions cost less. Today's date is added to every
    question (or `ASSUME_TODAY`, see 2.9).
 2. **The server checks Claude's answer** (`normalizeAndValidate`) before anything runs:
    - only known columns, the `count` measure, and these operators: equals, notEquals,
@@ -1263,6 +1307,8 @@ was carried over.
 | "The translation was cut off; try a shorter question." | The answer ran out of room |
 | "Cube.dev is still initializing…" | Cube is starting; try again in a few seconds |
 | "Could not talk to backend server orchestration framework." | The page couldn't reach the server |
+| "The AI assistant couldn't reach Claude just now…" | No answer from Claude within `CLAUDE_TIMEOUT_MS` (20 s), or the network is down; questions asked before still work |
+| "OneTouch is in offline mode for this presentation…" | `DEMO_MODE=offline`: only questions asked before are answered (see [Presentation day](#presentation-day-many-people-at-once)) |
 
 ## 2.4 Explanations for empty results
 
@@ -1273,7 +1319,8 @@ why instead of just saying "no records" (`empty_results.mjs`):
 2. It removes the filters one at a time (up to 6) and counts what each removal brings
    back. Where something comes back, it groups those rows by the removed filter's column
    (dates by month, top 8 values) to show what the filter was hiding.
-3. Claude turns those facts into 1 to 3 plain sentences that start with the direct
+3. Claude (`claude-haiku-5-5` unless `CLAUDE_SMALL_MODEL` says otherwise: it explained these as
+   well as Sonnet in the eval, for about a twentieth of the price) turns those facts into 1 to 3 plain sentences that start with the direct
    answer, e.g. "There are no open P1 incidents right now: all 3 P1 incidents in the
    data are closed." If a table is empty because no data was loaded, it says so. It ends
    with a nearby question that would return data.
@@ -1533,7 +1580,7 @@ inside the data. Leave it empty to use the real date.
 | Starts with | Means |
 |---|---|
 | 💬 | A question arrived, with its turn number |
-| 🧠 | Claude's token use: input, cached, output |
+| 🧠 | Claude's token use: input, read from the cache, written to the cache, output, and what it cost |
 | ⚡ | A repeated question answered without Claude (its earlier translation reused) |
 | 🤖 | Each Cube query that ran |
 | 🙋 | A clarify or unsupported answer |
@@ -1542,6 +1589,50 @@ inside the data. Leave it empty to use the real date.
 | 🔐 | Sign-ins (with the address), sign-in failures, account database status, sessions cleaned up |
 | 📊 | Metabase unreachable |
 | ⚠️ / 📋 / ❌ | Validator rejections, failures, a missing API key |
+
+### What the AI assistant costs
+
+Every call to Claude is saved in the `claude_usage` table (`usage.mjs`: when, which
+model and effort, who asked, the question, token counts, its cost in dollars, how long it
+took; kept 180 days). To see the bill per day:
+
+```
+docker exec analytics_node_app npm run usage          # last 30 days
+docker exec analytics_node_app npm run usage -- 7     # last 7 days
+```
+
+Where the money goes: the business logic is about 22,400 tokens and goes with every
+question. Read from the cache it costs about $0.0045; written to it (the first question
+after the cache expires) about $0.09, since it's kept an hour (2x the input price instead
+of 1.25x for 5 minutes; one write an hour is cheaper than one every 5 quiet minutes).
+Claude's answer is only about 250 tokens. So a question costs about $0.007 with a warm
+cache, and the first one in an hour about $0.09. A repeated question costs nothing.
+
+**Checking a cheaper setting:** `scripts/eval-translation.mjs` asks the 55 warmup questions
+and 4 follow-up conversations with several settings, runs every query in Cube, and compares
+each answer with today's setting (the same query, the same rows, or different, listed side
+by side for a person to judge). Today's setting runs twice, so normal variation is known.
+It costs about $2 and runs only with `--yes`:
+
+```
+docker exec analytics_node_app npm run eval-ai -- --yes
+docker exec analytics_node_app npm run eval-ai -- --yes --only=sonnet-low --limit=10
+```
+
+Results go to `eval-results/` (not in git). The run on 9 Nov 2026 (66 questions):
+
+| Setting | Same as Sonnet at high (query or rows) | Different | Cost a question (warm cache) | Median time |
+|---|---|---|---|---|
+| Sonnet 5.5, high (the setting before), asked again | 63 | 3 | $0.0075 | 2.1 s |
+| Sonnet 5.5, medium | 61 | 5 | $0.0073 | 2.1 s |
+| Sonnet 5.5, **low** (chosen) | 64 | 2 | $0.0072 | 2.1 s |
+| Haiku 5.5, medium | 58 | 8 | $0.0005 | 3.2 s |
+
+Lower effort barely changes the price, because Claude hardly thinks on these questions at
+any effort. Haiku is about 15 times cheaper but slower, and differs more often (some
+answers better, e.g. counting changes too in "tickets at Milwaukee Brewery", one worse:
+it dropped "still open" from "requests still waiting for approval"). To try it:
+`CLAUDE_MODEL=claude-haiku-5-5` in `.env` and restart.
 
 ## 2.11 Development tools
 
@@ -1705,6 +1796,8 @@ Fill in `.env`:
 | `METABASE_ADMIN_EMAIL`, `METABASE_ADMIN_PASSWORD` | the Metabase admin login to create (password at least 8 characters) |
 | `ASSUME_TODAY` | optional, e.g. `2026-09-02`, so "last month" falls inside the export (roughly 2026-06-01 to 2026-09-01) |
 | `CLAUDE_MODEL` | optional; empty means `claude-sonnet-5-5` |
+| `CLAUDE_EFFORT` | optional; `low` (the default), `medium` or `high`: how hard Claude thinks before translating a question |
+| `CLAUDE_SMALL_MODEL` | optional; empty means `claude-haiku-5-5`, used for the empty-result explanations |
 
 A random value: `node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"`
 
@@ -2336,6 +2429,11 @@ Create each file at the path shown, with exactly this content. Files are in the 
 - [B.86 `issues.mjs`](#b86)
 - [B.87 `checks/issues.mjs`](#b87)
 - [B.88 `checks/attention.mjs`](#b88)
+- [B.89 `usage.mjs`](#b89)
+- [B.90 `scripts/usage.mjs`](#b90)
+- [B.91 `scripts/eval-translation.mjs`](#b91)
+- [B.92 `checks/usage.mjs`](#b92)
+- [B.93 `demo/gate.config.json`](#b93)
 
 <a id="b1"></a>
 ### B.1 `.gitignore`
@@ -2383,6 +2481,12 @@ desktop.ini
 
 # 📝 Personal Claude Code notes: our chats and progress (CLAUDE.local.md), never shared
 CLAUDE.local.md
+
+# AI assistant evals (scripts/eval-translation.mjs): answers and costs, kept locally
+eval-results/
+
+# The AI assistant's saved answers (server.mjs ANSWER_CACHE_FILE), so a restart keeps the warm-up
+.cache/
 ```
 
 <a id="b2"></a>
@@ -2491,7 +2595,7 @@ public/vendor/** -text
     "wrappy": "^1.0.2"
   },
   "scripts": {
-    "test": "node checks/ticket-order.mjs && node checks/architecture.mjs && node checks/issues.mjs && node checks/attention.mjs",
+    "test": "node checks/ticket-order.mjs && node checks/architecture.mjs && node checks/issues.mjs && node checks/attention.mjs && node checks/usage.mjs",
     "build": "node scripts/check.mjs",
     "check": "node scripts/check.mjs",
     "docs": "node scripts/build-docs.mjs",
@@ -2500,7 +2604,9 @@ public/vendor/** -text
     "remote": "node remote.mjs",
     "share": "node scripts/share.mjs",
     "warmup": "node scripts/warmup.mjs",
-    "mail-test": "node scripts/mail-test.mjs"
+    "mail-test": "node scripts/mail-test.mjs",
+    "usage": "node scripts/usage.mjs",
+    "eval-ai": "node scripts/eval-translation.mjs"
   },
   "repository": {
     "type": "git",
@@ -2530,6 +2636,16 @@ CUBE_API_URL=http://localhost:4000/cubejs-api/v1/load
 ASSUME_TODAY=
 # Optional: override the Claude model used for translation (defaults to claude-sonnet-5-5).
 CLAUDE_MODEL=
+# low (default) | medium | high: how hard Claude thinks before translating a question
+CLAUDE_EFFORT=
+# Model for the short "why nothing was found" explanations (default claude-haiku-5-5)
+CLAUDE_SMALL_MODEL=
+# How long to wait for Claude before giving up, in milliseconds (default 20000)
+CLAUDE_TIMEOUT_MS=
+# live = ask Claude as usual. offline = the presentation's emergency switch: the AI assistant
+# never asks Claude and answers only questions asked before (npm run warmup), labelled
+# "Offline mode". Change it, then: docker restart analytics_node_app (saved answers are kept).
+DEMO_MODE=live
 
 # Database / Cube secrets (docker-compose.yml reads these; it refuses to start without them).
 # Long random values, e.g.: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
@@ -5176,9 +5292,11 @@ If a table is empty because no data is loaded, say the data has not been loaded 
 End with one short suggestion of a nearby question that would return data, when there is one. Use only the facts given; do not guess.`;
 
 // Short explanation for the user; falls back to plain facts if Claude can't answer
-export async function explainEmpty({ anthropic, model, question, searchedFor, facts }) {
+// onUsage(usage, ms): called with the call's token counts (usage.mjs saves them)
+export async function explainEmpty({ anthropic, model, question, searchedFor, facts, onUsage }) {
   const fallback = `No matching records were found. ${facts.filter(f => / runs from | is empty/.test(f)).join(' ')}`.trim();
   try {
+    const started = Date.now();
     const message = await anthropic.messages.create({
       model,
       max_tokens: 2000,
@@ -5189,6 +5307,7 @@ export async function explainEmpty({ anthropic, model, question, searchedFor, fa
         content: `Question: """${question}"""\nWhat was searched for: ${searchedFor}\n\nFacts:\n${facts.map(f => `- ${f}`).join('\n')}`,
       }],
     });
+    onUsage?.(message.usage, Date.now() - started);
     if (message.stop_reason === 'refusal') return fallback;
     const text = message.content.filter(b => b.type === 'text').map(b => b.text).join('').trim();
     return text || fallback;
@@ -6407,6 +6526,8 @@ try {
 import dns from 'node:dns/promises';
 import { createHash, createHmac } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
+import { mkdir, rename, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import express from 'express';
 import dotenv from 'dotenv';
 import Anthropic from '@anthropic-ai/sdk';
@@ -6429,12 +6550,14 @@ import * as shares from './shares.mjs';
 import * as chats from './chats.mjs';
 import * as teams from './teams.mjs';
 import * as notifications from './notifications.mjs';
-import { startMail, mailEnabled } from './mail.mjs';
+import { startMail, mailEnabled, mailConfig } from './mail.mjs';
 import * as kpis from './kpis.mjs';
 import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
 import { architectureMap, pushState } from './architecture.mjs';
 import { makeHealth, noteResponse } from './health.mjs';
 import * as issues from './issues.mjs';
+import * as usage from './usage.mjs';
+import { costUsd } from './usage.mjs';
 
 dotenv.config();
 
@@ -6749,7 +6872,7 @@ function scopedRunner(scope) {
   return run;
 }
 
-app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families', '/api/notifications', '/api/my-tickets', '/api/kpis', '/api/ticket-statuses', '/api/demo-tickets', '/api/architecture', '/api/issues'], requireLogin);
+app.use(['/api/query', '/api/export', '/api/conversation', '/api/me', '/api/dashboards', '/api/tickets', '/api/stars', '/api/seen-tickets', '/api/preferences', '/api/charts', '/api/shares', '/api/families', '/api/chats', '/api/teams', '/api/assignments', '/api/ticket-families', '/api/notifications', '/api/my-tickets', '/api/kpis', '/api/ticket-statuses', '/api/demo-tickets', '/api/everyone-admin', '/api/email-everyone','/api/architecture', '/api/issues'], requireLogin);
 
 // 🧊 Architecture (architecture.mjs): admins only, for everything under this
 // path. The page's script holds no facts, so this is the whole lock.
@@ -6779,6 +6902,7 @@ app.get('/api/architecture/health', async (req, res) => {
     fetch,
     listClaudeModels: () => anthropic.models.list({ limit: 1 }),
     hasClaudeKey: Boolean(process.env.ANTHROPIC_API_KEY),
+    claudeOffline: DEMO_OFFLINE,
     mailEnabled: mailEnabled(),
     publicUrl: (process.env.ONETOUCH_PUBLIC_URL || process.env.APP_URL || '').replace(/\/+$/, ''),
     metabaseUrl: METABASE_URL,
@@ -6992,12 +7116,31 @@ if (!anthropicKey || anthropicKey.startsWith('REPLACE_WITH')) {
 
 const anthropicWorkspaceId = (process.env.ANTHROPIC_WORKSPACE_ID || '').trim();
 
+// A short timeout: answers take 2-5 s, and on a bad network a question that
+// fails in 20 s beats one that hangs for the SDK's default 10 minutes
+const CLAUDE_TIMEOUT_MS = Number(process.env.CLAUDE_TIMEOUT_MS) || 20 * 1000;
+
 const anthropic = new Anthropic({
   apiKey: anthropicKey,
   defaultHeaders: anthropicWorkspaceId ? { 'anthropic-workspace-id': anthropicWorkspaceId } : undefined,
+  timeout: CLAUDE_TIMEOUT_MS,
+  maxRetries: 1,
 });
 
+// DEMO_MODE=offline in .env (then docker restart analytics_node_app): the
+// emergency switch for a presentation on a bad network. The AI assistant
+// never asks Claude; questions asked before (npm run warmup) still answer
+// from the saved answers, every answer says it's offline, and anything new
+// gets a list of questions that work instead of an error.
+const DEMO_OFFLINE = (process.env.DEMO_MODE || '').trim().toLowerCase() === 'offline';
+if (DEMO_OFFLINE) console.log('🔌 DEMO_MODE=offline: the AI assistant only answers questions asked before');
+
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-5-5';
+// How hard Claude thinks before translating a question (low | medium | high).
+// Chosen with scripts/eval-translation.mjs: see README "What the AI assistant costs".
+const CLAUDE_EFFORT = ['low', 'medium', 'high', 'xhigh', 'max'].includes(process.env.CLAUDE_EFFORT) ? process.env.CLAUDE_EFFORT : 'low';
+// The short "why nothing was found" explanations need no more than this
+const CLAUDE_SMALL_MODEL = process.env.CLAUDE_SMALL_MODEL || 'claude-haiku-5-5';
 
 // The CSV export is a frozen snapshot (roughly 2026-06-01 to 2026-09-01).
 // Relative phrases like "last month" are computed from TODAY, which drifts
@@ -7049,18 +7192,31 @@ async function translateToQuery(conversation, userPrompt) {
   const note = conversation.pendingNote ? `[Result of your previous answer: ${conversation.pendingNote}]\n\n` : '';
   const userTurn = { role: 'user', content: note + buildUserMessage(userPrompt, referenceToday()) };
 
+  const started = Date.now();
+  if (DEMO_OFFLINE) throw new Error('Offline mode: Claude is not asked'); // answerQuestion stops before this
   const stream = anthropic.messages.stream({
     model: CLAUDE_MODEL,
     max_tokens: 4000,
     system: [
-      { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+      // Kept an hour (writing it costs 2x instead of 1.25x, but questions are
+      // often more than 5 minutes apart, and each miss rewrites ~15k tokens)
+      { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral', ttl: '1h' } },
     ],
     // Caches the conversation so far, so each follow-up only pays full price for the new turn
     cache_control: { type: 'ephemeral' },
     messages: [...conversation.messages, userTurn],
-    output_config: { format: { type: 'json_schema', schema: OUTPUT_SCHEMA } },
+    output_config: { format: { type: 'json_schema', schema: OUTPUT_SCHEMA }, effort: CLAUDE_EFFORT },
   });
-  const message = await stream.finalMessage();
+  // The client's timeout covers waiting for Claude to start answering; this
+  // covers an answer that starts and then stalls (the network drops mid-way)
+  const stalled = setTimeout(() => stream.abort(), 2 * CLAUDE_TIMEOUT_MS);
+  let message;
+  try {
+    message = await stream.finalMessage();
+  } finally {
+    clearTimeout(stalled);
+  }
+  const ms = Date.now() - started;
 
   // A failed call leaves the conversation as it was, so the user can just ask again
   if (message.stop_reason === 'refusal') {
@@ -7079,7 +7235,7 @@ async function translateToQuery(conversation, userPrompt) {
   conversation.turns += 1;
   conversation.pendingNote = null;
 
-  return { parsed, usage: message.usage, memoryReset, userTurn, content: message.content };
+  return { parsed, usage: message.usage, ms, memoryReset, userTurn, content: message.content };
 }
 
 // =====================================================================
@@ -7088,19 +7244,35 @@ async function translateToQuery(conversation, userPrompt) {
 // translation from then: it answers in a fraction of a second instead of
 // a few. Follow-ups depend on the conversation, so they always go to Claude.
 // A reused translation still goes through normalizeAndValidate every time.
+//
+// They're also saved to ANSWER_CACHE_FILE (git-ignored), so a restart (for
+// example to switch DEMO_MODE) keeps the morning's warm-up. Only Claude's
+// translations and empty-result explanations are kept, never ticket rows:
+// every reuse runs the query again, for the tickets the person asking may see.
 // =====================================================================
 
 const ANSWER_CACHE_SIZE = 500;
-// key -> { userTurn, content, parsed, explanation }; Map order = least recently used first
+const ANSWER_CACHE_FILE = process.env.ANSWER_CACHE_FILE || '.cache/answers.json';
+// key -> { userTurn, content, parsed, explanations }; Map order = least recently used first
 const answerCache = new Map();
 
+// A changed prompt, question wrapper or output schema must not reuse
+// translations made for the old one (they're saved across restarts)
+const PROMPT_VERSION = createHash('sha256').update(SYSTEM_PROMPT).update(String(buildUserMessage))
+  .update(JSON.stringify(OUTPUT_SCHEMA)).digest('hex').slice(0, 12);
+
 // Same question = same words, ignoring capitals, spacing and the closing "?",
-// asked on the same "today" (the turn Claude saw carries the date) of the same model
-function answerCacheKey(conversation, userPrompt) {
-  if (conversation.messages.length || conversation.pendingNote) return null;
+// asked on the same "today" (the turn Claude saw carries the date) of the same
+// model and prompt
+function questionKey(userPrompt) {
   const question = userPrompt.toLowerCase().replace(/\s+/g, ' ').trim().replace(/[\s?.!]+$/, '');
   if (!question) return null;
-  return JSON.stringify([CLAUDE_MODEL, referenceToday().toISOString().slice(0, 10), question]);
+  return JSON.stringify([CLAUDE_MODEL, PROMPT_VERSION, referenceToday().toISOString().slice(0, 10), question]);
+}
+
+function answerCacheKey(conversation, userPrompt) {
+  if (conversation.messages.length || conversation.pendingNote) return null;
+  return questionKey(userPrompt);
 }
 
 function cachedAnswer(key) {
@@ -7112,6 +7284,64 @@ function cachedAnswer(key) {
 function rememberAnswer(key, entry) {
   answerCache.set(key, entry);
   if (answerCache.size > ANSWER_CACHE_SIZE) answerCache.delete(answerCache.keys().next().value);
+  saveAnswersSoon();
+}
+
+// Only today's answers for this model and prompt are written, so the file
+// holds what can still be reused (the quality gate counts them)
+function usableKey(key) {
+  const [model, version, day] = JSON.parse(key);
+  return model === CLAUDE_MODEL && version === PROMPT_VERSION && day === referenceToday().toISOString().slice(0, 10);
+}
+
+function loadAnswers() {
+  try {
+    const saved = JSON.parse(readFileSync(ANSWER_CACHE_FILE, 'utf8'));
+    for (const { key, userTurn, content, parsed, explanations } of saved.answers || []) {
+      if (key && usableKey(key)) answerCache.set(key, { userTurn, content, parsed, explanations: explanations || {} });
+    }
+    console.log(`⚡ ${answerCache.size} saved answers loaded from ${ANSWER_CACHE_FILE}`);
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.error(`⚡ Could not read ${ANSWER_CACHE_FILE}:`, error.message);
+  }
+}
+
+// Written a second after the last change, to a temporary file first, so a
+// burst of answers (the warm-up) is one write and a crash never leaves half a file
+let saveTimer = null;
+function saveAnswersSoon() {
+  if (saveTimer) return;
+  saveTimer = setTimeout(async () => {
+    saveTimer = null;
+    const answers = [...answerCache].filter(([key]) => usableKey(key))
+      .map(([key, entry]) => ({ key, question: JSON.parse(key)[3], ...entry }));
+    try {
+      await mkdir(dirname(ANSWER_CACHE_FILE), { recursive: true });
+      await writeFile(`${ANSWER_CACHE_FILE}.tmp`, JSON.stringify({ savedAt: new Date().toISOString(), model: CLAUDE_MODEL, answers }));
+      await rename(`${ANSWER_CACHE_FILE}.tmp`, ANSWER_CACHE_FILE);
+    } catch (error) {
+      console.error(`⚡ Could not save the answers to ${ANSWER_CACHE_FILE}:`, error.message);
+    }
+  }, 1000);
+  saveTimer.unref();
+}
+
+loadAnswers();
+
+// What offline mode suggests instead: questions from the warm-up list that
+// have a saved answer (never other people's questions, which may be private)
+function offlineSuggestions(limit = 6) {
+  let lines = [];
+  try {
+    lines = readFileSync('scripts/warmup-questions.txt', 'utf8').split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+  } catch { /* no list: no suggestions */ }
+  return lines.filter(line => answerCache.has(questionKey(line))).slice(0, limit);
+}
+
+function offlineMessage() {
+  const ideas = offlineSuggestions();
+  return 'OneTouch is in offline mode for this presentation, so the AI assistant can only answer questions it has answered before.' +
+    (ideas.length ? ` Try one of these: ${ideas.map(q => `"${q}"`).join(' · ')}` : ' None are saved yet: run npm run warmup while online.');
 }
 
 // =====================================================================
@@ -7241,6 +7471,16 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
       });
     }
 
+    // Offline mode: anything without a saved answer (new questions, follow-ups)
+    // gets the questions that do work, at once, instead of waiting on Claude
+    if (DEMO_OFFLINE && !cached) {
+      console.log('🔌 Offline mode: no saved answer, Claude not asked');
+      return reply.send(200, {
+        intent: 'unsupported', message: offlineMessage(), assumptions: [], sections: [], results: [],
+        elapsedMs: Date.now() - started, fromCache: false, offline: true,
+      });
+    }
+
     let parsed, memoryReset = false, fresh = null;
     if (cached) {
       // The conversation gets the original question and Claude's original reply,
@@ -7255,11 +7495,12 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
       const t = await translateToQuery(conversation, userPrompt);
       ({ parsed, memoryReset } = t);
       fresh = { userTurn: t.userTurn, content: t.content, parsed };
-      console.log(`🧠 tokens in=${t.usage.input_tokens} cached=${t.usage.cache_read_input_tokens ?? 0} out=${t.usage.output_tokens}`);
+      console.log(`🧠 tokens in=${t.usage.input_tokens} cached=${t.usage.cache_read_input_tokens ?? 0} written=${t.usage.cache_creation_input_tokens ?? 0} out=${t.usage.output_tokens} $${(costUsd(CLAUDE_MODEL, t.usage) ?? 0).toFixed(4)}`);
+      usage.recordUsage({ kind: 'translate', model: CLAUDE_MODEL, effort: CLAUDE_EFFORT, userId: user.id, question: userPrompt, usage: t.usage, ms: t.ms });
     }
     remembered = true;
     // Timing and whether Claude was skipped, for the page's "Answered in …" line
-    const timing = () => ({ elapsedMs: Date.now() - started, fromCache: Boolean(cached) });
+    const timing = () => ({ elapsedMs: Date.now() - started, fromCache: Boolean(cached), offline: DEMO_OFFLINE });
 
     const verdict = normalizeAndValidate(parsed);
     if (!verdict.ok) {
@@ -7318,6 +7559,8 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
     if (toExplain.length && !explanation && !scope.all && !scope.count) {
       // No tickets at all: nothing to diagnose, and no reason to ask Claude
       explanation = teams.scopeNote(scope);
+    } else if (toExplain.length && !explanation && DEMO_OFFLINE) {
+      explanation = 'Nothing matched. (Offline mode: OneTouch isn\'t asking Claude to explain why right now.)';
     } else if (toExplain.length && !explanation) {
       reply.progress('explaining');
       try {
@@ -7327,9 +7570,15 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
         if (!scope.all && hiddenEach) facts.push('No ticket in the whole data matches either, not even one this person cannot see: say plainly that the data has none, without mentioning permissions.');
         else if (!scope.all) facts.push(`This person only sees some tickets: ${teams.scopeNote(scope)}`);
         console.log('🔎 Empty result facts:\n   ' + facts.join('\n   '));
-        explanation = await explainEmpty({ anthropic, model: CLAUDE_MODEL, question: userPrompt, searchedFor: verdict.message, facts });
+        explanation = await explainEmpty({
+          anthropic, model: CLAUDE_SMALL_MODEL, question: userPrompt, searchedFor: verdict.message, facts,
+          onUsage: (u, ms) => usage.recordUsage({ kind: 'explain', model: CLAUDE_SMALL_MODEL, effort: 'low', userId: user.id, question: userPrompt, usage: u, ms }),
+        });
         console.log(`🔎 Explained: ${explanation}`);
-        if (cached) cached.explanations = { ...cached.explanations, [scope.key]: explanation };
+        if (cached) {
+          cached.explanations = { ...cached.explanations, [scope.key]: explanation };
+          saveAnswersSoon();
+        }
       } catch (error) {
         console.error('🔎 Could not diagnose the empty result:', error.message);
       }
@@ -7387,6 +7636,12 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
 
   } catch (error) {
     if (remembered) conversation.pendingNote = `it failed when run: ${error.message}`;
+    // No answer from Claude at all (network down, timed out): say so plainly,
+    // and what still works, rather than "Claude API error (undefined)"
+    if (error instanceof Anthropic.APIConnectionError || error instanceof Anthropic.APIUserAbortError) {
+      console.error('📋 Claude did not answer:', error.message);
+      return reply.send(504, { error: 'The AI assistant couldn\'t reach Claude just now, so this question wasn\'t answered. Questions asked before still answer at once; please try again in a moment.' });
+    }
     if (error instanceof Anthropic.APIError) {
       console.error(`📋 Claude API error ${error.status}:`, error.message);
       return reply.send(502, { error: `Claude API error (${error.status}). Please try again.` });
@@ -8068,7 +8323,18 @@ function teamsFailed(res, error, what) {
 
 app.get('/api/teams', async (req, res) => {
   try {
-    res.json(await teams.listTeams(req.scope));
+    const result = await teams.listTeams(req.scope);
+    // The 🎬 card's "Email everyone" (admins see it; the permanent admins switch it)
+    if (result.presentation) {
+      const cfg = mailConfig();
+      result.presentation.email = {
+        enabled: Boolean(cfg.key), limited: cfg.onlyTo.length > 0, on: teams.emailsEveryone(),
+        // The addresses themselves only to the permanent admins
+        onlyTo: req.scope.access.permanentAdmin ? cfg.onlyTo : [],
+        people: await teams.emailablePeople(), canSwitch: req.scope.access.permanentAdmin,
+      };
+    }
+    res.json(result);
   } catch (error) {
     teamsFailed(res, error, 'Loading the teams');
   }
@@ -8285,6 +8551,32 @@ app.post('/api/demo-tickets/reset', async (req, res) => {
   }
 });
 
+// The permanent admins, after a presentation: { on } -> everyone is an admin, or
+// back to normal (teams.setEveryoneAdmin) -> { on, people }
+app.put('/api/everyone-admin', async (req, res) => {
+  if (typeof req.body?.on !== 'boolean') return res.status(400).json({ error: 'Say whether everyone is an admin: { "on": true } or { "on": false }.' });
+  try {
+    const done = await teams.setEveryoneAdmin(req.scope, req.body.on);
+    console.log(`👑 ${req.user.username} ${done.on ? `made everyone an admin (${done.people} accounts)` : 'put admins back to normal'}`);
+    res.json(done);
+  } catch (error) {
+    teamsFailed(res, error, 'Changing who is an admin');
+  }
+});
+
+// The permanent admins, on demo day: { on } -> every person with an address is
+// emailed, whatever MAIL_ONLY_TO says, or back to MAIL_ONLY_TO -> { on, people }
+app.put('/api/email-everyone', async (req, res) => {
+  if (typeof req.body?.on !== 'boolean') return res.status(400).json({ error: 'Say whether everyone is emailed: { "on": true } or { "on": false }.' });
+  try {
+    const done = await teams.setEmailEveryone(req.scope, req.body.on);
+    console.log(`✉️  ${req.user.username} ${done.on ? `switched on emails to everyone (${done.people} people)` : 'limited emails to MAIL_ONLY_TO again'}`);
+    res.json(done);
+  } catch (error) {
+    teamsFailed(res, error, 'Changing who is emailed');
+  }
+});
+
 // =====================================================================
 // NOTIFICATIONS (notifications.mjs): the 🔔 in the header
 // =====================================================================
@@ -8360,6 +8652,7 @@ async function prepareAccounts(attempt = 1) {
     await teams.ensureTeamsSchema();
     await notifications.ensureNotificationsSchema();
     await issues.ensureIssuesSchema();
+    await usage.ensureUsageSchema();
   } catch (error) {
     const wait = Math.min(attempt * 2, 15);
     console.error(`🔐 Account database not reachable yet (${error.message}); retrying in ${wait}s`);
@@ -10257,6 +10550,15 @@ tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
 .ai-msg.wide { max-width: 100%; width: 100%; box-sizing: border-box; }
 /* "Answered in 2.8 s" under each answer */
 .result-timing { margin-top: 8px; color: var(--faint); font-size: 0.78rem; }
+/* DEMO_MODE=offline: every answer says it's a saved one, so the room can tell */
+.result-timing.offline {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: var(--warn-soft);
+    color: var(--warn-ink);
+    font-weight: 600;
+}
 
 .result-title { font-weight: 600; margin-bottom: 8px; }
 /* Not the full report, or not answered: tickets they don't have permission to see */
@@ -10538,6 +10840,8 @@ tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
 .presentation-steps li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px;
     padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
 .presentation-steps span { flex: 1 1 260px; }
+.presentation-steps li.everyone-admin-on { border-color: var(--accent); }
+.presentation-steps + h3 { margin-top: 18px; }
 
 /* Radio buttons drawn as pills and color swatches (the real input stays, for keyboards) */
 .choice-row { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -13331,7 +13635,7 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
 
     // About tickets they don't have permission to see: not answered (server.mjs)
     if (data.intent === 'denied') {
-        appendMessage('ai-msg', `<div class="result-restricted">${linkTicketsHtml(data.message)}</div>` + answerTimingHtml(seconds, data.fromCache));
+        appendMessage('ai-msg', `<div class="result-restricted">${linkTicketsHtml(data.message)}</div>` + answerTimingHtml(seconds, data.fromCache, data.offline));
         return;
     }
 
@@ -13339,7 +13643,7 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
     if (data.intent === 'clarify' || data.intent === 'unsupported') {
         const message = data.message || 'I need a little more detail to run that.';
         const download = downloadBarHtml(registerExport({ title: 'OneTouch answer', question: userPromptText, tables: buildExportTables(data, message) }));
-        appendMessage('ai-msg', `${linkTicketsHtml(message)}` + download + answerTimingHtml(seconds, data.fromCache));
+        appendMessage('ai-msg', `${linkTicketsHtml(message)}` + download + answerTimingHtml(seconds, data.fromCache, data.offline));
         return;
     }
 
@@ -13399,7 +13703,7 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
         }), 'Download as', { pictures: Boolean(answer.model) });
     }
 
-    const answerId = appendMessage('ai-msg wide', html + answerTimingHtml(seconds, data.fromCache));
+    const answerId = appendMessage('ai-msg wide', html + answerTimingHtml(seconds, data.fromCache, data.offline));
     const answerEl = document.getElementById(answerId);
     answerEl._answer = answer;
     paintPictureOptions(answerEl);
@@ -13494,8 +13798,14 @@ async function readQueryResponse(response, onStep) {
 }
 
 // "Answered in 2.8 s", or for a repeated question "Answered in 0.2 s …"
-// (nothing for a saved answer whose time wasn't kept)
-function answerTimingHtml(seconds, fromCache) {
+// (nothing for a saved answer whose time wasn't kept). offline: the server
+// is in DEMO_MODE=offline, which every answer says plainly.
+function answerTimingHtml(seconds, fromCache, offline) {
+    if (offline) {
+        return fromCache
+            ? '<div class="result-timing offline">🔌 Offline mode: a saved answer (Claude isn\'t being asked right now)</div>'
+            : '<div class="result-timing offline">🔌 Offline mode: only questions asked before can be answered</div>';
+    }
     if (seconds == null) return '';
     const time = `${seconds.toFixed(1)} s`;
     return fromCache
@@ -18165,7 +18475,7 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 - **Claude conversation history is append-only.** Never edit or drop earlier turns, and pass assistant `content` back exactly as returned (thinking blocks included); Sonnet 5.5 rejects or ignores altered history. New context goes into the next user turn (see `pendingNote`).
 - **Claude Sonnet 5.5 API rules:** forced `tool_choice` (`any`/`tool`) and `thinking: {type: "disabled"}` return 400. Steer with the prompt; control depth with `output_config.effort`.
 - **Every model-built query goes through `normalizeAndValidate`.** Don't add a path that sends model output to Cube unvalidated (the repeated-question cache in `server.mjs` re-validates its stored translation on every reuse).
-- **Repeated questions skip Claude.** A conversation-opening question asked before reuses the stored user turn *and* Claude's reply as the conversation's history, so follow-ups see exactly what Claude produced. Changing `buildSystemPrompt()`, `buildUserMessage()` or the output schema needs a server restart, which empties that cache. `/api/query` streams `progress` / `result` server-sent events when asked for `text/event-stream`.
+- **Repeated questions skip Claude.** A conversation-opening question asked before reuses the stored user turn *and* Claude's reply as the conversation's history, so follow-ups see exactly what Claude produced. The cache is saved to `.cache/answers.json` (`ANSWER_CACHE_FILE`, git-ignored) and reloaded on start; its key includes a hash of the system prompt, `buildUserMessage`'s source and the output schema (`PROMPT_VERSION`), so changing any of them (plus a restart) starts it over. `DEMO_MODE=offline` (presentation emergency switch) answers only from this cache and never calls Claude; `CLAUDE_TIMEOUT_MS` (20 s) bounds every Claude call. `/api/query` streams `progress` / `result` server-sent events when asked for `text/event-stream`.
 - **Accounts:** after changing accounts, run `node scripts/users.mjs export` and commit `db/accounts.json` (hashes only), so clones get them.
 - **Cloudflare makes browsers keep `.js` / `.css` for 4 hours** (it rewrites `max-age=0` to `max-age=14400`). `server.mjs` serves `index.html` itself, adding `?v=<content hash>` to each `<script src="x.js">` and `<link rel="stylesheet" href="x.css">`, so changed files reach browsers at once. Add new page files in exactly that form, or they skip the versioning and can be stale for hours.
 - **Test as `tester1` (and `tester2` when a second person is needed), passwords `TESTER1_PASSWORD` / `TESTER2_PASSWORD` in `.env`.** Never test as a real person (a wrong-password check counts toward locking them out, and their stars, lists and last sign-in change) or as `warmup` (the warm-up fills its Ticket results). Put back what a test changes on the test accounts; both have the Home and Dashboards tours marked as seen. The test accounts are on no team (`teams.mjs` only lets test accounts, `tester*` and `test.<name>`, join a test team such as the Milwaukee Brewers), so they see no tickets: to test teams, assignments or notifications, use a throwaway database (`CREATE DATABASE onetouch_auth_test OWNER onetouch_app`, run the server on another port with `AUTH_DB_NAME=onetouch_auth_test AUTH_DB_HOST=localhost ACCOUNTS_FILE=`, fill in a team or two by hand, then drop it), never real people's assignments. Start that server with `BREVO_API_KEY=` too, since `.env` has the real key and the test accounts may carry a real address. Its `starred_tickets` and `seen_tickets` tables only exist once the server has started on it, so add the demo families (the part of `db/demo-tickets.sql` after `\connect onetouch_auth`) after that.
@@ -18331,6 +18641,8 @@ const FILES = [
   'servicenow-sync/servicenow-blueprint.md',
   'checks/ticket-order.mjs', '.github/workflows/ci.yml', '.dockerignore', 'public/accessibility.js',
   'architecture.mjs', 'public/architecture.js', 'checks/architecture.mjs', 'health.mjs', 'issues.mjs', 'checks/issues.mjs', 'checks/attention.mjs',
+  'usage.mjs', 'scripts/usage.mjs', 'scripts/eval-translation.mjs', 'checks/usage.mjs',
+  'demo/gate.config.json',
 ];
 
 // Not copied in, and why (shown in the appendix)
@@ -19194,10 +19506,14 @@ console.log('='.repeat(64) + '\n');
 //   ... -- --user jsmith --password-stdin   password from stdin instead of a prompt
 //
 // It signs in as the "warmup" account, with WARMUP_PASSWORD from .env (or asks
-// for the password), so the demo tickets its answers list land in that
-// account's Ticket results rather than a real person's. Run it on the day
-// itself, and don't restart OneTouch afterwards: a restart forgets the
-// remembered questions, and they are tied to the date.
+// for the password). That account sees every ticket, as an admin does, without
+// an admin's powers (teams.mjs SEES_EVERY_TICKET), so every question can be
+// asked and the dashboards' "all" view (the admins') is filled. Only Claude's
+// reading of a question is kept, never rows. Another account (--user) may be
+// refused questions naming tickets it can't see; those are listed. Each
+// question's chat is deleted afterwards, so it leaves nothing in that account's
+// chat history. Run it on the day itself: the remembered questions are tied to
+// the date (they're saved in .cache/answers.json, so a restart keeps them).
 
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -19269,6 +19585,7 @@ async function signIn() {
 // A one-line summary of an answer: rows found, or what went wrong
 function describe(data) {
   if (data.error) return { ok: false, text: data.error };
+  if (data.intent === 'denied') return { ok: false, denied: true, text: "this account can't see that ticket, so it wasn't asked" };
   if (data.intent !== 'query') return { ok: true, text: `Claude asked for more detail (${data.intent})` };
   const rows = data.combined ? data.combined.rows.length : (data.sections || []).reduce((n, s) => n + s.rows.length, 0);
   return { ok: true, text: data.allEmpty ? 'nothing found (explanation ready)' : `${rows.toLocaleString()} ${rows === 1 ? 'row' : 'rows'}` };
@@ -19303,11 +19620,16 @@ const token = await signIn();
 const auth = { Authorization: `Bearer ${token}` };
 const started = performance.now();
 const problems = [];
+let denied = 0;
+const resetChat = () => fetch(`${base}/api/conversation/reset`, {
+  method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ delete: true }),
+});
 
 console.log('\nQuestions (⚡ = was already ready):');
 for (const question of questions) {
-  // A fresh conversation each time: only a conversation's first question is remembered for everyone
-  await fetch(`${base}/api/conversation/reset`, { method: 'POST', headers: auth });
+  // A fresh conversation each time: only a conversation's first question is remembered for everyone.
+  // The last one's chat is deleted, so the warm-up leaves nothing in the account's chat history.
+  await resetChat();
   const t0 = performance.now();
   let data;
   try {
@@ -19317,10 +19639,12 @@ for (const question of questions) {
     data = { error: err.message };
   }
   const d = describe(data);
-  if (!d.ok) problems.push(`"${question}": ${d.text}`);
+  if (d.denied) denied += 1;
+  else if (!d.ok) problems.push(`"${question}": ${d.text}`);
   console.log(`  ${!d.ok ? '✗' : data.fromCache ? '⚡' : '✓'} ${question}  (${d.text}, ${secs(performance.now() - t0)})`);
 }
-await fetch(`${base}/api/conversation/reset`, { method: 'POST', headers: auth });
+await resetChat();
+if (denied) problems.push(`${denied} ${denied === 1 ? 'question names a ticket' : 'questions name tickets'} this account can't see, so ${denied === 1 ? "it wasn't" : "they weren't"} remembered: run it again as warmup (npm run warmup) or an admin; the rest come back instantly`);
 
 console.log('\nDashboards:');
 const list = await (await fetch(`${base}/api/dashboards`, { headers: auth })).json();
@@ -19365,7 +19689,8 @@ if (problems.length) {
   console.log(`the same words (see ${QUESTIONS_FILE}), and every dashboard chart works. Metabase keeps each`);
   console.log('person\'s dashboard results apart (they see different tickets), so only this account\'s are ready now.');
 }
-console.log("Don't restart OneTouch before the presentation: a restart forgets the remembered questions.");
+console.log('The remembered questions are saved (.cache/answers.json), so a restart keeps them, but they are');
+console.log("tied to today's date (UTC): warm up again on the day of the presentation.");
 console.log('='.repeat(64) + '\n');
 ```
 
@@ -19397,6 +19722,25 @@ What causes the most incidents?
 Which incidents were P1 at some point but are not P1 now?
 How many incidents were reassigned at least once, by team?
 List the P2 incidents for the ACN-INFRA-CLOUD-WINTEL team
+How many incidents are there by impact and urgency?
+How many incidents are open by state?
+List the open P1 incidents
+List the open P2 incidents
+How many P1 and P2 incidents were opened in August 2026?
+How many incidents were opened each day in August 2026?
+How many incidents were closed each month?
+What are the most common incident categories?
+Which configuration items have the most incidents?
+How many incidents were caused by a change?
+How many incidents have a knowledge article?
+How many global incidents are there?
+How many incidents caused a business outage?
+What are the most common close codes for incidents?
+What are the most common cause codes for incidents?
+Which teams have the most reopened incidents?
+Which incidents were reassigned the most?
+How many incidents came from monitoring?
+How many incidents mention SAP?
 
 # Problems and related tickets
 Which problem records have the most incidents?
@@ -19418,11 +19762,30 @@ Which teams own the most changes?
 How many production changes had an outage?
 How many changes affect SAP?
 How many changes touch breweries?
+How many changes are there by state?
+How many changes are there by environment?
+How many changes were successful?
+What are the most common failure codes for changes?
+Which changes needed an SAP transport?
+How many changes are in each project?
+Which changes were raised to fix an incident?
+List the high risk changes planned for September 2026
+How many changes are planned to start each month?
+Which configuration items have the most changes?
+How many changes were created each week in August 2026?
+Which changes are linked to a problem?
+How many changes had a process failure?
+Who requested the most changes?
 
 # Approvals
 Which groups approve the most changes?
 How many requests were rejected?
 How many requests are still waiting for approval?
+How many change approvals are there by state?
+How many change approvals were created each week in August 2026?
+Which groups approve the most requests?
+How many request approvals were approved, rejected or are still waiting?
+List the requests waiting for approval
 
 # Requests and catalog tasks
 What are the top 5 most requested catalog items?
@@ -19436,6 +19799,14 @@ Show me request RITM0440498
 Show me catalog task SCTASK0595823
 How many catalog tasks were created each week in August 2026?
 Which catalog items create the most tasks?
+How many requests are open by state?
+How many requests were opened each week in August 2026?
+How many requests were closed each month?
+Which order guides are used the most?
+Which catalog items have the most open requests?
+How many catalog tasks are open by state?
+How many catalog tasks breached SLA, by team?
+How many catalog tasks are still active?
 
 # Across ticket types
 How many incidents, changes and requests were opened in August 2026?
@@ -19443,6 +19814,20 @@ How many requests and incidents were opened each week in August 2026?
 How many tickets of each type are open right now?
 Show open tickets for the ACN-INFRA-CLOUD-WINTEL team
 How many tickets were opened at Milwaukee Brewery in August 2026?
+How many tickets were opened each week in August 2026?
+How many tickets were closed in August 2026, by type?
+Which teams have the most open tickets?
+How many tickets are there of each type?
+How many tickets were opened in July 2026?
+
+# The [Demo] tickets (db/demo-tickets.sql), for the live assigning demo
+Show me incident INC9900001
+Show me the child incidents of INC9900001
+Show me incident INC9900007
+Show me change CHG9900001
+Show me request RITM9900001
+Show me the catalog tasks for RITM9900001
+Show me order REQ9900001
 
 # Nothing found: OneTouch works out why and says so
 Show me changes owned by the TCS-ServiceDesk-L1-NA-WE team
@@ -24186,6 +24571,10 @@ export const ROLES = {
 };
 // Accounts that aren't people (scripts/warmup.mjs) never join a team
 const SERVICE_ACCOUNTS = ['warmup'];
+// The warm-up sees every ticket, as an admin does, so it can ask every question
+// (one naming a ticket is refused before Claude for anyone who can't see it) and
+// fill the dashboards' "all" view. It gets none of an admin's powers.
+const SEES_EVERY_TICKET = ['warmup'];
 // Test accounts (tester1, tester2, ..., and test.<name>, like the Milwaukee
 // Brewers' players) only ever join a test team, never a real one. A Postgres
 // pattern, also used as a RegExp.
@@ -24283,7 +24672,84 @@ export async function ensureTeamsSchema() {
         GRANT SELECT ON ticket_access TO access_reader;
       END IF;
     END $$;
+    -- Switches the permanent admins flip on the Team tab: 'everyone_admin', 'email_everyone'
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key         text PRIMARY KEY,
+      value       jsonb NOT NULL,
+      updated_at  timestamptz NOT NULL DEFAULT now(),
+      updated_by  integer REFERENCES users(id) ON DELETE SET NULL
+    );
   `);
+  const { rows } = await pool.query('SELECT key, value FROM app_settings');
+  const saved = Object.fromEntries(rows.map(r => [r.key, r.value]));
+  everyoneAdmin = saved.everyone_admin === true;
+  emailEveryone = saved.email_everyone === true;
+  if (everyoneAdmin) console.log('👑 Everyone is an admin (the Team tab\'s "After the presentation" switches it back)');
+  if (emailEveryone) console.log('✉️  Demo day: everyone with an address is emailed, whatever MAIL_ONLY_TO says (the Team tab switches it back)');
+}
+
+// One of the switches above, saved in the name of whoever flipped it
+async function saveSetting(key, value, userId) {
+  await pool.query(
+    `INSERT INTO app_settings (key, value, updated_by) VALUES ($1, $2::jsonb, $3)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`,
+    [key, JSON.stringify(value), userId]);
+}
+
+// ---------------------------------------------------------------------
+// EVERYONE AN ADMIN, after a presentation, so stakeholders can try every
+// feature: every account but the service accounts gets an admin's scope
+// (every ticket, every admin page and change). Only the permanent admins
+// (ADMIN_USERNAMES) may switch it, and 🚩 problem reports still go only to
+// them (issues.mjs). Saved in app_settings, so it survives a restart.
+// ---------------------------------------------------------------------
+
+let everyoneAdmin = false;
+const isPermanentAdmin = user => ADMIN_USERNAMES.includes(user.username);
+
+// { on } -> { on, people }: how many accounts it makes admins
+export async function setEveryoneAdmin(scope, on) {
+  if (!scope.access.permanentAdmin) throw new AccessError('Only the permanent admins can switch that.');
+  if (typeof on !== 'boolean') throw new AccessError('Say whether everyone is an admin: { "on": true } or { "on": false }.');
+  await saveSetting('everyone_admin', on, scope.access.userId);
+  everyoneAdmin = on;
+  changed();
+  return { on, people: await everyoneAdminCount() };
+}
+
+// The accounts the switch makes admins (not the permanent admins, who are already)
+async function everyoneAdminCount() {
+  const { rows: [r] } = await pool.query(
+    'SELECT count(*)::int AS n FROM users WHERE is_active AND username <> ALL($1::text[])', [[...ADMIN_USERNAMES, ...SERVICE_ACCOUNTS]]);
+  return r.n;
+}
+
+// ---------------------------------------------------------------------
+// EMAIL EVERYONE, on demo day: while MAIL_ONLY_TO in .env limits the emails
+// to a few addresses (for trying things out), this switch lets every person
+// with an address be emailed again (mail.mjs skipReason reads emailsEveryone).
+// Only the permanent admins may switch it. Saved in app_settings.
+// ---------------------------------------------------------------------
+
+let emailEveryone = false;
+export const emailsEveryone = () => emailEveryone;
+
+// { on } -> { on, people }: how many people would be emailed with it on
+export async function setEmailEveryone(scope, on) {
+  if (!scope.access.permanentAdmin) throw new AccessError('Only the permanent admins can switch that.');
+  if (typeof on !== 'boolean') throw new AccessError('Say whether everyone is emailed: { "on": true } or { "on": false }.');
+  await saveSetting('email_everyone', on, scope.access.userId);
+  emailEveryone = on;
+  return { on, people: await emailablePeople() };
+}
+
+// People with an address who haven't turned email off (test and service accounts never are)
+export async function emailablePeople() {
+  const { rows: [r] } = await pool.query(
+    `SELECT count(*)::int AS n FROM users
+      WHERE is_active AND email IS NOT NULL AND email_notifications AND username <> ALL($1::text[]) AND username !~ $2`,
+    [SERVICE_ACCOUNTS, TEST_ACCOUNT]);
+  return r.n;
 }
 
 // Who someone is to the Metabase dashboards (a locked filter in their signed
@@ -24448,7 +24914,8 @@ export async function seedTeams(runQuery) {
 }
 
 // ---------------------------------------------------------------------
-// WHAT SOMEONE MAY SEE. A scope is { all: true } for an admin, otherwise
+// WHAT SOMEONE MAY SEE. A scope is { all: true } for an admin (and the
+// warmup account, without an admin's powers), otherwise
 // their ticket numbers by type. Kept for a minute, and dropped as soon as
 // anything here changes. key names the scope in the caches of charts.mjs
 // and relations.mjs, so two people never share a cached answer they
@@ -24469,12 +24936,13 @@ export async function scopeFor(user) {
     'SELECT m.role, t.id, t.name FROM team_members m JOIN teams t ON t.id = m.team_id WHERE m.user_id = $1', [user.id]);
   const access = {
     userId: user.id,
-    admin: ADMIN_USERNAMES.includes(user.username),
+    admin: isPermanentAdmin(user) || (everyoneAdmin && !SERVICE_ACCOUNTS.includes(user.username)),
+    permanentAdmin: isPermanentAdmin(user),
     role: m?.role || null,
     team: m ? { id: m.id, name: m.name } : null,
   };
   let scope;
-  if (access.admin) {
+  if (access.admin || SEES_EVERY_TICKET.includes(user.username)) {
     scope = { all: true, key: 'all', count: null };
   } else {
     const { rows } = access.role === 'project_manager'
@@ -24649,7 +25117,10 @@ export async function listTeams(scope) {
               count(*) FILTER (WHERE f.team_id IS NOT NULL)::int AS on_team
          FROM ticket_assignments a JOIN ticket_families f ON f.id = a.family_id WHERE a.number ~ $1`, [DEMO_TICKET]);
     const { rows: [s] } = await pool.query('SELECT count(DISTINCT number)::int AS tickets FROM ticket_reports');
-    result.presentation = { demo: { tickets: d.tickets, assigned: d.assigned, onTeam: d.on_team }, statuses: s.tickets };
+    result.presentation = {
+      demo: { tickets: d.tickets, assigned: d.assigned, onTeam: d.on_team }, statuses: s.tickets,
+      everyoneAdmin: { on: everyoneAdmin, people: await everyoneAdminCount(), canSwitch: access.permanentAdmin },
+    };
   }
   return result;
 }
@@ -25932,7 +26403,74 @@ function presentationHtml() {
         '<ul class="presentation-steps">' +
         `<li><span>${escapeHtml(statuses)}</span><button type="button" class="home-action danger" data-undo-statuses="${p.statuses}"${p.statuses ? '' : ' disabled'}>↩ Undo every status</button></li>` +
         `<li><span>${escapeHtml(demo)}</span><button type="button" class="home-action danger" data-reset-demo="${d.tickets}"${d.tickets ? '' : ' disabled'}>🧹 Put the demo tickets back</button></li>` +
-        '</ul>';
+        '</ul>' + emailEveryoneHtml(p.email) + everyoneAdminHtml(p.everyoneAdmin);
+}
+
+// ✉️ Demo day: everyone with an address emailed, though MAIL_ONLY_TO in .env
+// limits it the rest of the time (teams.mjs setEmailEveryone)
+function emailEveryoneHtml(m) {
+    if (!m) return '';
+    let text, button = '';
+    if (!m.enabled) text = 'Email is off on this server (no Brevo key), so nobody is emailed.';
+    else if (!m.limited) text = `Everyone with an address is emailed (${howMany(m.people, 'person', 'people')}): nothing in .env limits it.`;
+    else if (m.on) {
+        text = `Everyone with an address is emailed (${howMany(m.people, 'person', 'people')}).`;
+        button = m.canSwitch ? '<button type="button" class="home-action" data-email-everyone="off">Only email me again</button>' : '';
+    } else {
+        text = `Emails only go to ${m.onlyTo.length ? m.onlyTo.join(', ') : 'the test addresses'}. On demo day, email everyone with an address (${howMany(m.people, 'person', 'people')}).`;
+        button = m.canSwitch ? `<button type="button" class="home-action danger" data-email-everyone="on" data-people="${m.people}">✉️ Email everyone</button>` : '';
+    }
+    if (m.enabled && m.limited && !m.canSwitch) button = '<span class="home-status">Only the permanent admins can switch this.</span>';
+    return '<h3>Demo day</h3>' +
+        `<ul class="presentation-steps"><li${m.on && m.limited ? ' class="everyone-admin-on"' : ''}><span>${escapeHtml(text)}</span>${button}</li></ul>`;
+}
+
+async function setEmailEveryone(on, people) {
+    const question = on
+        ? `Email everyone? From now on, each notification is also emailed to the person it's for: ${howMany(people, 'person has', 'people have')} an address. ` +
+            'Notifications from before stay unsent. Switch it back after the demo.'
+        : 'Only email the test addresses in .env again? Everyone else stops getting emails (their notifications still show under the 🔔).';
+    if (!confirm(question)) return;
+    try {
+        const data = await teamsFetch('/api/email-everyone', { method: 'PUT', body: JSON.stringify({ on }) });
+        if (!data) return;
+        showToast(data.on ? `Everyone with an address is emailed now (${howMany(data.people, 'person', 'people')})` : 'Emails only go to the test addresses again');
+        loadTeams();
+    } catch (err) {
+        showToast(`${err.message}`, 'error');
+    }
+}
+
+// 👑 After the presentation: everyone an admin, so stakeholders can try every
+// feature; only the permanent admins can switch it (teams.mjs setEveryoneAdmin)
+function everyoneAdminHtml(e) {
+    if (!e) return '';
+    const text = e.on
+        ? `Everyone is an admin: ${howMany(e.people, 'account sees', 'accounts see')} every ticket and every admin feature, and can make admin changes.`
+        : `Only the permanent admins see everything. Make everyone an admin so stakeholders can try every feature (${howMany(e.people, 'account', 'accounts')}).`;
+    const button = !e.canSwitch
+        ? '<span class="home-status">Only the permanent admins can switch this back.</span>'
+        : e.on
+            ? `<button type="button" class="home-action" data-everyone-admin="off" data-people="${e.people}">Back to normal</button>`
+            : `<button type="button" class="home-action danger" data-everyone-admin="on" data-people="${e.people}">👑 Make everyone an admin</button>`;
+    return '<h3>After the presentation</h3>' +
+        `<ul class="presentation-steps"><li${e.on ? ' class="everyone-admin-on"' : ''}><span>${escapeHtml(text)}</span>${button}</li></ul>`;
+}
+
+async function setEveryoneAdmin(on, people) {
+    const question = on
+        ? `Make everyone an admin? ${howMany(people, 'account', 'accounts')} will see every ticket, 🧊 Architecture and every admin card, and can move families, ` +
+            'change teams and roles, assign any ticket and undo statuses, until you switch it back. People already signed in see the admin buttons when they reload the page.'
+        : 'Back to normal? Everyone but the permanent admins goes back to seeing only their own tickets (project managers: their team\'s).';
+    if (!confirm(question)) return;
+    try {
+        const data = await teamsFetch('/api/everyone-admin', { method: 'PUT', body: JSON.stringify({ on }) });
+        if (!data) return;
+        showToast(data.on ? `Everyone is an admin (${howMany(data.people, 'account', 'accounts')})` : 'Back to normal: only the permanent admins see everything');
+        loadTeams();
+    } catch (err) {
+        showToast(`${err.message}`, 'error');
+    }
 }
 
 async function undoAllStatuses(count) {
@@ -26061,7 +26599,11 @@ document.getElementById('teams-view').addEventListener('click', e => {
     const undo = e.target.closest('[data-undo-statuses]');
     if (undo) { undoAllStatuses(Number(undo.dataset.undoStatuses)); return; }
     const demo = e.target.closest('[data-reset-demo]');
-    if (demo) resetDemoTickets(Number(demo.dataset.resetDemo));
+    if (demo) { resetDemoTickets(Number(demo.dataset.resetDemo)); return; }
+    const everyone = e.target.closest('[data-everyone-admin]');
+    if (everyone) { setEveryoneAdmin(everyone.dataset.everyoneAdmin === 'on', Number(everyone.dataset.people)); return; }
+    const email = e.target.closest('[data-email-everyone]');
+    if (email) setEmailEveryone(email.dataset.emailEveryone === 'on', Number(email.dataset.people));
 });
 
 // A name picked in a ticket's box gives it to them; in a family's, the whole family
@@ -26154,7 +26696,10 @@ replacing that.
   team's members, and sees each member's workload (Team tab).
 - **Process excellence** and **project team member**: see only the tickets
   assigned to them.
-- People on no team, and the `warmup` service account, see no tickets.
+- People on no team see no tickets. The `warmup` service account sees every
+  ticket, as an admin does (`SEES_EVERY_TICKET` in `teams.mjs`), so `npm run warmup`
+  can ask every question and fill the dashboards' "all" view; it has none of an
+  admin's powers and never joins a team.
 - Test accounts (`tester1`, `tester2`, …, and any `test.<name>`) only ever
   join a **test team** (`teams.is_test`), never a real one. Seeding skips them,
   an admin can only put them on a test team, and the server takes any that
@@ -26185,6 +26730,12 @@ replacing that.
   gone) and undoes every status (`POST /api/ticket-statuses/undo-all`,
   `teams.undoAllStatuses`: all of `ticket_reports` and the 'report'
   notifications). Real tickets keep their teams and people.
+- **Everyone an admin, after a presentation** (the same card's "After the presentation",
+  `PUT /api/everyone-admin` `{ on }`, `teams.setEveryoneAdmin`): every account but the
+  service accounts gets an admin's scope (`access.admin`), so stakeholders can try every
+  feature. Only the permanent admins (`access.permanentAdmin`, `ADMIN_USERNAMES`) can
+  switch it; 🚩 reports still go only to them. Saved in `app_settings` ('everyone_admin'),
+  so it survives a restart. Teams, roles and assignments never change.
 
 **Assigned to me** (Home's first tab, `GET /api/my-tickets`): everyone's
 OneTouch tickets, most urgent first, then oldest (`ticketsByPriority` in
@@ -26343,7 +26894,9 @@ report on the live server: it emails the real admins.**
 change commits, retried up to 5 times, never older than an hour. Only to people with
 `users.email` set (an admin sets it: `npm run users -- email|emails`; never in
 `db/accounts.json`) who haven't unticked "Email me these too" in the 🔔 panel; never test
-or service accounts; only `MAIL_ONLY_TO` while that's set. An email holds who did what
+or service accounts; only `MAIL_ONLY_TO` while that's set, unless a permanent admin has
+switched on **Email everyone** (the 🎬 card's "Demo day", `PUT /api/email-everyone`,
+`teams.setEmailEveryone`, saved in `app_settings`). An email holds who did what
 and the ticket numbers, never summaries or notes. No `BREVO_API_KEY` in `.env`: off.
 
 **Families decide teams.** Tickets linked to each other form one family: a
@@ -28052,12 +28605,13 @@ document.addEventListener('keydown', e => {
 //   MAIL_FROM       the sender, on a domain authenticated in Brevo (notifications@onetouch.fyi)
 //   MAIL_FROM_NAME  the name it shows (OneTouch)
 //   APP_URL         where the emails link to (https://onetouch.fyi)
-//   MAIL_ONLY_TO    comma-separated addresses: while it's set, nobody else is emailed
+//   MAIL_ONLY_TO    comma-separated addresses: while it's set, nobody else is emailed,
+//                   unless a permanent admin switches on "Email everyone" (Team tab, demo day)
 // For tests only: BREVO_API_URL (a stand-in for Brevo), MAIL_INTERVAL_MS, MAIL_RETRY_MS.
 // =====================================================================
 
 import { pool } from './auth.mjs';
-import { isTestOrServiceAccount } from './teams.mjs';
+import { isTestOrServiceAccount, emailsEveryone } from './teams.mjs';
 
 const BREVO_URL = 'https://api.brevo.com/v3/smtp/email';
 const BATCH = 20;                  // emails per round, well inside Brevo's limits
@@ -28138,7 +28692,8 @@ export function skipReason(n, cfg = mailConfig(), now = Date.now()) {
   if (!n.is_active) return 'the account is deactivated';
   if (!n.email) return 'no email address on file';
   if (!n.email_notifications) return 'they turned email off';
-  if (cfg.onlyTo.length && !cfg.onlyTo.includes(String(n.email).toLowerCase())) return 'not on MAIL_ONLY_TO';
+  // The Team tab's "Email everyone" (demo day) lifts MAIL_ONLY_TO while it's on
+  if (cfg.onlyTo.length && !emailsEveryone() && !cfg.onlyTo.includes(String(n.email).toLowerCase())) return 'not on MAIL_ONLY_TO';
   if (now - new Date(n.created_at).getTime() > MAX_AGE_MS) return 'too old by the time it could be sent';
   return '';
 }
@@ -29543,6 +30098,7 @@ servicenow-sync/node_modules/
 .github/
 .claude/
 .cubestore/
+.cache/
 CLAUDE.local.md
 diag*.txt
 curl.txt
@@ -30440,7 +30996,7 @@ export const NODES = [
       ['Outbox', 'Checked every 30 seconds, retried up to 5 times, never sent if older than an hour'],
       ['An email holds', 'Who did what and the ticket numbers, never summaries or notes'],
     ],
-    secure: 'Test and service accounts are never emailed. MAIL_ONLY_TO limits who gets email while trying it out.',
+    secure: 'Test and service accounts are never emailed. MAIL_ONLY_TO limits who gets email while trying it out, until a permanent admin switches on Email everyone (Team tab, demo day).',
     files: ['notifications.mjs', 'mail.mjs', 'issues.mjs', 'public/notifications.js'],
   },
   {
@@ -33792,7 +34348,7 @@ const fail = (text, detail) => {
   return problem;
 };
 
-// tools: { db(sql) -> rows, cubeQuery(query), fetch, listClaudeModels(), hasClaudeKey,
+// tools: { db(sql) -> rows, cubeQuery(query), fetch, listClaudeModels(), hasClaudeKey, claudeOffline,
 //          mailEnabled, publicUrl, metabaseUrl, dashboardsReady(), listening() }
 // Each check returns a sentence when all is well, or { off: sentence }, or throws.
 export function buildChecks(tools) {
@@ -33841,6 +34397,7 @@ export function buildChecks(tools) {
       id: 'claude', node: 'claude', name: 'AI assistant (Claude API)', keepMs: KEEP_OUTSIDE_MS, failText: 'The Claude API refused this server\'s key or didn\'t answer.',
       effect: 'New questions can\'t be answered. Repeated ones still can.',
       async run() {
+        if (tools.claudeOffline) return { off: 'Offline mode (DEMO_MODE=offline): Claude isn\'t asked, and only questions asked before are answered.' };
         if (!tools.hasClaudeKey) throw fail('No ANTHROPIC_API_KEY is set.');
         await tools.listClaudeModels();
         return 'The Claude API accepts this server\'s key.';
@@ -34203,6 +34760,469 @@ check('a flag says why', flagged('CHG0000001', true)[0].value, '3.0 days');
 
 if (failures) process.exit(1);
 console.log('Attention flags: all correct.');
+```
+
+<a id="b89"></a>
+### B.89 `usage.mjs`
+
+```js
+// =====================================================================
+// CLAUDE API USAGE: every call the server makes to Claude (translating a
+// question, explaining an empty result) is saved with its token counts and
+// what it cost, so the bill can be checked against real use:
+//   docker exec analytics_node_app npm run usage            (last 30 days)
+//   docker exec analytics_node_app npm run usage -- 7       (last 7 days)
+// Rows older than KEEP_DAYS are deleted at start. A failure to save one never
+// affects the answer.
+// =====================================================================
+
+// Loaded on first use, so costUsd works without the database (checks/usage.mjs)
+const db = async () => (await import('./auth.mjs')).pool;
+
+const KEEP_DAYS = 180;
+
+// US dollars per million tokens (Anthropic's prices; Haiku's are for prompts under 100K tokens).
+// A model missing here is saved without a cost.
+const PRICES = {
+  'claude-sonnet-5-5': { input: 2, output: 10, cacheRead: 0.2, cacheWrite5m: 2.5, cacheWrite1h: 4 },
+  'claude-haiku-5-5': { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite5m: 0.125, cacheWrite1h: 0.2 },
+  'claude-opus-5-5': { input: 4, output: 20, cacheRead: 0.2, cacheWrite5m: 5, cacheWrite1h: 8 },
+};
+
+// What one call cost, from the API's usage object; null for an unknown model
+export function costUsd(model, usage) {
+  const p = PRICES[model];
+  if (!p || !usage) return null;
+  const written = usage.cache_creation_input_tokens || 0;
+  // Newer responses split cache writes by how long they're kept
+  const w1h = usage.cache_creation?.ephemeral_1h_input_tokens ?? 0;
+  const w5m = usage.cache_creation ? (usage.cache_creation.ephemeral_5m_input_tokens ?? 0) : written;
+  return ((usage.input_tokens || 0) * p.input
+    + (usage.output_tokens || 0) * p.output
+    + (usage.cache_read_input_tokens || 0) * p.cacheRead
+    + w5m * p.cacheWrite5m + w1h * p.cacheWrite1h) / 1e6;
+}
+
+export async function ensureUsageSchema() {
+  await (await db()).query(`
+    CREATE TABLE IF NOT EXISTS claude_usage (
+      id           bigserial PRIMARY KEY,
+      at           timestamptz NOT NULL DEFAULT now(),
+      kind         text NOT NULL,              -- 'translate' | 'explain'
+      model        text NOT NULL,
+      effort       text,
+      user_id      integer REFERENCES users(id) ON DELETE SET NULL,
+      question     text,
+      input        integer NOT NULL,
+      cache_read   integer NOT NULL,
+      cache_write  integer NOT NULL,
+      output       integer NOT NULL,
+      cost_usd     numeric(10, 6),
+      ms           integer
+    );
+    CREATE INDEX IF NOT EXISTS claude_usage_at_idx ON claude_usage (at);
+  `);
+  await (await db()).query(`DELETE FROM claude_usage WHERE at < now() - make_interval(days => $1)`, [KEEP_DAYS]);
+}
+
+// Saves one call; never throws
+export async function recordUsage({ kind, model, effort = null, userId = null, question = null, usage, ms = null }) {
+  if (!usage) return;
+  try {
+    await (await db()).query(
+      `INSERT INTO claude_usage (kind, model, effort, user_id, question, input, cache_read, cache_write, output, cost_usd, ms)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [kind, model, effort, userId, question ? question.slice(0, 2000) : null,
+        usage.input_tokens || 0, usage.cache_read_input_tokens || 0, usage.cache_creation_input_tokens || 0,
+        usage.output_tokens || 0, costUsd(model, usage), ms]);
+  } catch (error) {
+    console.error('🧾 Could not save the Claude usage:', error.message);
+  }
+}
+
+// Per day and in all, for the last `days` days
+export async function usageReport(days = 30) {
+  const { rows } = await (await db()).query(`
+    SELECT to_char(date_trunc('day', at), 'YYYY-MM-DD') AS day, kind, model, coalesce(effort, '-') AS effort,
+           count(*)::int AS calls,
+           count(*) FILTER (WHERE cache_read > 0)::int AS cache_hits,
+           count(*) FILTER (WHERE cache_write > 0)::int AS cache_writes,
+           round(avg(output))::int AS avg_output,
+           round(avg(ms))::int AS avg_ms,
+           round(sum(cost_usd), 4)::float AS cost,
+           round(avg(cost_usd), 4)::float AS avg_cost
+      FROM claude_usage
+     WHERE at >= now() - make_interval(days => $1)
+     GROUP BY 1, 2, 3, 4 ORDER BY 1, 2, 3, 4`, [days]);
+  return rows;
+}
+```
+
+<a id="b90"></a>
+### B.90 `scripts/usage.mjs`
+
+```js
+// What the Claude API cost, per day (see usage.mjs):
+//   docker exec analytics_node_app npm run usage          (last 30 days)
+//   docker exec analytics_node_app npm run usage -- 7     (last 7 days)
+
+import dotenv from 'dotenv';
+dotenv.config();
+const { usageReport } = await import('../usage.mjs');
+const { pool } = await import('../auth.mjs');
+
+const days = Math.max(1, Math.min(365, Number(process.argv[2]) || 30));
+const rows = await usageReport(days);
+if (!rows.length) {
+  console.log(`No Claude API calls in the last ${days} days.`);
+} else {
+  console.table(rows);
+  const total = rows.reduce((a, r) => a + (r.cost || 0), 0);
+  const calls = rows.reduce((a, r) => a + r.calls, 0);
+  const hits = rows.reduce((a, r) => a + r.cache_hits, 0);
+  console.log(`Last ${days} days: ${calls} calls, $${total.toFixed(2)} in all, $${(total / calls).toFixed(4)} a call; the business-logic prompt came from the cache on ${Math.round(100 * hits / calls)}% of calls.`);
+}
+await pool.end?.();
+```
+
+<a id="b91"></a>
+### B.91 `scripts/eval-translation.mjs`
+
+```js
+// =====================================================================
+// EVAL: does a cheaper setting still translate questions the same way?
+//
+// Asks the warmup questions (scripts/warmup-questions.txt) and a few
+// follow-up conversations with several model / effort settings, exactly as
+// translateToQuery in server.mjs does (same system prompt, schema, validator,
+// conversation and "[Result of your previous answer …]" notes). Each answer
+// is compared with today's setting: the same query, or the same rows when
+// both queries are run in Cube, or different (listed for a person to judge).
+// Today's setting runs twice, so the normal run-to-run variation is known.
+//
+// It calls the Claude API (real money: about $5-8 for every setting), so it
+// only runs with --yes:
+//   docker exec analytics_node_app node scripts/eval-translation.mjs --yes
+// Options: --only=sonnet-low,haiku-medium  --limit=10  --max-cost=15
+// Results: eval-results/translation-<time>.json and .md (not in git).
+// Runs as an admin would (every ticket), and never touches onetouch_auth.
+// =====================================================================
+
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHmac } from 'node:crypto';
+import dotenv from 'dotenv';
+import Anthropic from '@anthropic-ai/sdk';
+import { buildSystemPrompt, buildUserMessage, normalizeAndValidate, OUTPUT_SCHEMA } from '../business_logic.mjs';
+import { diagnoseEmpty, explainEmpty, isEmptyResult } from '../empty_results.mjs';
+import { costUsd } from '../usage.mjs';
+
+dotenv.config();
+
+const args = Object.fromEntries(process.argv.slice(2).map(a => {
+  const [k, v] = a.replace(/^--/, '').split('=');
+  return [k, v ?? true];
+}));
+if (!args.yes) {
+  console.log('This asks Claude about 300 questions (about $5-8 per setting). Run again with --yes to go ahead.');
+  process.exit(1);
+}
+
+const SONNET = 'claude-sonnet-5-5';
+const HAIKU = 'claude-haiku-5-5';
+// effort undefined = what server.mjs sends today (Sonnet 5.5's default, high)
+const ALL_SETTINGS = [
+  { name: 'today', model: SONNET, effort: undefined, note: 'Sonnet 5.5, no effort set (high)' },
+  { name: 'today-again', model: SONNET, effort: undefined, note: 'the same, a second time: normal variation' },
+  { name: 'sonnet-medium', model: SONNET, effort: 'medium' },
+  { name: 'sonnet-low', model: SONNET, effort: 'low' },
+  { name: 'haiku-medium', model: HAIKU, effort: 'medium' },
+];
+const BASELINE = 'today';
+const only = args.only ? String(args.only).split(',') : null;
+const SETTINGS = ALL_SETTINGS.filter(s => !only || only.includes(s.name) || s.name === BASELINE);
+const MAX_COST = Number(args['max-cost'] || 15);
+
+// ---------------------------------------------------------------------
+// Questions: each warmup question on its own, plus follow-up conversations
+// ---------------------------------------------------------------------
+const warmup = readFileSync(new URL('./warmup-questions.txt', import.meta.url), 'utf8')
+  .split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+const FOLLOW_UPS = [
+  ['How many open incidents are there by priority?', 'Only the P1s and P2s', 'Same but for changes, by risk'],
+  ['List the emergency changes', 'Which of those caused incidents?'],
+  ['What are the top 5 most requested catalog items?', 'How many of the first one are still open?'],
+  ['Which assignment groups have the most open incidents?', 'List the P2s for the top one', 'How many of them breached SLA?'],
+];
+let chains = [...warmup.map(q => [q]), ...FOLLOW_UPS];
+if (args.limit) chains = chains.slice(0, Number(args.limit));
+const steps = chains.flatMap((chain, c) => chain.map((question, t) => ({ id: `${c}.${t}`, chain: c, turn: t, question })));
+
+// ---------------------------------------------------------------------
+// Claude and Cube, as server.mjs uses them
+// ---------------------------------------------------------------------
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+  defaultHeaders: process.env.ANTHROPIC_WORKSPACE_ID ? { 'anthropic-workspace-id': process.env.ANTHROPIC_WORKSPACE_ID } : undefined,
+  maxRetries: 6,
+});
+const SYSTEM_PROMPT = buildSystemPrompt();
+const pinned = (process.env.ASSUME_TODAY || '').trim();
+const TODAY = /^\d{4}-\d{2}-\d{2}$/.test(pinned) ? new Date(`${pinned}T12:00:00Z`) : new Date();
+
+let spent = 0;
+function charge(model, usage) {
+  const c = costUsd(model, usage) ?? 0;
+  spent += c;
+  if (spent > MAX_COST) {
+    console.error(`💸 Stopped: over the $${MAX_COST} limit ($${spent.toFixed(2)}).`);
+    process.exit(2);
+  }
+  return c;
+}
+
+async function translate(setting, conversation, question) {
+  const note = conversation.pendingNote ? `[Result of your previous answer: ${conversation.pendingNote}]\n\n` : '';
+  const userTurn = { role: 'user', content: note + buildUserMessage(question, TODAY) };
+  const started = Date.now();
+  const message = await anthropic.messages.stream({
+    model: setting.model,
+    max_tokens: 4000,
+    system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+    cache_control: { type: 'ephemeral' },
+    messages: [...conversation.messages, userTurn],
+    output_config: { format: { type: 'json_schema', schema: OUTPUT_SCHEMA }, ...(setting.effort ? { effort: setting.effort } : {}) },
+  }).finalMessage();
+  const ms = Date.now() - started;
+  const cost = charge(setting.model, message.usage);
+  if (message.stop_reason !== 'end_turn') return { error: `stopped: ${message.stop_reason}`, usage: message.usage, cost, ms };
+  const parsed = JSON.parse(message.content.filter(b => b.type === 'text').map(b => b.text).join(''));
+  conversation.messages.push(userTurn, { role: 'assistant', content: message.content });
+  conversation.pendingNote = null;
+  return { parsed, usage: message.usage, cost, ms };
+}
+
+const CUBE_URL = process.env.CUBE_API_URL || 'http://localhost:4000/cubejs-api/v1/load';
+function cubeToken() {
+  const now = Math.floor(Date.now() / 1000);
+  const b64 = o => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const body = `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ iat: now, exp: now + 3600 })}`;
+  return `${body}.${createHmac('sha256', process.env.CUBEJS_API_SECRET).update(body).digest('base64url')}`;
+}
+const cubeCache = new Map();
+async function runCube(query) {
+  const key = JSON.stringify(query);
+  if (!cubeCache.has(key)) {
+    cubeCache.set(key, (async () => {
+      const giveUpAt = Date.now() + 120_000;
+      for (;;) {
+        const res = await fetch(CUBE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: cubeToken() }, body: JSON.stringify({ query }) });
+        const data = await res.json();
+        if (data.error === 'Continue wait' && Date.now() < giveUpAt) { await new Promise(r => setTimeout(r, 500)); continue; }
+        if (data.error) throw new Error(data.error);
+        return data.data || [];
+      }
+    })());
+  }
+  return cubeCache.get(key);
+}
+
+// ---------------------------------------------------------------------
+// One setting through every question
+// ---------------------------------------------------------------------
+async function runSetting(setting) {
+  const out = {};
+  for (const chain of chains.map((_, c) => steps.filter(s => s.chain === c))) {
+    const conversation = { messages: [], pendingNote: null };
+    for (const step of chain) {
+      const r = { question: step.question };
+      try {
+        const t = await translate(setting, conversation, step.question);
+        Object.assign(r, { usage: t.usage, cost: t.cost, ms: t.ms });
+        if (t.error) { r.outcome = 'error'; r.error = t.error; out[step.id] = r; break; }
+        const verdict = normalizeAndValidate(t.parsed);
+        r.parsed = t.parsed;
+        if (!verdict.ok) {
+          r.outcome = 'rejected'; r.error = verdict.error;
+          conversation.pendingNote = `it was rejected before running: ${verdict.error}`;
+        } else {
+          r.intent = verdict.intent; r.message = verdict.message;
+          if (verdict.intent === 'query') {
+            r.queries = verdict.queries;
+            r.rows = await Promise.all(verdict.queries.map(q => runCube(q.cubeQuery)));
+            r.outcome = 'ran';
+            conversation.pendingNote = verdict.queries.map((q, i) => `${q.entity} query returned ${r.rows[i].length} ${r.rows[i].length === 1 ? 'row' : 'rows'}`).join('; ') + '.';
+          } else {
+            r.outcome = verdict.intent;
+          }
+        }
+      } catch (error) {
+        r.outcome = 'error'; r.error = error.message;
+        out[step.id] = r;
+        break; // the rest of this conversation can't be compared
+      }
+      out[step.id] = r;
+      process.stdout.write(`${setting.name} ${step.id} ${r.outcome} $${(r.cost ?? 0).toFixed(4)} ${r.ms ?? '-'}ms\n`);
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------
+// Comparing with today's setting
+// ---------------------------------------------------------------------
+const canon = v => Array.isArray(v) ? `[${v.map(canon).join(',')}]`
+  : v && typeof v === 'object' ? `{${Object.keys(v).sort().map(k => `${JSON.stringify(k)}:${canon(v[k])}`).join(',')}}`
+  : JSON.stringify(v);
+// Rows compared by their values only (a measure's name may differ), in any order
+const rowsKey = rows => rows.map(set => set.map(row => Object.values(row).map(String).sort().join('|')).sort().join('\n')).join('\n---\n');
+
+function compare(base, other) {
+  if (!base || !other) return 'missing';
+  if (base.outcome === 'error' || other.outcome === 'error') return other.outcome === 'error' ? 'error' : 'baseline-error';
+  if (other.outcome === 'rejected') return 'rejected';
+  if (base.outcome === 'rejected') return 'baseline-rejected';
+  if (base.intent !== other.intent) return 'different';
+  if (base.intent !== 'query') return 'same';
+  if (canon(base.queries) === canon(other.queries)) return 'same';
+  if (rowsKey(base.rows) === rowsKey(other.rows)) return 'same-rows';
+  return 'different';
+}
+
+// ---------------------------------------------------------------------
+// Empty results: today's explanation (Sonnet) next to Haiku's
+// ---------------------------------------------------------------------
+async function compareExplanations(baseline) {
+  const out = [];
+  for (const [id, r] of Object.entries(baseline)) {
+    if (r.outcome !== 'ran') continue;
+    const empty = r.queries.filter((_, i) => isEmptyResult(r.rows[i]));
+    if (!empty.length) continue;
+    const facts = (await Promise.all(empty.map(q => diagnoseEmpty(q.entity, q.cubeQuery, runCube)))).flat();
+    const texts = {};
+    for (const model of [SONNET, HAIKU]) {
+      texts[model] = await explainEmpty({
+        anthropic, model, question: r.question, searchedFor: r.message, facts,
+        onUsage: usage => charge(model, usage),
+      });
+    }
+    out.push({ id, question: r.question, facts, texts });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------
+const startedAt = new Date();
+console.log(`Asking ${steps.length} questions (${chains.length} conversations) with ${SETTINGS.map(s => s.name).join(', ')}; limit $${MAX_COST}`);
+const results = Object.fromEntries(await Promise.all(SETTINGS.map(async s => [s.name, await runSetting(s)])));
+const explanations = await compareExplanations(results[BASELINE]);
+
+const median = xs => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : 0; };
+const summary = SETTINGS.map(s => {
+  const rs = Object.values(results[s.name]);
+  const verdicts = steps.map(st => s.name === BASELINE ? 'baseline' : compare(results[BASELINE][st.id], results[s.name][st.id]));
+  const count = v => verdicts.filter(x => x === v).length;
+  // Cost per question with the business-logic prompt already cached (as in steady use)
+  const warm = rs.map(r => r.usage ? costUsd(s.model, { ...r.usage, cache_read_input_tokens: (r.usage.cache_read_input_tokens || 0) + (r.usage.cache_creation_input_tokens || 0), cache_creation_input_tokens: 0, cache_creation: undefined }) : 0);
+  return {
+    setting: s.name, model: s.model, effort: s.effort ?? '(default: high)', note: s.note || '',
+    same: count('same'), sameRows: count('same-rows'), different: count('different'),
+    rejected: rs.filter(r => r.outcome === 'rejected').length, errors: rs.filter(r => r.outcome === 'error').length,
+    answered: rs.length,
+    medianOutputTokens: median(rs.filter(r => r.usage).map(r => r.usage.output_tokens)),
+    avgWarmCost: warm.reduce((a, b) => a + b, 0) / (warm.length || 1),
+    medianMs: median(rs.filter(r => r.ms).map(r => r.ms)),
+    spent: rs.reduce((a, r) => a + (r.cost || 0), 0),
+  };
+});
+
+mkdirSync('eval-results', { recursive: true });
+const stamp = startedAt.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+const base = `eval-results/translation-${stamp}`;
+writeFileSync(`${base}.json`, JSON.stringify({ startedAt, today: TODAY, settings: SETTINGS, steps, summary, results, explanations }, null, 2));
+
+// Markdown: the table, then every question some setting answered differently
+const md = [];
+md.push(`# Translation eval ${startedAt.toISOString()}`, '', `${steps.length} questions, ${chains.length} conversations. Compared with **${BASELINE}**. Spent $${spent.toFixed(2)}.`, '');
+md.push('| Setting | Same query | Same rows | Different | Rejected | Errors | Median output tokens | Avg cost / question (warm cache) | Median time |');
+md.push('|---|---|---|---|---|---|---|---|---|');
+for (const s of summary) md.push(`| ${s.setting} ${s.note ? `(${s.note})` : ''} | ${s.setting === BASELINE ? '-' : s.same} | ${s.setting === BASELINE ? '-' : s.sameRows} | ${s.setting === BASELINE ? '-' : s.different} | ${s.rejected} | ${s.errors} | ${s.medianOutputTokens} | $${s.avgWarmCost.toFixed(4)} | ${(s.medianMs / 1000).toFixed(1)} s |`);
+md.push('', '## Questions answered differently', '');
+for (const st of steps) {
+  const diff = SETTINGS.filter(s => s.name !== BASELINE && !['same', 'same-rows'].includes(compare(results[BASELINE][st.id], results[s.name][st.id])));
+  if (!diff.length) continue;
+  md.push(`### ${st.id} ${st.question}`, '');
+  for (const s of [SETTINGS.find(x => x.name === BASELINE), ...diff]) {
+    const r = results[s.name][st.id];
+    if (!r) { md.push(`- **${s.name}**: (not asked: an earlier turn failed)`); continue; }
+    const rows = r.rows ? ` → ${r.rows.map(x => x.length).join(' + ')} rows` : '';
+    md.push(`- **${s.name}** [${r.outcome}${s.name === BASELINE ? '' : `, ${compare(results[BASELINE][st.id], r)}`}]: ${r.message || r.error || ''}${rows}`);
+    if (r.queries) md.push(`  \`${JSON.stringify(r.queries.map(q => q.cubeQuery))}\``);
+  }
+  md.push('');
+}
+md.push('## Empty-result explanations: Sonnet vs Haiku', '');
+for (const e of explanations) md.push(`### ${e.id} ${e.question}`, '', `- **Sonnet**: ${e.texts[SONNET]}`, `- **Haiku**: ${e.texts[HAIKU]}`, '');
+writeFileSync(`${base}.md`, md.join('\n'));
+
+console.table(summary.map(({ note, ...s }) => ({ ...s, avgWarmCost: s.avgWarmCost.toFixed(4), spent: s.spent.toFixed(2) })));
+console.log(`Spent $${spent.toFixed(2)}. Written: ${base}.md and .json`);
+```
+
+<a id="b92"></a>
+### B.92 `checks/usage.mjs`
+
+```js
+// What a Claude call cost (usage.mjs costUsd), from made-up usage objects.
+// No database or API needed: npm test.
+import assert from 'node:assert/strict';
+import { costUsd } from '../usage.mjs';
+
+const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} != ${b}`);
+
+// Sonnet 5.5: $2 in, $10 out, $0.20 cache read, $2.50 / $4 cache write (5 min / 1 h)
+near(costUsd('claude-sonnet-5-5', { input_tokens: 1_000_000, output_tokens: 0 }), 2);
+near(costUsd('claude-sonnet-5-5', { input_tokens: 0, output_tokens: 1_000_000 }), 10);
+near(costUsd('claude-sonnet-5-5', { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 1_000_000 }), 0.2);
+// An older response with only the total written: priced as 5-minute writes
+near(costUsd('claude-sonnet-5-5', { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 1_000_000 }), 2.5);
+// Split by how long they're kept
+near(costUsd('claude-sonnet-5-5', {
+  input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 2_000_000,
+  cache_creation: { ephemeral_5m_input_tokens: 1_000_000, ephemeral_1h_input_tokens: 1_000_000 },
+}), 6.5);
+// A typical warm translation: 20k cached, 300 new, 220 out
+near(costUsd('claude-sonnet-5-5', { input_tokens: 300, output_tokens: 220, cache_read_input_tokens: 20_000 }), (300 * 2 + 220 * 10 + 20_000 * 0.2) / 1e6);
+// Haiku 5.5 is priced too; unknown models and missing usage give null
+near(costUsd('claude-haiku-5-5', { input_tokens: 1_000_000, output_tokens: 1_000_000 }), 0.6);
+assert.equal(costUsd('claude-unknown', { input_tokens: 5, output_tokens: 5 }), null);
+assert.equal(costUsd('claude-sonnet-5-5', null), null);
+
+console.log('usage: 9 checks passed');
+```
+
+<a id="b93"></a>
+### B.93 `demo/gate.config.json`
+
+```json
+{
+  "description": "Demo quality gate for OneTouch (i.c.stars T11A). Run from this repo: node ../tech-foundations/t11a-demo-engineering/tools/gate.js demo/gate.config.json. Paths are relative to this file. Run npm run warmup first: it checks the Claude key end to end (the gate can't send the workspace header Claude needs) and fills the saved answers this gate counts. The public address goes RED when the venue's internet is down: present from http://localhost:8000 on the server laptop and switch DEMO_MODE=offline.",
+  "env": {
+    "file": "../.env",
+    "required": [
+      "ANTHROPIC_API_KEY", "ANTHROPIC_WORKSPACE_ID", "POSTGRES_PASSWORD", "CUBEJS_API_SECRET",
+      "CUBE_DB_PASSWORD", "AUTH_DB_PASSWORD", "METABASE_EMBEDDING_SECRET", "WARMUP_PASSWORD",
+      "BREVO_API_KEY", "DEMO_MODE"
+    ]
+  },
+  "data": { "file": "../.cache/answers.json", "arrayPath": "answers", "minRecords": 100 },
+  "credentials": { "url": "https://api.brevo.com/v3/account", "header": "api-key", "envVar": "BREVO_API_KEY" },
+  "health": [
+    { "name": "OneTouch app (sign-in page)", "url": "http://localhost:8000/" },
+    { "name": "Cube (ticket data)", "url": "http://localhost:4000/readyz" },
+    { "name": "Metabase (dashboards)", "url": "http://localhost:3000/api/health" },
+    { "name": "Public address (Cloudflare tunnel)", "url": "https://onetouch.fyi/" }
+  ]
+}
 ```
 
 ## Appendix C: images

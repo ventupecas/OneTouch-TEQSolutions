@@ -36,7 +36,10 @@ replacing that.
   team's members, and sees each member's workload (Team tab).
 - **Process excellence** and **project team member**: see only the tickets
   assigned to them.
-- People on no team, and the `warmup` service account, see no tickets.
+- People on no team see no tickets. The `warmup` service account sees every
+  ticket, as an admin does (`SEES_EVERY_TICKET` in `teams.mjs`), so `npm run warmup`
+  can ask every question and fill the dashboards' "all" view; it has none of an
+  admin's powers and never joins a team.
 - Test accounts (`tester1`, `tester2`, …, and any `test.<name>`) only ever
   join a **test team** (`teams.is_test`), never a real one. Seeding skips them,
   an admin can only put them on a test team, and the server takes any that
@@ -67,6 +70,12 @@ replacing that.
   gone) and undoes every status (`POST /api/ticket-statuses/undo-all`,
   `teams.undoAllStatuses`: all of `ticket_reports` and the 'report'
   notifications). Real tickets keep their teams and people.
+- **Everyone an admin, after a presentation** (the same card's "After the presentation",
+  `PUT /api/everyone-admin` `{ on }`, `teams.setEveryoneAdmin`): every account but the
+  service accounts gets an admin's scope (`access.admin`), so stakeholders can try every
+  feature. Only the permanent admins (`access.permanentAdmin`, `ADMIN_USERNAMES`) can
+  switch it; 🚩 reports still go only to them. Saved in `app_settings` ('everyone_admin'),
+  so it survives a restart. Teams, roles and assignments never change.
 
 **Assigned to me** (Home's first tab, `GET /api/my-tickets`): everyone's
 OneTouch tickets, most urgent first, then oldest (`ticketsByPriority` in
@@ -225,7 +234,9 @@ report on the live server: it emails the real admins.**
 change commits, retried up to 5 times, never older than an hour. Only to people with
 `users.email` set (an admin sets it: `npm run users -- email|emails`; never in
 `db/accounts.json`) who haven't unticked "Email me these too" in the 🔔 panel; never test
-or service accounts; only `MAIL_ONLY_TO` while that's set. An email holds who did what
+or service accounts; only `MAIL_ONLY_TO` while that's set, unless a permanent admin has
+switched on **Email everyone** (the 🎬 card's "Demo day", `PUT /api/email-everyone`,
+`teams.setEmailEveryone`, saved in `app_settings`). An email holds who did what
 and the ticket numbers, never summaries or notes. No `BREVO_API_KEY` in `.env`: off.
 
 **Families decide teams.** Tickets linked to each other form one family: a

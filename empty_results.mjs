@@ -99,9 +99,11 @@ If a table is empty because no data is loaded, say the data has not been loaded 
 End with one short suggestion of a nearby question that would return data, when there is one. Use only the facts given; do not guess.`;
 
 // Short explanation for the user; falls back to plain facts if Claude can't answer
-export async function explainEmpty({ anthropic, model, question, searchedFor, facts }) {
+// onUsage(usage, ms): called with the call's token counts (usage.mjs saves them)
+export async function explainEmpty({ anthropic, model, question, searchedFor, facts, onUsage }) {
   const fallback = `No matching records were found. ${facts.filter(f => / runs from | is empty/.test(f)).join(' ')}`.trim();
   try {
+    const started = Date.now();
     const message = await anthropic.messages.create({
       model,
       max_tokens: 2000,
@@ -112,6 +114,7 @@ export async function explainEmpty({ anthropic, model, question, searchedFor, fa
         content: `Question: """${question}"""\nWhat was searched for: ${searchedFor}\n\nFacts:\n${facts.map(f => `- ${f}`).join('\n')}`,
       }],
     });
+    onUsage?.(message.usage, Date.now() - started);
     if (message.stop_reason === 'refusal') return fallback;
     const text = message.content.filter(b => b.type === 'text').map(b => b.text).join('').trim();
     return text || fallback;
