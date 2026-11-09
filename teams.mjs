@@ -40,6 +40,10 @@ export const ROLES = {
 };
 // Accounts that aren't people (scripts/warmup.mjs) never join a team
 const SERVICE_ACCOUNTS = ['warmup'];
+// The warm-up sees every ticket, as an admin does, so it can ask every question
+// (one naming a ticket is refused before Claude for anyone who can't see it) and
+// fill the dashboards' "all" view. It gets none of an admin's powers.
+const SEES_EVERY_TICKET = ['warmup'];
 // Test accounts (tester1, tester2, ..., and test.<name>, like the Milwaukee
 // Brewers' players) only ever join a test team, never a real one. A Postgres
 // pattern, also used as a RegExp.
@@ -379,7 +383,8 @@ export async function seedTeams(runQuery) {
 }
 
 // ---------------------------------------------------------------------
-// WHAT SOMEONE MAY SEE. A scope is { all: true } for an admin, otherwise
+// WHAT SOMEONE MAY SEE. A scope is { all: true } for an admin (and the
+// warmup account, without an admin's powers), otherwise
 // their ticket numbers by type. Kept for a minute, and dropped as soon as
 // anything here changes. key names the scope in the caches of charts.mjs
 // and relations.mjs, so two people never share a cached answer they
@@ -406,7 +411,7 @@ export async function scopeFor(user) {
     team: m ? { id: m.id, name: m.name } : null,
   };
   let scope;
-  if (access.admin) {
+  if (access.admin || SEES_EVERY_TICKET.includes(user.username)) {
     scope = { all: true, key: 'all', count: null };
   } else {
     const { rows } = access.role === 'project_manager'

@@ -10,10 +10,14 @@
 //   ... -- --user jsmith --password-stdin   password from stdin instead of a prompt
 //
 // It signs in as the "warmup" account, with WARMUP_PASSWORD from .env (or asks
-// for the password), so the demo tickets its answers list land in that
-// account's Ticket results rather than a real person's. Run it on the day
-// itself, and don't restart OneTouch afterwards: a restart forgets the
-// remembered questions, and they are tied to the date.
+// for the password). That account sees every ticket, as an admin does, without
+// an admin's powers (teams.mjs SEES_EVERY_TICKET), so every question can be
+// asked and the dashboards' "all" view (the admins') is filled. Only Claude's
+// reading of a question is kept, never rows. Another account (--user) may be
+// refused questions naming tickets it can't see; those are listed. Each
+// question's chat is deleted afterwards, so it leaves nothing in that account's
+// chat history. Run it on the day itself: the remembered questions are tied to
+// the date (they're saved in .cache/answers.json, so a restart keeps them).
 
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -85,6 +89,7 @@ async function signIn() {
 // A one-line summary of an answer: rows found, or what went wrong
 function describe(data) {
   if (data.error) return { ok: false, text: data.error };
+  if (data.intent === 'denied') return { ok: false, denied: true, text: "this account can't see that ticket, so it wasn't asked" };
   if (data.intent !== 'query') return { ok: true, text: `Claude asked for more detail (${data.intent})` };
   const rows = data.combined ? data.combined.rows.length : (data.sections || []).reduce((n, s) => n + s.rows.length, 0);
   return { ok: true, text: data.allEmpty ? 'nothing found (explanation ready)' : `${rows.toLocaleString()} ${rows === 1 ? 'row' : 'rows'}` };
@@ -119,11 +124,16 @@ const token = await signIn();
 const auth = { Authorization: `Bearer ${token}` };
 const started = performance.now();
 const problems = [];
+let denied = 0;
+const resetChat = () => fetch(`${base}/api/conversation/reset`, {
+  method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ delete: true }),
+});
 
 console.log('\nQuestions (⚡ = was already ready):');
 for (const question of questions) {
-  // A fresh conversation each time: only a conversation's first question is remembered for everyone
-  await fetch(`${base}/api/conversation/reset`, { method: 'POST', headers: auth });
+  // A fresh conversation each time: only a conversation's first question is remembered for everyone.
+  // The last one's chat is deleted, so the warm-up leaves nothing in the account's chat history.
+  await resetChat();
   const t0 = performance.now();
   let data;
   try {
@@ -133,10 +143,12 @@ for (const question of questions) {
     data = { error: err.message };
   }
   const d = describe(data);
-  if (!d.ok) problems.push(`"${question}": ${d.text}`);
+  if (d.denied) denied += 1;
+  else if (!d.ok) problems.push(`"${question}": ${d.text}`);
   console.log(`  ${!d.ok ? '✗' : data.fromCache ? '⚡' : '✓'} ${question}  (${d.text}, ${secs(performance.now() - t0)})`);
 }
-await fetch(`${base}/api/conversation/reset`, { method: 'POST', headers: auth });
+await resetChat();
+if (denied) problems.push(`${denied} ${denied === 1 ? 'question names a ticket' : 'questions name tickets'} this account can't see, so ${denied === 1 ? "it wasn't" : "they weren't"} remembered: run it again as warmup (npm run warmup) or an admin; the rest come back instantly`);
 
 console.log('\nDashboards:');
 const list = await (await fetch(`${base}/api/dashboards`, { headers: auth })).json();
@@ -181,5 +193,6 @@ if (problems.length) {
   console.log(`the same words (see ${QUESTIONS_FILE}), and every dashboard chart works. Metabase keeps each`);
   console.log('person\'s dashboard results apart (they see different tickets), so only this account\'s are ready now.');
 }
-console.log("Don't restart OneTouch before the presentation: a restart forgets the remembered questions.");
+console.log('The remembered questions are saved (.cache/answers.json), so a restart keeps them, but they are');
+console.log("tied to today's date (UTC): warm up again on the day of the presentation.");
 console.log('='.repeat(64) + '\n');

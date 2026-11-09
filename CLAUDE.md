@@ -36,7 +36,10 @@ replacing that.
   team's members, and sees each member's workload (Team tab).
 - **Process excellence** and **project team member**: see only the tickets
   assigned to them.
-- People on no team, and the `warmup` service account, see no tickets.
+- People on no team see no tickets. The `warmup` service account sees every
+  ticket, as an admin does (`SEES_EVERY_TICKET` in `teams.mjs`), so `npm run warmup`
+  can ask every question and fill the dashboards' "all" view; it has none of an
+  admin's powers and never joins a team.
 - Test accounts (`tester1`, `tester2`, …, and any `test.<name>`) only ever
   join a **test team** (`teams.is_test`), never a real one. Seeding skips them,
   an admin can only put them on a test team, and the server takes any that
