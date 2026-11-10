@@ -11,7 +11,8 @@
 // Saved preferences: loaded at sign-in, each part saved as it changes
 // ---------------------------------------------------------------------
 
-const THEME_DEFAULTS = { mode: 'light', accent: '#10a37f', header: 'dark' };
+// The default accent is the wheat gold of the sign-in page's photo
+const THEME_DEFAULTS = { mode: 'light', accent: '#a06b1c', header: 'dark' };
 const defaultHome = () => ({ blocks: [{ type: 'tickets' }] });
 const defaultDashboards = () => ({ boards: [], hidden: [], last: '' });
 
@@ -163,7 +164,7 @@ function resetCustomizing() {
 // ---------------------------------------------------------------------
 
 const ACCENT_CHOICES = [
-    ['#10a37f', 'OneTouch green'], ['#2a78d6', 'Blue'], ['#6250d6', 'Violet'], ['#d55181', 'Pink'],
+    ['#a06b1c', 'Wheat gold'], ['#10a37f', 'Green'], ['#2a78d6', 'Blue'], ['#6250d6', 'Violet'], ['#d55181', 'Pink'],
     ['#e34948', 'Red'], ['#eb6834', 'Orange'], ['#0f8a8a', 'Teal'], ['#4a5568', 'Slate'],
 ];
 const THEME_MODES = [['light', '☀️ Light'], ['dark', '🌙 Dark'], ['system', '💻 Match my computer']];

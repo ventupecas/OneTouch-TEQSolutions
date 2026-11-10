@@ -621,13 +621,18 @@ const CLAUDE_SMALL_MODEL = process.env.CLAUDE_SMALL_MODEL || 'claude-haiku-5-5';
 // Relative phrases like "last month" are computed from TODAY, which drifts
 // past the data over time. Set ASSUME_TODAY=YYYY-MM-DD in .env to pin the
 // reference date (e.g. 2026-09-02) so relative dates land inside the export.
+// Otherwise today is the date in Chicago (CST / CDT), not UTC: the date Claude
+// is told and the date saved answers are kept under (they start over at
+// midnight Chicago time). Returned as noon UTC of that date, as a pinned one is.
+const APP_TIME_ZONE = 'America/Chicago';
+const chicagoDate = new Intl.DateTimeFormat('en-CA', { timeZone: APP_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' });
 function referenceToday() {
   const pinned = (process.env.ASSUME_TODAY || '').trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(pinned)) {
     const d = new Date(`${pinned}T12:00:00Z`);
     if (!Number.isNaN(d.getTime())) return d;
   }
-  return new Date();
+  return new Date(`${chicagoDate.format(new Date())}T12:00:00Z`);
 }
 
 // The business logic (entity catalog, vocabulary, worked examples) lives in

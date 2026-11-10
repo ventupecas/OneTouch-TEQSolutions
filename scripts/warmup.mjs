@@ -194,5 +194,5 @@ if (problems.length) {
   console.log('person\'s dashboard results apart (they see different tickets), so only this account\'s are ready now.');
 }
 console.log('The remembered questions are saved (.cache/answers.json), so a restart keeps them, but they are');
-console.log("tied to today's date (UTC): warm up again on the day of the presentation.");
+console.log("tied to today's date (Chicago time; they start over at midnight): warm up again on the day of the presentation.");
 console.log('='.repeat(64) + '\n');

@@ -103,7 +103,7 @@ export function emailFor(n, cfg = mailConfig()) {
     `<p style="font-size:16px"><strong>${escapeHtml(what)}.</strong></p>` +
     (tickets ? `<p style="color:#4a5568">${escapeHtml(tickets)}</p>` : '') +
     `<p>${escapeHtml(where)}</p>` +
-    `<p><a href="${escapeHtml(cfg.appUrl)}" style="display:inline-block;background:#10a37f;color:#ffffff;text-decoration:none;padding:9px 16px;border-radius:6px;font-weight:600">Open OneTouch</a></p>` +
+    `<p><a href="${escapeHtml(cfg.appUrl)}" style="display:inline-block;background:#a06b1c;color:#ffffff;text-decoration:none;padding:9px 16px;border-radius:6px;font-weight:600">Open OneTouch</a></p>` +
     `<p style="font-size:12px;color:#718096;border-top:1px solid #e2e8f0;padding-top:10px;margin-top:20px">${escapeHtml(footer)}</p></div>`;
   return { subject: what, text, html };
 }

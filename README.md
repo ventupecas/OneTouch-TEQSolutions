@@ -243,9 +243,9 @@ which is why Metabase keeps each chart's result (see [Dashboards](#dashboards-me
    run `npm run warmup` again; questions it has already asked come back instantly, and the answer says it was asked before.
 4. The remembered questions are saved in `.cache/answers.json` (not in git), so a restart
    keeps them. They are tied to the date Claude sees as "today", which is the real date in
-   UTC unless `ASSUME_TODAY` is set, so warm up on the day itself. A presentation that runs
-   past 7 PM Central crosses into the next UTC day; run the warm-up again then. Changing
-   the model or the AI's instructions (`business_logic.mjs`) starts them over too.
+   Chicago (CST / CDT, `APP_TIME_ZONE` in `server.mjs`) unless `ASSUME_TODAY` is set, so
+   they start over at midnight Chicago time: warm up on the day itself. Changing the model
+   or the AI's instructions (`business_logic.mjs`) starts them over too.
 5. Run the quality gate (from this folder, with the class's `tech-foundations` repo next to
    it): `node ../tech-foundations/t11a-demo-engineering/tools/gate.js demo/gate.config.json`.
    It checks the `.env` keys, that at least 100 answers are saved, the email key, and that
@@ -505,11 +505,20 @@ Nobody else sees it.
 **🎨 Colors** (header, right) opens a small panel:
 - **Light or dark**: Light, Dark, or **Match my computer** (follows the computer's own
   setting, and changes with it).
-- **Accent color**: OneTouch green (the default), blue, violet, pink, red, orange, teal,
+- **Accent color**: wheat gold (the default), green, blue, violet, pink, red, orange, teal,
   slate, or **＋** for any color at all. It colors the buttons, the lit Home / Dashboards
   button, and your charts. On a pale color, button text turns dark so it stays readable.
-- **Header**: Dark (the default), the accent color, or the same as the page.
+- **Header**: Dark (the default, a deep wheat-shadow brown), the accent color, or the same
+  as the page.
 - **↺ Default colors** puts everything back.
+
+The default colors follow the wheat photo on the sign-in page: cream and straw surfaces, a
+wheat-gold accent (`#a06b1c`, dark enough for white text), a deep brown header, and the
+photo's sky blue for information; dark mode uses the same warm tones. The sign-in card's
+button and links use the same gold. The photo itself is behind every page too
+(`public/app-background.jpg`, a 200 KB copy of the sign-in page's 4 MB one), fixed to the
+window under a veil of the page color so text on it stays readable; panels and tables stay
+solid, and ♿ high contrast drops it for a plain background.
 
 The team dashboards switch to Metabase's own dark look when OneTouch is dark, and so does
 every page a click inside them opens. Metabase's links can't know OneTouch is dark, so
@@ -1072,7 +1081,7 @@ it in the tab's `sessionStorage`, so:
 - **Header:** one row with the OneTouch logo and name (click either to go back to Home), the
   signed-in person's display name (or their username if they have none), the **🏠 Home**,
   **📈 Dashboards** and **👥 Team** buttons, and **🧊 Architecture** for admins (the page
-  you're on lights up in the accent color, green by default), the **Ask Claude about the
+  you're on lights up in the accent color, wheat gold by default), the **Ask Claude about the
   data…** bar (the AI assistant), and
   **🔔**, **🎨 Colors** and **Sign out** at the right.
 - **Home** is the first page after signing in: "Welcome, *first name*!" in the top-left
@@ -7146,13 +7155,18 @@ const CLAUDE_SMALL_MODEL = process.env.CLAUDE_SMALL_MODEL || 'claude-haiku-5-5';
 // Relative phrases like "last month" are computed from TODAY, which drifts
 // past the data over time. Set ASSUME_TODAY=YYYY-MM-DD in .env to pin the
 // reference date (e.g. 2026-09-02) so relative dates land inside the export.
+// Otherwise today is the date in Chicago (CST / CDT), not UTC: the date Claude
+// is told and the date saved answers are kept under (they start over at
+// midnight Chicago time). Returned as noon UTC of that date, as a pinned one is.
+const APP_TIME_ZONE = 'America/Chicago';
+const chicagoDate = new Intl.DateTimeFormat('en-CA', { timeZone: APP_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' });
 function referenceToday() {
   const pinned = (process.env.ASSUME_TODAY || '').trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(pinned)) {
     const d = new Date(`${pinned}T12:00:00Z`);
     if (!Number.isNaN(d.getTime())) return d;
   }
-  return new Date();
+  return new Date(`${chicagoDate.format(new Date())}T12:00:00Z`);
 }
 
 // The business logic (entity catalog, vocabulary, worked examples) lives in
@@ -8917,7 +8931,7 @@ listenForTicketChanges();
             <div class="swatch-row">
                 <span id="theme-accents" class="swatch-row"></span>
                 <label class="swatch swatch-custom" title="Any color you like">
-                    <input type="color" id="theme-custom" value="#10a37f" aria-label="Pick any color">
+                    <input type="color" id="theme-custom" value="#a06b1c" aria-label="Pick any color">
                     <span class="swatch-custom-face">＋</span>
                 </label>
             </div>
@@ -9468,20 +9482,23 @@ listenForTicketChanges();
 ```css
 /* COLORS: every color in the app is one of these, so each person's color
    scheme (light / dark, accent, header; see customize.js) changes them all.
-   --accent and --on-accent are set by the page from the chosen accent. */
+   --accent and --on-accent are set by the page from the chosen accent.
+   The defaults follow the wheat photo on the sign-in page: cream and straw
+   surfaces, a wheat-gold accent, a deep wheat-shadow brown header, and the
+   photo's sky for information. */
 :root {
     color-scheme: light;
-    --bg-primary: #f4f6f9;
-    --panel-bg: #ffffff;
-    --surface-2: #f7fafc;
-    --surface-3: #edf2f7;
-    --zebra: #f9fafb;
-    --text: #2d3748;
-    --text-2: #4a5568;
-    --muted: #718096;
-    --faint: #a0aec0;
-    --border: #e2e8f0;
-    --accent: #10a37f;
+    --bg-primary: #f6f0e4;
+    --panel-bg: #fffdf9;
+    --surface-2: #faf5eb;
+    --surface-3: #f0e6d3;
+    --zebra: #fcf8f1;
+    --text: #2f2618;
+    --text-2: #4d412f;
+    --muted: #776750;
+    --faint: #b0a084;
+    --border: #e6dac3;
+    --accent: #a06b1c;
     --on-accent: #ffffff;
     --accent-ink: color-mix(in srgb, var(--accent) 70%, #000);
     --accent-soft: color-mix(in srgb, var(--accent) 12%, var(--panel-bg));
@@ -9496,30 +9513,30 @@ listenForTicketChanges();
     --warn-soft-hover: #faf089;
     --warn-softer: #fffff0;
     --warn-line: #ecc94b;
-    --info: #4299e1;
-    --info-soft: #ebf8ff;
+    --info: #4a8fd0;
+    --info-soft: #eaf3fc;
     --same-bg: #e6fffa;
     --same-ink: #0b7a5f;
     --differ-bg: #fffaf0;
     --differ-ink: #b7791f;
     --note-bg: #fffbea;
-    --backdrop: rgba(26, 32, 44, 0.35);
-    --shadow: rgba(0, 0, 0, 0.12);
-    --shadow-strong: rgba(0, 0, 0, 0.22);
-    --toast-bg: #1a202c;
+    --backdrop: rgba(47, 38, 24, 0.35);
+    --shadow: rgba(60, 40, 10, 0.12);
+    --shadow-strong: rgba(60, 40, 10, 0.22);
+    --toast-bg: #33281a;
     --toast-text: #ffffff;
-    /* The header (dark by default; see the data-header variants below) */
-    --header-bg: #1a202c;
-    --header-text: #cbd5e0;
+    /* The header (dark by default: the wheat's shadows; see the data-header variants below) */
+    --header-bg: #33281a;
+    --header-text: #e6d9bf;
     --header-strong: #ffffff;
-    --header-line: #4a5568;
-    --header-line-hover: #a0aec0;
-    --header-link-hover: #c6f6e5;
+    --header-line: #6b5838;
+    --header-line-hover: #c4ad84;
+    --header-link-hover: #f3d79c;
     /* Charts: hairline grid and axis, and the categorical colors in their
        fixed order (validated for color-blind separation on this surface) */
-    --chart-grid: #edf0f3;
-    --chart-axis: #cbd2d9;
-    --chart-other: #a0aec0;
+    --chart-grid: #efe6d6;
+    --chart-axis: #d6c8ad;
+    --chart-other: #b0a084;
     --series-1: #2a78d6;
     --series-2: #eb6834;
     --series-3: #1baf7a;
@@ -9533,16 +9550,16 @@ listenForTicketChanges();
 /* Dark mode: its own steps, not an automatic flip */
 :root[data-theme="dark"] {
     color-scheme: dark;
-    --bg-primary: #0f1216;
-    --panel-bg: #191c21;
-    --surface-2: #1f2329;
-    --surface-3: #262b32;
-    --zebra: #1c2025;
-    --text: #e4e7eb;
-    --text-2: #c2c8d0;
-    --muted: #9aa3ae;
-    --faint: #6f7883;
-    --border: #2e343c;
+    --bg-primary: #13100b;
+    --panel-bg: #1c1812;
+    --surface-2: #231e17;
+    --surface-3: #2c261d;
+    --zebra: #1f1b14;
+    --text: #ece5d8;
+    --text-2: #cfc4b0;
+    --muted: #a69a84;
+    --faint: #7a6d57;
+    --border: #372f24;
     --accent-ink: color-mix(in srgb, var(--accent) 60%, #fff);
     --accent-soft: color-mix(in srgb, var(--accent) 24%, var(--panel-bg));
     --accent-softer: color-mix(in srgb, var(--accent) 12%, var(--panel-bg));
@@ -9566,14 +9583,14 @@ listenForTicketChanges();
     --backdrop: rgba(0, 0, 0, 0.55);
     --shadow: rgba(0, 0, 0, 0.4);
     --shadow-strong: rgba(0, 0, 0, 0.6);
-    --toast-bg: #e4e7eb;
-    --toast-text: #1a202c;
-    --header-bg: #0b0d10;
-    --header-line: #2e343c;
-    --header-line-hover: #6f7883;
-    --chart-grid: #262b32;
-    --chart-axis: #3a414a;
-    --chart-other: #6f7883;
+    --toast-bg: #ece5d8;
+    --toast-text: #1c1812;
+    --header-bg: #0d0a06;
+    --header-line: #372f24;
+    --header-line-hover: #7a6d57;
+    --chart-grid: #2c261d;
+    --chart-axis: #443a2c;
+    --chart-other: #7a6d57;
     --series-1: #3987e5;
     --series-2: #d95926;
     --series-3: #199e70;
@@ -9611,6 +9628,25 @@ body {
     flex-direction: column;
     height: 100vh;
 }
+
+/* The sign-in page's wheat photo behind every page (a 1920 px copy,
+   app-background.jpg, so phones don't load 4 MB), under a veil of the page
+   color so text on it stays readable. Fixed to the window, not the page, so it
+   doesn't scroll or stretch with long lists; panels and tables stay solid. */
+body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+        linear-gradient(var(--page-veil), var(--page-veil)),
+        var(--bg-primary) url("app-background.jpg") center / cover no-repeat;
+}
+:root { --page-veil: color-mix(in srgb, var(--bg-primary) 70%, transparent); }
+:root[data-theme="dark"] { --page-veil: color-mix(in srgb, var(--bg-primary) 84%, transparent); }
+/* High contrast keeps a plain background */
+html.a11y-contrast body::before { display: none; }
 
 .app-header {
     background: var(--header-bg);
@@ -11646,7 +11682,7 @@ body.signed-out .app-content { display: none; }
 body:not(.signed-out) .login-page { display: none; }
 
 .login-page {
-  --brand: #4f46e5;
+  --brand: #a06b1c; /* the wheat gold of the photo behind it, as the app's default accent */
   --ink: #111827;
   --muted: #6b7280;
   --line: #e5e7eb;
@@ -11827,7 +11863,7 @@ body:not(.signed-out) .login-page { display: none; }
   transition: background .15s;
 }
 
-.login-page .btn:hover { background: #4338ca; }
+.login-page .btn:hover { background: #87591a; }
 .login-page .btn:disabled { opacity: .7; cursor: wait; }
 
 .login-page .provs {
@@ -19690,7 +19726,7 @@ if (problems.length) {
   console.log('person\'s dashboard results apart (they see different tickets), so only this account\'s are ready now.');
 }
 console.log('The remembered questions are saved (.cache/answers.json), so a restart keeps them, but they are');
-console.log("tied to today's date (UTC): warm up again on the day of the presentation.");
+console.log("tied to today's date (Chicago time; they start over at midnight): warm up again on the day of the presentation.");
 console.log('='.repeat(64) + '\n');
 ```
 
@@ -20587,7 +20623,7 @@ export async function resetPreference(userId, part) {
 function cleanTheme(t = {}) {
   return {
     mode: MODES.includes(t.mode) ? t.mode : 'light',
-    accent: /^#[0-9a-f]{6}$/i.test(t.accent) ? t.accent.toLowerCase() : '#10a37f',
+    accent: /^#[0-9a-f]{6}$/i.test(t.accent) ? t.accent.toLowerCase() : '#a06b1c',
     header: HEADERS.includes(t.header) ? t.header : 'dark',
   };
 }
@@ -22143,7 +22179,8 @@ async function downloadPicture(spec, format, name) {
 // Saved preferences: loaded at sign-in, each part saved as it changes
 // ---------------------------------------------------------------------
 
-const THEME_DEFAULTS = { mode: 'light', accent: '#10a37f', header: 'dark' };
+// The default accent is the wheat gold of the sign-in page's photo
+const THEME_DEFAULTS = { mode: 'light', accent: '#a06b1c', header: 'dark' };
 const defaultHome = () => ({ blocks: [{ type: 'tickets' }] });
 const defaultDashboards = () => ({ boards: [], hidden: [], last: '' });
 
@@ -22295,7 +22332,7 @@ function resetCustomizing() {
 // ---------------------------------------------------------------------
 
 const ACCENT_CHOICES = [
-    ['#10a37f', 'OneTouch green'], ['#2a78d6', 'Blue'], ['#6250d6', 'Violet'], ['#d55181', 'Pink'],
+    ['#a06b1c', 'Wheat gold'], ['#10a37f', 'Green'], ['#2a78d6', 'Blue'], ['#6250d6', 'Violet'], ['#d55181', 'Pink'],
     ['#e34948', 'Red'], ['#eb6834', 'Orange'], ['#0f8a8a', 'Teal'], ['#4a5568', 'Slate'],
 ];
 const THEME_MODES = [['light', '☀️ Light'], ['dark', '🌙 Dark'], ['system', '💻 Match my computer']];
@@ -28680,7 +28717,7 @@ export function emailFor(n, cfg = mailConfig()) {
     `<p style="font-size:16px"><strong>${escapeHtml(what)}.</strong></p>` +
     (tickets ? `<p style="color:#4a5568">${escapeHtml(tickets)}</p>` : '') +
     `<p>${escapeHtml(where)}</p>` +
-    `<p><a href="${escapeHtml(cfg.appUrl)}" style="display:inline-block;background:#10a37f;color:#ffffff;text-decoration:none;padding:9px 16px;border-radius:6px;font-weight:600">Open OneTouch</a></p>` +
+    `<p><a href="${escapeHtml(cfg.appUrl)}" style="display:inline-block;background:#a06b1c;color:#ffffff;text-decoration:none;padding:9px 16px;border-radius:6px;font-weight:600">Open OneTouch</a></p>` +
     `<p style="font-size:12px;color:#718096;border-top:1px solid #e2e8f0;padding-top:10px;margin-top:20px">${escapeHtml(footer)}</p></div>`;
   return { subject: what, text, html };
 }

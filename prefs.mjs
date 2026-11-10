@@ -67,7 +67,7 @@ export async function resetPreference(userId, part) {
 function cleanTheme(t = {}) {
   return {
     mode: MODES.includes(t.mode) ? t.mode : 'light',
-    accent: /^#[0-9a-f]{6}$/i.test(t.accent) ? t.accent.toLowerCase() : '#10a37f',
+    accent: /^#[0-9a-f]{6}$/i.test(t.accent) ? t.accent.toLowerCase() : '#a06b1c',
     header: HEADERS.includes(t.header) ? t.header : 'dark',
   };
 }
