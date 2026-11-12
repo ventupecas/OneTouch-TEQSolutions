@@ -467,8 +467,9 @@ html.a11y-contrast body::before { display: none; }
 
 /* HOME PAGE: the welcome sits in the page's top-left corner */
 #home-view { overflow-y: auto; }
-/* Home's column sits in the middle of wide windows (it's 1400px at most) */
-#home-view > .home { margin-inline: auto; }
+/* Home's and the Team tab's columns sit in the middle of wide windows (1400px at most) */
+#home-view > .home,
+#teams-view > .home { margin-inline: auto; }
 
 /* TEAM TAB (teams.js): teams, their people, and who has which ticket */
 #teams-view { overflow-y: auto; }
@@ -1569,7 +1570,8 @@ tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
 .dashboard-drawer.editing .is-hidden .dashboard-choice-desc { opacity: 0.5; }
 
 /* ONE OF YOUR OWN DASHBOARDS: its buttons, then its charts */
-.board-view { flex: 1; min-height: 0; overflow-y: auto; box-sizing: border-box; padding: 16px 20px 32px; }
+/* Its content centered in a 1400px column, like Home (the scroll bar stays at the window's edge) */
+.board-view { flex: 1; min-height: 0; overflow-y: auto; box-sizing: border-box; padding: 16px max(20px, calc((100% - 1400px) / 2)) 32px; }
 .board-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
 .tile-grid {
     display: grid;
@@ -2121,7 +2123,7 @@ span.family-chip { color: var(--text-2); background: var(--surface-3); }
    window a ticket opens in
    ===================================================================== */
 
-.families-view { flex: 1; min-height: 0; overflow-y: auto; box-sizing: border-box; padding: 16px 20px 32px; }
+.families-view { flex: 1; min-height: 0; overflow-y: auto; box-sizing: border-box; padding: 16px max(20px, calc((100% - 1400px) / 2)) 32px; }
 /* One tab per kind of family, with how many there are */
 .families-kinds { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .family-kind {
