@@ -467,6 +467,8 @@ html.a11y-contrast body::before { display: none; }
 
 /* HOME PAGE: the welcome sits in the page's top-left corner */
 #home-view { overflow-y: auto; }
+/* Home's column sits in the middle of wide windows (it's 1400px at most) */
+#home-view > .home { margin-inline: auto; }
 
 /* TEAM TAB (teams.js): teams, their people, and who has which ticket */
 #teams-view { overflow-y: auto; }
