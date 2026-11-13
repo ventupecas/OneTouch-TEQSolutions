@@ -9949,6 +9949,9 @@ html.a11y-contrast body::before { display: none; }
 
 /* HOME PAGE: the welcome sits in the page's top-left corner */
 #home-view { overflow-y: auto; }
+/* Home's and the Team tab's columns sit in the middle of wide windows (1400px at most) */
+#home-view > .home,
+#teams-view > .home { margin-inline: auto; }
 
 /* TEAM TAB (teams.js): teams, their people, and who has which ticket */
 #teams-view { overflow-y: auto; }
@@ -11049,7 +11052,8 @@ tr.expanded .expand-caret { transform: rotate(90deg); color: var(--accent); }
 .dashboard-drawer.editing .is-hidden .dashboard-choice-desc { opacity: 0.5; }
 
 /* ONE OF YOUR OWN DASHBOARDS: its buttons, then its charts */
-.board-view { flex: 1; min-height: 0; overflow-y: auto; box-sizing: border-box; padding: 16px 20px 32px; }
+/* Its content centered in a 1400px column, like Home (the scroll bar stays at the window's edge) */
+.board-view { flex: 1; min-height: 0; overflow-y: auto; box-sizing: border-box; padding: 16px max(20px, calc((100% - 1400px) / 2)) 32px; }
 .board-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
 .tile-grid {
     display: grid;
@@ -11601,7 +11605,7 @@ span.family-chip { color: var(--text-2); background: var(--surface-3); }
    window a ticket opens in
    ===================================================================== */
 
-.families-view { flex: 1; min-height: 0; overflow-y: auto; box-sizing: border-box; padding: 16px 20px 32px; }
+.families-view { flex: 1; min-height: 0; overflow-y: auto; box-sizing: border-box; padding: 16px max(20px, calc((100% - 1400px) / 2)) 32px; }
 /* One tab per kind of family, with how many there are */
 .families-kinds { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .family-kind {
@@ -18690,6 +18694,8 @@ const SKIPPED = {
   'public/vendor/three-0.186.1/three.module.js': 'three.js, unchanged: `build/three.module.js` from `npm pack three@0.186.1`',
   'public/vendor/three-0.186.1/three.core.js': 'three.js, unchanged: `build/three.core.js` from `npm pack three@0.186.1`',
   'public/vendor/three-0.186.1/LICENSE': 'three.js\'s MIT license, from the same package',
+  'demo/build-portfolio-demo.mjs': 'builds the static portfolio demo (not part of running OneTouch); its scrub list names the client',
+  'demo/static/mock-api.js': 'the portfolio demo\'s in-browser stand-in for the server, about 1,500 lines of generated data (not part of running OneTouch)',
 };
 
 // Images can't be pasted as text; the guide says how to make each one (step 14)
@@ -18703,6 +18709,7 @@ const IMAGES = {
   'public/molsoncoorslogo.png': 'Molson Coors logo above the sign-in box, 320×143',
   'public/microsoftlogo.png': 'Microsoft logo on the "Microsoft Entra ID" button, 447×447',
   'public/login-background.jpg': 'wheat-field photo filling the sign-in page behind the box',
+  'public/app-background.jpg': 'the same photo behind every page after sign-in, 1920×1280 JPEG (about 200 KB)',
   'molsoncoorslogo.png': 'unused copy of public/molsoncoorslogo.png',
   'microsoftlogo.png': 'unused copy of the Microsoft logo, 447×447',
   'microsoftlogo (1).png': 'unused copy of public/microsoftlogo.png',
@@ -35277,6 +35284,7 @@ Make or download an image with the same name and size (step 14). The SHA-256 let
 | `public/molsoncoorslogo.png` | Molson Coors logo above the sign-in box, 320×143 | 17,266 | `3337f757109fc033…` |
 | `public/microsoftlogo.png` | Microsoft logo on the "Microsoft Entra ID" button, 447×447 | 2,317 | `20479b072c51b6c4…` |
 | `public/login-background.jpg` | wheat-field photo filling the sign-in page behind the box | 4,306,193 | `08413dbddeada9ff…` |
+| `public/app-background.jpg` | the same photo behind every page after sign-in, 1920×1280 JPEG (about 200 KB) | 207,255 | `6396366e51a6f9ff…` |
 | `molsoncoorslogo.png` | unused copy of public/molsoncoorslogo.png | 17,266 | `3337f757109fc033…` |
 | `microsoftlogo.png` | unused copy of the Microsoft logo, 447×447 | 1,273 | `d08ad38884617b08…` |
 | `microsoftlogo (1).png` | unused copy of public/microsoftlogo.png | 2,317 | `20479b072c51b6c4…` |
@@ -35292,5 +35300,7 @@ Make or download an image with the same name and size (step 14). The SHA-256 let
 | `public/vendor/three-0.186.1/three.module.js` | three.js, unchanged: `build/three.module.js` from `npm pack three@0.186.1` |
 | `public/vendor/three-0.186.1/three.core.js` | three.js, unchanged: `build/three.core.js` from `npm pack three@0.186.1` |
 | `public/vendor/three-0.186.1/LICENSE` | three.js's MIT license, from the same package |
+| `demo/build-portfolio-demo.mjs` | builds the static portfolio demo (not part of running OneTouch); its scrub list names the client |
+| `demo/static/mock-api.js` | the portfolio demo's in-browser stand-in for the server, about 1,500 lines of generated data (not part of running OneTouch) |
 
 <!-- END GENERATED -->

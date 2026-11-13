@@ -60,6 +60,8 @@ const SKIPPED = {
   'public/vendor/three-0.186.1/three.module.js': 'three.js, unchanged: `build/three.module.js` from `npm pack three@0.186.1`',
   'public/vendor/three-0.186.1/three.core.js': 'three.js, unchanged: `build/three.core.js` from `npm pack three@0.186.1`',
   'public/vendor/three-0.186.1/LICENSE': 'three.js\'s MIT license, from the same package',
+  'demo/build-portfolio-demo.mjs': 'builds the static portfolio demo (not part of running OneTouch); its scrub list names the client',
+  'demo/static/mock-api.js': 'the portfolio demo\'s in-browser stand-in for the server, about 1,500 lines of generated data (not part of running OneTouch)',
 };
 
 // Images can't be pasted as text; the guide says how to make each one (step 14)
@@ -73,6 +75,7 @@ const IMAGES = {
   'public/molsoncoorslogo.png': 'Molson Coors logo above the sign-in box, 320×143',
   'public/microsoftlogo.png': 'Microsoft logo on the "Microsoft Entra ID" button, 447×447',
   'public/login-background.jpg': 'wheat-field photo filling the sign-in page behind the box',
+  'public/app-background.jpg': 'the same photo behind every page after sign-in, 1920×1280 JPEG (about 200 KB)',
   'molsoncoorslogo.png': 'unused copy of public/molsoncoorslogo.png',
   'microsoftlogo.png': 'unused copy of the Microsoft logo, 447×447',
   'microsoftlogo (1).png': 'unused copy of public/microsoftlogo.png',
