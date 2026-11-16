@@ -664,6 +664,11 @@ the other page scripts) and the "♿ ACCESSIBILITY" part of `style.css`; the set
 button, and the server refuses the map's data to anyone else. On smaller screens the button
 is just the 🧊.
 
+The page opens on its tabs alone, in a centered column: 🧩 Overview, 🩺 Health, ⚠️ Risk monitor,
+📣 Reports, 📚 Stack and 🔌 ServiceNow. **The 2D or 3D map is only shown once someone opens
+🩺 Health** (three.js is loaded then, not before), and stays beside the tabs until **✕ Close the
+map** at the bottom of the left side bar or a reload.
+
 - **Moving around:** drag to turn, scroll to zoom, Shift+drag or right-drag to move, or use
   two fingers on a touch screen. With the keyboard: arrow keys turn it, **+** and **-** zoom,
   **0** resets, Tab reaches each block's name and Enter opens it.
@@ -713,6 +718,25 @@ means for people and how long it's been going on: sign-in and teams, ticket data
 Metabase, the Claude API, emails, the public address, the ticket-change channel, and any request
 the server answered with an error in the last 15 minutes. Checks run only while the page is open
 (`health.mjs`). **◀** minimizes the left side bar to the side, and **▶** brings it back.
+
+**⚠️ Risk monitor** lists what hasn't gone wrong yet but could, each one really measured while the
+page is open (`risks.mjs`, sent with the health report): the computer's disk filling up, Postgres
+running out of connections, AI spending passing its daily budget (`CLAUDE_DAILY_BUDGET_USD`, $5
+unless set), Brevo's daily sending limit (`BREVO_DAILY_LIMIT`, 300 unless set), the Node server
+running out of memory, and several accounts locked at once (someone guessing passwords). Each has
+a bar with its reading, a mark where it's getting close and one where it comes true, what we
+watch, what happens if it comes true, and what to do. Getting close shows in the banner. **A risk
+that comes true is a problem**: it's listed under 🩺 Health, counted in the banner, and its block
+turns red in 2D and 3D (a red, glowing block in 3D, with what's wrong under its name; a throbbing
+red card in 2D). Not being able to measure one isn't a problem; the health checks cover what's down.
+
+**For demos, the example risk** ("Example: Cube runs out of memory", at the bottom of the Risk
+monitor): **▶ Run the example**, and its made-up reading climbs from 52% to 100% in 4.5 seconds:
+getting close at 80%, then it comes true at 95%. It then shows under 🩺 Health and turns Cube red
+on the map, marked as an example and made up everywhere. **■ Stop the example** ends it, and it
+ends by itself after 10 minutes or a restart. Every admin on the page sees it while it runs
+(`POST /api/architecture/risks/example` `{ run }`). Nothing is really wrong. A demo: open the Risk
+monitor, run the example, open 🩺 Health when it comes true, and switch between 🗺️ 2D and 🧊 3D.
 
 What the map says is in `architecture.mjs`, because `public/` can be read without signing in.
 `public/architecture.js` only draws it, with three.js kept unchanged in `public/vendor/`.
@@ -2435,14 +2459,15 @@ Create each file at the path shown, with exactly this content. Files are in the 
 - [B.83 `public/architecture.js`](#b83)
 - [B.84 `checks/architecture.mjs`](#b84)
 - [B.85 `health.mjs`](#b85)
-- [B.86 `issues.mjs`](#b86)
-- [B.87 `checks/issues.mjs`](#b87)
-- [B.88 `checks/attention.mjs`](#b88)
-- [B.89 `usage.mjs`](#b89)
-- [B.90 `scripts/usage.mjs`](#b90)
-- [B.91 `scripts/eval-translation.mjs`](#b91)
-- [B.92 `checks/usage.mjs`](#b92)
-- [B.93 `demo/gate.config.json`](#b93)
+- [B.86 `risks.mjs`](#b86)
+- [B.87 `issues.mjs`](#b87)
+- [B.88 `checks/issues.mjs`](#b88)
+- [B.89 `checks/attention.mjs`](#b89)
+- [B.90 `usage.mjs`](#b90)
+- [B.91 `scripts/usage.mjs`](#b91)
+- [B.92 `scripts/eval-translation.mjs`](#b92)
+- [B.93 `checks/usage.mjs`](#b93)
+- [B.94 `demo/gate.config.json`](#b94)
 
 <a id="b1"></a>
 ### B.1 `.gitignore`
@@ -2651,6 +2676,8 @@ CLAUDE_EFFORT=
 CLAUDE_SMALL_MODEL=
 # How long to wait for Claude before giving up, in milliseconds (default 20000)
 CLAUDE_TIMEOUT_MS=
+# 🧊 Architecture's ⚠️ Risk monitor: what Claude may cost in 24 hours before the risk comes true (default 5)
+CLAUDE_DAILY_BUDGET_USD=
 # live = ask Claude as usual. offline = the presentation's emergency switch: the AI assistant
 # never asks Claude and answers only questions asked before (npm run warmup), labelled
 # "Offline mode". Change it, then: docker restart analytics_node_app (saved answers are kept).
@@ -2703,6 +2730,8 @@ APP_URL=https://onetouch.fyi
 # While trying email out: only these addresses (comma-separated) are emailed. Delete the
 # line (or leave it empty) to email everyone with an address on file.
 MAIL_ONLY_TO=
+# How many emails Brevo's plan sends in a day, for the ⚠️ Risk monitor (default 300, the free plan)
+BREVO_DAILY_LIMIT=
 ```
 
 <a id="b5"></a>
@@ -6535,7 +6564,8 @@ try {
 import dns from 'node:dns/promises';
 import { createHash, createHmac } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { mkdir, rename, writeFile } from 'node:fs/promises';
+import { mkdir, rename, statfs, writeFile } from 'node:fs/promises';
+import v8 from 'node:v8';
 import { dirname } from 'node:path';
 import express from 'express';
 import dotenv from 'dotenv';
@@ -6564,6 +6594,7 @@ import * as kpis from './kpis.mjs';
 import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
 import { architectureMap, pushState } from './architecture.mjs';
 import { makeHealth, noteResponse } from './health.mjs';
+import { makeRisks, asProblems } from './risks.mjs';
 import * as issues from './issues.mjs';
 import * as usage from './usage.mjs';
 import { costUsd } from './usage.mjs';
@@ -6918,7 +6949,39 @@ app.get('/api/architecture/health', async (req, res) => {
     dashboardsReady: () => existsSync(METABASE_DASHBOARDS_FILE) && /^[0-9a-f]{64}$/.test(process.env.METABASE_EMBEDDING_SECRET || ''),
     listening: () => servicenowPush.listening,
   });
-  res.json(await health());
+  // The risks that came true are reported as problems too, so the Health tab
+  // lists them and the map turns their blocks red (risks.mjs)
+  const [report, risks] = await Promise.all([health(), riskMonitor().report()]);
+  res.json({ ...report, checks: [...report.checks, ...asProblems(risks)], risks });
+});
+
+// ⚠️ Risk monitor (risks.mjs): what could go wrong, measured while the page is open
+let riskTracker = null;
+function riskMonitor() {
+  riskTracker ||= makeRisks({
+    db: async sql => (await auth.pool.query(sql)).rows,
+    // This folder is on the same drive as Docker's disk, so its free space is theirs
+    diskAt: async () => {
+      const disk = await statfs(new URL('.', import.meta.url));
+      return { total: disk.blocks * disk.bsize, free: disk.bavail * disk.bsize };
+    },
+    heap: async () => {
+      const { used_heap_size: used, heap_size_limit: limit } = v8.getHeapStatistics();
+      return { used, limit };
+    },
+    mailEnabled: mailEnabled(),
+    claudeBudgetUsd: Number(process.env.CLAUDE_DAILY_BUDGET_USD) > 0 ? Number(process.env.CLAUDE_DAILY_BUDGET_USD) : 5,
+    emailDailyLimit: Number.parseInt(process.env.BREVO_DAILY_LIMIT, 10) > 0 ? Number.parseInt(process.env.BREVO_DAILY_LIMIT, 10) : 300,
+  });
+  return riskTracker;
+}
+
+// The example risk, for demos: { run: true|false } -> the example as the Risk monitor shows it
+app.post('/api/architecture/risks/example', (req, res) => {
+  if (typeof req.body?.run !== 'boolean') return res.status(400).json({ error: 'Say whether to run the example: { run: true } or { run: false }.' });
+  const example = riskMonitor().setExample(req.body.run, req.user.displayName || req.user.username);
+  console.log(`⚠️ ${req.user.username} ${req.body.run ? 'started' : 'stopped'} the example risk`);
+  res.json(example);
 });
 
 function issuesFailed(res, error, what) {
@@ -12784,6 +12847,67 @@ html.a11y-motion *::after {
 }
 @media (prefers-reduced-motion: reduce) {
     .arch-band, .arch-band-label, .arch-card, .arch-line, .arch-line-label { transition: none; }
+}
+
+/* 🧊 Before the map is opened (from 🩺 Health): the banner and the tabs on their
+   own, in a centered column, and the page scrolls */
+.arch.arch-map-closed {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    overflow-y: auto;
+    background: var(--bg-primary);
+}
+.arch-map-closed .arch-rail, .arch-map-closed .arch-stage, .arch-map-closed .arch-plan,
+.arch-map-closed .arch-list, .arch-map-closed .arch-step { display: none !important; }
+.arch-map-closed .arch-status, .arch-map-closed .arch-side {
+    position: static !important;
+    flex-shrink: 0;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 900px;
+    max-height: none;
+    margin: 0 auto !important;
+    box-shadow: none;
+}
+.arch-map-closed .arch-side { overflow: visible; }
+.arch-map-closed .arch-side-body { overflow: visible; padding: 16px 20px 20px; font-size: 0.9rem; }
+.arch-map-closed .arch-tab { font-size: 0.82rem; }
+.arch-open-map { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 8px 0 12px; }
+.arch-open-map p { flex: 1 1 260px; margin: 0 !important; }
+.arch-close-map { margin-top: auto; }
+
+/* ⚠️ Risk monitor */
+.arch-risks { margin: 0 0 12px; padding: 0; list-style: none; }
+.arch-risk { margin-bottom: 10px; padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--border); border-left: 4px solid var(--same-ink); border-radius: 8px; }
+.arch-risk-close { border-left-color: var(--warn); }
+.arch-risk-happened { background: var(--danger-soft); border-color: var(--danger-line); border-left-color: var(--danger); }
+.arch-risk-unknown, .arch-risk-off, .arch-risk-idle { border-left-color: var(--muted); }
+.arch-risk-example { border-style: dashed; border-left-style: solid; }
+.arch-risk-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; margin-bottom: 4px; }
+.arch-risk-name { font-size: 0.95rem; }
+.arch-risk p { margin-bottom: 6px; }
+.arch-risk .arch-facts { margin-top: 8px; }
+.arch-risk-reading { font-weight: 600; }
+.arch-meter { position: relative; height: 10px; margin: 6px 0; background: var(--surface-3); border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
+.arch-meter-fill { position: absolute; inset: 0 auto 0 0; background: var(--same-ink); border-radius: 999px; transition: width 0.6s ease; }
+.arch-meter-close .arch-meter-fill { background: var(--warn); }
+.arch-meter-happened .arch-meter-fill { background: var(--danger); }
+.arch-meter-mark { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--warn-ink); }
+.arch-meter-mark-fail { background: var(--danger); }
+
+/* A block with a problem: the name in 3D says what's wrong, and the 2D card throbs */
+.arch-tag-problem { display: block; max-width: 230px; white-space: normal; font-weight: 700; color: var(--danger); }
+@keyframes arch-bad-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 var(--danger-line); }
+    50% { box-shadow: 0 0 0 7px var(--danger-line); }
+}
+.arch-card.arch-card-bad { animation: arch-bad-pulse 1.6s ease-in-out infinite; }
+.a11y-motion .arch-card.arch-card-bad { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+    .arch-card.arch-card-bad { animation: none; }
+    .arch-meter-fill { transition: none; }
 }
 ```
 
@@ -18680,7 +18804,7 @@ const FILES = [
   'servicenow-sync/src/db/pending.js', 'servicenow-sync/src/families.js',
   'servicenow-sync/servicenow-blueprint.md',
   'checks/ticket-order.mjs', '.github/workflows/ci.yml', '.dockerignore', 'public/accessibility.js',
-  'architecture.mjs', 'public/architecture.js', 'checks/architecture.mjs', 'health.mjs', 'issues.mjs', 'checks/issues.mjs', 'checks/attention.mjs',
+  'architecture.mjs', 'public/architecture.js', 'checks/architecture.mjs', 'health.mjs', 'risks.mjs', 'issues.mjs', 'checks/issues.mjs', 'checks/attention.mjs',
   'usage.mjs', 'scripts/usage.mjs', 'scripts/eval-translation.mjs', 'checks/usage.mjs',
   'demo/gate.config.json',
 ];
@@ -26902,6 +27026,18 @@ They run only while the page is open, and answers are kept 30 s or more. A probl
 the banner, the 🩺 Health tab and on its block; if the report itself can't be had, the page
 says so. **Something new that can break gets a check in `buildChecks`.** The left side bar
 minimizes with ◀ (remembered in this browser).
+**The page opens on its tabs alone** (`arch-map-closed`, a centered column): the 2D/3D map is
+only shown, and three.js only loaded, once someone opens 🩺 Health (`openMapView`); "✕ Close the
+map" on the left side bar shuts it again (`closeMapView`). **⚠️ Risk monitor** (`risks.mjs`,
+sent with the health report as `risks`): what could go wrong, really measured (disk, Postgres
+connections, AI spending against `CLAUDE_DAILY_BUDGET_USD`, Brevo's `BREVO_DAILY_LIMIT`, Node
+memory, locked accounts), each 'watching', 'close' or 'happened'. A risk that comes true is added
+to the health checks (`asProblems`, `risk` set), so Health, the banner and the red block in 2D and
+3D all show it; one that can't be measured is 'unknown', never a problem. **The example risk**
+(`EXAMPLE`, on Cube) is for demos: `POST /api/architecture/risks/example` `{ run }`, a made-up
+reading that climbs to coming true in about 4 s (4.5 s to 100%), ends itself after 10 minutes, in memory only, labelled
+made up everywhere; the page polls twice a second while it climbs. **Something that could go wrong
+but hasn't gets a risk in `buildRisks`.**
 
 **Notifications** (`notifications.mjs`, the 🔔 in the header, checked every
 minute). Each one is saved in the same transaction as the change it reports:
@@ -30984,7 +31120,7 @@ export const NODES = [
       ['Listens for', 'Postgres channel onetouch_tickets_changed (what the ServiceNow push announces on)'],
     ],
     secure: 'A session token is required on every OneTouch API route except sign-in. This page\'s data has one more check: admins only.',
-    files: ['server.mjs', 'Dockerfile', 'architecture.mjs', 'health.mjs'],
+    files: ['server.mjs', 'Dockerfile', 'architecture.mjs', 'health.mjs', 'risks.mjs'],
   },
   {
     id: 'auth', name: 'Sign-in', layer: 'app', shape: 'module', pos: [-3.3, 12, -4.2],
@@ -31599,12 +31735,15 @@ export function architectureMap({ model = null, push = {} } = {}) {
 
     const THREE_URL = './vendor/three-0.186.1/three.module.js';
     const POLL_MS = 20 * 1000;
+    const FAST_POLL_MS = 500; // while the example risk's reading climbs
     const DIM = 0.14; // how faint what isn't in focus gets
 
     let map = null;        // what the server said; null until loaded and after sign-out
     let world = null;      // the 3D scene; null when this browser can't draw it
     let planView = null;   // the flat view
     let active = false;
+    let mapOpen = false;   // the 2D/3D map: shut until someone opens 🩺 Health
+    let fastTimer = null;  // the quicker health poll while the example risk climbs
     let loading = null;    // the first opening, while it's still under way
     let opening = 0;       // goes up at sign-out, so a late answer can't draw the map for the next person
     let mode = '2d';       // '2d', '3d' or 'list'
@@ -31635,8 +31774,11 @@ export function architectureMap({ model = null, push = {} } = {}) {
         || matchMedia('(prefers-reduced-motion: reduce)').matches;
     const receiving = () => map?.push.state === 'receiving';
     const colorVar = name => `var(--${/^(series-[1-8]|warn)$/.test(name) ? name : 'muted'})`;
-    // Whichever drawing is showing: both answer to the same calls. The list has none.
-    const scene = () => (mode === '3d' ? world : mode === '2d' ? planView : null);
+    // Whichever drawing is showing: both answer to the same calls. The list has
+    // none, and nothing shows until the map is opened from 🩺 Health.
+    const scene = () => (!mapOpen ? null : mode === '3d' ? world : mode === '2d' ? planView : null);
+    // The example risk's reading is still climbing: worth asking twice a second
+    const exampleClimbing = () => Boolean(health?.risks?.some(r => r.example && r.running && r.value < 100));
 
     // -----------------------------------------------------------------
     // The page's text (everything but the scene)
@@ -31686,6 +31828,12 @@ export function architectureMap({ model = null, push = {} } = {}) {
                 <span class="arch-status-text">${shown.map(p => `<b>${esc(p.name)}:</b> ${esc(p.text)}`).join('<br>')}${list.length > shown.length ? `<br>and ${list.length - shown.length} more` : ''}</span>
                 <button type="button" class="arch-btn" data-side="health">See what's wrong</button>
             </div>`;
+        const close = closeRisks();
+        const near = !close.length ? '' : `<div class="arch-status-row arch-status-problems">
+                <span class="arch-chip arch-chip-warn">${close.length} risk${close.length === 1 ? '' : 's'} getting close</span>
+                <span class="arch-status-text">${close.map(r => `<b>${esc(r.name)}:</b> ${esc(r.text)}`).join('<br>')}</span>
+                <button type="button" class="arch-btn" data-side="risks">See the risks</button>
+            </div>`;
         const open = issues?.openCount || 0;
         const latest = issues?.open[0];
         const reported = !open ? '' : `<div class="arch-status-row arch-status-problems">
@@ -31694,8 +31842,11 @@ export function architectureMap({ model = null, push = {} } = {}) {
                 <button type="button" class="arch-btn" data-side="reports">See the reports</button>
             </div>`;
         const push = pushBarHidden() ? '' : `<div class="arch-status-row arch-status-push">${pushStatusHtml()}</div>`;
-        return `${bad}${reported}${push}`;
+        return `${bad}${near}${reported}${push}`;
     }
+
+    // Risks past their warning that haven't come true (those are problems already)
+    const closeRisks = () => (health?.risks || []).filter(r => r.state === 'close');
 
     // Only the "needs authentication" notice can be closed. Real problems and
     // reports always show, and so does the news when records start arriving.
@@ -31766,13 +31917,91 @@ export function architectureMap({ model = null, push = {} } = {}) {
             ${summary}
             <ul class="arch-checks">${server}${checks.map(c => `
                 <li class="arch-check arch-check-${esc(c.state)}">
-                    <b>${c.node ? `<button type="button" class="arch-link" data-node="${esc(c.node)}">${esc(c.name)}</button>` : esc(c.name)}</b><br>
+                    ${!c.risk ? '' : c.example ? '<span class="arch-chip arch-chip-warn">Example risk, made up</span><br>' : '<span class="arch-chip arch-chip-stop">A risk that came true</span><br>'}
+                    <b>${c.node && mapOpen ? `<button type="button" class="arch-link" data-node="${esc(c.node)}">${esc(c.name)}</button>` : esc(c.name)}</b><br>
                     ${esc(c.text)}
                     ${c.effect ? `<br><b>What this means:</b> ${esc(c.effect)}` : ''}
                     ${c.state === 'problem' && c.detail && c.detail !== c.text ? `<br><span class="arch-small">${esc(c.detail)}</span>` : ''}
                     <br><span class="arch-small">${c.since ? `Since ${esc(when(c.since))}. ` : ''}Checked ${esc(when(c.checkedAt))}.</span>
+                    ${c.risk ? `<br><button type="button" class="arch-link" data-side="risks">See it in the Risk monitor</button>` : ''}
                 </li>`).join('')}</ul>
-            <p class="arch-small">Each check really tries the thing, while this page is open, every 30 seconds or so. Outside services are asked less often. ServiceNow's authentication is listed in the banner, and in its own tab.</p>`;
+            <p class="arch-small">Each check really tries the thing, while this page is open, every 30 seconds or so. Outside services are asked less often. A risk from the ⚠️ Risk monitor that comes true is listed here too, and its block turns red on the map. ServiceNow's authentication is listed in the banner, and in its own tab.</p>`;
+    }
+
+    // ---- ⚠️ Risk monitor: what could go wrong, and how near each one is ----
+
+    const RISK_RANK = { happened: 0, close: 1, unknown: 2, watching: 3, off: 4, idle: 5 };
+    const RISK_CHIP = {
+        happened: '<span class="arch-chip arch-chip-stop">Came true</span>',
+        close: '<span class="arch-chip arch-chip-warn">Getting close</span>',
+        watching: '<span class="arch-chip arch-chip-good">Fine</span>',
+        unknown: '<span class="arch-chip">Can\'t measure</span>',
+        off: '<span class="arch-chip">Off here</span>',
+        idle: '<span class="arch-chip">Not running</span>',
+    };
+    const amount = (r, value) => (r.unit === '%' ? `${value}%` : `${value} ${r.unit}`);
+
+    // A bar with the reading, and marks where it gets close and where it comes true
+    function meterHtml(r) {
+        if (typeof r.value !== 'number') return '';
+        const at = value => Math.max(0, Math.min(100, (value / r.max) * 100)).toFixed(1);
+        return `<div class="arch-meter arch-meter-${esc(r.state)}" role="meter" aria-label="${esc(r.name)}"
+                    aria-valuemin="0" aria-valuemax="${esc(r.max)}" aria-valuenow="${esc(Math.min(r.value, r.max))}" aria-valuetext="${esc(amount(r, r.value))}">
+                <span class="arch-meter-fill" style="width: ${at(r.value)}%"></span>
+                <span class="arch-meter-mark" style="left: ${at(r.warnAt)}%" title="Getting close at ${esc(amount(r, r.warnAt))}"></span>
+                <span class="arch-meter-mark arch-meter-mark-fail" style="left: ${at(r.failAt)}%" title="Comes true at ${esc(amount(r, r.failAt))}"></span>
+            </div>`;
+    }
+
+    function exampleControlsHtml(r) {
+        if (!r.running) {
+            return `<button type="button" class="arch-btn arch-btn-wide" data-example="run">▶ Run the example</button>
+                <p class="arch-small">Every admin on this page sees it while it runs, marked as an example. Nothing really changes.</p>`;
+        }
+        return `<p class="arch-small">Started by ${esc(r.startedBy)} at ${esc(when(r.startedAt))}. It ends by itself at ${esc(when(r.endsAt))}.</p>
+            <button type="button" class="arch-btn arch-btn-wide" data-example="stop">■ Stop the example</button>`;
+    }
+
+    function riskHtml(r) {
+        const node = nodeById(r.node);
+        const where = !node ? '' : mapOpen
+            ? `<button type="button" class="arch-link" data-node="${esc(node.id)}">${esc(node.name)}</button>`
+            : `<b>${esc(node.name)}</b>`;
+        const cameTrue = r.state !== 'happened' ? '' : `<p class="arch-notice arch-notice-bad">
+                ${r.since ? `Came true ${esc(when(r.since))}. ` : ''}It's on the 🩺 Health tab${mapOpen ? ', and its block is red on the map' : ''}.
+                <button type="button" class="arch-link" data-side="health">${mapOpen ? 'See it in Health' : 'See it in Health and on the map'}</button></p>`;
+        return `<li class="arch-risk arch-risk-${esc(r.state)}${r.example ? ' arch-risk-example' : ''}">
+                <div class="arch-risk-head"><b class="arch-risk-name">${esc(r.name)}</b>${RISK_CHIP[r.state] || ''}</div>
+                ${where ? `<p class="arch-small">On the map: ${where}</p>` : ''}
+                <p>${esc(r.risk)}</p>
+                ${meterHtml(r)}
+                <p class="arch-risk-reading">${esc(r.text)}${r.state === 'unknown' && r.detail ? ` <span class="arch-small">(${esc(r.detail)})</span>` : ''}</p>
+                ${typeof r.value === 'number' || r.example ? `<p class="arch-small">Getting close at ${esc(amount(r, r.warnAt))}. Comes true at ${esc(amount(r, r.failAt))}.</p>` : ''}
+                ${cameTrue}
+                <dl class="arch-facts">
+                    <dt>We watch</dt><dd>${esc(r.watch)}</dd>
+                    <dt>If it comes true</dt><dd>${esc(r.effect)}</dd>
+                    <dt>What to do</dt><dd>${esc(r.action)}</dd>
+                </dl>
+                ${r.example ? exampleControlsHtml(r) : `<span class="arch-small">Measured ${esc(when(r.checkedAt))}.</span>`}
+            </li>`;
+    }
+
+    function risksHtml(Heading = 'h3') {
+        const title = `<${Heading} class="arch-node-name">Risks we watch</${Heading}>`;
+        if (!health?.risks) return `${title}<p>${healthError ? esc(healthError) : 'Measuring…'}</p>`;
+        const real = health.risks.filter(r => !r.example).sort((a, b) => RISK_RANK[a.state] - RISK_RANK[b.state]);
+        const examples = health.risks.filter(r => r.example);
+        const came = real.filter(r => r.state === 'happened').length;
+        const close = real.filter(r => r.state === 'close').length;
+        const summary = came ? `<p class="arch-notice arch-notice-bad"><b>${came} risk${came === 1 ? '' : 's'} came true.</b> ${came === 1 ? 'It\'s' : 'They\'re'} on the 🩺 Health tab too.</p>`
+            : close ? `<p class="arch-notice"><b>${close} risk${close === 1 ? ' is' : 's are'} getting close.</b></p>`
+            : '<p class="arch-notice arch-notice-good"><b>None of the risks has come true.</b></p>';
+        return `${title}
+            ${summary}
+            <p>Things that haven't gone wrong, but could. Each one is measured while this page is open. When one passes its limit it comes true: it moves to 🩺 Health, and its block turns red on the 2D and 3D map.</p>
+            <ul class="arch-risks">${real.map(riskHtml).join('')}</ul>
+            ${examples.length ? `<h4>For demos</h4><ul class="arch-risks">${examples.map(riskHtml).join('')}</ul>` : ''}`;
     }
 
     function pushStatusHtml() {
@@ -31789,7 +32018,7 @@ export function architectureMap({ model = null, push = {} } = {}) {
             <span class="arch-status-text"><b>${esc(s.headline)}</b> No data can arrive until then.</span>
             <span class="arch-status-actions">
                 <button type="button" class="arch-btn" data-side="servicenow">What it needs</button>
-                <button type="button" class="arch-btn" data-flow="servicenow">▶ See how it will work</button>
+                ${mapOpen ? '<button type="button" class="arch-btn" data-flow="servicenow">▶ See how it will work</button>' : ''}
             </span>`;
     }
 
@@ -31814,7 +32043,8 @@ export function architectureMap({ model = null, push = {} } = {}) {
             <h3 class="arch-rail-head">What happens when…</h3>
             <div class="arch-rail-group">${flows}</div>
             <h3 class="arch-rail-head">Layers</h3>
-            <div class="arch-rail-group">${layers}</div>`;
+            <div class="arch-rail-group">${layers}</div>
+            <button type="button" class="arch-btn arch-btn-wide arch-close-map" data-do="close-map">✕ Close the map</button>`;
     }
 
     // The part of the page no panel is floating over, for a view w by h
@@ -31899,15 +32129,22 @@ export function architectureMap({ model = null, push = {} } = {}) {
             <ul class="arch-built">${s.built.map(b => `<li>${esc(b)}</li>`).join('')}</ul>
             <h4>The steps for ServiceNow</h4>
             <p><code>${esc(s.blueprint)}</code></p>
-            <button type="button" class="arch-btn arch-btn-wide" data-flow="servicenow">▶ See how it ${receiving() ? 'works' : 'will work'}</button>`;
+            ${mapOpen ? `<button type="button" class="arch-btn arch-btn-wide" data-flow="servicenow">▶ See how it ${receiving() ? 'works' : 'will work'}</button>` : ''}`;
     }
 
     function overviewHtml() {
+        const opener = mapOpen ? '' : `<div class="arch-notice arch-open-map">
+                <p><b>The map opens from 🩺 Health:</b> every block and line of OneTouch in 2D or 3D, with anything that isn't working in red.</p>
+                <button type="button" class="arch-btn" data-side="health">🩺 Open Health and the map</button>
+            </div>`;
         return `
             <h3 class="arch-node-name">How OneTouch fits together</h3>
+            ${opener}
             <p>${esc(map.overview)}</p>
             <h4>Find your way around</h4>
             <ul class="arch-built">
+                <li><b>🩺 Health</b> opens the map beside what's working and what isn't.</li>
+                <li><b>⚠️ Risk monitor</b> lists what could go wrong, measured. A risk that comes true moves to Health, and its block turns red on the map.</li>
                 <li><b>2D</b>, <b>3D</b> and <b>List</b> are the same map. 2D writes on every block and line what it's doing.</li>
                 <li>Click any block for what it does, how it's protected and where its code is.</li>
                 <li>Pick a <b>What happens when…</b> to follow a real request through the system, step by step.</li>
@@ -31922,11 +32159,19 @@ export function architectureMap({ model = null, push = {} } = {}) {
         const node = selected && nodeById(selected);
         const count = problems().length;
         const reported = issues?.openCount || 0;
-        const tabs = [['details', '🧩 Details'], ['stack', '📚 Stack'], ['health', `🩺 Health${count ? ` (${count})` : ''}`],
-            ['reports', `📣 Reports${reported ? ` (${reported})` : ''}`], ['servicenow', '🔌 ServiceNow']];
-        // A redraw of the same tab stays where the person had scrolled to
+        const risky = (health?.risks || []).filter(r => r.state === 'happened' || r.state === 'close').length;
+        const tabs = [['details', node ? '🧩 Details' : '🧩 Overview'], ['health', `🩺 Health${count ? ` (${count})` : ''}`],
+            ['risks', `⚠️ Risk monitor${risky ? ` (${risky})` : ''}`], ['reports', `📣 Reports${reported ? ` (${reported})` : ''}`],
+            ['stack', '📚 Stack'], ['servicenow', '🔌 ServiceNow']];
+        // A redraw of the same tab stays where the person had scrolled to, and
+        // keeps the keys on the same button (the example risk redraws twice a second)
         const scrolled = sideShown === sideTab ? side.querySelector('.arch-side-body')?.scrollTop || 0 : 0;
+        const focused = side.contains(document.activeElement) ? document.activeElement : null;
+        const refocus = !focused ? null
+            : focused.classList.contains('arch-side-body') ? '.arch-side-body'
+            : Object.entries(focused.dataset).map(([k, v]) => `[data-${k.replace(/[A-Z]/g, c => `-${c.toLowerCase()}`)}="${CSS.escape(v)}"]`).join('') || null;
         const body = sideTab === 'health' ? healthHtml()
+            : sideTab === 'risks' ? risksHtml()
             : sideTab === 'reports' ? reportsHtml()
             : sideTab === 'stack' ? stackHtml()
             : sideTab === 'servicenow' ? servicenowHtml()
@@ -31937,6 +32182,7 @@ export function architectureMap({ model = null, push = {} } = {}) {
             </div>
             <div class="arch-side-body" role="tabpanel" tabindex="0">${body}</div>`;
         side.querySelector('.arch-side-body').scrollTop = scrolled;
+        if (refocus && sideShown === sideTab) side.querySelector(refocus)?.focus({ preventScroll: true });
         sideShown = sideTab;
     }
 
@@ -31986,6 +32232,7 @@ export function architectureMap({ model = null, push = {} } = {}) {
         list.innerHTML = `
             <section class="arch-list-layer"><h2>Architecture</h2><p>${esc(map.overview)}</p></section>
             <section class="arch-list-layer arch-item" id="arch-list-health" tabindex="-1">${healthHtml('h3')}</section>
+            <section class="arch-list-layer arch-item" id="arch-list-risks" tabindex="-1">${risksHtml('h3')}</section>
             <section class="arch-list-layer arch-item" id="arch-list-reports" tabindex="-1">${reportsHtml('h3')}</section>
             <section class="arch-list-layer arch-item" id="arch-list-servicenow" tabindex="-1">${servicenowHtml('h3')}</section>
             <section class="arch-list-layer"><h3>Tech stack</h3>${stackHtml()}</section>
@@ -32125,12 +32372,18 @@ export function architectureMap({ model = null, push = {} } = {}) {
     // Every button on the page, in one place
     function onClick(event) {
         // A name over a block, or anything else that's a button on this page
-        const el = event.target.closest('[data-issue], [data-node], [data-flow], [data-layer], [data-side], [data-do]');
+        const el = event.target.closest('[data-issue], [data-example], [data-node], [data-flow], [data-layer], [data-side], [data-do]');
         if (!el || !$('architecture').contains(el)) return;
         // First, so the camera frames what comes next around the bar being back
         if (pushBarOff && isPushButton(el)) setPushBar(false);
         if (el.dataset.issue) {
             setIssue(el, el.dataset.issue, el.dataset.issueStatus);
+        } else if (el.dataset.example) {
+            runExample(el, el.dataset.example === 'run');
+        } else if (el.dataset.side === 'health' && !mapOpen) {
+            // The map is only shown once someone opens Health
+            sideTab = 'health';
+            openMapView();
         } else if (el.dataset.node) {
             if (player.flow) stopFlow();
             select(el.dataset.node);
@@ -32144,6 +32397,7 @@ export function architectureMap({ model = null, push = {} } = {}) {
             if (mode === 'list' && sideTab === 'servicenow') goToInList('arch-list-servicenow');
             if (mode === 'list' && sideTab === 'health') goToInList('arch-list-health');
             if (mode === 'list' && sideTab === 'reports') goToInList('arch-list-reports');
+            if (mode === 'list' && sideTab === 'risks') goToInList('arch-list-risks');
         } else {
             act(el.dataset.do);
         }
@@ -32151,6 +32405,7 @@ export function architectureMap({ model = null, push = {} } = {}) {
 
     function act(what) {
         if (what === 'rail') setRailMin(!railMin);
+        else if (what === 'close-map') closeMapView();
         else if (what === 'hide-push-bar') hidePushBar();
         else if (what === '3d' || what === '2d' || what === 'list') pickMode(what);
         else if (what === 'labels') planView?.toggleLabels();
@@ -32197,7 +32452,7 @@ export function architectureMap({ model = null, push = {} } = {}) {
         const status = $('arch-status');
         if (!status || !map) return;
         const list = problems();
-        const key = `${map.push.state}:${map.push.heard}:${list.map(p => `${p.id}=${p.text}`).join('|')}:${issues?.openCount || 0}:${issues?.open[0]?.id || 0}:${pushBarHidden()}`;
+        const key = `${map.push.state}:${map.push.heard}:${list.map(p => `${p.id}=${p.text}`).join('|')}:${closeRisks().map(r => `${r.id}=${r.text}`).join('|')}:${issues?.openCount || 0}:${issues?.open[0]?.id || 0}:${pushBarHidden()}:${mapOpen}`;
         if (status.dataset.key !== key) {
             status.dataset.key = key;
             status.innerHTML = statusHtml();
@@ -32207,12 +32462,18 @@ export function architectureMap({ model = null, push = {} } = {}) {
             status.classList.toggle('arch-status-bad', list.length > 0);
             // The banner's height may have changed, and the scene is centered below it
             scene()?.resize();
-            world?.setProblems(list.map(p => p.node).filter(Boolean));
-            planView?.setProblems(list.filter(p => p.node));
+            paintProblems();
         }
         world?.setPushState(receiving());
         planView?.setPushState(receiving());
         if (before !== undefined && map.push.heard > before) scene()?.pulse(map.servicenow.arrives);
+    }
+
+    // Blocks with a problem (a failed check, or a risk that came true) turn red in 2D and 3D
+    function paintProblems() {
+        const list = problems().filter(p => p.node);
+        world?.setProblems(list);
+        planView?.setProblems(list);
     }
 
     async function fetchMap() {
@@ -32226,9 +32487,11 @@ export function architectureMap({ model = null, push = {} } = {}) {
     // The health report. Not getting one is itself a problem to report: a server
     // that can't reach its database, or isn't answering, can't say so any other way.
     async function pollHealth() {
+        clearTimeout(fastTimer);
         if (!active || !map) return;
         const session = opening;
-        const before = JSON.stringify(health?.checks.map(c => [c.id, c.state, c.text])) + healthError;
+        const seen = () => JSON.stringify([health?.checks.map(c => [c.id, c.state, c.text]), health?.risks?.map(r => [r.id, r.state, r.text, r.running])]) + healthError;
+        const before = seen();
         try {
             const response = await fetch(`${API_BASE}/api/architecture/health`, { headers: authHeaders() });
             if (handleUnauthorized(response) || session !== opening) return;
@@ -32244,12 +32507,36 @@ export function architectureMap({ model = null, push = {} } = {}) {
             healthErrorSince ||= new Date().toISOString();
         }
         paintPush();
-        if (before !== JSON.stringify(health?.checks.map(c => [c.id, c.state, c.text])) + healthError) {
+        if (before !== seen()) {
             renderSide();
-            if (mode === 'list') renderList();
-        } else if (sideTab === 'health' && !$('arch-side')?.contains(document.activeElement)) {
+            if (mode === 'list' && mapOpen) renderList();
+        } else if ((sideTab === 'health' || sideTab === 'risks') && !$('arch-side')?.contains(document.activeElement)) {
             // Only the "Checked at" times moved: not worth taking the keys from someone
             renderSide();
+        }
+        // The example risk climbs in under 5 seconds: watch it closely until it's done
+        if (active && session === opening && exampleClimbing()) fastTimer = setTimeout(pollHealth, FAST_POLL_MS);
+    }
+
+    // ▶ Run or ■ Stop the example risk (for demos). Every admin sees it.
+    async function runExample(button, run) {
+        button.disabled = true;
+        try {
+            const response = await fetch(`${API_BASE}/api/architecture/risks/example`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                body: JSON.stringify({ run }),
+            });
+            if (handleUnauthorized(response)) return;
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || 'The example could not be changed right now.');
+            await pollHealth();
+            showToast(run ? 'The example is running. Its made-up reading climbs until it comes true; nothing is really wrong.' : 'The example has stopped.');
+            // Its button changed: the keys go to the new one
+            document.querySelector('#arch-side [data-example]')?.focus({ preventScroll: true });
+        } catch (error) {
+            button.disabled = false;
+            showToast(error.message, 'error');
         }
     }
 
@@ -32351,28 +32638,72 @@ export function architectureMap({ model = null, push = {} } = {}) {
         }
         root.innerHTML = pageHtml();
         root.onclick = onClick;
-        let THREE = null;
-        try {
-            THREE = await import(THREE_URL);
-        } catch (error) {
-            console.error('🧊 Could not load three.js:', error);
-        }
-        if (session !== opening) return;
-        if (THREE) {
-            try {
-                world = buildWorld(THREE);
-            } catch (error) {
-                console.error('🧊 Could not start the 3D map:', error);
-                world = null;
-            }
-        }
-        planView = buildPlanView();
+        // The tabs first, on their own: the map waits until someone opens 🩺 Health
+        mapOpen = false;
+        root.classList.add('arch-map-closed');
         renderSide();
         paintRail();
         paintPush();
-        setMode(savedMode());
         pollHealth();
         pollIssues();
+    }
+
+    // The 2D/3D map, beside the Health tab. Built the first time (three.js is
+    // only loaded then), and kept until sign-out.
+    async function openMapView() {
+        if (mapOpen || !map) return;
+        const session = opening;
+        const root = $('architecture');
+        mapOpen = true;
+        root.classList.remove('arch-map-closed');
+        renderSide();
+        paintRail();
+        if (!planView) {
+            let THREE = null;
+            try {
+                THREE = await import(THREE_URL);
+            } catch (error) {
+                console.error('🧊 Could not load three.js:', error);
+            }
+            if (session !== opening || !map) return;
+            if (THREE) {
+                try {
+                    world = buildWorld(THREE);
+                } catch (error) {
+                    console.error('🧊 Could not start the 3D map:', error);
+                    world = null;
+                }
+            }
+            planView = buildPlanView();
+            world?.setPushState(receiving());
+            planView.setPushState(receiving());
+        }
+        if (session !== opening || !mapOpen) return;
+        paintRail();
+        paintProblems();
+        $('arch-status').dataset.key = ''; // the banner's buttons change with the map
+        paintPush();
+        setMode(savedMode());
+        renderSide();
+        // The keys go to the panel that opened it
+        document.querySelector('#arch-side .arch-tab.is-on')?.focus({ preventScroll: true });
+    }
+
+    // Back to the tabs on their own
+    function closeMapView() {
+        if (!mapOpen) return;
+        stopFlow();
+        scene()?.sleep();
+        mapOpen = false;
+        selected = null;
+        focusLayer = null;
+        const root = $('architecture');
+        root.classList.remove('arch-is-list');
+        root.classList.add('arch-map-closed');
+        $('arch-status').dataset.key = '';
+        paintPush();
+        renderSide();
+        document.querySelector('#arch-side .arch-tab.is-on')?.focus({ preventScroll: true });
     }
 
     function hideArchitecture() {
@@ -32380,6 +32711,8 @@ export function architectureMap({ model = null, push = {} } = {}) {
         active = false;
         clearInterval(pollTimer);
         pollTimer = null;
+        clearTimeout(fastTimer);
+        fastTimer = null;
         player.playing = false;
         renderStep();
         scene()?.sleep();
@@ -32399,6 +32732,7 @@ export function architectureMap({ model = null, push = {} } = {}) {
         healthErrorSince = null;
         issues = null;
         sideShown = null;
+        mapOpen = false;
         mode = '3d';
         sideTab = 'details';
         selected = null;
@@ -32408,7 +32742,7 @@ export function architectureMap({ model = null, push = {} } = {}) {
         if (root) {
             root.innerHTML = '';
             root.onclick = null;
-            root.classList.remove('arch-is-list');
+            root.classList.remove('arch-is-list', 'arch-map-closed');
         }
     }
 
@@ -32458,18 +32792,21 @@ export function architectureMap({ model = null, push = {} } = {}) {
             return target.setRGB(r / 255, g / 255, b / 255, THREE.SRGBColorSpace);
         }
         const paints = [];
+        const paintOf = new Map(); // a material's entry, so a block with a problem can turn red
         function paint(material, css, mix = null, share = 0) {
             const entry = { material, css, mix, share };
             paints.push(entry);
+            paintOf.set(material, entry);
             return entry;
         }
         const mixColor = new THREE.Color();
+        function recolor(p) {
+            cssColor(p.css, p.material.color);
+            if (p.mix) p.material.color.lerp(cssColor(p.mix, mixColor), p.share);
+            if (p.material.emissive) p.material.emissive.copy(p.material.color);
+        }
         function applyTheme() {
-            for (const p of paints) {
-                cssColor(p.css, p.material.color);
-                if (p.mix) p.material.color.lerp(cssColor(p.mix, mixColor), p.share);
-                if (p.material.emissive) p.material.emissive.copy(p.material.color);
-            }
+            for (const p of paints) recolor(p);
             for (const link of links) {
                 cssColor(link.base, link.baseColor);
                 cssColor('accent', link.hotColor);
@@ -33324,6 +33661,8 @@ export function architectureMap({ model = null, push = {} } = {}) {
                 // The gate keeps breathing while it's what everything waits for
                 if (node === gate && !receiving() && lively) glowTo += 0.14 + 0.14 * Math.sin(clock.t * 2.4);
                 if (node === gate && stepFocus?.stop && lively) glowTo += 0.3 * Math.abs(Math.sin(clock.t * 6));
+                // A block with a problem glows red, and throbs while someone is watching
+                if (node.bad) glowTo += lively ? 0.3 + 0.2 * Math.sin(clock.t * 3.2) : 0.3;
                 node.glow = ease(node.glow, glowTo, still ? 1000 : 9, dt || 0.016);
                 if (!close(wasDim, node.dim) || !close(wasGlow, node.glow)) {
                     dirty = true;
@@ -33462,14 +33801,36 @@ export function architectureMap({ model = null, push = {} } = {}) {
         applyCamera();
         showFocus(false);
 
-        // Blocks with a problem get a red name, which stays showing
-        function setProblems(ids) {
+        // A block with a problem turns red and glows, and its name, which stays
+        // showing, says what's wrong. The light parts (screens, rims) keep their color.
+        function setProblems(list) {
             for (const [id, node] of nodes) {
-                const bad = ids.includes(id);
-                node.tag.el.classList.toggle('arch-tag-bad', bad);
+                const own = list.filter(p => p.node === id);
+                const bad = own.length > 0;
+                if (Boolean(node.bad) !== bad) {
+                    node.bad = bad;
+                    for (const material of node.mats) {
+                        const entry = paintOf.get(material);
+                        if (!entry) continue;
+                        entry.okCss ??= entry.css;
+                        if (entry.okCss === 'panel-bg' || entry.okCss === 'muted') continue;
+                        entry.css = bad ? 'danger' : entry.okCss;
+                        recolor(entry);
+                    }
+                }
+                const el = node.tag.el;
+                el.classList.toggle('arch-tag-bad', bad);
+                el.querySelector('.arch-tag-problem')?.remove();
+                if (bad) {
+                    const note = document.createElement('span');
+                    note.className = 'arch-tag-problem';
+                    note.textContent = own.map(p => p.text).join(' ');
+                    el.append(note);
+                }
                 node.tag.baseRank ??= node.tag.rank;
                 node.tag.rank = bad ? 15 : node.tag.baseRank;
             }
+            measureTags();
             dirty = true;
         }
 
@@ -34189,6 +34550,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { architectureMap, composeImages, FLOWS, LAYERS, LINKS, NODES, PLAN, SERVICENOW } from '../architecture.mjs';
 import { buildChecks, makeHealth, noteResponse } from '../health.mjs';
+import { asProblems, buildRisks, EXAMPLE, makeRisks } from '../risks.mjs';
 
 const problems = [];
 const check = (ok, message) => { if (!ok) problems.push(message); };
@@ -34333,6 +34695,49 @@ const errors = await stateOf({}, 'errors');
 assert.equal(errors.state, 'problem');
 assert.match(errors.text, /1 request/);
 assert.equal(errors.detail, '/api/teams: 1', 'Only the start of the path, and only server errors');
+
+// ⚠️ The risks: each points at a real block; a reading past its limit comes
+// true and is reported as a problem on that block; one that can't be measured
+// isn't; and the example climbs until it comes true, then ends by itself
+const calm = {
+  db: async sql => (sql.includes('pg_stat_activity') ? [{ used: 10, max: 100 }] : sql.includes('claude_usage') ? [{ spent: 0.5 }]
+    : sql.includes('notifications') ? [{ sent: 12 }] : [{ locked: 0 }]),
+  diskAt: async () => ({ total: 100e9, free: 60e9 }),
+  heap: async () => ({ used: 100e6, limit: 2000e6 }),
+  mailEnabled: true, claudeBudgetUsd: 5, emailDailyLimit: 300,
+};
+for (const r of [...buildRisks(calm), EXAMPLE]) {
+  check(ids.has(r.node), `Risk ${r.id} points at "${r.node}", which isn't a block`);
+  check(r.warnAt < r.failAt && r.failAt <= r.max, `Risk ${r.id}: its warning must come before its limit, within its scale`);
+  for (const field of ['name', 'risk', 'watch', 'effect', 'action']) check(r[field], `Risk ${r.id} says nothing for "${field}"`);
+}
+let clock = Date.parse('2026-11-16T15:00:00Z');
+const risksAt = tools => makeRisks({ ...calm, ...tools }, () => clock);
+const calmReport = await risksAt({}).report();
+assert.ok(calmReport.filter(r => !r.example).every(r => r.state === 'watching'), 'All low: every risk is just watched');
+assert.deepEqual(asProblems(calmReport), [], 'Nothing came true: no problems');
+const full = await risksAt({ diskAt: async () => ({ total: 100e9, free: 2e9 }) }).report();
+assert.equal(full.find(r => r.id === 'disk').state, 'happened');
+assert.deepEqual(asProblems(full).map(p => [p.node, p.state]), [['analytics_db', 'problem']], 'A risk that came true is a problem on its block');
+assert.equal((await risksAt({ heap: async () => ({ used: 1600e6, limit: 2000e6 }) }).report()).find(r => r.id === 'memory').state, 'close');
+assert.equal((await risksAt({ mailEnabled: false }).report()).find(r => r.id === 'email-limit').state, 'off');
+const blind = await risksAt({ db: async () => { throw new Error('connection refused'); } }).report();
+assert.equal(blind.find(r => r.id === 'connections').state, 'unknown');
+assert.deepEqual(asProblems(blind), [], 'Not being able to measure a risk isn\'t the risk coming true');
+const demo = risksAt({});
+assert.equal((await demo.report()).find(r => r.example).state, 'idle', 'The example waits until someone runs it');
+demo.setExample(true, 'Test Admin');
+assert.equal((await demo.report()).find(r => r.example).state, 'watching');
+clock += 5 * 1000;
+const cameTrue = await demo.report();
+assert.equal(cameTrue.find(r => r.example).state, 'happened', 'The example comes true within 5 seconds');
+assert.deepEqual(asProblems(cameTrue).map(p => [p.node, p.example]), [['cube', true]], 'It shows on Cube, marked as an example');
+assert.match(asProblems(cameTrue)[0].text, /Made-up/, 'It says it\'s made up');
+clock += 10 * 60 * 1000;
+assert.equal((await demo.report()).find(r => r.example).state, 'idle', 'It ends by itself after 10 minutes');
+demo.setExample(true, 'Test Admin');
+demo.setExample(false);
+assert.equal((await demo.report()).find(r => r.example).state, 'idle', 'Stop ends it at once');
 
 if (problems.length) {
   console.error(`The architecture map is out of step with the repo:\n- ${problems.join('\n- ')}`);
@@ -34531,7 +34936,209 @@ export function makeHealth(tools, now = () => Date.now()) {
 ```
 
 <a id="b86"></a>
-### B.86 `issues.mjs`
+### B.86 `risks.mjs`
+
+```js
+// =====================================================================
+// RISKS TO WATCH: the ⚠️ Risk monitor on the 🧊 Architecture page (admins
+// only, sent with GET /api/architecture/health). A risk hasn't gone wrong
+// yet, but could. Each one is really measured, and once its reading passes
+// its limit it "comes true": it is reported with the health checks
+// (asProblems), so the 🩺 Health tab lists it and its block turns red on
+// the 2D and 3D map.
+//
+// Measured only while an admin has the page open, and kept 30 s, like the
+// health checks.
+//
+// One example risk is for demos (EXAMPLE): an admin starts it from the Risk
+// monitor, its made-up reading climbs until it comes true, and it ends by
+// itself after 10 minutes. Nothing is really wrong, and it says so wherever
+// it shows. It lives in this server's memory, so a restart ends it too.
+// =====================================================================
+
+const KEEP_MS = 30 * 1000;
+const MEASURE_TIMEOUT_MS = 15 * 1000;
+const EXAMPLE_CLIMB_MS = 4500; // quick, so a demo doesn't wait long
+const EXAMPLE_LASTS_MS = 10 * 60 * 1000;
+const EXAMPLE_FROM = 52;
+
+const percent = (part, whole) => (whole > 0 ? Math.round((part / whole) * 1000) / 10 : 0);
+const gb = bytes => `${(bytes / 1e9).toFixed(1)} GB`;
+const mb = bytes => `${Math.round(bytes / 1e6).toLocaleString('en-US')} MB`;
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+// 'watching', 'close' (past its warning) or 'happened' (past its limit)
+export const stateOf = (risk, value) => (value >= risk.failAt ? 'happened' : value >= risk.warnAt ? 'close' : 'watching');
+
+// tools: { db(sql) -> rows, diskAt() -> { total, free } in bytes, heap() -> { used, limit } in bytes,
+//          mailEnabled, claudeBudgetUsd, emailDailyLimit }
+// Each measure() returns { value, text }, or { off: sentence } when it doesn't apply here, or throws.
+export function buildRisks(tools) {
+  return [
+    {
+      id: 'disk', node: 'analytics_db', name: 'The computer\'s disk fills up',
+      risk: 'Docker\'s disk (both databases), the saved answers and the logs all live on this computer\'s drive, and they only grow.',
+      watch: 'How full the drive that holds OneTouch\'s folder and Docker\'s disk is.',
+      effect: 'Postgres can\'t save anything: sign-ins, assignments and notifications fail, and the databases may not start again.',
+      action: 'Free space on the drive (docker system prune, old downloads), or move Docker\'s disk to a bigger one.',
+      unit: '%', warnAt: 85, failAt: 95, max: 100,
+      async measure() {
+        const { total, free } = await tools.diskAt();
+        const used = percent(total - free, total);
+        return { value: used, text: `${used}% full: ${gb(free)} free of ${gb(total)}.` };
+      },
+    },
+    {
+      id: 'connections', node: 'onetouch_auth', name: 'Postgres runs out of connections',
+      risk: 'The Node server, Cube and Metabase each keep connections open to the one Postgres server, and a stuck query holds one.',
+      watch: 'Connections in use, against Postgres\'s max_connections.',
+      effect: 'New connections are refused: sign-in, ticket data and dashboards fail for everyone at once.',
+      action: 'See what holds them (pg_stat_activity) and restart it, or raise max_connections.',
+      unit: '%', warnAt: 75, failAt: 95, max: 100,
+      async measure() {
+        const [{ used, max }] = await tools.db(
+          "SELECT (SELECT count(*) FROM pg_stat_activity)::int AS used, current_setting('max_connections')::int AS max");
+        return { value: percent(used, max), text: `${used} of ${max} connections in use.` };
+      },
+    },
+    {
+      id: 'claude-spend', node: 'claude', name: 'AI spending passes its daily budget',
+      risk: 'Every new question costs a little. A busy day, a big warm-up run or something asking in a loop adds up quickly.',
+      watch: `What Claude cost in the last 24 hours (claude_usage), against a budget of $${tools.claudeBudgetUsd} a day (CLAUDE_DAILY_BUDGET_USD).`,
+      effect: 'More is being spent than planned. If the Anthropic workspace\'s spend limit is reached, new questions stop being answered.',
+      action: 'npm run usage shows who and what is asking. Raise the budget here, or the spend limit in Anthropic\'s console.',
+      unit: '%', warnAt: 75, failAt: 100, max: 100,
+      async measure() {
+        const [{ spent }] = await tools.db(
+          "SELECT coalesce(sum(cost_usd), 0)::float AS spent FROM claude_usage WHERE at > now() - interval '24 hours'");
+        return { value: percent(spent, tools.claudeBudgetUsd), text: `$${spent.toFixed(2)} of the $${tools.claudeBudgetUsd} budget in the last 24 hours.` };
+      },
+    },
+    {
+      id: 'email-limit', node: 'brevo', name: 'Brevo\'s daily sending limit is reached',
+      risk: 'Brevo sends only so many emails a day on this plan. Email everyone on demo day, or a family of hundreds handed out, uses it fast.',
+      watch: `Emails sent in the last 24 hours, against ${tools.emailDailyLimit} a day (BREVO_DAILY_LIMIT).`,
+      effect: 'Brevo refuses the rest of the day\'s emails. The 🔔 in the header still works.',
+      action: 'Switch Email everyone off, or move to a Brevo plan that sends more and raise BREVO_DAILY_LIMIT.',
+      unit: '%', warnAt: 80, failAt: 100, max: 100,
+      async measure() {
+        if (!tools.mailEnabled) return { off: 'Email is off here, so nothing is sent.' };
+        const [{ sent }] = await tools.db(
+          "SELECT count(*)::int AS sent FROM notifications WHERE emailed_at > now() - interval '24 hours'");
+        return { value: percent(sent, tools.emailDailyLimit), text: `${plural(sent, 'email')} of ${tools.emailDailyLimit} in the last 24 hours.` };
+      },
+    },
+    {
+      id: 'memory', node: 'express', name: 'The Node server runs out of memory',
+      risk: 'The ticket index, KPIs, chart results and saved answers are kept in memory. More tickets, or something that never lets go, makes them grow.',
+      watch: 'How much of its memory limit the Node server is using.',
+      effect: 'The server stops and restarts: everyone loses what they were doing, and the site is down for a few seconds.',
+      action: 'Restart the app, and look for what grew. If the data really grew, give Node more memory (--max-old-space-size).',
+      unit: '%', warnAt: 75, failAt: 90, max: 100,
+      async measure() {
+        const { used, limit } = await tools.heap();
+        return { value: percent(used, limit), text: `${mb(used)} of ${mb(limit)} in use.` };
+      },
+    },
+    {
+      id: 'lockouts', node: 'auth', name: 'Someone is guessing passwords',
+      risk: 'Five wrong passwords lock an account for 15 minutes. One locked account is someone who forgot; several at once looks like guessing.',
+      watch: 'How many accounts are locked right now.',
+      effect: 'Those people can\'t sign in for 15 minutes, and someone may be trying to get in.',
+      action: 'See whose (npm run users -- list), and check who is reaching the site in Cloudflare.',
+      unit: 'accounts', warnAt: 2, failAt: 4, max: 6,
+      async measure() {
+        const [{ locked }] = await tools.db('SELECT count(*) FILTER (WHERE locked_until > now())::int AS locked FROM users');
+        return { value: locked, text: `${plural(locked, 'account')} locked right now.` };
+      },
+    },
+  ];
+}
+
+// The demo's risk: on the Cube block, so it shows in the middle of the map
+export const EXAMPLE = {
+  id: 'example', node: 'cube', name: 'Example: Cube runs out of memory', example: true,
+  risk: 'For demos only. Cube keeps recent query results in memory; if it filled up, Cube would stop answering.',
+  watch: `A made-up reading. Once someone presses Run, it climbs from ${EXAMPLE_FROM}% to 100% in ${EXAMPLE_CLIMB_MS / 1000} seconds.`,
+  effect: 'If this were real: search, charts, KPIs and the AI assistant\'s answers would stop.',
+  action: 'Nothing: it isn\'t real. Press Stop, or it ends by itself after 10 minutes.',
+  unit: '%', warnAt: 80, failAt: 95, max: 100,
+};
+
+// Keeps each risk's last reading, when it came true, and the example
+export function makeRisks(tools, now = () => Date.now()) {
+  const risks = buildRisks(tools).map(risk => ({ ...risk, reading: null, at: 0, running: null, since: null }));
+  let example = null; // { startedAt, by }
+
+  async function measureOne(risk) {
+    let reading;
+    try {
+      const answer = await Promise.race([
+        risk.measure(),
+        new Promise((_, reject) => { setTimeout(() => reject(new Error('No answer in time.')), MEASURE_TIMEOUT_MS).unref?.(); }),
+      ]);
+      reading = answer?.off ? { state: 'off', value: null, text: answer.off }
+        : { state: stateOf(risk, answer.value), value: answer.value, text: answer.text };
+    } catch (error) {
+      // Not knowing isn't the risk coming true: the health checks say what's down
+      reading = { state: 'unknown', value: null, text: 'It couldn\'t be measured just now.', detail: String(error?.message || '').slice(0, 200) };
+    }
+    risk.since = reading.state === 'happened' ? risk.since || now() : null;
+    risk.reading = reading;
+    risk.at = now();
+  }
+
+  function exampleNow() {
+    if (example && now() - example.startedAt > EXAMPLE_LASTS_MS) example = null;
+    const shown = { ...EXAMPLE, running: Boolean(example), checkedAt: new Date(now()).toISOString() };
+    if (!example) return { ...shown, state: 'idle', value: null, text: 'Not running.', since: null };
+    const share = Math.min(1, (now() - example.startedAt) / EXAMPLE_CLIMB_MS);
+    const value = Math.round(EXAMPLE_FROM + (100 - EXAMPLE_FROM) * share);
+    const state = stateOf(EXAMPLE, value);
+    const cameTrue = example.startedAt + ((EXAMPLE.failAt - EXAMPLE_FROM) / (100 - EXAMPLE_FROM)) * EXAMPLE_CLIMB_MS;
+    return {
+      ...shown, state, value,
+      text: state === 'happened' ? `Made-up reading: Cube is at ${value}% of its memory and has stopped answering.` : `Made-up reading: Cube is at ${value}% of its memory.`,
+      since: state === 'happened' ? new Date(cameTrue).toISOString() : null,
+      startedBy: example.by, startedAt: new Date(example.startedAt).toISOString(),
+      endsAt: new Date(example.startedAt + EXAMPLE_LASTS_MS).toISOString(),
+    };
+  }
+
+  async function report() {
+    await Promise.all(risks.map(risk => {
+      if (risk.running) return risk.running;
+      if (risk.reading && now() - risk.at < KEEP_MS) return null;
+      risk.running = measureOne(risk).finally(() => { risk.running = null; });
+      return risk.running;
+    }));
+    const real = risks.map(({ measure, reading, at, running, since, ...risk }) => ({
+      ...risk, ...reading, checkedAt: new Date(at).toISOString(), since: since ? new Date(since).toISOString() : null,
+    }));
+    return [...real, exampleNow()];
+  }
+
+  // Started or stopped by an admin; the name is who, for the others watching
+  function setExample(run, by) {
+    example = run ? { startedAt: now(), by: String(by || 'An admin').slice(0, 80) } : null;
+    return exampleNow();
+  }
+
+  return { report, setExample };
+}
+
+// The risks that came true, as health checks: the Health tab lists them, the
+// banner counts them, and the map turns their blocks red
+export function asProblems(risks) {
+  return risks.filter(r => r.state === 'happened').map(r => ({
+    id: `risk-${r.id}`, node: r.node, name: r.name, state: 'problem', risk: r.id, example: Boolean(r.example),
+    text: r.text, effect: r.effect, checkedAt: r.checkedAt, since: r.since,
+  }));
+}
+```
+
+<a id="b87"></a>
+### B.87 `issues.mjs`
 
 ```js
 // =====================================================================
@@ -34673,8 +35280,8 @@ export async function setIssueStatus(id, status, userId) {
 }
 ```
 
-<a id="b87"></a>
-### B.87 `checks/issues.mjs`
+<a id="b88"></a>
+### B.88 `checks/issues.mjs`
 
 ```js
 // Problem reports, without a database: what's accepted, and that someone's
@@ -34717,8 +35324,8 @@ console.log('Problem reports: what is accepted, and what stays out of the email,
 process.exit(0);
 ```
 
-<a id="b88"></a>
-### B.88 `checks/attention.mjs`
+<a id="b89"></a>
+### B.89 `checks/attention.mjs`
 
 ```js
 // Which tickets get highlighted (kpis.mjs attentionFlagger), checked against
@@ -34806,8 +35413,8 @@ if (failures) process.exit(1);
 console.log('Attention flags: all correct.');
 ```
 
-<a id="b89"></a>
-### B.89 `usage.mjs`
+<a id="b90"></a>
+### B.90 `usage.mjs`
 
 ```js
 // =====================================================================
@@ -34902,8 +35509,8 @@ export async function usageReport(days = 30) {
 }
 ```
 
-<a id="b90"></a>
-### B.90 `scripts/usage.mjs`
+<a id="b91"></a>
+### B.91 `scripts/usage.mjs`
 
 ```js
 // What the Claude API cost, per day (see usage.mjs):
@@ -34929,8 +35536,8 @@ if (!rows.length) {
 await pool.end?.();
 ```
 
-<a id="b91"></a>
-### B.91 `scripts/eval-translation.mjs`
+<a id="b92"></a>
+### B.92 `scripts/eval-translation.mjs`
 
 ```js
 // =====================================================================
@@ -35212,8 +35819,8 @@ console.table(summary.map(({ note, ...s }) => ({ ...s, avgWarmCost: s.avgWarmCos
 console.log(`Spent $${spent.toFixed(2)}. Written: ${base}.md and .json`);
 ```
 
-<a id="b92"></a>
-### B.92 `checks/usage.mjs`
+<a id="b93"></a>
+### B.93 `checks/usage.mjs`
 
 ```js
 // What a Claude call cost (usage.mjs costUsd), from made-up usage objects.
@@ -35244,8 +35851,8 @@ assert.equal(costUsd('claude-sonnet-5-5', null), null);
 console.log('usage: 9 checks passed');
 ```
 
-<a id="b93"></a>
-### B.93 `demo/gate.config.json`
+<a id="b94"></a>
+### B.94 `demo/gate.config.json`
 
 ```json
 {

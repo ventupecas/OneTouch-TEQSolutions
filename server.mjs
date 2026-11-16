@@ -1,7 +1,8 @@
 import dns from 'node:dns/promises';
 import { createHash, createHmac } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { mkdir, rename, writeFile } from 'node:fs/promises';
+import { mkdir, rename, statfs, writeFile } from 'node:fs/promises';
+import v8 from 'node:v8';
 import { dirname } from 'node:path';
 import express from 'express';
 import dotenv from 'dotenv';
@@ -30,6 +31,7 @@ import * as kpis from './kpis.mjs';
 import { diagnoseEmpty, explainEmpty, isEmptyResult } from './empty_results.mjs';
 import { architectureMap, pushState } from './architecture.mjs';
 import { makeHealth, noteResponse } from './health.mjs';
+import { makeRisks, asProblems } from './risks.mjs';
 import * as issues from './issues.mjs';
 import * as usage from './usage.mjs';
 import { costUsd } from './usage.mjs';
@@ -384,7 +386,39 @@ app.get('/api/architecture/health', async (req, res) => {
     dashboardsReady: () => existsSync(METABASE_DASHBOARDS_FILE) && /^[0-9a-f]{64}$/.test(process.env.METABASE_EMBEDDING_SECRET || ''),
     listening: () => servicenowPush.listening,
   });
-  res.json(await health());
+  // The risks that came true are reported as problems too, so the Health tab
+  // lists them and the map turns their blocks red (risks.mjs)
+  const [report, risks] = await Promise.all([health(), riskMonitor().report()]);
+  res.json({ ...report, checks: [...report.checks, ...asProblems(risks)], risks });
+});
+
+// ⚠️ Risk monitor (risks.mjs): what could go wrong, measured while the page is open
+let riskTracker = null;
+function riskMonitor() {
+  riskTracker ||= makeRisks({
+    db: async sql => (await auth.pool.query(sql)).rows,
+    // This folder is on the same drive as Docker's disk, so its free space is theirs
+    diskAt: async () => {
+      const disk = await statfs(new URL('.', import.meta.url));
+      return { total: disk.blocks * disk.bsize, free: disk.bavail * disk.bsize };
+    },
+    heap: async () => {
+      const { used_heap_size: used, heap_size_limit: limit } = v8.getHeapStatistics();
+      return { used, limit };
+    },
+    mailEnabled: mailEnabled(),
+    claudeBudgetUsd: Number(process.env.CLAUDE_DAILY_BUDGET_USD) > 0 ? Number(process.env.CLAUDE_DAILY_BUDGET_USD) : 5,
+    emailDailyLimit: Number.parseInt(process.env.BREVO_DAILY_LIMIT, 10) > 0 ? Number.parseInt(process.env.BREVO_DAILY_LIMIT, 10) : 300,
+  });
+  return riskTracker;
+}
+
+// The example risk, for demos: { run: true|false } -> the example as the Risk monitor shows it
+app.post('/api/architecture/risks/example', (req, res) => {
+  if (typeof req.body?.run !== 'boolean') return res.status(400).json({ error: 'Say whether to run the example: { run: true } or { run: false }.' });
+  const example = riskMonitor().setExample(req.body.run, req.user.displayName || req.user.username);
+  console.log(`⚠️ ${req.user.username} ${req.body.run ? 'started' : 'stopped'} the example risk`);
+  res.json(example);
 });
 
 function issuesFailed(res, error, what) {

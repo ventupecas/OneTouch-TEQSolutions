@@ -198,6 +198,18 @@ They run only while the page is open, and answers are kept 30 s or more. A probl
 the banner, the 🩺 Health tab and on its block; if the report itself can't be had, the page
 says so. **Something new that can break gets a check in `buildChecks`.** The left side bar
 minimizes with ◀ (remembered in this browser).
+**The page opens on its tabs alone** (`arch-map-closed`, a centered column): the 2D/3D map is
+only shown, and three.js only loaded, once someone opens 🩺 Health (`openMapView`); "✕ Close the
+map" on the left side bar shuts it again (`closeMapView`). **⚠️ Risk monitor** (`risks.mjs`,
+sent with the health report as `risks`): what could go wrong, really measured (disk, Postgres
+connections, AI spending against `CLAUDE_DAILY_BUDGET_USD`, Brevo's `BREVO_DAILY_LIMIT`, Node
+memory, locked accounts), each 'watching', 'close' or 'happened'. A risk that comes true is added
+to the health checks (`asProblems`, `risk` set), so Health, the banner and the red block in 2D and
+3D all show it; one that can't be measured is 'unknown', never a problem. **The example risk**
+(`EXAMPLE`, on Cube) is for demos: `POST /api/architecture/risks/example` `{ run }`, a made-up
+reading that climbs to coming true in about 4 s (4.5 s to 100%), ends itself after 10 minutes, in memory only, labelled
+made up everywhere; the page polls twice a second while it climbs. **Something that could go wrong
+but hasn't gets a risk in `buildRisks`.**
 
 **Notifications** (`notifications.mjs`, the 🔔 in the header, checked every
 minute). Each one is saved in the same transaction as the change it reports:

@@ -100,7 +100,7 @@ export const NODES = [
       ['Listens for', 'Postgres channel onetouch_tickets_changed (what the ServiceNow push announces on)'],
     ],
     secure: 'A session token is required on every OneTouch API route except sign-in. This page\'s data has one more check: admins only.',
-    files: ['server.mjs', 'Dockerfile', 'architecture.mjs', 'health.mjs'],
+    files: ['server.mjs', 'Dockerfile', 'architecture.mjs', 'health.mjs', 'risks.mjs'],
   },
   {
     id: 'auth', name: 'Sign-in', layer: 'app', shape: 'module', pos: [-3.3, 12, -4.2],

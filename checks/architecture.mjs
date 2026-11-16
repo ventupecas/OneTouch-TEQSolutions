@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { architectureMap, composeImages, FLOWS, LAYERS, LINKS, NODES, PLAN, SERVICENOW } from '../architecture.mjs';
 import { buildChecks, makeHealth, noteResponse } from '../health.mjs';
+import { asProblems, buildRisks, EXAMPLE, makeRisks } from '../risks.mjs';
 
 const problems = [];
 const check = (ok, message) => { if (!ok) problems.push(message); };
@@ -156,6 +157,49 @@ const errors = await stateOf({}, 'errors');
 assert.equal(errors.state, 'problem');
 assert.match(errors.text, /1 request/);
 assert.equal(errors.detail, '/api/teams: 1', 'Only the start of the path, and only server errors');
+
+// ⚠️ The risks: each points at a real block; a reading past its limit comes
+// true and is reported as a problem on that block; one that can't be measured
+// isn't; and the example climbs until it comes true, then ends by itself
+const calm = {
+  db: async sql => (sql.includes('pg_stat_activity') ? [{ used: 10, max: 100 }] : sql.includes('claude_usage') ? [{ spent: 0.5 }]
+    : sql.includes('notifications') ? [{ sent: 12 }] : [{ locked: 0 }]),
+  diskAt: async () => ({ total: 100e9, free: 60e9 }),
+  heap: async () => ({ used: 100e6, limit: 2000e6 }),
+  mailEnabled: true, claudeBudgetUsd: 5, emailDailyLimit: 300,
+};
+for (const r of [...buildRisks(calm), EXAMPLE]) {
+  check(ids.has(r.node), `Risk ${r.id} points at "${r.node}", which isn't a block`);
+  check(r.warnAt < r.failAt && r.failAt <= r.max, `Risk ${r.id}: its warning must come before its limit, within its scale`);
+  for (const field of ['name', 'risk', 'watch', 'effect', 'action']) check(r[field], `Risk ${r.id} says nothing for "${field}"`);
+}
+let clock = Date.parse('2026-11-16T15:00:00Z');
+const risksAt = tools => makeRisks({ ...calm, ...tools }, () => clock);
+const calmReport = await risksAt({}).report();
+assert.ok(calmReport.filter(r => !r.example).every(r => r.state === 'watching'), 'All low: every risk is just watched');
+assert.deepEqual(asProblems(calmReport), [], 'Nothing came true: no problems');
+const full = await risksAt({ diskAt: async () => ({ total: 100e9, free: 2e9 }) }).report();
+assert.equal(full.find(r => r.id === 'disk').state, 'happened');
+assert.deepEqual(asProblems(full).map(p => [p.node, p.state]), [['analytics_db', 'problem']], 'A risk that came true is a problem on its block');
+assert.equal((await risksAt({ heap: async () => ({ used: 1600e6, limit: 2000e6 }) }).report()).find(r => r.id === 'memory').state, 'close');
+assert.equal((await risksAt({ mailEnabled: false }).report()).find(r => r.id === 'email-limit').state, 'off');
+const blind = await risksAt({ db: async () => { throw new Error('connection refused'); } }).report();
+assert.equal(blind.find(r => r.id === 'connections').state, 'unknown');
+assert.deepEqual(asProblems(blind), [], 'Not being able to measure a risk isn\'t the risk coming true');
+const demo = risksAt({});
+assert.equal((await demo.report()).find(r => r.example).state, 'idle', 'The example waits until someone runs it');
+demo.setExample(true, 'Test Admin');
+assert.equal((await demo.report()).find(r => r.example).state, 'watching');
+clock += 5 * 1000;
+const cameTrue = await demo.report();
+assert.equal(cameTrue.find(r => r.example).state, 'happened', 'The example comes true within 5 seconds');
+assert.deepEqual(asProblems(cameTrue).map(p => [p.node, p.example]), [['cube', true]], 'It shows on Cube, marked as an example');
+assert.match(asProblems(cameTrue)[0].text, /Made-up/, 'It says it\'s made up');
+clock += 10 * 60 * 1000;
+assert.equal((await demo.report()).find(r => r.example).state, 'idle', 'It ends by itself after 10 minutes');
+demo.setExample(true, 'Test Admin');
+demo.setExample(false);
+assert.equal((await demo.report()).find(r => r.example).state, 'idle', 'Stop ends it at once');
 
 if (problems.length) {
   console.error(`The architecture map is out of step with the repo:\n- ${problems.join('\n- ')}`);

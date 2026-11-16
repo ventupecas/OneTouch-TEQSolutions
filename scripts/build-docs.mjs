@@ -46,7 +46,7 @@ const FILES = [
   'servicenow-sync/src/db/pending.js', 'servicenow-sync/src/families.js',
   'servicenow-sync/servicenow-blueprint.md',
   'checks/ticket-order.mjs', '.github/workflows/ci.yml', '.dockerignore', 'public/accessibility.js',
-  'architecture.mjs', 'public/architecture.js', 'checks/architecture.mjs', 'health.mjs', 'issues.mjs', 'checks/issues.mjs', 'checks/attention.mjs',
+  'architecture.mjs', 'public/architecture.js', 'checks/architecture.mjs', 'health.mjs', 'risks.mjs', 'issues.mjs', 'checks/issues.mjs', 'checks/attention.mjs',
   'usage.mjs', 'scripts/usage.mjs', 'scripts/eval-translation.mjs', 'checks/usage.mjs',
   'demo/gate.config.json',
 ];
