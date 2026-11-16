@@ -34958,9 +34958,10 @@ export function makeHealth(tools, now = () => Date.now()) {
 
 const KEEP_MS = 30 * 1000;
 const MEASURE_TIMEOUT_MS = 15 * 1000;
-const EXAMPLE_CLIMB_MS = 4500; // quick, so a demo doesn't wait long
-const EXAMPLE_LASTS_MS = 10 * 60 * 1000;
-const EXAMPLE_FROM = 52;
+// Exported so the portfolio demo (demo/build-portfolio-demo.mjs) climbs the same way
+export const EXAMPLE_CLIMB_MS = 4500; // quick, so a demo doesn't wait long
+export const EXAMPLE_LASTS_MS = 10 * 60 * 1000;
+export const EXAMPLE_FROM = 52;
 
 const percent = (part, whole) => (whole > 0 ? Math.round((part / whole) * 1000) / 10 : 0);
 const gb = bytes => `${(bytes / 1e9).toFixed(1)} GB`;

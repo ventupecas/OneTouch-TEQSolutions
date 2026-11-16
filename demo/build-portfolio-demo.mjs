@@ -17,6 +17,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statS
 import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { architectureMap } from '../architecture.mjs';
+import { buildRisks, EXAMPLE, EXAMPLE_CLIMB_MS, EXAMPLE_FROM, EXAMPLE_LASTS_MS } from '../risks.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC = join(ROOT, 'public');
@@ -102,6 +103,8 @@ html = patch(html, '<body class="signed-out">', `<body class="signed-out">
         .demo-pill { position: fixed; left: 12px; bottom: 12px; z-index: 50; padding: 5px 12px; border-radius: 999px; background: rgba(20,20,20,.78); color: #fff; font: 12px/1.4 system-ui, sans-serif; text-decoration: none; }
         .demo-pill:hover, .demo-pill:focus-visible { background: #000; }
         body.signed-out .demo-pill { display: none; }
+        /* While the architecture map is open, sit above its "✕ Close the map" button */
+        body:has(#architecture-view.active .arch:not(.arch-map-closed)) .demo-pill { bottom: 70px; }
         #drawer-customize { display: none; }
         .demo-examples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
         .demo-examples button { font: inherit; font-size: 12.5px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--border, #ccc); background: var(--bg-secondary, #fff); color: inherit; cursor: pointer; text-align: left; }
@@ -165,6 +168,14 @@ mkdirSync(join(OUT, 'demo'), { recursive: true });
 cpSync(join(ROOT, 'demo', 'static', 'mock-api.js'), join(OUT, 'demo', 'mock-api.js'));
 const map = architectureMap({ model: 'claude-sonnet', push: { listening: false, heard: 0, lastAt: null, last: null, since: new Date().toISOString() } });
 writeFileSync(join(OUT, 'demo', 'architecture.json'), scrub(JSON.stringify(map)));
+
+// ⚠️ Risk monitor: the risks' descriptions and the example's timing, from risks.mjs
+// (with the server's default budget and email limit). mock-api.js gives the real
+// risks demo readings and runs the example in the browser.
+const riskList = buildRisks({ mailEnabled: false, claudeBudgetUsd: 5, emailDailyLimit: 300 }).map(({ measure, ...risk }) => risk);
+writeFileSync(join(OUT, 'demo', 'risks.json'), scrub(JSON.stringify({
+  risks: riskList, example: EXAMPLE, exampleFrom: EXAMPLE_FROM, exampleClimbMs: EXAMPLE_CLIMB_MS, exampleLastsMs: EXAMPLE_LASTS_MS,
+})));
 
 // ---------------------------------------------------------------
 // Nothing that names the client may remain
