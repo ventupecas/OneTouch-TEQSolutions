@@ -1547,7 +1547,7 @@ app.post('/api/kpis/tickets', async (req, res) => {
   }
 });
 
-// The columns of Team families on Home, for looking a family up
+// The columns of Ticket families on Home, for looking a family up
 const TEAM_FAMILY_LOOKUP_COLUMNS = ['Family', 'Tickets', 'KPIs'];
 
 // ?team=<id> (admins; a project manager gets their own)&status=open|all&linked=0|1&offset&limit

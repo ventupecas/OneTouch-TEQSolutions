@@ -29,7 +29,7 @@ replacing that.
 - **Assigning** is done by typing a name (`public/picker.js`): a project
   manager or admin types part of a team member's name and picks from the
   matches, for one ticket, the ticked tickets, or a whole family at once
-  ("Give all…" on the Team tab, "Give it all to" in Team families;
+  ("Give all…" on the Team tab, "Give it all to" in Ticket families;
   `PUT /api/ticket-families/:id/assignee`, `teams.assignFamily`). Only the
   family's team's people can be picked, and they're notified.
 - **Project manager**: sees every ticket of their team, assigns them to the
@@ -100,7 +100,7 @@ today, and "typical" means the median for that kind of ticket.
   - Catalog tasks: open for / closed in (to their last update, since tasks
     have no closing date), last update, SLA.
 - **Each family's KPIs** are only for its team's project manager and admins
-  (Home's "Team families", `GET /api/kpis/families` and
+  (Home's "Ticket families", `GET /api/kpis/families` and
   `/api/kpis/families/:id`). They cover: tickets, how many are closed,
   oldest open, no update for a week, highest priority, median resolve and
   fulfil times, SLA breaches, reassignments, reopens, successful changes,
@@ -110,7 +110,7 @@ today, and "typical" means the median for that kind of ticket.
 **Highlighted tickets** (`kpis.mjs` `attentionFlagger`, `server.mjs` `attentionCheck` and
 `withFlags`). Open tickets that need attention get a red row and say why under their number
 (`t.flags`, `attentionFlagsHtml` in `app.js`), in Assigned to me, the Team tab, 📥 Not assigned
-yet, a family's tickets in Team families, ticket search, Ticket results and Starred tickets.
+yet, a family's tickets in Ticket families, ticket search, Ticket results and Starred tickets.
 Assigned to me and the Team tab's lists have a **Needs attention (n)** filter
 (`?attention=1`). Closed tickets aren't flagged, nor are ones someone said they resolved or
 closed (`ticket_reports`), since the data never changes to clear them.
@@ -126,7 +126,7 @@ closed (`ticket_reports`), since the data never changes to clear them.
 **Sorting** (`public/sorting.js`). Every ticket list and table sorts by any of its
 columns: a heading sorts ascending, then descending, then back to the list's own order.
 Lists shown a page at a time sort all of their tickets, not just the page; the Team tab,
-Team families and the Families page are sorted by the server, from every ticket's summary
+Ticket families and the Families page are sorted by the server, from every ticket's summary
 read once at start (`tickets.mjs` `loadTicketIndex`). That index only orders tickets the
 person may already see; it never decides what they see. Charts sort with their ⇅ menu,
 the builder's Order, or an answer's Order menu: by count or by their groups, either way.
@@ -134,7 +134,7 @@ the builder's Order, or an answer's Order menu: by count or by their groups, eit
 **Looking up** (`public/lookup.js`). Every ticket list has a 🔍 box that finds its
 tickets by any of its columns (or one picked column): every word must appear, "quoted
 words" stay together. Lists the page holds whole are looked up where they are; lists
-shown a page at a time look through all of their tickets, the Team tab, Team families
+shown a page at a time look through all of their tickets, the Team tab, Ticket families
 and the Families page on the server (`?q=&col=`, `tickets.mjs` `lookupMatches`), only
 ever among the tickets that person may already see.
 

@@ -311,7 +311,7 @@ export function sortRows(rows, valueOf, dir = 'asc') {
 
 // ---------------------------------------------------------------------
 // LOOKING UP tickets in the long lists the server pages (the Team tab's
-// tickets, Team families, the Families page) by what their columns show,
+// tickets, Ticket families, the Families page) by what their columns show,
 // the same way the page looks through the lists it holds (public/lookup.js):
 // every word typed must appear, in the chosen column or else in any column;
 // "words in quotes" stay together. Case and spacing don't matter.

@@ -293,7 +293,7 @@ dashboards drawer if one is open. On a phone, the buttons wrap onto more lines.
 
 After signing in, people land on **Home**: "Welcome, *first name*!" in the top-left corner,
 then their tickets: **📋 Assigned to me**, **📊 My charts** (the same tickets drawn as charts),
-**👪 Team families** (project managers and admins), **Ticket results** and **Starred
+**👪 Ticket families** (project managers and admins), **Ticket results** and **Starred
 tickets** (everything you've starred, newest first). Each person can add charts and
 dashboard shortcuts with **✏️ Customize Home**.
 
@@ -340,7 +340,7 @@ their columns show: in **every column**, or in the one picked next to the box. E
 typed must appear ("change high" finds changes with a high risk); "words in quotes" stay
 together; a date can be typed as shown ("Sep 1, 2026") or as the data writes it
 (2026-09-01). Lists shown a page at a time look through all of their tickets (the server
-does it for the Team tab, Team families and the Families page). Escape empties the box.
+does it for the Team tab, Ticket families and the Families page). Escape empties the box.
 The box remembers what's typed until you sign out.
 
 **No cell is left blank.** Where the data has nothing, the cell says why (hover for more):
@@ -885,7 +885,7 @@ empty box lists the whole team, "Not assigned" takes a ticket back, and Escape p
 had it. Tick tickets and type a name in **Give the ticked tickets to**, then **Assign**, to
 hand out many at once. **Give all…** next to a family of linked tickets gives every one of
 them to one person (after asking, since some may be someone else's), and so does the
-**Give it all to** box on each family in Home's 👪 Team families. Whoever gets them is told
+**Give it all to** box on each family in Home's 👪 Ticket families. Whoever gets them is told
 by the 🔔. An admin picks any team at the top, changes anyone's role or team in the people
 table, adds people who are on no team, and can **Move tickets to another team** or give a
 family to someone on its team.
@@ -1109,7 +1109,7 @@ it in the tab's `sessionStorage`, so:
   data…** bar (the AI assistant), and
   **🔔**, **🎨 Colors** and **Sign out** at the right.
 - **Home** is the first page after signing in: "Welcome, *first name*!" in the top-left
-  corner, then your tickets (Assigned to me, My charts, Team families, ticket results and
+  corner, then your tickets (Assigned to me, My charts, Ticket families, ticket results and
   starred tickets; see
   [Home page and the AI assistant](#home-page-and-the-ai-assistant) in Part 1). Each person
   can reorder or hide those and add charts with **✏️ Customize Home** (see
@@ -8110,7 +8110,7 @@ app.post('/api/kpis/tickets', async (req, res) => {
   }
 });
 
-// The columns of Team families on Home, for looking a family up
+// The columns of Ticket families on Home, for looking a family up
 const TEAM_FAMILY_LOOKUP_COLUMNS = ['Family', 'Tickets', 'KPIs'];
 
 // ?team=<id> (admins; a project manager gets their own)&status=open|all&linked=0|1&offset&limit
@@ -9123,7 +9123,7 @@ listenForTicketChanges();
                             </button>
                             <!-- Project managers and admins: their team's families and each one's KPIs -->
                             <button type="button" role="tab" class="home-mode" data-mode="families" id="kpi-families-tab" aria-selected="false" aria-controls="home-families" onclick="setHomeMode('families')" hidden>
-                                <span class="home-mode-name">👪 Team families <span class="star-count" id="kpi-families-count" hidden>0</span></span>
+                                <span class="home-mode-name">👪 Ticket families <span class="star-count" id="kpi-families-count" hidden>0</span></span>
                                 <span class="home-mode-desc">Each family's KPIs, the most urgent first</span>
                             </button>
                             <button type="button" role="tab" class="home-mode" data-mode="results" aria-selected="false" aria-controls="home-results" onclick="setHomeMode('results')">
@@ -13019,7 +13019,7 @@ function setCurrentUser(user) {
     document.getElementById('teams-tab').hidden = !(currentAccess.admin || currentAccess.team);
     // 🧊 Architecture: admins only (architecture.js; the server checks too)
     document.getElementById('architecture-tab').hidden = !currentAccess.admin;
-    // Home's "Team families": project managers and admins
+    // Home's "Ticket families": project managers and admins
     document.getElementById('kpi-families-tab').hidden = !canSeeFamilies();
     // The 🔔 panel's "Email me these too" (notifications.js)
     paintEmailSetting(user ? user.email : null);
@@ -14885,7 +14885,7 @@ const HOME_MODES = ['assigned', 'charts', 'families', 'results', 'starred'];
 let homeMode = 'assigned';
 // Each search bumps its counter, so an older, slower answer can't replace a newer one
 const homeRuns = { assigned: 0, charts: 0, families: 0, results: 0, starred: 0 };
-// "Team families" (family KPIs) is for project managers and admins
+// "Ticket families" (family KPIs) is for project managers and admins
 const canSeeFamilies = () => Boolean(currentAccess.admin || currentAccess.role === 'project_manager');
 
 // The list each person had open last, remembered in this browser. (A new
@@ -14920,7 +14920,7 @@ function setHomeMode(mode, quiet = false, { keepDrill = false } = {}) {
         b.setAttribute('aria-selected', String(on));
     });
     for (const m of HOME_MODES) document.getElementById(`home-${m}`).hidden = m !== mode;
-    // Not remembered when it fell back: a project manager's "Team families" is
+    // Not remembered when it fell back: a project manager's "Ticket families" is
     // asked for again once their access has loaded
     if (currentUsername && mode === wanted) {
         try { localStorage.setItem(homeModeKey(), mode); } catch { /* not remembered; that's fine */ }
@@ -15503,7 +15503,7 @@ document.getElementById('my-charts-result').addEventListener('click', e => {
 
 // =====================================================================
 // KPIs (kpis.mjs): each ticket's in "Assigned to me", each family's (and its
-// tickets') in a project manager's "Team families". Green: on track; amber:
+// tickets') in a project manager's "Ticket families". Green: on track; amber:
 // keep an eye on it; red: needs attention. Hovering one says what it means.
 // =====================================================================
 
@@ -15547,7 +15547,7 @@ async function fillTicketKpis(container) {
 }
 
 // ---------------------------------------------------------------------
-// TEAM FAMILIES (project managers and admins): the team's families, those
+// TICKET FAMILIES (project managers and admins): the team's families, those
 // with open tickets first, by their most urgent open ticket and then their
 // oldest; each with its KPIs, and its tickets' at a click
 // ---------------------------------------------------------------------
@@ -18591,9 +18591,9 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 | `seen.mjs` | Each person's "Ticket results": every ticket shown to them (`seen_tickets`, created on start). `/api/query` records the ticket numbers in each answer (`ticketNumbersIn`) before replying and returns them as `shownTickets`; `GET /api/seen-tickets` returns the list with summaries (`ticketSummaries`); `DELETE /api/seen-tickets` empties it ("Clear ticket results"), `POST /api/seen-tickets/remove` removes ticked rows (`removeSeen`); the list carries each ticket's parent and families (`ticketLinks`) |
 | `prefs.mjs` | Each person's preferences in `onetouch_auth` (`user_preferences`: one JSONB per user, saved in parts `theme` / `home` / `dashboards` / `tour` via `PUT /api/preferences/:part`, reset with `DELETE`; `tour` is `{ done, dashboards }`: Home's tour and the Dashboards page's tour seen). `cleanPreference` drops unknown keys and caps sizes (20 dashboards x 30 charts, 30 Home sections); every chart goes through `sanitizeChart` |
 | `public/picker.js` | The box where a PM or admin types a team member's name to assign (ARIA combobox): `personPickerHtml(teamId, current, label, { nobody, placeholder, attrs })`, the team's names from `setPickerPeople` (teams.js `rememberPickerPeople`, from `/api/teams`; cleared at sign-out). A pick fires a bubbling `personpick` event (`{ id, previous, name }`, id null = nobody) that the list handles: a ticket's box (`data-number`) calls `assign`, a family's (`data-family`) calls teams.js `giveFamily` (asks first) -> `PUT /api/ticket-families/:id/assignee` -> `teams.assignFamily` (shares `giveTickets` with `assignTickets`: team check, one transaction, notification with `detail.family`). The list is `position: fixed` so table scroll boxes don't clip it. Tests in headless Edge need `Emulation.setFocusEmulationEnabled` or focus events don't fire |
-| `public/lookup.js` | The 🔍 box over every ticket list (`lookupBarHtml(list, labels, { mode, count, noun })`): every word must appear, in the picked column or any; "quotes" keep a phrase; same rules as `tickets.mjs` `lookupTerms` / `lookupMatches` on the server. Mode `rows`: the box sits right before the list's `.table-wrap` and hides non-matching rows (`tr.lookup-miss`, a `.row-detail` follows its row; cell text = its `title` or text, plus a raw date from `data-sort`), fired as `lookedup` so Ticket results / Starred tick-all only what shows. Mode `list`: the list registers `pagedLookups[name]` and redraws (Assigned to me and a family's tickets filter their data with `lookedUpTickets` + app.js `ticketLookupText`; Team families, the Team tab and the Families page send `lookupQuery(list)` = `q`/`col` to the server), then `restoreLookupFocus` gives the new box the keys. Named lists keep what's typed in `listLookups` (cleared on sign-out); `ticketTableHtml(…, { lookup })` adds a rows box to any list of 2+ |
-| `public/sorting.js` | Every ticket list and table sorts by any column: a heading (`sortHeadHtml(list, col, label, cls)` inside a `<table data-sort-list="…">`) cycles ascending → descending → the list's own order; empty cells last either way; values from a cell's `data-sort`, its KPI chips (`kpiAttention`, same weights as `kpis.attention`), its `<select>`, or its text. `ticketTableHtml(…, { sort })` does this for ticket lists (`TICKET_SORT_VALUES` in app.js: dates raw, Priority / Risk by `levelRank`). A named list keeps its sort while the page is open (`listSorts`, cleared on sign-out); `''` sorts in place only. Lists shown a page at a time must sort everything, not the page: they register `pagedSorts[name]` and redraw (Assigned to me, a family's tickets) or ask the server (`sortQuery`: Team tab tickets `sort=number…assignee`, Team families `family/size/kpis`, the Families page `parent…size`). Rows `.row-detail` move with their row, `.sort-pinned` stay last. Charts: `sort` `count`/`label` + `direction` `asc`/`desc` (`chartOrder`; charts saved without a direction keep their old order), the tile's ⇅ menu, the builder's Order, an answer's Order menu (`orderChartRows` / `orderSeries`) |
-| `kpis.mjs` | Ticket and family KPIs: every ticket's KPI fields read from Cube once at start (`load`, fixed query), "now" = newest timestamp in the data, "typical" = median of that kind; `ticketKpis`, `teamFamilyKpis` (families with open tickets first), `oneFamilyKpis`. A KPI is `{ key, label, value, tone: good/warn/bad/info, detail }`. Routes: `POST /api/kpis/tickets` (only numbers `teams.canSeeTicket` allows), `GET /api/kpis/families[/:id]` (team's PM or admin, `teams.teamFamilies` / `familyMembers`). app.js: `KPI_COLUMN` + `fillTicketKpis` in "Assigned to me", `showFamilyKpis` for Home's "Team families" tab. Page scripts share one global scope: a top-level `const` named like one in another script (e.g. `familiesView` in families.js) breaks the whole page |
+| `public/lookup.js` | The 🔍 box over every ticket list (`lookupBarHtml(list, labels, { mode, count, noun })`): every word must appear, in the picked column or any; "quotes" keep a phrase; same rules as `tickets.mjs` `lookupTerms` / `lookupMatches` on the server. Mode `rows`: the box sits right before the list's `.table-wrap` and hides non-matching rows (`tr.lookup-miss`, a `.row-detail` follows its row; cell text = its `title` or text, plus a raw date from `data-sort`), fired as `lookedup` so Ticket results / Starred tick-all only what shows. Mode `list`: the list registers `pagedLookups[name]` and redraws (Assigned to me and a family's tickets filter their data with `lookedUpTickets` + app.js `ticketLookupText`; Ticket families, the Team tab and the Families page send `lookupQuery(list)` = `q`/`col` to the server), then `restoreLookupFocus` gives the new box the keys. Named lists keep what's typed in `listLookups` (cleared on sign-out); `ticketTableHtml(…, { lookup })` adds a rows box to any list of 2+ |
+| `public/sorting.js` | Every ticket list and table sorts by any column: a heading (`sortHeadHtml(list, col, label, cls)` inside a `<table data-sort-list="…">`) cycles ascending → descending → the list's own order; empty cells last either way; values from a cell's `data-sort`, its KPI chips (`kpiAttention`, same weights as `kpis.attention`), its `<select>`, or its text. `ticketTableHtml(…, { sort })` does this for ticket lists (`TICKET_SORT_VALUES` in app.js: dates raw, Priority / Risk by `levelRank`). A named list keeps its sort while the page is open (`listSorts`, cleared on sign-out); `''` sorts in place only. Lists shown a page at a time must sort everything, not the page: they register `pagedSorts[name]` and redraw (Assigned to me, a family's tickets) or ask the server (`sortQuery`: Team tab tickets `sort=number…assignee`, Ticket families `family/size/kpis`, the Families page `parent…size`). Rows `.row-detail` move with their row, `.sort-pinned` stay last. Charts: `sort` `count`/`label` + `direction` `asc`/`desc` (`chartOrder`; charts saved without a direction keep their old order), the tile's ⇅ menu, the builder's Order, an answer's Order menu (`orderChartRows` / `orderSeries`) |
+| `kpis.mjs` | Ticket and family KPIs: every ticket's KPI fields read from Cube once at start (`load`, fixed query), "now" = newest timestamp in the data, "typical" = median of that kind; `ticketKpis`, `teamFamilyKpis` (families with open tickets first), `oneFamilyKpis`. A KPI is `{ key, label, value, tone: good/warn/bad/info, detail }`. Routes: `POST /api/kpis/tickets` (only numbers `teams.canSeeTicket` allows), `GET /api/kpis/families[/:id]` (team's PM or admin, `teams.teamFamilies` / `familyMembers`). app.js: `KPI_COLUMN` + `fillTicketKpis` in "Assigned to me", `showFamilyKpis` for Home's "Ticket families" tab. Page scripts share one global scope: a top-level `const` named like one in another script (e.g. `familiesView` in families.js) breaks the whole page |
 | `mail.mjs` | Every notification by email through Brevo's transactional API (`POST https://api.brevo.com/v3/smtp/email`, header `api-key`; no npm package). Outbox: `notifications.email_state` 'pending' (rows from before email existed are 'before'), `sendPending` every 30 s after the change has committed: 'sent' / 'skipped' + `email_note` (test or service account, deactivated, no `users.email`, `users.email_notifications` off, not on `MAIL_ONLY_TO`, older than an hour) / retried with doubling waits, 'failed' after 5. `emailFor` words it like public/notifications.js (numbers and a link only). Settings in `.env`: `BREVO_API_KEY` (none: off), `MAIL_FROM`, `MAIL_FROM_NAME`, `APP_URL`, `MAIL_ONLY_TO`; tests point `BREVO_API_URL` at a stand-in and shorten `MAIL_INTERVAL_MS` / `MAIL_RETRY_MS`. Addresses: `auth.setEmail` (`npm run users -- email|emails`), never exported to `db/accounts.json`; `GET /api/me` returns `email: { address, on, enabled }`, `PUT /api/me/email { on }` (the 🔔 panel's switch, `paintEmailSetting`). `npm run mail-test -- <address>` sends one test email. Never test with a real person's address |
 | `notifications.mjs` | The 🔔 in the header (`notifications` in `onetouch_auth`): kinds `assigned` (someone gave you tickets), `family` (a family moved to the team you're the project manager of) and `report` (a member says they resolved or closed a ticket). `teams.mjs` makes them in the same transaction as the change; `teams.reportTicket` also writes `ticket_reports`, which only tells the PM and never changes the ticket. Routes: `GET /api/notifications`, `POST /api/notifications/read`, `POST /api/tickets/report`. `public/notifications.js`: the list (checked every minute, opening it marks them read), and the "Tell my project manager" dialog (`reportButtonHtml`, on a ticket's record and the Team tab's rows) |
 | `architecture.mjs` | 🧊 Architecture, admins only: everything the 3D and 🗺️ 2D maps say (`LAYERS`, `NODES`, `LINKS`, `FLOWS`, `SERVICENOW`, and for 2D `PLAN` plus each block's `plan` and `doing`, each link's `route` and `labelAt`, each layer's `band`), `architectureMap` (adds versions read from `package-lock.json` and `docker-compose.yml`), `pushState`. `GET /api/architecture` and `/push`: one admin check in `server.mjs` covers everything under that path; `servicenowPush` there counts `onetouch_tickets_changed` signals since start. `public/architecture.js` is drawing code only (one function; three.js from `public/vendor/three-0.186.1/`, loaded on first open; never put map facts in `public/`, which can be read without signing in). `checks/architecture.mjs` (`npm test`) holds the map to the repo. Test it as a throwaway account named like an admin in a throwaway database, never as a real admin. Headless Edge draws it with `--use-angle=swiftshader --enable-unsafe-swiftshader` |
@@ -19251,7 +19251,7 @@ export function sortRows(rows, valueOf, dir = 'asc') {
 
 // ---------------------------------------------------------------------
 // LOOKING UP tickets in the long lists the server pages (the Team tab's
-// tickets, Team families, the Families page) by what their columns show,
+// tickets, Ticket families, the Families page) by what their columns show,
 // the same way the page looks through the lists it holds (public/lookup.js):
 // every word typed must appear, in the chosen column or else in any column;
 // "words in quotes" stay together. Case and spacing don't matter.
@@ -26857,7 +26857,7 @@ replacing that.
 - **Assigning** is done by typing a name (`public/picker.js`): a project
   manager or admin types part of a team member's name and picks from the
   matches, for one ticket, the ticked tickets, or a whole family at once
-  ("Give all…" on the Team tab, "Give it all to" in Team families;
+  ("Give all…" on the Team tab, "Give it all to" in Ticket families;
   `PUT /api/ticket-families/:id/assignee`, `teams.assignFamily`). Only the
   family's team's people can be picked, and they're notified.
 - **Project manager**: sees every ticket of their team, assigns them to the
@@ -26928,7 +26928,7 @@ today, and "typical" means the median for that kind of ticket.
   - Catalog tasks: open for / closed in (to their last update, since tasks
     have no closing date), last update, SLA.
 - **Each family's KPIs** are only for its team's project manager and admins
-  (Home's "Team families", `GET /api/kpis/families` and
+  (Home's "Ticket families", `GET /api/kpis/families` and
   `/api/kpis/families/:id`). They cover: tickets, how many are closed,
   oldest open, no update for a week, highest priority, median resolve and
   fulfil times, SLA breaches, reassignments, reopens, successful changes,
@@ -26938,7 +26938,7 @@ today, and "typical" means the median for that kind of ticket.
 **Highlighted tickets** (`kpis.mjs` `attentionFlagger`, `server.mjs` `attentionCheck` and
 `withFlags`). Open tickets that need attention get a red row and say why under their number
 (`t.flags`, `attentionFlagsHtml` in `app.js`), in Assigned to me, the Team tab, 📥 Not assigned
-yet, a family's tickets in Team families, ticket search, Ticket results and Starred tickets.
+yet, a family's tickets in Ticket families, ticket search, Ticket results and Starred tickets.
 Assigned to me and the Team tab's lists have a **Needs attention (n)** filter
 (`?attention=1`). Closed tickets aren't flagged, nor are ones someone said they resolved or
 closed (`ticket_reports`), since the data never changes to clear them.
@@ -26954,7 +26954,7 @@ closed (`ticket_reports`), since the data never changes to clear them.
 **Sorting** (`public/sorting.js`). Every ticket list and table sorts by any of its
 columns: a heading sorts ascending, then descending, then back to the list's own order.
 Lists shown a page at a time sort all of their tickets, not just the page; the Team tab,
-Team families and the Families page are sorted by the server, from every ticket's summary
+Ticket families and the Families page are sorted by the server, from every ticket's summary
 read once at start (`tickets.mjs` `loadTicketIndex`). That index only orders tickets the
 person may already see; it never decides what they see. Charts sort with their ⇅ menu,
 the builder's Order, or an answer's Order menu: by count or by their groups, either way.
@@ -26962,7 +26962,7 @@ the builder's Order, or an answer's Order menu: by count or by their groups, eit
 **Looking up** (`public/lookup.js`). Every ticket list has a 🔍 box that finds its
 tickets by any of its columns (or one picked column): every word must appear, "quoted
 words" stay together. Lists the page holds whole are looked up where they are; lists
-shown a page at a time look through all of their tickets, the Team tab, Team families
+shown a page at a time look through all of their tickets, the Team tab, Ticket families
 and the Families page on the server (`?q=&col=`, `tickets.mjs` `lookupMatches`), only
 ever among the tickets that person may already see.
 
@@ -28156,7 +28156,7 @@ export async function oneFamilyKpis(members, runCubeQuery) {
 // oldest, A first); a second click, descending; a third, back to the list's
 // own order. Empty cells stay at the bottom either way.
 //
-// Lists shown a page at a time (Assigned to me, Team families, the Team
+// Lists shown a page at a time (Assigned to me, Ticket families, the Team
 // tab's tickets, the Families page) sort every one of their tickets, not
 // just the page showing: they register in pagedSorts and draw themselves
 // again (some ask the server). Every other table is sorted where it is.
@@ -28565,7 +28565,7 @@ window.addEventListener('resize', () => { if (openPickerBox) placePickerList(ope
 // case doesn't matter. Escape empties the box.
 //
 // A list drawn whole is looked up where it is: the rows that don't match
-// hide. Lists shown a page at a time (Assigned to me, Team families, a
+// hide. Lists shown a page at a time (Assigned to me, Ticket families, a
 // family's tickets, the Team tab's tickets, the Families page) look through
 // all of their tickets: they register in pagedLookups and draw themselves
 // again (some ask the server, which looks up the same way: tickets.mjs
