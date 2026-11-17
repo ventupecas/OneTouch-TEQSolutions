@@ -99,9 +99,14 @@ today, and "typical" means the median for that kind of ticket.
   - Requests: open for / fulfilled in, last update, approval.
   - Catalog tasks: open for / closed in (to their last update, since tasks
     have no closing date), last update, SLA.
-- **Each family's KPIs** are only for its team's project manager and admins
-  (Home's "Ticket families", `GET /api/kpis/families` and
-  `/api/kpis/families/:id`). They cover: tickets, how many are closed,
+- **Each family's KPIs** (Home's "Ticket families", `GET /api/kpis/families` and
+  `/api/kpis/families/:id`): a team's project manager and admins get the team's
+  families and can give them out. Everyone else (`mine: true`) gets the families
+  with a ticket assigned to them (`teams.personFamilies`), read-only: every ticket
+  in them with its summary, state, priority, who has it and its KPIs, theirs marked
+  "(you)". This is the one place they see tickets that aren't theirs; opening one
+  still says "You don't have permission", and the AI assistant, search, records and
+  dashboards stay limited to their own. They cover: tickets, how many are closed,
   oldest open, no update for a week, highest priority, median resolve and
   fulfil times, SLA breaches, reassignments, reopens, successful changes,
   incidents caused by its changes, how long it's been active, people on it,

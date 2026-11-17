@@ -1552,12 +1552,15 @@ const TEAM_FAMILY_LOOKUP_COLUMNS = ['Family', 'Tickets', 'KPIs'];
 
 // ?team=<id> (admins; a project manager gets their own)&status=open|all&linked=0|1&offset&limit
 // &sort=family|size|kpis&dir=asc|desc&q=<words>&col=<column> -> one page of the team's
-// families, most in need of attention first (or in that sort), each with its KPIs
+// families, most in need of attention first (or in that sort), each with its KPIs.
+// Anyone else (mine: true) gets the families of the tickets assigned to them, read-only.
 app.get('/api/kpis/families', async (req, res) => {
   try {
-    const teamId = Number(req.query.team) || req.scope.access.team?.id;
-    if (!teamId) return res.status(403).json({ error: 'You\'re not on a team, so there are no families to show.' });
-    const families = await teams.teamFamilies(req.scope, teamId);
+    const { access } = req.scope;
+    const mine = !access.admin && access.role !== 'project_manager';
+    const teamId = mine ? null : Number(req.query.team) || access.team?.id;
+    if (!mine && !teamId) return res.status(403).json({ error: 'You\'re not on a team, so there are no families to show.' });
+    const families = mine ? await teams.personFamilies(access.userId) : await teams.teamFamilies(req.scope, teamId);
     const lookup = parseLookup(req.query, TEAM_FAMILY_LOOKUP_COLUMNS);
     // A family is named after its first ticket and that ticket's summary (the numbers were just checked)
     const index = lookup ? await loadTicketIndex(runCubeQuery) : null;
@@ -1578,13 +1581,14 @@ app.get('/api/kpis/families', async (req, res) => {
     // Each family is named after its first ticket (the numbers were just checked)
     const summaries = await ticketSummaries(page.families.map(f => f.id), runCubeQuery)
       .catch(error => { console.error('📏 Could not load family summaries:', error.message); return new Map(); });
-    res.json({ ...page, teamId, families: page.families.map(f => ({ ...f, ticket: summaries.get(f.id) || null })) });
+    res.json({ ...page, teamId, mine, families: page.families.map(f => ({ ...f, ticket: summaries.get(f.id) || null })) });
   } catch (error) {
     teamsFailed(res, error, 'Loading the families\' KPIs');
   }
 });
 
-// One family: its KPIs, and each of its tickets with who has it and its KPIs
+// One family: its KPIs, and each of its tickets with who has it and its KPIs (mine: the
+// person asking has it). Its project manager, an admin, or anyone with one of its tickets.
 app.get('/api/kpis/families/:id', async (req, res) => {
   try {
     const family = await teams.familyMembers(req.scope, String(req.params.id).toUpperCase());
@@ -1597,7 +1601,8 @@ app.get('/api/kpis/families/:id', async (req, res) => {
     // Open ones first, then the most urgent, then the oldest (as Assigned to me)
     const tickets = family.members
       .map(m => {
-        const t = { ...summaries.get(m.number), number: m.number, assignee: m.assignee, kpis: found.tickets[m.number] || [], flags: flagged(m.number, Boolean(m.assigneeId)) };
+        const t = { ...summaries.get(m.number), number: m.number, assignee: m.assignee, mine: m.assigneeId === req.scope.access.userId,
+          kpis: found.tickets[m.number] || [], flags: flagged(m.number, Boolean(m.assigneeId)) };
         return { ...t, open: t.kind ? isOpen(t) : false, rank: t.kind ? priorityRank(t) : 5 };
       })
       .sort((a, b) => (b.open - a.open) || a.rank - b.rank || String(a.opened || '~').localeCompare(String(b.opened || '~')));

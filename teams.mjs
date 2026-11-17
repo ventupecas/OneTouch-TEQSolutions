@@ -611,6 +611,22 @@ export async function teamFamilies(scope, teamId) {
     `SELECT f.id, f.size, a.number, a.assignee_id
        FROM ticket_families f JOIN ticket_assignments a ON a.family_id = f.id
       WHERE f.team_id = $1 ORDER BY f.id, a.number`, [teamId]);
+  return familiesFromRows(rows);
+}
+
+// The families with at least one ticket assigned to this person, each with all of
+// its tickets and who has each (Home's Ticket families for a project team member or
+// process excellence: read-only) -> Map(id -> { id, size, members: [{ number, assigneeId }] })
+export async function personFamilies(userId) {
+  const { rows } = await pool.query(
+    `SELECT f.id, f.size, a.number, a.assignee_id
+       FROM ticket_families f JOIN ticket_assignments a ON a.family_id = f.id
+      WHERE f.id IN (SELECT family_id FROM ticket_assignments WHERE assignee_id = $1)
+      ORDER BY f.id, a.number`, [userId]);
+  return familiesFromRows(rows);
+}
+
+function familiesFromRows(rows) {
   const families = new Map();
   for (const r of rows) {
     if (!families.has(r.id)) families.set(r.id, { id: r.id, size: r.size, members: [] });
@@ -619,13 +635,17 @@ export async function teamFamilies(scope, teamId) {
   return families;
 }
 
-// One family's tickets and who has each, for its team's project manager or
-// an admin -> { id, size, team: { id, name }, members: [{ number, assigneeId, assignee }] }
+// One family's tickets and who has each, for its team's project manager, an
+// admin, or (read-only) anyone with one of its tickets
+// -> { id, size, team: { id, name }, members: [{ number, assigneeId, assignee }] }
 export async function familyMembers(scope, familyId) {
   const { rows: [f] } = await pool.query(
     'SELECT f.id, f.size, f.team_id, t.name FROM ticket_families f LEFT JOIN teams t ON t.id = f.team_id WHERE f.id = $1', [String(familyId || '')]);
   if (!f) throw new AccessError('There is no such family.');
-  if (!f.team_id || !canManage(scope, f.team_id)) throw new AccessError('Only an admin or this family\'s project manager can see it.');
+  const manages = f.team_id && canManage(scope, f.team_id);
+  const hasOne = !manages && (await pool.query(
+    'SELECT 1 FROM ticket_assignments WHERE family_id = $1 AND assignee_id = $2 LIMIT 1', [f.id, scope.access.userId])).rowCount > 0;
+  if (!manages && !hasOne) throw new AccessError('Only an admin, this family\'s project manager or someone with one of its tickets can see it.');
   const { rows } = await pool.query(
     `SELECT a.number, a.assignee_id, u.username, u.display_name
        FROM ticket_assignments a LEFT JOIN users u ON u.id = a.assignee_id

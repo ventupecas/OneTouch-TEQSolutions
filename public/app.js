@@ -102,7 +102,7 @@ function setCurrentUser(user) {
     document.getElementById('teams-tab').hidden = !(currentAccess.admin || currentAccess.team);
     // 🧊 Architecture: admins only (architecture.js; the server checks too)
     document.getElementById('architecture-tab').hidden = !currentAccess.admin;
-    // Home's "Ticket families": project managers and admins
+    // Home's "Ticket families": everyone (a project manager's team's, or the families of your tickets)
     document.getElementById('kpi-families-tab').hidden = !canSeeFamilies();
     // The 🔔 panel's "Email me these too" (notifications.js)
     paintEmailSetting(user ? user.email : null);
@@ -1968,8 +1968,10 @@ const HOME_MODES = ['assigned', 'charts', 'families', 'results', 'starred'];
 let homeMode = 'assigned';
 // Each search bumps its counter, so an older, slower answer can't replace a newer one
 const homeRuns = { assigned: 0, charts: 0, families: 0, results: 0, starred: 0 };
-// "Ticket families" (family KPIs) is for project managers and admins
-const canSeeFamilies = () => Boolean(currentAccess.admin || currentAccess.role === 'project_manager');
+// "Ticket families" (family KPIs): project managers and admins see their team's
+// families and give them out; everyone else the families of their own tickets, read-only
+const canSeeFamilies = () => Boolean(currentUsername);
+const managesFamilies = () => Boolean(currentAccess.admin || currentAccess.role === 'project_manager');
 
 // The list each person had open last, remembered in this browser. (A new
 // name when "Assigned to me" arrived, so everyone opens on it once.)
@@ -2630,9 +2632,10 @@ async function fillTicketKpis(container) {
 }
 
 // ---------------------------------------------------------------------
-// TICKET FAMILIES (project managers and admins): the team's families, those
-// with open tickets first, by their most urgent open ticket and then their
-// oldest; each with its KPIs, and its tickets' at a click
+// TICKET FAMILIES: the team's families (project managers and admins), or the
+// families of the person's own tickets (everyone else, read-only); those with open
+// tickets first, by their most urgent open ticket and then their oldest; each with
+// its KPIs, and its tickets' at a click
 // ---------------------------------------------------------------------
 
 const FAMILY_PAGE = 25;
@@ -2649,17 +2652,20 @@ function showFamilyKpis(quiet = false) {
     return runHomeSearch('families', 'kpi-families-result', async () => {
         // Admins can look at any team; a project manager sees their own. Their
         // people are the names that can be typed to give a family to (picker.js).
-        if (!teamFamiliesView.teams) {
+        // Anyone else gets the families of their own tickets (the server decides)
+        const manages = managesFamilies();
+        if (manages && !teamFamiliesView.teams) {
             const r = await fetch(`${API_BASE}/api/teams`, { headers: authHeaders() });
             if (handleUnauthorized(r)) return null;
             const t = await r.json().catch(() => ({}));
             teamFamiliesView.teams = (t.teams || []).map(team => ({ id: team.id, name: team.name }));
             if (t.teams) rememberPickerPeople(t);
         }
-        const teamId = teamFamiliesView.teamId || currentAccess.team?.id || teamFamiliesView.teams?.[0]?.id;
-        if (!teamId) return '<p class="home-status">You\'re not on a team, so there are no families to show.</p>';
+        const teamId = manages ? teamFamiliesView.teamId || currentAccess.team?.id || teamFamiliesView.teams?.[0]?.id : null;
+        if (manages && !teamId) return '<p class="home-status">You\'re not on a team, so there are no families to show.</p>';
         const q = new URLSearchParams({
-            team: teamId, status: teamFamiliesView.status, linked: teamFamiliesView.linked ? 1 : 0, offset: teamFamiliesView.offset, limit: FAMILY_PAGE,
+            ...(teamId ? { team: teamId } : {}),
+            status: teamFamiliesView.status, linked: teamFamiliesView.linked ? 1 : 0, offset: teamFamiliesView.offset, limit: FAMILY_PAGE,
             ...sortQuery('team-families', TEAM_FAMILY_SORT_KEYS), ...lookupQuery('team-families'),
         });
         const token = sessionTokenValue;
@@ -2680,7 +2686,9 @@ function showFamilyKpis(quiet = false) {
 
 function familiesHtml() {
     const { data, status, linked } = teamFamiliesView;
-    const teamName = teamFamiliesView.teams?.find(t => t.id === data.teamId)?.name || currentAccess.team?.name || 'Your team';
+    const mine = Boolean(data.mine);
+    const teamName = mine ? 'Your tickets\' families'
+        : teamFamiliesView.teams?.find(t => t.id === data.teamId)?.name || currentAccess.team?.name || 'Your team';
     const which = status === 'open' ? 'with open tickets' : '';
     const sized = linked ? 'linked ' : '';
     const filter = '<div class="assigned-filter" role="group" aria-label="Which families">' +
@@ -2697,10 +2705,16 @@ function familiesHtml() {
     const head = '<div class="results-head">' +
         `<p class="home-status">${escapeHtml(teamName)}: ${all.toLocaleString()} ${sized}${all === 1 ? 'family' : 'families'} ${which}, ` +
         `${order}. A family is tickets linked to each other, which always stay with one team. ` +
-        'Open one to see each of its tickets\' KPIs and who has it, or type a name to give someone all of its tickets.</p>' +
+        (mine
+            ? 'These are the families with a ticket assigned to you. Open one to see all of its tickets, who has each and their KPIs; ' +
+              'only your own tickets open in full.</p>'
+            : 'Open one to see each of its tickets\' KPIs and who has it, or type a name to give someone all of its tickets.</p>') +
         `<div class="families-controls">${filter}<label><input type="checkbox" data-families-linked${linked ? ' checked' : ''}> Only linked families (2 or more tickets)</label>${teamPick}</div>` +
         '</div>';
-    if (!all) return head + `<p class="home-status">${status === 'open' ? 'No families with open tickets: all caught up.' : 'No families.'}</p>`;
+    if (!all) {
+        const none = mine && status !== 'open' ? 'None of your tickets are in a family yet.' : status === 'open' ? 'No families with open tickets: all caught up.' : 'No families.';
+        return head + `<p class="home-status">${none}</p>`;
+    }
     const bar = lookupBarHtml('team-families', TEAM_FAMILY_LOOKUP_COLUMNS, { mode: 'list', noun: 'families', count: { shown: data.total, total: all } });
     if (!data.families.length) return head + bar + '<p class="home-status">No families match what you typed. Change it, or press Escape in the box to see them all.</p>';
     const rows = data.families.map(f => {
@@ -2712,8 +2726,8 @@ function familiesHtml() {
             (summary ? `<div class="family-sub"${summary.length > 90 ? ` title="${escapeHtml(summary)}"` : ''}>${escapeHtml(summary.length > 90 ? `${summary.slice(0, 87)}…` : summary)}</div>` : '') + '</td>' +
             `<td><strong>${f.size.toLocaleString()}</strong> ${f.size === 1 ? 'ticket' : 'tickets'}<div class="family-kinds">${escapeHtml(kinds)}</div></td>` +
             `<td class="kpi-cell">${kpiChipsHtml(f.kpis)}</td>` +
-            `<td>${personPickerHtml(data.teamId, undefined, `Give all ${f.size.toLocaleString()} tickets of family ${f.id} to`,
-                { placeholder: 'Type a name…', attrs: `data-family="${id}" data-family-size="${f.size}"` })}</td>` +
+            (mine ? '' : `<td>${personPickerHtml(data.teamId, undefined, `Give all ${f.size.toLocaleString()} tickets of family ${f.id} to`,
+                { placeholder: 'Type a name…', attrs: `data-family="${id}" data-family-size="${f.size}"` })}</td>`) +
             `<td><button type="button" class="home-action" data-family-open="${id}" aria-expanded="false">Its tickets</button></td></tr>`;
     }).join('');
     const first = teamFamiliesView.offset + 1;
@@ -2725,7 +2739,7 @@ function familiesHtml() {
         : '';
     return head + bar + KPI_LEGEND_HTML + '<div class="table-wrap"><table class="result-table" data-sort-list="team-families"><thead><tr>' +
         sortHeadHtml('team-families', 'Family', 'Family (its first ticket)') + sortHeadHtml('team-families', 'Tickets') + sortHeadHtml('team-families', 'KPIs') +
-        '<th>Give it all to</th><th></th></tr></thead>' + `<tbody>${rows}</tbody></table></div>` + pager;
+        (mine ? '' : '<th>Give it all to</th>') + '<th></th></tr></thead>' + `<tbody>${rows}</tbody></table></div>` + pager;
 }
 
 // A heading, or a lookup: every family of the team sorted or looked through by the server, from the first page
@@ -2741,7 +2755,7 @@ const FAMILY_TICKET_COLUMNS = [
     ['Summary', t => t.summary],
     ['State', t => t.state],
     ['Priority / Risk', t => t.level],
-    ['Assigned to', t => t.assignee || 'Not assigned yet'],
+    ['Assigned to', t => (t.mine ? `${t.assignee} (you)` : t.assignee || 'Not assigned yet')],
     ['KPIs', () => '', t => kpiChipsHtml(t.kpis)],
 ];
 
@@ -2757,7 +2771,7 @@ async function toggleFamilyTickets(button) {
     }
     button.setAttribute('aria-expanded', 'true');
     button.textContent = 'Hide its tickets';
-    row.insertAdjacentHTML('afterend', `<tr class="row-detail"><td colspan="5"><div class="family-tickets"><p class="home-status">Loading its tickets…</p></div></td></tr>`);
+    row.insertAdjacentHTML('afterend', `<tr class="row-detail"><td colspan="${row.cells.length}"><div class="family-tickets"><p class="home-status">Loading its tickets…</p></div></td></tr>`);
     const box = row.nextElementSibling.querySelector('.family-tickets');
     try {
         const response = await fetch(`${API_BASE}/api/kpis/families/${encodeURIComponent(button.dataset.familyOpen)}`, { headers: authHeaders() });
