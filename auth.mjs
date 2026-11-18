@@ -41,7 +41,11 @@ function getPool() {
   return poolInstance;
 }
 
-export const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+// A sign-in ends after an hour without activity (the page says how long it has
+// been since the person last clicked, typed, scrolled or touched; see
+// getSessionUser), and 12 hours after signing in whatever happens
+export const SESSION_IDLE_MS = 60 * 60 * 1000;
+export const SESSION_MAX_MS = 12 * 60 * 60 * 1000;
 
 // Five wrong passwords lock that account for 15 minutes
 const MAX_FAILED_ATTEMPTS = 5;
@@ -158,7 +162,7 @@ export async function signIn(username, password) {
   const token = randomBytes(32).toString('hex');
   await pool.query(
     "INSERT INTO sessions (token_hash, user_id, expires_at) VALUES ($1, $2, now() + ($3 || ' milliseconds')::interval)",
-    [hashToken(token), user.id, String(SESSION_TTL_MS)]);
+    [hashToken(token), user.id, String(SESSION_IDLE_MS)]);
   await pool.query(
     'UPDATE users SET failed_attempts = 0, locked_until = NULL, last_login_at = now() WHERE id = $1',
     [user.id]);
@@ -166,13 +170,30 @@ export async function signIn(username, password) {
   return { ok: true, token, user: { id: user.id, username: user.username, displayName: user.display_name } };
 }
 
-// The signed-in user for a token, or null if it is unknown, expired, or the account was deactivated
-export async function getSessionUser(token) {
+// The signed-in user for a token, or null if it is unknown, expired, or the account was deactivated.
+// Using it moves the session's end to an hour after the person's last activity:
+// idleMs is how long ago that was (the page sends it, so the 🔔 check every
+// minute and other background requests never keep an idle tab signed in;
+// anything that doesn't send it, such as npm run warmup, counts as active).
+// Never past 12 hours from signing in, never earlier than it already was, and
+// only written when it moves by more than 30 seconds.
+export async function getSessionUser(token, idleMs = 0) {
+  const idle = Math.min(Math.max(Math.round(Number(idleMs) || 0), 0), SESSION_IDLE_MS);
   const { rows } = await pool.query(
-    `SELECT u.id, u.username, u.display_name
-       FROM sessions s JOIN users u ON u.id = s.user_id
-      WHERE s.token_hash = $1 AND s.expires_at > now() AND u.is_active`,
-    [hashToken(token)]);
+    `WITH s AS (
+       SELECT s.token_hash, s.expires_at,
+              LEAST(s.created_at + ($3 || ' milliseconds')::interval,
+                    now() + ($2 || ' milliseconds')::interval) AS new_end,
+              u.id, u.username, u.display_name
+         FROM sessions s JOIN users u ON u.id = s.user_id
+        WHERE s.token_hash = $1 AND s.expires_at > now() AND u.is_active
+     ), moved AS (
+       UPDATE sessions SET expires_at = s.new_end
+         FROM s
+        WHERE sessions.token_hash = s.token_hash AND s.new_end > s.expires_at + interval '30 seconds'
+     )
+     SELECT id, username, display_name FROM s`,
+    [hashToken(token), String(SESSION_IDLE_MS - idle), String(SESSION_MAX_MS)]);
   return rows[0] ? { id: rows[0].id, username: rows[0].username, displayName: rows[0].display_name } : null;
 }
 

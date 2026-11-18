@@ -22,8 +22,24 @@ function saveToken(token) {
 
 let sessionTokenValue = readToken();
 
+// Activity: moving the pointer, clicking, typing, scrolling or touching, in the
+// dashboards' frame too. Every API call says how long ago the last one was, and
+// the server ends the sign-in an hour after it (auth.mjs getSessionUser), so the
+// 🔔 check every minute and other background calls never keep an idle tab signed in.
+const IDLE_SIGN_OUT_MS = 60 * 60 * 1000;
+let lastActivity = Date.now();
+function noteActivity() { lastActivity = Date.now(); }
+function watchActivity(target) {
+    for (const type of ['pointermove', 'pointerdown', 'keydown', 'wheel', 'touchstart', 'scroll']) {
+        target.addEventListener(type, noteActivity, { capture: true, passive: true });
+    }
+}
+watchActivity(window);
+
 function authHeaders() {
-    return sessionTokenValue ? { Authorization: `Bearer ${sessionTokenValue}` } : {};
+    return sessionTokenValue
+        ? { Authorization: `Bearer ${sessionTokenValue}`, 'X-OneTouch-Idle-Ms': String(Date.now() - lastActivity) }
+        : {};
 }
 
 function showLoginError(message) {
@@ -193,10 +209,12 @@ function signOut(message) {
     showApp(false);
 }
 
-// An expired session (or a server restart) sends the user back to sign in
+// An expired session sends the user back to sign in
 function handleUnauthorized(response) {
     if (response.status !== 401) return false;
-    signOut('Your session has ended. Please sign in again.');
+    signOut(Date.now() - lastActivity >= IDLE_SIGN_OUT_MS
+        ? 'You were signed out after an hour without activity. Please sign in again.'
+        : 'Your session has ended. Please sign in again.');
     return true;
 }
 
@@ -773,6 +791,10 @@ function followDashboardFrame() {
 }
 setInterval(followDashboardFrame, 400);
 document.getElementById('dashboard-frame').addEventListener('load', followDashboardFrame);
+// Using a dashboard counts as activity (an hour without any signs people out)
+document.getElementById('dashboard-frame').addEventListener('load', () => {
+    try { watchActivity(document.getElementById('dashboard-frame').contentWindow); } catch { /* not ours */ }
+});
 
 // Follows a click inside the frame as it happens rather than at the next
 // look, so a page that opened light turns dark before it is seen

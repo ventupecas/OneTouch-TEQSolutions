@@ -1091,9 +1091,15 @@ it in the tab's `sessionStorage`, so:
 - Reloading the page keeps you signed in. Your name is fetched again (`/api/me`), and the
   chat starts empty.
 - Closing the tab, or opening OneTouch in a new tab, means signing in again.
-- A session lasts 12 hours. After that, or after a password reset or deactivation, the
-  next action returns you to the sign-in page with "Your session has ended. Please sign
-  in again."
+- A session ends after **an hour without activity** (no pointer movement, click, key,
+  scroll or touch on the page or in a dashboard), and 12 hours after signing in at most.
+  Every API call sends how long it has been (`X-OneTouch-Idle-Ms`), and the server moves
+  the session's end to an hour after that (`getSessionUser` in `auth.mjs`), so the 🔔
+  check every minute and other background calls never keep an idle tab signed in. Within
+  about a minute of the hour, the page goes back to sign-in with "You were signed out
+  after an hour without activity." After 12 hours, a password reset or deactivation, the
+  next action says "Your session has ended. Please sign in again." Scripts that don't
+  send the header (`npm run warmup`) count as active.
 - **Sign out** (top right) ends the session on the server, clears the chat from the screen
   so the next person on that computer can't see it, and shows the sign-in page.
 - The server stores only a SHA-256 hash of each token, and only salted scrypt hashes of
@@ -1951,7 +1957,8 @@ Check: `node --check business_logic.mjs` prints nothing.
 
 - `auth.mjs` ([B.22](#b22)): accounts and sessions in the `onetouch_auth` database.
   Passwords are stored only as salted scrypt hashes, and session tokens only as SHA-256.
-  Five wrong passwords lock an account for 15 minutes, and sessions last 12 hours. Usernames
+  Five wrong passwords lock an account for 15 minutes, and sessions end after an hour
+  without activity (12 hours at most). Usernames
   are lower-case, and `@molsoncoors.com` typed after one is ignored. It creates its own
   tables on start (`ensureSchema`), and `syncAccounts` loads `db/accounts.json` without
   ever undoing a newer change.
@@ -5993,7 +6000,11 @@ function getPool() {
   return poolInstance;
 }
 
-export const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+// A sign-in ends after an hour without activity (the page says how long it has
+// been since the person last clicked, typed, scrolled or touched; see
+// getSessionUser), and 12 hours after signing in whatever happens
+export const SESSION_IDLE_MS = 60 * 60 * 1000;
+export const SESSION_MAX_MS = 12 * 60 * 60 * 1000;
 
 // Five wrong passwords lock that account for 15 minutes
 const MAX_FAILED_ATTEMPTS = 5;
@@ -6110,7 +6121,7 @@ export async function signIn(username, password) {
   const token = randomBytes(32).toString('hex');
   await pool.query(
     "INSERT INTO sessions (token_hash, user_id, expires_at) VALUES ($1, $2, now() + ($3 || ' milliseconds')::interval)",
-    [hashToken(token), user.id, String(SESSION_TTL_MS)]);
+    [hashToken(token), user.id, String(SESSION_IDLE_MS)]);
   await pool.query(
     'UPDATE users SET failed_attempts = 0, locked_until = NULL, last_login_at = now() WHERE id = $1',
     [user.id]);
@@ -6118,13 +6129,30 @@ export async function signIn(username, password) {
   return { ok: true, token, user: { id: user.id, username: user.username, displayName: user.display_name } };
 }
 
-// The signed-in user for a token, or null if it is unknown, expired, or the account was deactivated
-export async function getSessionUser(token) {
+// The signed-in user for a token, or null if it is unknown, expired, or the account was deactivated.
+// Using it moves the session's end to an hour after the person's last activity:
+// idleMs is how long ago that was (the page sends it, so the 🔔 check every
+// minute and other background requests never keep an idle tab signed in;
+// anything that doesn't send it, such as npm run warmup, counts as active).
+// Never past 12 hours from signing in, never earlier than it already was, and
+// only written when it moves by more than 30 seconds.
+export async function getSessionUser(token, idleMs = 0) {
+  const idle = Math.min(Math.max(Math.round(Number(idleMs) || 0), 0), SESSION_IDLE_MS);
   const { rows } = await pool.query(
-    `SELECT u.id, u.username, u.display_name
-       FROM sessions s JOIN users u ON u.id = s.user_id
-      WHERE s.token_hash = $1 AND s.expires_at > now() AND u.is_active`,
-    [hashToken(token)]);
+    `WITH s AS (
+       SELECT s.token_hash, s.expires_at,
+              LEAST(s.created_at + ($3 || ' milliseconds')::interval,
+                    now() + ($2 || ' milliseconds')::interval) AS new_end,
+              u.id, u.username, u.display_name
+         FROM sessions s JOIN users u ON u.id = s.user_id
+        WHERE s.token_hash = $1 AND s.expires_at > now() AND u.is_active
+     ), moved AS (
+       UPDATE sessions SET expires_at = s.new_end
+         FROM s
+        WHERE sessions.token_hash = s.token_hash AND s.new_end > s.expires_at + interval '30 seconds'
+     )
+     SELECT id, username, display_name FROM s`,
+    [hashToken(token), String(SESSION_IDLE_MS - idle), String(SESSION_MAX_MS)]);
   return rows[0] ? { id: rows[0].id, username: rows[0].username, displayName: rows[0].display_name } : null;
 }
 
@@ -6881,7 +6909,7 @@ async function requireLogin(req, res, next) {
   const token = sessionToken(req);
   let user = null;
   try {
-    user = token ? await auth.getSessionUser(token) : null;
+    user = token ? await auth.getSessionUser(token, req.get('X-OneTouch-Idle-Ms')) : null;
   } catch (error) {
     console.error('🔐 Session check failed:', error.message);
     return res.status(503).json({ error: 'The account database could not be reached. Please try again shortly.' });
@@ -7170,7 +7198,7 @@ app.delete('/api/chats/:id', async (req, res) => {
 
 // Hourly housekeeping: expired sessions, idle conversations, old failure counts
 setInterval(async () => {
-  const idleCutoff = Date.now() - auth.SESSION_TTL_MS;
+  const idleCutoff = Date.now() - auth.SESSION_MAX_MS;
   for (const [token, state] of conversations) if (state.lastUsed < idleCutoff) conversations.delete(token);
   for (const [ip, entry] of failuresByIp) if (entry.resetAt <= Date.now()) failuresByIp.delete(ip);
   try {
@@ -12944,8 +12972,24 @@ function saveToken(token) {
 
 let sessionTokenValue = readToken();
 
+// Activity: moving the pointer, clicking, typing, scrolling or touching, in the
+// dashboards' frame too. Every API call says how long ago the last one was, and
+// the server ends the sign-in an hour after it (auth.mjs getSessionUser), so the
+// 🔔 check every minute and other background calls never keep an idle tab signed in.
+const IDLE_SIGN_OUT_MS = 60 * 60 * 1000;
+let lastActivity = Date.now();
+function noteActivity() { lastActivity = Date.now(); }
+function watchActivity(target) {
+    for (const type of ['pointermove', 'pointerdown', 'keydown', 'wheel', 'touchstart', 'scroll']) {
+        target.addEventListener(type, noteActivity, { capture: true, passive: true });
+    }
+}
+watchActivity(window);
+
 function authHeaders() {
-    return sessionTokenValue ? { Authorization: `Bearer ${sessionTokenValue}` } : {};
+    return sessionTokenValue
+        ? { Authorization: `Bearer ${sessionTokenValue}`, 'X-OneTouch-Idle-Ms': String(Date.now() - lastActivity) }
+        : {};
 }
 
 function showLoginError(message) {
@@ -13115,10 +13159,12 @@ function signOut(message) {
     showApp(false);
 }
 
-// An expired session (or a server restart) sends the user back to sign in
+// An expired session sends the user back to sign in
 function handleUnauthorized(response) {
     if (response.status !== 401) return false;
-    signOut('Your session has ended. Please sign in again.');
+    signOut(Date.now() - lastActivity >= IDLE_SIGN_OUT_MS
+        ? 'You were signed out after an hour without activity. Please sign in again.'
+        : 'Your session has ended. Please sign in again.');
     return true;
 }
 
@@ -13695,6 +13741,10 @@ function followDashboardFrame() {
 }
 setInterval(followDashboardFrame, 400);
 document.getElementById('dashboard-frame').addEventListener('load', followDashboardFrame);
+// Using a dashboard counts as activity (an hour without any signs people out)
+document.getElementById('dashboard-frame').addEventListener('load', () => {
+    try { watchActivity(document.getElementById('dashboard-frame').contentWindow); } catch { /* not ours */ }
+});
 
 // Follows a click inside the frame as it happens rather than at the next
 // look, so a page that opened light turns dark before it is seen
@@ -31169,11 +31219,11 @@ export const NODES = [
   {
     id: 'auth', name: 'Sign-in', layer: 'app', shape: 'module', pos: [-3.3, 12, -4.2],
     plan: [730, 404, 160, 122],
-    doing: 'Checks passwords against scrypt hashes and manages 12-hour sessions.',
+    doing: 'Checks passwords against scrypt hashes and ends a sign-in after an hour without activity.',
     tech: 'Node crypto: scrypt and SHA-256',
     what: 'Accounts and sessions. Passwords are kept only as salted scrypt hashes, and session tokens only as their SHA-256.',
     facts: [
-      ['Session length', '12 hours'],
+      ['Session length', 'Ends after an hour without activity, and 12 hours after signing in'],
       ['Wrong passwords', 'Five lock the account for 15 minutes'],
       ['Accounts', 'npm run users; hashes are shared between clones through db/accounts.json'],
     ],
@@ -31487,7 +31537,7 @@ export const FLOWS = [
       { path: ['express', 'auth'], title: 'The password is checked',
         text: 'auth.mjs compares it with the salted scrypt hash. Five wrong passwords lock the account for 15 minutes.' },
       { path: ['auth', 'onetouch_auth'], title: 'A session is saved',
-        text: 'Only the SHA-256 of the token is stored, so a copy of the table can\'t be used to sign in. It lasts 12 hours.' },
+        text: 'Only the SHA-256 of the token is stored, so a copy of the table can\'t be used to sign in. It ends an hour after the person\'s last activity (the page sends how long it has been with every call), and 12 hours after signing in at most.' },
       { path: ['onetouch_auth', 'auth', 'express', 'tunnel', 'browser'], title: 'The token goes back to the page',
         text: 'Every later call carries it as a bearer token, and the server works out that person\'s tickets on each request.' },
     ],

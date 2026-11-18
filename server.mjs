@@ -318,7 +318,7 @@ async function requireLogin(req, res, next) {
   const token = sessionToken(req);
   let user = null;
   try {
-    user = token ? await auth.getSessionUser(token) : null;
+    user = token ? await auth.getSessionUser(token, req.get('X-OneTouch-Idle-Ms')) : null;
   } catch (error) {
     console.error('🔐 Session check failed:', error.message);
     return res.status(503).json({ error: 'The account database could not be reached. Please try again shortly.' });
@@ -607,7 +607,7 @@ app.delete('/api/chats/:id', async (req, res) => {
 
 // Hourly housekeeping: expired sessions, idle conversations, old failure counts
 setInterval(async () => {
-  const idleCutoff = Date.now() - auth.SESSION_TTL_MS;
+  const idleCutoff = Date.now() - auth.SESSION_MAX_MS;
   for (const [token, state] of conversations) if (state.lastUsed < idleCutoff) conversations.delete(token);
   for (const [ip, entry] of failuresByIp) if (entry.resetAt <= Date.now()) failuresByIp.delete(ip);
   try {

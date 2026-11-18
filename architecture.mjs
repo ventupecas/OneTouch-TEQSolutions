@@ -105,11 +105,11 @@ export const NODES = [
   {
     id: 'auth', name: 'Sign-in', layer: 'app', shape: 'module', pos: [-3.3, 12, -4.2],
     plan: [730, 404, 160, 122],
-    doing: 'Checks passwords against scrypt hashes and manages 12-hour sessions.',
+    doing: 'Checks passwords against scrypt hashes and ends a sign-in after an hour without activity.',
     tech: 'Node crypto: scrypt and SHA-256',
     what: 'Accounts and sessions. Passwords are kept only as salted scrypt hashes, and session tokens only as their SHA-256.',
     facts: [
-      ['Session length', '12 hours'],
+      ['Session length', 'Ends after an hour without activity, and 12 hours after signing in'],
       ['Wrong passwords', 'Five lock the account for 15 minutes'],
       ['Accounts', 'npm run users; hashes are shared between clones through db/accounts.json'],
     ],
@@ -423,7 +423,7 @@ export const FLOWS = [
       { path: ['express', 'auth'], title: 'The password is checked',
         text: 'auth.mjs compares it with the salted scrypt hash. Five wrong passwords lock the account for 15 minutes.' },
       { path: ['auth', 'onetouch_auth'], title: 'A session is saved',
-        text: 'Only the SHA-256 of the token is stored, so a copy of the table can\'t be used to sign in. It lasts 12 hours.' },
+        text: 'Only the SHA-256 of the token is stored, so a copy of the table can\'t be used to sign in. It ends an hour after the person\'s last activity (the page sends how long it has been with every call), and 12 hours after signing in at most.' },
       { path: ['onetouch_auth', 'auth', 'express', 'tunnel', 'browser'], title: 'The token goes back to the page',
         text: 'Every later call carries it as a bearer token, and the server works out that person\'s tickets on each request.' },
     ],
