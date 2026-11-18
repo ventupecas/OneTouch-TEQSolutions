@@ -54,6 +54,7 @@ const FILES = [
 // Not copied in, and why (shown in the appendix)
 const SKIPPED = {
   'README.md': 'this file',
+  'MOVING-HOSTS.md': 'steps for moving the hosting to another computer, for the agents doing it',
   'package-lock.json': 'written by `npm install`; the versions it pins are in the table above',
   'servicenow-sync/package-lock.json': 'written by `npm install` in `servicenow-sync/`',
   'db/accounts.json': "everyone's usernames and password hashes; make your own accounts instead (step 16)",
