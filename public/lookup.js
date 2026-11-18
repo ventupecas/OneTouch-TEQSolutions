@@ -60,12 +60,15 @@ function lookupCountText(shown, total, noun, active) {
 // The box over a list. list: its name, whose lookup is kept while the page is open
 // ('' forgets it when the list is drawn again). labels: the columns it can look in.
 // mode: 'rows' (every row is on the page) or 'list' (pagedLookups draws it again).
-// count: { shown, total } for a 'list' box.
-function lookupBarHtml(list, labels, { mode = 'rows', count = null, noun = 'tickets' } = {}) {
+// count: { shown, total } for a 'list' box. big: drawn larger, to be seen first
+// (every tab's own list: above the list's count and filters; lists inside an
+// answer, a record or a family keep the small box). A 'rows' box looks up the
+// first table after it (lookupTable).
+function lookupBarHtml(list, labels, { mode = 'rows', count = null, noun = 'tickets', big = false } = {}) {
     const { q, col } = lookupFor(list);
     const options = `<option value="">every column</option>` +
         labels.map(label => `<option value="${escapeHtml(label)}"${label === col ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('');
-    return `<div class="lookup-bar" role="search" data-lookup="${escapeHtml(list)}" data-lookup-mode="${mode}" data-noun="${escapeHtml(noun)}">` +
+    return `<div class="lookup-bar${big ? ' lookup-bar-big' : ''}" role="search" data-lookup="${escapeHtml(list)}" data-lookup-mode="${mode}" data-noun="${escapeHtml(noun)}">` +
         '<span class="lookup-icon" aria-hidden="true">🔍</span>' +
         `<input type="search" class="lookup-input" value="${escapeHtml(q)}" maxlength="${LOOKUP_MAX_LENGTH}" placeholder="Look up ${escapeHtml(noun)}…"` +
         ` aria-label="Look up ${escapeHtml(noun)} in this list" title='Every word must appear; "words in quotes" stay together' autocomplete="off" spellcheck="false">` +
@@ -97,10 +100,19 @@ function cellLookupText(cell) {
     return `${cell.getAttribute('title') || cell.textContent}${/^\d{4}-\d{2}-\d{2}/.test(sort) ? ` ${sort}` : ''}`;
 }
 
+// A 'rows' box's list: the first table after it, beside it on the page (a large box
+// sits above its list's count and buttons, so those may come in between)
+function lookupTable(bar) {
+    for (let el = bar.nextElementSibling; el && !el.matches('.lookup-bar'); el = el.nextElementSibling) {
+        if (el.matches('.table-wrap')) return el.querySelector('table');
+    }
+    return null;
+}
+
 // A list drawn whole: hides the rows that don't match (a row opened to show more
 // goes with its row), and shows how many do
 function filterTableRows(bar) {
-    const table = bar.nextElementSibling?.querySelector('table');
+    const table = lookupTable(bar);
     const body = table?.tBodies[0];
     if (!body) return;
     const terms = lookupTerms(bar.querySelector('.lookup-input').value);

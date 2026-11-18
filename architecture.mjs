@@ -296,9 +296,10 @@ export const NODES = [
     facts: [
       ['Key', 'ANTHROPIC_API_KEY in .env'],
       ['Model setting', 'CLAUDE_MODEL in .env, or the default below'],
+      ['Offline version', 'AI_PROVIDER=local: a free model in Ollama on this computer takes Claude\'s place (docker-compose.local-ai.yml)'],
     ],
     secure: 'Called only by the server, over HTTPS. Never connected to the database.',
-    files: ['business_logic.mjs', 'empty_results.mjs', 'server.mjs'],
+    files: ['business_logic.mjs', 'empty_results.mjs', 'server.mjs', 'local_llm.mjs'],
   },
   {
     id: 'brevo', name: 'Brevo', layer: 'outside', shape: 'orb', pos: [-14.5, 9.5, 3], big: true,

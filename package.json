@@ -101,7 +101,8 @@
     "warmup": "node scripts/warmup.mjs",
     "mail-test": "node scripts/mail-test.mjs",
     "usage": "node scripts/usage.mjs",
-    "eval-ai": "node scripts/eval-translation.mjs"
+    "eval-ai": "node scripts/eval-translation.mjs",
+    "local-ai": "node scripts/local-ai.mjs"
   },
   "repository": {
     "type": "git",

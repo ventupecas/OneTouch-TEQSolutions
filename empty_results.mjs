@@ -100,8 +100,13 @@ End with one short suggestion of a nearby question that would return data, when 
 
 // Short explanation for the user; falls back to plain facts if Claude can't answer
 // onUsage(usage, ms): called with the call's token counts (usage.mjs saves them)
-export async function explainEmpty({ anthropic, model, question, searchedFor, facts, onUsage }) {
+// plainOnly: the offline version (AI_PROVIDER=local) gives the plain facts and
+// asks no model: its one memory slot holds the 22k-token system prompt, and a
+// different prompt here would make the next question read it all again (minutes)
+export async function explainEmpty({ anthropic, plainOnly = false, model, question, searchedFor, facts, onUsage }) {
   const fallback = `No matching records were found. ${facts.filter(f => / runs from | is empty/.test(f)).join(' ')}`.trim();
+  if (plainOnly) return fallback;
+  const content = `Question: """${question}"""\nWhat was searched for: ${searchedFor}\n\nFacts:\n${facts.map(f => `- ${f}`).join('\n')}`;
   try {
     const started = Date.now();
     const message = await anthropic.messages.create({
@@ -109,10 +114,7 @@ export async function explainEmpty({ anthropic, model, question, searchedFor, fa
       max_tokens: 2000,
       output_config: { effort: 'low' },
       system: EXPLAIN_SYSTEM,
-      messages: [{
-        role: 'user',
-        content: `Question: """${question}"""\nWhat was searched for: ${searchedFor}\n\nFacts:\n${facts.map(f => `- ${f}`).join('\n')}`,
-      }],
+      messages: [{ role: 'user', content }],
     });
     onUsage?.(message.usage, Date.now() - started);
     if (message.stop_reason === 'refusal') return fallback;

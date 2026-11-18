@@ -141,7 +141,10 @@ tickets by any of its columns (or one picked column): every word must appear, "q
 words" stay together. Lists the page holds whole are looked up where they are; lists
 shown a page at a time look through all of their tickets, the Team tab, Ticket families
 and the Families page on the server (`?q=&col=`, `tickets.mjs` `lookupMatches`), only
-ever among the tickets that person may already see.
+ever among the tickets that person may already see. On a tab's own list (Home's four lists,
+the Team tab's three, the Families page) the box comes first, larger (`{ big: true }`,
+`.lookup-bar-big`), above the count and buttons; lists inside an answer, a record or a family keep
+the small one. A rows box looks up the first table after it (`lookupTable`).
 
 **No blank cells.** Where the data has nothing, a list says why ("No priority" for
 requests and catalog tasks, "Not assigned", "No parent", …; `blankText` in `app.js` and
@@ -215,6 +218,16 @@ to the health checks (`asProblems`, `risk` set), so Health, the banner and the r
 reading that climbs to coming true in about 4 s (4.5 s to 100%), ends itself after 10 minutes, in memory only, labelled
 made up everywhere; the page polls twice a second while it climbs. **Something that could go wrong
 but hasn't gets a risk in `buildRisks`.**
+
+**Two versions of the AI assistant** (`AI_PROVIDER` in `server.mjs`). `claude` (the default) asks
+the Claude API (`CLAUDE_MODEL`). `local` asks a free model (`LOCAL_LLM_MODEL`, default `qwen3:4b`,
+Apache 2.0) that Ollama runs in its own container (`local_llm.mjs`; started with
+`docker compose -f docker-compose.yml -f docker-compose.local-ai.yml up -d`, model downloaded with
+`npm run local-ai -- pull`). Same system prompt, question, schema, validator and permissions; only
+the translation step differs. Saved answers and `claude_usage` rows carry the model name
+(`local:…`, $0), the page says "the AI" instead of Claude (`/api/me` `ai.local`), and 🩺 Health
+checks Ollama. Ollama is capped at 5 GB (`mem_limit`) so it can never starve the live containers.
+On this laptop's CPU it is slow (see README "Two versions of the AI assistant").
 
 **Notifications** (`notifications.mjs`, the 🔔 in the header, checked every
 minute). Each one is saved in the same transaction as the change it reports:

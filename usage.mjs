@@ -23,6 +23,8 @@ const PRICES = {
 
 // What one call cost, from the API's usage object; null for an unknown model
 export function costUsd(model, usage) {
+  // The offline version's model (local_llm.mjs) runs on this computer: no charge per call
+  if (String(model).startsWith('local:') && usage) return 0;
   const p = PRICES[model];
   if (!p || !usage) return null;
   const written = usage.cache_creation_input_tokens || 0;

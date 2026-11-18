@@ -35,6 +35,7 @@ import { makeRisks, asProblems } from './risks.mjs';
 import * as issues from './issues.mjs';
 import * as usage from './usage.mjs';
 import { costUsd } from './usage.mjs';
+import { localChat, checkLocalModel, warmLocalModel, LOCAL_MODEL_NAME, LOCAL_LLM_MODEL, LOCAL_LLM_TURNS } from './local_llm.mjs';
 
 dotenv.config();
 
@@ -364,7 +365,7 @@ app.use('/api/architecture', (req, res, next) => {
 const servicenowPush = { listening: false, heard: 0, lastAt: null, last: null, since: new Date().toISOString() };
 
 app.get('/api/architecture', (req, res) => {
-  res.json(architectureMap({ model: CLAUDE_MODEL, push: servicenowPush }));
+  res.json(architectureMap({ model: AI_MODEL, push: servicenowPush }));
 });
 
 // Is everything working? Made on first use, since what it needs is defined further down
@@ -379,6 +380,8 @@ app.get('/api/architecture/health', async (req, res) => {
     fetch,
     listClaudeModels: () => anthropic.models.list({ limit: 1 }),
     hasClaudeKey: Boolean(process.env.ANTHROPIC_API_KEY),
+    aiLocal: AI_LOCAL,
+    checkLocalModel,
     claudeOffline: DEMO_OFFLINE,
     mailEnabled: mailEnabled(),
     publicUrl: (process.env.ONETOUCH_PUBLIC_URL || process.env.APP_URL || '').replace(/\/+$/, ''),
@@ -473,6 +476,8 @@ app.get('/api/me', async (req, res) => {
     username: req.user.username, displayName: req.user.displayName,
     access: { admin, role, roleName: teams.ROLES[role] || null, team, tickets: req.scope.count, note: teams.scopeNote(req.scope) },
     email: { ...email, enabled: mailEnabled() },
+    // Which AI answers: the page says "the AI" instead of Claude in the offline version
+    ai: { local: AI_LOCAL },
   });
 });
 
@@ -618,8 +623,13 @@ setInterval(async () => {
   }
 }, 60 * 60 * 1000).unref();
 
+// Which AI translates questions: 'claude' (the Claude API, CLAUDE_MODEL) or
+// 'local' (a free model on this computer through Ollama, local_llm.mjs; started
+// with docker-compose.local-ai.yml). Everything else is the same in both versions.
+const AI_LOCAL = (process.env.AI_PROVIDER || 'claude').trim().toLowerCase() === 'local';
+
 const anthropicKey = (process.env.ANTHROPIC_API_KEY || '').trim();
-if (!anthropicKey || anthropicKey.startsWith('REPLACE_WITH')) {
+if (!AI_LOCAL && (!anthropicKey || anthropicKey.startsWith('REPLACE_WITH'))) {
   console.error('❌ ANTHROPIC_API_KEY is missing or still the placeholder. Set a real key in .env, then run: docker compose up -d --force-recreate app');
 }
 
@@ -650,6 +660,9 @@ const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-5-5';
 const CLAUDE_EFFORT = ['low', 'medium', 'high', 'xhigh', 'max'].includes(process.env.CLAUDE_EFFORT) ? process.env.CLAUDE_EFFORT : 'low';
 // The short "why nothing was found" explanations need no more than this
 const CLAUDE_SMALL_MODEL = process.env.CLAUDE_SMALL_MODEL || 'claude-haiku-5-5';
+// The model answering, as saved answers and claude_usage name it
+const AI_MODEL = AI_LOCAL ? LOCAL_MODEL_NAME : CLAUDE_MODEL;
+if (AI_LOCAL) console.log(`🦙 AI_PROVIDER=local: questions go to ${LOCAL_LLM_MODEL} through Ollama, never to Claude`);
 
 // The CSV export is a frozen snapshot (roughly 2026-06-01 to 2026-09-01).
 // Relative phrases like "last month" are computed from TODAY, which drifts
@@ -708,6 +721,7 @@ async function translateToQuery(conversation, userPrompt) {
 
   const started = Date.now();
   if (DEMO_OFFLINE) throw new Error('Offline mode: Claude is not asked'); // answerQuestion stops before this
+  if (AI_LOCAL) return translateLocally(conversation, userTurn, memoryReset);
   const stream = anthropic.messages.stream({
     model: CLAUDE_MODEL,
     max_tokens: 4000,
@@ -752,6 +766,28 @@ async function translateToQuery(conversation, userPrompt) {
   return { parsed, usage: message.usage, ms, memoryReset, userTurn, content: message.content };
 }
 
+// The offline version: the same system prompt, question and schema, sent to
+// the local model. Its reply is kept as one text block, as Claude's would be,
+// so the conversation and saved answers look the same to everything else.
+// It sees only the last few questions (LOCAL_LLM_TURNS): its window is small.
+async function translateLocally(conversation, userTurn, memoryReset) {
+  const asText = content => (typeof content === 'string' ? content : content.filter(b => b.type === 'text').map(b => b.text).join(''));
+  const history = conversation.messages.slice(-2 * LOCAL_LLM_TURNS).map(m => ({ role: m.role, content: asText(m.content) }));
+  const t = await localChat({ system: SYSTEM_PROMPT, messages: [...history, { role: 'user', content: userTurn.content }], schema: OUTPUT_SCHEMA });
+  if (t.stop === 'max_tokens') throw new Error('The translation was cut off; try a shorter question.');
+  let parsed;
+  try {
+    parsed = JSON.parse(t.text);
+  } catch {
+    throw new Error('The local model didn\'t answer in the expected form. Try asking another way.');
+  }
+  const content = [{ type: 'text', text: t.text }];
+  conversation.messages.push(userTurn, { role: 'assistant', content });
+  conversation.turns += 1;
+  conversation.pendingNote = null;
+  return { parsed, usage: t.usage, ms: t.ms, memoryReset, userTurn, content };
+}
+
 // =====================================================================
 // REPEATED QUESTIONS: the data never changes, so a question that opens a
 // conversation and has been asked before (by anyone) reuses Claude's
@@ -781,7 +817,7 @@ const PROMPT_VERSION = createHash('sha256').update(SYSTEM_PROMPT).update(String(
 function questionKey(userPrompt) {
   const question = userPrompt.toLowerCase().replace(/\s+/g, ' ').trim().replace(/[\s?.!]+$/, '');
   if (!question) return null;
-  return JSON.stringify([CLAUDE_MODEL, PROMPT_VERSION, referenceToday().toISOString().slice(0, 10), question]);
+  return JSON.stringify([AI_MODEL, PROMPT_VERSION, referenceToday().toISOString().slice(0, 10), question]);
 }
 
 function answerCacheKey(conversation, userPrompt) {
@@ -805,7 +841,7 @@ function rememberAnswer(key, entry) {
 // holds what can still be reused (the quality gate counts them)
 function usableKey(key) {
   const [model, version, day] = JSON.parse(key);
-  return model === CLAUDE_MODEL && version === PROMPT_VERSION && day === referenceToday().toISOString().slice(0, 10);
+  return model === AI_MODEL && version === PROMPT_VERSION && day === referenceToday().toISOString().slice(0, 10);
 }
 
 function loadAnswers() {
@@ -831,7 +867,7 @@ function saveAnswersSoon() {
       .map(([key, entry]) => ({ key, question: JSON.parse(key)[3], ...entry }));
     try {
       await mkdir(dirname(ANSWER_CACHE_FILE), { recursive: true });
-      await writeFile(`${ANSWER_CACHE_FILE}.tmp`, JSON.stringify({ savedAt: new Date().toISOString(), model: CLAUDE_MODEL, answers }));
+      await writeFile(`${ANSWER_CACHE_FILE}.tmp`, JSON.stringify({ savedAt: new Date().toISOString(), model: AI_MODEL, answers }));
       await rename(`${ANSWER_CACHE_FILE}.tmp`, ANSWER_CACHE_FILE);
     } catch (error) {
       console.error(`⚡ Could not save the answers to ${ANSWER_CACHE_FILE}:`, error.message);
@@ -872,11 +908,17 @@ function queryReply(req, res) {
     res.flushHeaders();
   }
   const event = (name, data) => res.write(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
+  // A comment line every 15 s while the answer is worked out: Cloudflare cuts a
+  // reply that sends nothing for 100 s, and the offline version's model can take
+  // longer than that on a processor (pages ignore comment lines)
+  const keepAlive = streaming ? setInterval(() => res.write(': still working\n\n'), 15 * 1000) : null;
+  res.on('close', () => clearInterval(keepAlive));
   return {
     progress(stage) {
       if (streaming) event('progress', { stage });
     },
     send(status, body) {
+      clearInterval(keepAlive);
       if (!streaming) return res.status(status).json(body);
       event('result', { status, ...body });
       res.end();
@@ -1009,8 +1051,8 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
       const t = await translateToQuery(conversation, userPrompt);
       ({ parsed, memoryReset } = t);
       fresh = { userTurn: t.userTurn, content: t.content, parsed };
-      console.log(`🧠 tokens in=${t.usage.input_tokens} cached=${t.usage.cache_read_input_tokens ?? 0} written=${t.usage.cache_creation_input_tokens ?? 0} out=${t.usage.output_tokens} $${(costUsd(CLAUDE_MODEL, t.usage) ?? 0).toFixed(4)}`);
-      usage.recordUsage({ kind: 'translate', model: CLAUDE_MODEL, effort: CLAUDE_EFFORT, userId: user.id, question: userPrompt, usage: t.usage, ms: t.ms });
+      console.log(`🧠 tokens in=${t.usage.input_tokens} cached=${t.usage.cache_read_input_tokens ?? 0} written=${t.usage.cache_creation_input_tokens ?? 0} out=${t.usage.output_tokens} $${(costUsd(AI_MODEL, t.usage) ?? 0).toFixed(4)} in ${(t.ms / 1000).toFixed(1)} s`);
+      usage.recordUsage({ kind: 'translate', model: AI_MODEL, effort: AI_LOCAL ? null : CLAUDE_EFFORT, userId: user.id, question: userPrompt, usage: t.usage, ms: t.ms });
     }
     remembered = true;
     // Timing and whether Claude was skipped, for the page's "Answered in …" line
@@ -1085,7 +1127,7 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
         else if (!scope.all) facts.push(`This person only sees some tickets: ${teams.scopeNote(scope)}`);
         console.log('🔎 Empty result facts:\n   ' + facts.join('\n   '));
         explanation = await explainEmpty({
-          anthropic, model: CLAUDE_SMALL_MODEL, question: userPrompt, searchedFor: verdict.message, facts,
+          anthropic, plainOnly: AI_LOCAL, model: CLAUDE_SMALL_MODEL, question: userPrompt, searchedFor: verdict.message, facts,
           onUsage: (u, ms) => usage.recordUsage({ kind: 'explain', model: CLAUDE_SMALL_MODEL, effort: 'low', userId: user.id, question: userPrompt, usage: u, ms }),
         });
         console.log(`🔎 Explained: ${explanation}`);
@@ -2154,7 +2196,8 @@ app.post('/api/export', async (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`🚀 Node.js Orchestrator live on port ${port} (model: ${CLAUDE_MODEL})`);
+  console.log(`🚀 Node.js Orchestrator live on port ${port} (model: ${AI_MODEL})`);
+  if (AI_LOCAL && !DEMO_OFFLINE) warmLocalModel(SYSTEM_PROMPT);
 });
 
 // Account setup: create the tables if this is a fresh database, then load the

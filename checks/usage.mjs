@@ -22,5 +22,7 @@ near(costUsd('claude-sonnet-5-5', { input_tokens: 300, output_tokens: 220, cache
 near(costUsd('claude-haiku-5-5', { input_tokens: 1_000_000, output_tokens: 1_000_000 }), 0.6);
 assert.equal(costUsd('claude-unknown', { input_tokens: 5, output_tokens: 5 }), null);
 assert.equal(costUsd('claude-sonnet-5-5', null), null);
+// The offline version's model (AI_PROVIDER=local) runs on this computer: free per call
+assert.equal(costUsd('local:qwen3:4b', { input_tokens: 22_000, output_tokens: 400 }), 0);
 
-console.log('usage: 9 checks passed');
+console.log('usage: 10 checks passed');

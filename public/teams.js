@@ -131,12 +131,13 @@ function renderTeams() {
         html += `<section class="team-card" id="team-summary">${teamSummaryHtml(team)}</section>` +
             `<section class="team-card">` +
             `<h3>${manage ? `${escapeHtml(team.name)}'s tickets` : 'My tickets'}</h3>` +
+            // Any of the list's columns; the server looks through all of the team's tickets.
+            // First and large, above the filters and the count
+            lookupBarHtml('team-tickets', Object.keys(TEAM_TICKET_SORT_KEYS), { mode: 'list', big: true }) +
             `<div class="team-filters">` +
             (manage ? `<label>Who has it <select id="team-filter-assignee">${assigneeFilterOptions(team)}</select></label>` : '') +
             kindFilterHtml() + attentionFilterHtml() +
             `</div>` +
-            // Any of the list's columns; the server looks through all of the team's tickets
-            lookupBarHtml('team-tickets', Object.keys(TEAM_TICKET_SORT_KEYS), { mode: 'list' }) +
             (manage ? `<div class="team-bulk"><label><input type="checkbox" class="team-select-all"> Tick all on this page</label>` +
                 `<span>Give the ticked tickets to</span> ${personPickerHtml(team.id, undefined, 'Give the ticked tickets to', { attrs: 'id="team-bulk-to"' })}` +
                 `<button type="button" class="home-action" data-team-bulk>Assign</button></div>` : '') +
@@ -441,10 +442,11 @@ function unassignedCardHtml() {
     const teamOptions = `<option value=""${f ? '' : ' selected'}>Any team, or none</option><option value="none"${f === 'none' ? ' selected' : ''}>No team</option>` +
         teamsView.data.teams.map(t => `<option value="${t.id}"${String(t.id) === f ? ' selected' : ''}>${escapeHtml(t.name)}</option>`).join('');
     return `<section class="team-card"><h3>Not assigned yet</h3>` +
+        // Any of the list's columns; the server looks through every ticket nobody has.
+        // First and large, above the count and the filters
+        lookupBarHtml('unassigned-tickets', Object.keys(UNASSIGNED_SORT_KEYS), { mode: 'list', big: true }) +
         `<p class="home-status" id="unassigned-summary">${unassignedSummaryHtml()}</p>` +
         `<div class="team-filters"><label>Team <select id="team-filter-team">${teamOptions}</select></label>${kindFilterHtml()}${attentionFilterHtml()}</div>` +
-        // Any of the list's columns; the server looks through every ticket nobody has
-        lookupBarHtml('unassigned-tickets', Object.keys(UNASSIGNED_SORT_KEYS), { mode: 'list' }) +
         `<div id="team-tickets"></div></section>`;
 }
 
@@ -568,12 +570,13 @@ function ticketStatusesHtml(tickets) {
     const admin = currentAccess.admin;
     const heads = STATUS_HEADS.filter(h => admin || h !== 'Team');
     const where = admin ? 'on every team' : `on ${escapeHtml(currentAccess.team?.name || 'your team')}`;
-    let html = '<h3>Resolved or closed</h3><p class="home-status">' + (tickets.length
+    // The 🔍 box first and large (for two or more), above the count
+    let html = '<h3>Resolved or closed</h3>' + (tickets.length >= 2 ? lookupBarHtml('ticket-statuses', heads, { big: true }) : '') +
+        '<p class="home-status">' + (tickets.length
         ? `${howMany(tickets.length, 'ticket', 'tickets')} ${where} that someone said they resolved or closed, newest first. Change one's status with its menu; ` +
           '"Open" takes the status away. Only OneTouch\'s record changes, never the ticket\'s data.'
         : `Nobody has said they resolved or closed a ticket ${where} yet. When someone does, it shows here.`) + '</p>';
     if (!tickets.length) return html;
-    if (tickets.length >= 2) html += lookupBarHtml('ticket-statuses', heads);
     const rows = tickets.map(t => {
         const n = escapeHtml(t.number);
         const blank = { kind: kindOf(t.number) };

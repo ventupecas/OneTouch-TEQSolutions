@@ -122,12 +122,13 @@ async function loadFamilies(more = false, quiet = false) {
         } else {
             const counts = familiesState.summary[kind];
             const all = data.before ?? data.total;
-            list.innerHTML = `<p class="families-about"><b>${all.toLocaleString()} ${escapeHtml(info.tab.toLowerCase())}</b>, ` +
+            // The 🔍 box first and large, above the count
+            list.innerHTML = (all ? lookupBarHtml('families', FAMILY_HEADS, { mode: 'list', noun: 'families', count: { shown: data.total, total: all }, big: true }) : '') +
+                `<p class="families-about"><b>${all.toLocaleString()} ${escapeHtml(info.tab.toLowerCase())}</b>, ` +
                 `holding ${counts.tickets.toLocaleString()} ${counts.tickets === 1 ? info.child[0] : info.child[1]}. ${escapeHtml(info.about)} ` +
                 'Click a row to see the whole family, or any ticket number, parent or child, to open that ticket.</p>' +
                 (!all ? `<p class="home-status">None of the tickets you can see are in ${escapeHtml(info.tab.toLowerCase())}.</p>`
-                    : lookupBarHtml('families', FAMILY_HEADS, { mode: 'list', noun: 'families', count: { shown: data.total, total: all } }) +
-                      (data.total ? familyTableHtml(rows, false) : '<p class="home-status">No families match what you typed. Change it, or press Escape in the box to see them all.</p>')) +
+                    : (data.total ? familyTableHtml(rows, false) : '<p class="home-status">No families match what you typed. Change it, or press Escape in the box to see them all.</p>')) +
                 '<div class="families-more"></div>';
         }
         paintFamiliesMore();
@@ -241,8 +242,8 @@ async function findFamilies(number) {
         } else if (!data.families.length) {
             list.innerHTML = `<p class="families-about">${escapeHtml(data.number)} has no parent, children or other linked tickets.${open} ${back}</p>`;
         } else {
-            list.innerHTML = `<p class="families-about"><b>${escapeHtml(data.number)}</b> is in ${data.families.length} ${data.families.length === 1 ? 'family' : 'families'}.${open} ${back}</p>` +
-                (data.families.length >= 2 ? lookupBarHtml('', ['Parent', 'Kind of family', ...FAMILY_HEADS.slice(1)], { noun: 'families' }) : '') +
+            list.innerHTML = (data.families.length >= 2 ? lookupBarHtml('', ['Parent', 'Kind of family', ...FAMILY_HEADS.slice(1)], { noun: 'families', big: true }) : '') +
+                `<p class="families-about"><b>${escapeHtml(data.number)}</b> is in ${data.families.length} ${data.families.length === 1 ? 'family' : 'families'}.${open} ${back}</p>` +
                 familyTableHtml(familyRowsHtml(data.families, true), true, '');
             // One family: open it straight away
             if (data.families.length === 1) toggleFamilyRow(list.querySelector('tr.family-row'));

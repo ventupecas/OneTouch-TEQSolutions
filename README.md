@@ -341,7 +341,10 @@ typed must appear ("change high" finds changes with a high risk); "words in quot
 together; a date can be typed as shown ("Sep 1, 2026") or as the data writes it
 (2026-09-01). Lists shown a page at a time look through all of their tickets (the server
 does it for the Team tab, Ticket families and the Families page). Escape empties the box.
-The box remembers what's typed until you sign out.
+The box remembers what's typed until you sign out. On every tab's own list (Assigned to me, Ticket
+results, Starred tickets and Ticket families on Home; the Team tab's tickets, Not assigned yet and
+Resolved or closed; the Families page) it comes first, larger and framed, above the list's count and
+buttons. Lists inside an answer, a ticket's record or a family keep the smaller box.
 
 **No cell is left blank.** Where the data has nothing, the cell says why (hover for more):
 requests and catalog tasks show **No priority** (they have none in ServiceNow), a ticket
@@ -1673,6 +1676,49 @@ answers better, e.g. counting changes too in "tickets at Milwaukee Brewery", one
 it dropped "still open" from "requests still waiting for approval"). To try it:
 `CLAUDE_MODEL=claude-haiku-5-5` in `.env` and restart.
 
+### Two versions of the AI assistant (Claude, or a free model offline)
+
+OneTouch runs in one of two versions, chosen by `AI_PROVIDER`:
+
+- **Claude version** (`AI_PROVIDER=claude`, the default): questions go to the Claude API, with
+  the model in `CLAUDE_MODEL`. Started as always: `docker compose up -d`.
+- **Offline version** (`AI_PROVIDER=local`): questions go to a free, open model that Ollama runs
+  in its own container on this computer (`local_llm.mjs`). Nothing leaves the computer, and no
+  question costs anything. The default model is Qwen3 4B (`LOCAL_LLM_MODEL=qwen3:4b`, Apache 2.0,
+  so it may be used at work).
+
+```
+docker compose -f docker-compose.yml -f docker-compose.local-ai.yml up -d
+docker exec analytics_node_app npm run local-ai -- pull      # once: downloads the model (~2.5 GB)
+docker exec analytics_node_app npm run local-ai -- status    # is it there?
+docker exec analytics_node_app npm run local-ai -- ask "How many open P1 incidents are there?"
+```
+
+Back to the Claude version: `docker compose -f docker-compose.yml -f docker-compose.local-ai.yml stop ollama`,
+then `docker compose up -d app`. The downloaded model stays in the `ollama-models` volume.
+
+Everything after the translation is the same in both: the model gets the same system prompt,
+question and output schema (Ollama holds it to the schema), and its answer goes through the
+same validator and the same permissions. Saved answers and `claude_usage` rows are named after
+the model (`local:qwen3:4b`, cost $0), so one version never reuses the other's answers. 🩺 Health
+checks Ollama and the model instead of Claude. The local model sees only the last 4 questions of
+a conversation (`LOCAL_LLM_TURNS`), since its window is far smaller than Claude's.
+
+What to expect: without a graphics card it's slow. Every question starts with the ~22,000-token
+system prompt, and a laptop processor reads it at a few dozen tokens a second. On 18 Nov 2026,
+on this laptop (an i5-1245U, sharing the processor with a video encode), three tries didn't get
+through it within the 10-minute limit. So at start the server reads it once (`warmLocalModel`,
+allowed an hour) and Ollama keeps it: later questions only read what's new, and the model stays
+loaded for good (`LOCAL_LLM_KEEP_ALIVE`, default -1). Answers then still take minutes on a
+processor and a few seconds on a graphics card. Empty results get the plain facts (data coverage)
+instead of a written explanation, so the one memory slot keeps holding the system prompt. While
+the model works, the page gets a keep-alive every 15 s, so Cloudflare doesn't cut the answer off
+after 100 s. Running it on the computer that serves onetouch.fyi slows the live site while it reads.
+
+Ollama is limited to 5 GB of memory (`mem_limit` in `docker-compose.local-ai.yml`), so if the
+model needs more, Ollama stops, never the database, Cube or Metabase. On a server with an NVIDIA
+graphics card, add Ollama's GPU settings to that file; answers then take a few seconds.
+
 ## 2.11 Development tools
 
 - **`npm run check`** (`scripts/check.mjs`): `node --check` on every JS file, shell
@@ -2475,6 +2521,9 @@ Create each file at the path shown, with exactly this content. Files are in the 
 - [B.92 `scripts/eval-translation.mjs`](#b92)
 - [B.93 `checks/usage.mjs`](#b93)
 - [B.94 `demo/gate.config.json`](#b94)
+- [B.95 `local_llm.mjs`](#b95)
+- [B.96 `scripts/local-ai.mjs`](#b96)
+- [B.97 `docker-compose.local-ai.yml`](#b97)
 
 <a id="b1"></a>
 ### B.1 `.gitignore`
@@ -2647,7 +2696,8 @@ public/vendor/** -text
     "warmup": "node scripts/warmup.mjs",
     "mail-test": "node scripts/mail-test.mjs",
     "usage": "node scripts/usage.mjs",
-    "eval-ai": "node scripts/eval-translation.mjs"
+    "eval-ai": "node scripts/eval-translation.mjs",
+    "local-ai": "node scripts/local-ai.mjs"
   },
   "repository": {
     "type": "git",
@@ -2689,6 +2739,19 @@ CLAUDE_DAILY_BUDGET_USD=
 # never asks Claude and answers only questions asked before (npm run warmup), labelled
 # "Offline mode". Change it, then: docker restart analytics_node_app (saved answers are kept).
 DEMO_MODE=live
+# Which AI translates questions: claude (default, the Claude API and CLAUDE_MODEL above) or
+# local (a free model on this computer through Ollama). docker-compose.local-ai.yml sets it
+# for you; see README "Two versions of the AI assistant".
+AI_PROVIDER=
+# The offline version's model (default qwen3:4b, Apache 2.0) and Ollama's address (default http://ollama:11434)
+LOCAL_LLM_MODEL=
+LOCAL_LLM_URL=
+# How many words (tokens) the local model reads at once (default 28672; the system prompt is ~22k)
+LOCAL_LLM_CONTEXT=
+# How long to wait for the local model, in milliseconds (default 600000: a processor is slow)
+LOCAL_LLM_TIMEOUT_MS=
+# How many earlier questions the local model sees in a conversation (default 4)
+LOCAL_LLM_TURNS=
 
 # Database / Cube secrets (docker-compose.yml reads these; it refuses to start without them).
 # Long random values, e.g.: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
@@ -5338,8 +5401,13 @@ End with one short suggestion of a nearby question that would return data, when 
 
 // Short explanation for the user; falls back to plain facts if Claude can't answer
 // onUsage(usage, ms): called with the call's token counts (usage.mjs saves them)
-export async function explainEmpty({ anthropic, model, question, searchedFor, facts, onUsage }) {
+// plainOnly: the offline version (AI_PROVIDER=local) gives the plain facts and
+// asks no model: its one memory slot holds the 22k-token system prompt, and a
+// different prompt here would make the next question read it all again (minutes)
+export async function explainEmpty({ anthropic, plainOnly = false, model, question, searchedFor, facts, onUsage }) {
   const fallback = `No matching records were found. ${facts.filter(f => / runs from | is empty/.test(f)).join(' ')}`.trim();
+  if (plainOnly) return fallback;
+  const content = `Question: """${question}"""\nWhat was searched for: ${searchedFor}\n\nFacts:\n${facts.map(f => `- ${f}`).join('\n')}`;
   try {
     const started = Date.now();
     const message = await anthropic.messages.create({
@@ -5347,10 +5415,7 @@ export async function explainEmpty({ anthropic, model, question, searchedFor, fa
       max_tokens: 2000,
       output_config: { effort: 'low' },
       system: EXPLAIN_SYSTEM,
-      messages: [{
-        role: 'user',
-        content: `Question: """${question}"""\nWhat was searched for: ${searchedFor}\n\nFacts:\n${facts.map(f => `- ${f}`).join('\n')}`,
-      }],
+      messages: [{ role: 'user', content }],
     });
     onUsage?.(message.usage, Date.now() - started);
     if (message.stop_reason === 'refusal') return fallback;
@@ -6626,6 +6691,7 @@ import { makeRisks, asProblems } from './risks.mjs';
 import * as issues from './issues.mjs';
 import * as usage from './usage.mjs';
 import { costUsd } from './usage.mjs';
+import { localChat, checkLocalModel, warmLocalModel, LOCAL_MODEL_NAME, LOCAL_LLM_MODEL, LOCAL_LLM_TURNS } from './local_llm.mjs';
 
 dotenv.config();
 
@@ -6955,7 +7021,7 @@ app.use('/api/architecture', (req, res, next) => {
 const servicenowPush = { listening: false, heard: 0, lastAt: null, last: null, since: new Date().toISOString() };
 
 app.get('/api/architecture', (req, res) => {
-  res.json(architectureMap({ model: CLAUDE_MODEL, push: servicenowPush }));
+  res.json(architectureMap({ model: AI_MODEL, push: servicenowPush }));
 });
 
 // Is everything working? Made on first use, since what it needs is defined further down
@@ -6970,6 +7036,8 @@ app.get('/api/architecture/health', async (req, res) => {
     fetch,
     listClaudeModels: () => anthropic.models.list({ limit: 1 }),
     hasClaudeKey: Boolean(process.env.ANTHROPIC_API_KEY),
+    aiLocal: AI_LOCAL,
+    checkLocalModel,
     claudeOffline: DEMO_OFFLINE,
     mailEnabled: mailEnabled(),
     publicUrl: (process.env.ONETOUCH_PUBLIC_URL || process.env.APP_URL || '').replace(/\/+$/, ''),
@@ -7064,6 +7132,8 @@ app.get('/api/me', async (req, res) => {
     username: req.user.username, displayName: req.user.displayName,
     access: { admin, role, roleName: teams.ROLES[role] || null, team, tickets: req.scope.count, note: teams.scopeNote(req.scope) },
     email: { ...email, enabled: mailEnabled() },
+    // Which AI answers: the page says "the AI" instead of Claude in the offline version
+    ai: { local: AI_LOCAL },
   });
 });
 
@@ -7209,8 +7279,13 @@ setInterval(async () => {
   }
 }, 60 * 60 * 1000).unref();
 
+// Which AI translates questions: 'claude' (the Claude API, CLAUDE_MODEL) or
+// 'local' (a free model on this computer through Ollama, local_llm.mjs; started
+// with docker-compose.local-ai.yml). Everything else is the same in both versions.
+const AI_LOCAL = (process.env.AI_PROVIDER || 'claude').trim().toLowerCase() === 'local';
+
 const anthropicKey = (process.env.ANTHROPIC_API_KEY || '').trim();
-if (!anthropicKey || anthropicKey.startsWith('REPLACE_WITH')) {
+if (!AI_LOCAL && (!anthropicKey || anthropicKey.startsWith('REPLACE_WITH'))) {
   console.error('❌ ANTHROPIC_API_KEY is missing or still the placeholder. Set a real key in .env, then run: docker compose up -d --force-recreate app');
 }
 
@@ -7241,6 +7316,9 @@ const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-5-5';
 const CLAUDE_EFFORT = ['low', 'medium', 'high', 'xhigh', 'max'].includes(process.env.CLAUDE_EFFORT) ? process.env.CLAUDE_EFFORT : 'low';
 // The short "why nothing was found" explanations need no more than this
 const CLAUDE_SMALL_MODEL = process.env.CLAUDE_SMALL_MODEL || 'claude-haiku-5-5';
+// The model answering, as saved answers and claude_usage name it
+const AI_MODEL = AI_LOCAL ? LOCAL_MODEL_NAME : CLAUDE_MODEL;
+if (AI_LOCAL) console.log(`🦙 AI_PROVIDER=local: questions go to ${LOCAL_LLM_MODEL} through Ollama, never to Claude`);
 
 // The CSV export is a frozen snapshot (roughly 2026-06-01 to 2026-09-01).
 // Relative phrases like "last month" are computed from TODAY, which drifts
@@ -7299,6 +7377,7 @@ async function translateToQuery(conversation, userPrompt) {
 
   const started = Date.now();
   if (DEMO_OFFLINE) throw new Error('Offline mode: Claude is not asked'); // answerQuestion stops before this
+  if (AI_LOCAL) return translateLocally(conversation, userTurn, memoryReset);
   const stream = anthropic.messages.stream({
     model: CLAUDE_MODEL,
     max_tokens: 4000,
@@ -7343,6 +7422,28 @@ async function translateToQuery(conversation, userPrompt) {
   return { parsed, usage: message.usage, ms, memoryReset, userTurn, content: message.content };
 }
 
+// The offline version: the same system prompt, question and schema, sent to
+// the local model. Its reply is kept as one text block, as Claude's would be,
+// so the conversation and saved answers look the same to everything else.
+// It sees only the last few questions (LOCAL_LLM_TURNS): its window is small.
+async function translateLocally(conversation, userTurn, memoryReset) {
+  const asText = content => (typeof content === 'string' ? content : content.filter(b => b.type === 'text').map(b => b.text).join(''));
+  const history = conversation.messages.slice(-2 * LOCAL_LLM_TURNS).map(m => ({ role: m.role, content: asText(m.content) }));
+  const t = await localChat({ system: SYSTEM_PROMPT, messages: [...history, { role: 'user', content: userTurn.content }], schema: OUTPUT_SCHEMA });
+  if (t.stop === 'max_tokens') throw new Error('The translation was cut off; try a shorter question.');
+  let parsed;
+  try {
+    parsed = JSON.parse(t.text);
+  } catch {
+    throw new Error('The local model didn\'t answer in the expected form. Try asking another way.');
+  }
+  const content = [{ type: 'text', text: t.text }];
+  conversation.messages.push(userTurn, { role: 'assistant', content });
+  conversation.turns += 1;
+  conversation.pendingNote = null;
+  return { parsed, usage: t.usage, ms: t.ms, memoryReset, userTurn, content };
+}
+
 // =====================================================================
 // REPEATED QUESTIONS: the data never changes, so a question that opens a
 // conversation and has been asked before (by anyone) reuses Claude's
@@ -7372,7 +7473,7 @@ const PROMPT_VERSION = createHash('sha256').update(SYSTEM_PROMPT).update(String(
 function questionKey(userPrompt) {
   const question = userPrompt.toLowerCase().replace(/\s+/g, ' ').trim().replace(/[\s?.!]+$/, '');
   if (!question) return null;
-  return JSON.stringify([CLAUDE_MODEL, PROMPT_VERSION, referenceToday().toISOString().slice(0, 10), question]);
+  return JSON.stringify([AI_MODEL, PROMPT_VERSION, referenceToday().toISOString().slice(0, 10), question]);
 }
 
 function answerCacheKey(conversation, userPrompt) {
@@ -7396,7 +7497,7 @@ function rememberAnswer(key, entry) {
 // holds what can still be reused (the quality gate counts them)
 function usableKey(key) {
   const [model, version, day] = JSON.parse(key);
-  return model === CLAUDE_MODEL && version === PROMPT_VERSION && day === referenceToday().toISOString().slice(0, 10);
+  return model === AI_MODEL && version === PROMPT_VERSION && day === referenceToday().toISOString().slice(0, 10);
 }
 
 function loadAnswers() {
@@ -7422,7 +7523,7 @@ function saveAnswersSoon() {
       .map(([key, entry]) => ({ key, question: JSON.parse(key)[3], ...entry }));
     try {
       await mkdir(dirname(ANSWER_CACHE_FILE), { recursive: true });
-      await writeFile(`${ANSWER_CACHE_FILE}.tmp`, JSON.stringify({ savedAt: new Date().toISOString(), model: CLAUDE_MODEL, answers }));
+      await writeFile(`${ANSWER_CACHE_FILE}.tmp`, JSON.stringify({ savedAt: new Date().toISOString(), model: AI_MODEL, answers }));
       await rename(`${ANSWER_CACHE_FILE}.tmp`, ANSWER_CACHE_FILE);
     } catch (error) {
       console.error(`⚡ Could not save the answers to ${ANSWER_CACHE_FILE}:`, error.message);
@@ -7463,11 +7564,17 @@ function queryReply(req, res) {
     res.flushHeaders();
   }
   const event = (name, data) => res.write(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
+  // A comment line every 15 s while the answer is worked out: Cloudflare cuts a
+  // reply that sends nothing for 100 s, and the offline version's model can take
+  // longer than that on a processor (pages ignore comment lines)
+  const keepAlive = streaming ? setInterval(() => res.write(': still working\n\n'), 15 * 1000) : null;
+  res.on('close', () => clearInterval(keepAlive));
   return {
     progress(stage) {
       if (streaming) event('progress', { stage });
     },
     send(status, body) {
+      clearInterval(keepAlive);
       if (!streaming) return res.status(status).json(body);
       event('result', { status, ...body });
       res.end();
@@ -7600,8 +7707,8 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
       const t = await translateToQuery(conversation, userPrompt);
       ({ parsed, memoryReset } = t);
       fresh = { userTurn: t.userTurn, content: t.content, parsed };
-      console.log(`🧠 tokens in=${t.usage.input_tokens} cached=${t.usage.cache_read_input_tokens ?? 0} written=${t.usage.cache_creation_input_tokens ?? 0} out=${t.usage.output_tokens} $${(costUsd(CLAUDE_MODEL, t.usage) ?? 0).toFixed(4)}`);
-      usage.recordUsage({ kind: 'translate', model: CLAUDE_MODEL, effort: CLAUDE_EFFORT, userId: user.id, question: userPrompt, usage: t.usage, ms: t.ms });
+      console.log(`🧠 tokens in=${t.usage.input_tokens} cached=${t.usage.cache_read_input_tokens ?? 0} written=${t.usage.cache_creation_input_tokens ?? 0} out=${t.usage.output_tokens} $${(costUsd(AI_MODEL, t.usage) ?? 0).toFixed(4)} in ${(t.ms / 1000).toFixed(1)} s`);
+      usage.recordUsage({ kind: 'translate', model: AI_MODEL, effort: AI_LOCAL ? null : CLAUDE_EFFORT, userId: user.id, question: userPrompt, usage: t.usage, ms: t.ms });
     }
     remembered = true;
     // Timing and whether Claude was skipped, for the page's "Answered in …" line
@@ -7676,7 +7783,7 @@ async function answerQuestion(conversation, userPrompt, reply, user, scope, runQ
         else if (!scope.all) facts.push(`This person only sees some tickets: ${teams.scopeNote(scope)}`);
         console.log('🔎 Empty result facts:\n   ' + facts.join('\n   '));
         explanation = await explainEmpty({
-          anthropic, model: CLAUDE_SMALL_MODEL, question: userPrompt, searchedFor: verdict.message, facts,
+          anthropic, plainOnly: AI_LOCAL, model: CLAUDE_SMALL_MODEL, question: userPrompt, searchedFor: verdict.message, facts,
           onUsage: (u, ms) => usage.recordUsage({ kind: 'explain', model: CLAUDE_SMALL_MODEL, effort: 'low', userId: user.id, question: userPrompt, usage: u, ms }),
         });
         console.log(`🔎 Explained: ${explanation}`);
@@ -8745,7 +8852,8 @@ app.post('/api/export', async (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`🚀 Node.js Orchestrator live on port ${port} (model: ${CLAUDE_MODEL})`);
+  console.log(`🚀 Node.js Orchestrator live on port ${port} (model: ${AI_MODEL})`);
+  if (AI_LOCAL && !DEMO_OFFLINE) warmLocalModel(SYSTEM_PROMPT);
 });
 
 // Account setup: create the tables if this is a fresh database, then load the
@@ -10185,6 +10293,35 @@ html.a11y-contrast body::before { display: none; }
 .lookup-in { display: inline-flex; align-items: center; gap: 6px; }
 .lookup-col { max-width: 220px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-bg); color: var(--text); font: inherit; }
 .lookup-count { color: var(--muted); font-size: 0.82rem; }
+/* Assigned to me's box: first above its list, larger and framed in the accent color */
+.lookup-bar-big {
+    gap: 8px 12px;
+    margin: 4px 0 14px;
+    padding: 12px 14px;
+    border: 2px solid var(--accent);
+    border-radius: 12px;
+    background: var(--accent-softer);
+    box-shadow: 0 2px 10px color-mix(in srgb, var(--accent) 18%, transparent);
+    font-size: 1rem;
+    color: var(--text);
+}
+.lookup-bar-big .lookup-icon { font-size: 1.4rem; }
+.lookup-bar-big .lookup-input {
+    flex: 1 1 420px;
+    min-width: 0;
+    max-width: 640px;
+    padding: 10px 14px;
+    border: 2px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+    border-radius: 8px;
+    font-size: 1.08rem;
+}
+.lookup-bar-big .lookup-input:focus { outline: 3px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+.lookup-bar-big .lookup-col { padding: 9px 10px; border-width: 2px; border-radius: 8px; font-size: 0.95rem; }
+.lookup-bar-big .lookup-count { font-size: 0.92rem; font-weight: 600; color: var(--accent-ink); }
+@media (max-width: 480px) {
+    .lookup-bar-big { padding: 10px; }
+    .lookup-bar-big .lookup-input { flex-basis: 200px; }
+}
 /* A row the lookup hides (a long family's hidden rows show while something is typed) */
 tr.lookup-miss { display: none !important; }
 .family.collapsed table.looking tr.more-member { display: table-row; }
@@ -13093,7 +13230,9 @@ async function loadCurrentUser() {
         const response = await fetch(`${API_BASE}/api/me`, { headers: authHeaders() });
         if (handleUnauthorized(response)) return;
         if (response.ok) {
-            setCurrentUser(await response.json());
+            const me = await response.json();
+            setCurrentUser(me);
+            applyAssistantName(me.ai);
             signInLinkWhileSignedIn();
         }
     } catch (err) {
@@ -13418,8 +13557,27 @@ function updateChatControls() {
     count.hidden = !asked;
     count.textContent = asked.toLocaleString();
     document.getElementById('nav-ask-btn').title = asked
-        ? `Ask Claude. With nothing typed, this opens your chat (${asked.toLocaleString()} ${asked === 1 ? 'question' : 'questions'} so far)`
-        : 'Ask Claude. With nothing typed, this opens the chat';
+        ? `Ask ${assistantName}. With nothing typed, this opens your chat (${asked.toLocaleString()} ${asked === 1 ? 'question' : 'questions'} so far)`
+        : `Ask ${assistantName}. With nothing typed, this opens the chat`;
+}
+
+// Who answers questions: Claude, or in the offline version (AI_PROVIDER=local
+// on the server) a free model on OneTouch's own computer, which the page then
+// calls "the AI" wherever it would say Claude (/api/me's ai.local)
+let assistantName = 'Claude';
+function applyAssistantName(ai) {
+    if (!ai?.local || assistantName !== 'Claude') return;
+    assistantName = 'the AI';
+    const reword = text => text.replace(/\bClaude's\b/g, "the AI's").replace(/\bClaude\b/g, 'the AI');
+    for (const el of document.querySelectorAll('#nav-ask, #nav-ask-input, #nav-ask-btn, #send-btn')) {
+        for (const attr of ['aria-label', 'placeholder', 'title']) if (el.hasAttribute(attr)) el.setAttribute(attr, reword(el.getAttribute(attr)));
+    }
+    document.getElementById('send-btn').textContent = 'Ask the AI';
+    for (const span of document.querySelectorAll('.access-switch > span')) {
+        const words = span.firstChild;
+        if (words?.nodeType === Node.TEXT_NODE) words.textContent = reword(words.textContent);
+    }
+    updateChatControls();
 }
 
 // A click anywhere outside the open chat closes it, the header included (its
@@ -13844,7 +14002,7 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
     // A new answer (not a saved chat drawn again): ♿ can read it aloud (accessibility.js)
     if (!replay) setTimeout(() => document.dispatchEvent(new CustomEvent('onetouch:answer')));
     if (data.memoryReset) {
-        appendMessage('system-msg', 'This conversation got long, so Claude started fresh. Earlier questions are no longer remembered.');
+        appendMessage('system-msg', `This conversation got long, so ${assistantName} started fresh. Earlier questions are no longer remembered.`);
     }
 
     if (data.error) {
@@ -15144,10 +15302,16 @@ function formatStarredAt(iso) {
 // is open under that name ('': forgets it when drawn again); false: no box, for
 // a list that looks itself up (lookup.js)
 // Every cell shows something: where a ticket has nothing, it says why (blankText).
+// A ticket list's 🔍 box (lookup.js), for a list of two or more. big: a tab's own list,
+// whose box comes first, above its count and buttons (the table then has lookup: false)
+function ticketLookupBarHtml(tickets, columns, list, big = false) {
+    return tickets.length >= 2 ? lookupBarHtml(list, lookupColumns(columns).map(([label]) => label), { big }) : '';
+}
+
 function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set(), highlightClass = 'fresh', { select = null, rowClass = null, sort = '', lookup = '' } = {}) {
     const sortable = sort !== false;
     if (sort) tickets = sortedTickets(tickets, sort, columns, ticketSortValue);
-    const bar = lookup !== false && tickets.length >= 2 ? lookupBarHtml(lookup, lookupColumns(columns).map(([label]) => label)) : '';
+    const bar = lookup !== false ? ticketLookupBarHtml(tickets, columns, lookup) : '';
     const head = (select ? `<th class="select-cell"><input type="checkbox" class="select-all" data-select-list="${select}" aria-label="Select all"></th>` : '') +
         columns.map(([label]) => (sortable && !UNSORTED_COLUMNS.has(label) ? sortHeadHtml(sort, label) : `<th>${escapeHtml(label)}</th>`)).join('');
     const body = tickets.map((t, i) => {
@@ -15335,16 +15499,17 @@ function assignedHtml() {
     if (!listed.length) {
         return head + `<p class="home-status">${drill ? `None ${which}in ${escapeHtml(drill.label)}.` : status === 'attention' ? 'None of your tickets need attention.' : `None ${status === 'open' ? 'open: you\'re all caught up.' : 'closed yet.'}`}</p>`;
     }
+    // The 🔍 box first and large, above the count and the open / closed / all buttons
     const bar = lookupBarHtml('assigned', lookupColumns(columns).map(([label]) => label),
-        { mode: 'list', count: { shown: shown.length, total: listed.length } });
-    if (!shown.length) return head + bar + '<p class="home-status">No tickets match what you typed. Change it, or press Escape in the box to see them all.</p>';
+        { mode: 'list', count: { shown: shown.length, total: listed.length }, big: true });
+    if (!shown.length) return bar + head + '<p class="home-status">No tickets match what you typed. Change it, or press Escape in the box to see them all.</p>';
 
     const pager = pages > 1
         ? `<div class="team-pager"><span>${(first + 1).toLocaleString()}–${(first + page.length).toLocaleString()} of ${shown.length.toLocaleString()}</span>` +
           `<button type="button" class="home-action" data-assigned-page="-1"${assignedView.page ? '' : ' disabled'}>← Previous</button>` +
           `<button type="button" class="home-action" data-assigned-page="1"${assignedView.page < pages - 1 ? '' : ' disabled'}>Next →</button></div>`
         : '';
-    return head + bar + ATTENTION_LEGEND_HTML + KPI_LEGEND_HTML + ticketTableHtml(page, columns, new Set(), 'fresh', { sort: 'assigned', lookup: false }) + pager +
+    return bar + head + ATTENTION_LEGEND_HTML + KPI_LEGEND_HTML + ticketTableHtml(page, columns, new Set(), 'fresh', { sort: 'assigned', lookup: false }) + pager +
         ticketDownloadHtml(shown, `Assigned to me (${status === 'all' ? 'all' : status})`, ASSIGNED_COLUMNS);
 }
 
@@ -15687,8 +15852,9 @@ function familiesHtml() {
         const none = mine && status !== 'open' ? 'None of your tickets are in a family yet.' : status === 'open' ? 'No families with open tickets: all caught up.' : 'No families.';
         return head + `<p class="home-status">${none}</p>`;
     }
-    const bar = lookupBarHtml('team-families', TEAM_FAMILY_LOOKUP_COLUMNS, { mode: 'list', noun: 'families', count: { shown: data.total, total: all } });
-    if (!data.families.length) return head + bar + '<p class="home-status">No families match what you typed. Change it, or press Escape in the box to see them all.</p>';
+    // The 🔍 box first and large, above the count and the filters
+    const bar = lookupBarHtml('team-families', TEAM_FAMILY_LOOKUP_COLUMNS, { mode: 'list', noun: 'families', count: { shown: data.total, total: all }, big: true });
+    if (!data.families.length) return bar + head + '<p class="home-status">No families match what you typed. Change it, or press Escape in the box to see them all.</p>';
     const rows = data.families.map(f => {
         const id = escapeHtml(f.id);
         const summary = String(f.ticket?.summary || '');
@@ -15709,7 +15875,7 @@ function familiesHtml() {
           `<button type="button" class="home-action" data-families-page="-1"${teamFamiliesView.offset ? '' : ' disabled'}>← Previous</button>` +
           `<button type="button" class="home-action" data-families-page="1"${last < data.total ? '' : ' disabled'}>Next →</button></div>`
         : '';
-    return head + bar + KPI_LEGEND_HTML + '<div class="table-wrap"><table class="result-table" data-sort-list="team-families"><thead><tr>' +
+    return bar + head + KPI_LEGEND_HTML + '<div class="table-wrap"><table class="result-table" data-sort-list="team-families"><thead><tr>' +
         sortHeadHtml('team-families', 'Family', 'Family (its first ticket)') + sortHeadHtml('team-families', 'Tickets') + sortHeadHtml('team-families', 'KPIs') +
         (mine ? '' : '<th>Give it all to</th>') + '<th></th></tr></thead>' + `<tbody>${rows}</tbody></table></div>` + pager;
 }
@@ -15857,13 +16023,13 @@ function showTicketResults(quiet = false) {
         if (!tickets.length) return NO_TICKET_RESULTS_HTML;
         const columns = withLinks(SHOWN_COLUMNS);
         const fresh = tickets.filter(t => latestShown.has(t.number)).length;
-        return '<div class="results-head">' +
+        return ticketLookupBarHtml(tickets, columns, 'results', true) + '<div class="results-head">' +
             `<p class="home-status">${tickets.length.toLocaleString()} ${tickets.length === 1 ? 'ticket' : 'tickets'} shown to you, newest first. ` +
             (fresh ? `<span class="fresh-key">Highlighted: the ${fresh.toLocaleString()} from your latest question.</span> ` : '') +
             'Click a ticket number to see its full record, or its parent or family to see those.</p>' +
             `<button type="button" class="home-action danger" onclick="clearTicketResults(${tickets.length})">🧹 Clear ticket results</button></div>` +
             starAllHtml(tickets.map(t => t.number)) + selectBarHtml('results') +
-            ticketTableHtml(tickets, columns, latestShown, 'fresh', { select: 'results', sort: 'results', lookup: 'results' }) + ticketDownloadHtml(tickets, 'Ticket results', columns);
+            ticketTableHtml(tickets, columns, latestShown, 'fresh', { select: 'results', sort: 'results', lookup: false }) + ticketDownloadHtml(tickets, 'Ticket results', columns);
     }, quiet).then(() => paintSelection('results'));
 }
 
@@ -16122,12 +16288,12 @@ function showStarred(quiet = false) {
         const missing = (data.noAccess?.length
             ? `<p class="home-status">You don't have permission to see these any more (they're no longer yours): ${escapeHtml(data.noAccess.join(', '))}</p>` : '') +
             (data.notFound.length ? `<p class="home-status">Not in the data any more: ${escapeHtml(data.notFound.join(', '))}</p>` : '');
-        return '<div class="results-head">' +
+        return ticketLookupBarHtml(data.tickets, columns, 'starred', true) + '<div class="results-head">' +
             `<p class="home-status">${numbers.length.toLocaleString()} starred ${numbers.length === 1 ? 'ticket' : 'tickets'}, newest first. ` +
             'Tick tickets to unstar several at once.</p>' +
             `<button type="button" class="home-action danger" onclick="unstarAll()">☆ Unstar all</button></div>` +
             unstarByIssueHtml(data.tickets) + selectBarHtml('starred') +
-            ticketTableHtml(data.tickets, columns, new Set(), 'fresh', { select: 'starred', sort: 'starred', lookup: 'starred' }) + missing + ticketDownloadHtml(data.tickets, 'Starred tickets', columns);
+            ticketTableHtml(data.tickets, columns, new Set(), 'fresh', { select: 'starred', sort: 'starred', lookup: false }) + missing + ticketDownloadHtml(data.tickets, 'Starred tickets', columns);
     }, quiet).then(() => paintSelection('starred'));
 }
 
@@ -18660,7 +18826,7 @@ You implement changes in OneTouch, an internal ITIL analytics tool: people ask q
 | `seen.mjs` | Each person's "Ticket results": every ticket shown to them (`seen_tickets`, created on start). `/api/query` records the ticket numbers in each answer (`ticketNumbersIn`) before replying and returns them as `shownTickets`; `GET /api/seen-tickets` returns the list with summaries (`ticketSummaries`); `DELETE /api/seen-tickets` empties it ("Clear ticket results"), `POST /api/seen-tickets/remove` removes ticked rows (`removeSeen`); the list carries each ticket's parent and families (`ticketLinks`) |
 | `prefs.mjs` | Each person's preferences in `onetouch_auth` (`user_preferences`: one JSONB per user, saved in parts `theme` / `home` / `dashboards` / `tour` via `PUT /api/preferences/:part`, reset with `DELETE`; `tour` is `{ done, dashboards }`: Home's tour and the Dashboards page's tour seen). `cleanPreference` drops unknown keys and caps sizes (20 dashboards x 30 charts, 30 Home sections); every chart goes through `sanitizeChart` |
 | `public/picker.js` | The box where a PM or admin types a team member's name to assign (ARIA combobox): `personPickerHtml(teamId, current, label, { nobody, placeholder, attrs })`, the team's names from `setPickerPeople` (teams.js `rememberPickerPeople`, from `/api/teams`; cleared at sign-out). A pick fires a bubbling `personpick` event (`{ id, previous, name }`, id null = nobody) that the list handles: a ticket's box (`data-number`) calls `assign`, a family's (`data-family`) calls teams.js `giveFamily` (asks first) -> `PUT /api/ticket-families/:id/assignee` -> `teams.assignFamily` (shares `giveTickets` with `assignTickets`: team check, one transaction, notification with `detail.family`). The list is `position: fixed` so table scroll boxes don't clip it. Tests in headless Edge need `Emulation.setFocusEmulationEnabled` or focus events don't fire |
-| `public/lookup.js` | The 🔍 box over every ticket list (`lookupBarHtml(list, labels, { mode, count, noun })`): every word must appear, in the picked column or any; "quotes" keep a phrase; same rules as `tickets.mjs` `lookupTerms` / `lookupMatches` on the server. Mode `rows`: the box sits right before the list's `.table-wrap` and hides non-matching rows (`tr.lookup-miss`, a `.row-detail` follows its row; cell text = its `title` or text, plus a raw date from `data-sort`), fired as `lookedup` so Ticket results / Starred tick-all only what shows. Mode `list`: the list registers `pagedLookups[name]` and redraws (Assigned to me and a family's tickets filter their data with `lookedUpTickets` + app.js `ticketLookupText`; Ticket families, the Team tab and the Families page send `lookupQuery(list)` = `q`/`col` to the server), then `restoreLookupFocus` gives the new box the keys. Named lists keep what's typed in `listLookups` (cleared on sign-out); `ticketTableHtml(…, { lookup })` adds a rows box to any list of 2+ |
+| `public/lookup.js` | The 🔍 box over every ticket list (`lookupBarHtml(list, labels, { mode, count, noun, big })`; `big` = a tab's own list: larger `.lookup-bar-big`, drawn first, above its count and filters; `ticketLookupBarHtml(tickets, columns, list, big)` + `ticketTableHtml(…, { lookup: false })` for Ticket results / Starred): every word must appear, in the picked column or any; "quotes" keep a phrase; same rules as `tickets.mjs` `lookupTerms` / `lookupMatches` on the server. Mode `rows`: the box looks up the first `.table-wrap` after it among its siblings (`lookupTable`) and hides non-matching rows (`tr.lookup-miss`, a `.row-detail` follows its row; cell text = its `title` or text, plus a raw date from `data-sort`), fired as `lookedup` so Ticket results / Starred tick-all only what shows. Mode `list`: the list registers `pagedLookups[name]` and redraws (Assigned to me and a family's tickets filter their data with `lookedUpTickets` + app.js `ticketLookupText`; Ticket families, the Team tab and the Families page send `lookupQuery(list)` = `q`/`col` to the server), then `restoreLookupFocus` gives the new box the keys. Named lists keep what's typed in `listLookups` (cleared on sign-out); `ticketTableHtml(…, { lookup })` adds a rows box to any list of 2+ |
 | `public/sorting.js` | Every ticket list and table sorts by any column: a heading (`sortHeadHtml(list, col, label, cls)` inside a `<table data-sort-list="…">`) cycles ascending → descending → the list's own order; empty cells last either way; values from a cell's `data-sort`, its KPI chips (`kpiAttention`, same weights as `kpis.attention`), its `<select>`, or its text. `ticketTableHtml(…, { sort })` does this for ticket lists (`TICKET_SORT_VALUES` in app.js: dates raw, Priority / Risk by `levelRank`). A named list keeps its sort while the page is open (`listSorts`, cleared on sign-out); `''` sorts in place only. Lists shown a page at a time must sort everything, not the page: they register `pagedSorts[name]` and redraw (Assigned to me, a family's tickets) or ask the server (`sortQuery`: Team tab tickets `sort=number…assignee`, Ticket families `family/size/kpis`, the Families page `parent…size`). Rows `.row-detail` move with their row, `.sort-pinned` stay last. Charts: `sort` `count`/`label` + `direction` `asc`/`desc` (`chartOrder`; charts saved without a direction keep their old order), the tile's ⇅ menu, the builder's Order, an answer's Order menu (`orderChartRows` / `orderSeries`) |
 | `kpis.mjs` | Ticket and family KPIs: every ticket's KPI fields read from Cube once at start (`load`, fixed query), "now" = newest timestamp in the data, "typical" = median of that kind; `ticketKpis`, `teamFamilyKpis` (families with open tickets first), `oneFamilyKpis`. A KPI is `{ key, label, value, tone: good/warn/bad/info, detail }`. Routes: `POST /api/kpis/tickets` (only numbers `teams.canSeeTicket` allows), `GET /api/kpis/families[/:id]` (team's PM or admin, `teams.teamFamilies` / `familyMembers`). app.js: `KPI_COLUMN` + `fillTicketKpis` in "Assigned to me", `showFamilyKpis` for Home's "Ticket families" tab. Page scripts share one global scope: a top-level `const` named like one in another script (e.g. `familiesView` in families.js) breaks the whole page |
 | `mail.mjs` | Every notification by email through Brevo's transactional API (`POST https://api.brevo.com/v3/smtp/email`, header `api-key`; no npm package). Outbox: `notifications.email_state` 'pending' (rows from before email existed are 'before'), `sendPending` every 30 s after the change has committed: 'sent' / 'skipped' + `email_note` (test or service account, deactivated, no `users.email`, `users.email_notifications` off, not on `MAIL_ONLY_TO`, older than an hour) / retried with doubling waits, 'failed' after 5. `emailFor` words it like public/notifications.js (numbers and a link only). Settings in `.env`: `BREVO_API_KEY` (none: off), `MAIL_FROM`, `MAIL_FROM_NAME`, `APP_URL`, `MAIL_ONLY_TO`; tests point `BREVO_API_URL` at a stand-in and shorten `MAIL_INTERVAL_MS` / `MAIL_RETRY_MS`. Addresses: `auth.setEmail` (`npm run users -- email|emails`), never exported to `db/accounts.json`; `GET /api/me` returns `email: { address, on, enabled }`, `PUT /api/me/email { on }` (the 🔔 panel's switch, `paintEmailSetting`). `npm run mail-test -- <address>` sends one test email. Never test with a real person's address |
@@ -18876,6 +19042,7 @@ const FILES = [
   'architecture.mjs', 'public/architecture.js', 'checks/architecture.mjs', 'health.mjs', 'risks.mjs', 'issues.mjs', 'checks/issues.mjs', 'checks/attention.mjs',
   'usage.mjs', 'scripts/usage.mjs', 'scripts/eval-translation.mjs', 'checks/usage.mjs',
   'demo/gate.config.json',
+  'local_llm.mjs', 'scripts/local-ai.mjs', 'docker-compose.local-ai.yml',
 ];
 
 // Not copied in, and why (shown in the appendix)
@@ -24291,12 +24458,13 @@ async function loadFamilies(more = false, quiet = false) {
         } else {
             const counts = familiesState.summary[kind];
             const all = data.before ?? data.total;
-            list.innerHTML = `<p class="families-about"><b>${all.toLocaleString()} ${escapeHtml(info.tab.toLowerCase())}</b>, ` +
+            // The 🔍 box first and large, above the count
+            list.innerHTML = (all ? lookupBarHtml('families', FAMILY_HEADS, { mode: 'list', noun: 'families', count: { shown: data.total, total: all }, big: true }) : '') +
+                `<p class="families-about"><b>${all.toLocaleString()} ${escapeHtml(info.tab.toLowerCase())}</b>, ` +
                 `holding ${counts.tickets.toLocaleString()} ${counts.tickets === 1 ? info.child[0] : info.child[1]}. ${escapeHtml(info.about)} ` +
                 'Click a row to see the whole family, or any ticket number, parent or child, to open that ticket.</p>' +
                 (!all ? `<p class="home-status">None of the tickets you can see are in ${escapeHtml(info.tab.toLowerCase())}.</p>`
-                    : lookupBarHtml('families', FAMILY_HEADS, { mode: 'list', noun: 'families', count: { shown: data.total, total: all } }) +
-                      (data.total ? familyTableHtml(rows, false) : '<p class="home-status">No families match what you typed. Change it, or press Escape in the box to see them all.</p>')) +
+                    : (data.total ? familyTableHtml(rows, false) : '<p class="home-status">No families match what you typed. Change it, or press Escape in the box to see them all.</p>')) +
                 '<div class="families-more"></div>';
         }
         paintFamiliesMore();
@@ -24410,8 +24578,8 @@ async function findFamilies(number) {
         } else if (!data.families.length) {
             list.innerHTML = `<p class="families-about">${escapeHtml(data.number)} has no parent, children or other linked tickets.${open} ${back}</p>`;
         } else {
-            list.innerHTML = `<p class="families-about"><b>${escapeHtml(data.number)}</b> is in ${data.families.length} ${data.families.length === 1 ? 'family' : 'families'}.${open} ${back}</p>` +
-                (data.families.length >= 2 ? lookupBarHtml('', ['Parent', 'Kind of family', ...FAMILY_HEADS.slice(1)], { noun: 'families' }) : '') +
+            list.innerHTML = (data.families.length >= 2 ? lookupBarHtml('', ['Parent', 'Kind of family', ...FAMILY_HEADS.slice(1)], { noun: 'families', big: true }) : '') +
+                `<p class="families-about"><b>${escapeHtml(data.number)}</b> is in ${data.families.length} ${data.families.length === 1 ? 'family' : 'families'}.${open} ${back}</p>` +
                 familyTableHtml(familyRowsHtml(data.families, true), true, '');
             // One family: open it straight away
             if (data.families.length === 1) toggleFamilyRow(list.querySelector('tr.family-row'));
@@ -26147,12 +26315,13 @@ function renderTeams() {
         html += `<section class="team-card" id="team-summary">${teamSummaryHtml(team)}</section>` +
             `<section class="team-card">` +
             `<h3>${manage ? `${escapeHtml(team.name)}'s tickets` : 'My tickets'}</h3>` +
+            // Any of the list's columns; the server looks through all of the team's tickets.
+            // First and large, above the filters and the count
+            lookupBarHtml('team-tickets', Object.keys(TEAM_TICKET_SORT_KEYS), { mode: 'list', big: true }) +
             `<div class="team-filters">` +
             (manage ? `<label>Who has it <select id="team-filter-assignee">${assigneeFilterOptions(team)}</select></label>` : '') +
             kindFilterHtml() + attentionFilterHtml() +
             `</div>` +
-            // Any of the list's columns; the server looks through all of the team's tickets
-            lookupBarHtml('team-tickets', Object.keys(TEAM_TICKET_SORT_KEYS), { mode: 'list' }) +
             (manage ? `<div class="team-bulk"><label><input type="checkbox" class="team-select-all"> Tick all on this page</label>` +
                 `<span>Give the ticked tickets to</span> ${personPickerHtml(team.id, undefined, 'Give the ticked tickets to', { attrs: 'id="team-bulk-to"' })}` +
                 `<button type="button" class="home-action" data-team-bulk>Assign</button></div>` : '') +
@@ -26457,10 +26626,11 @@ function unassignedCardHtml() {
     const teamOptions = `<option value=""${f ? '' : ' selected'}>Any team, or none</option><option value="none"${f === 'none' ? ' selected' : ''}>No team</option>` +
         teamsView.data.teams.map(t => `<option value="${t.id}"${String(t.id) === f ? ' selected' : ''}>${escapeHtml(t.name)}</option>`).join('');
     return `<section class="team-card"><h3>Not assigned yet</h3>` +
+        // Any of the list's columns; the server looks through every ticket nobody has.
+        // First and large, above the count and the filters
+        lookupBarHtml('unassigned-tickets', Object.keys(UNASSIGNED_SORT_KEYS), { mode: 'list', big: true }) +
         `<p class="home-status" id="unassigned-summary">${unassignedSummaryHtml()}</p>` +
         `<div class="team-filters"><label>Team <select id="team-filter-team">${teamOptions}</select></label>${kindFilterHtml()}${attentionFilterHtml()}</div>` +
-        // Any of the list's columns; the server looks through every ticket nobody has
-        lookupBarHtml('unassigned-tickets', Object.keys(UNASSIGNED_SORT_KEYS), { mode: 'list' }) +
         `<div id="team-tickets"></div></section>`;
 }
 
@@ -26584,12 +26754,13 @@ function ticketStatusesHtml(tickets) {
     const admin = currentAccess.admin;
     const heads = STATUS_HEADS.filter(h => admin || h !== 'Team');
     const where = admin ? 'on every team' : `on ${escapeHtml(currentAccess.team?.name || 'your team')}`;
-    let html = '<h3>Resolved or closed</h3><p class="home-status">' + (tickets.length
+    // The 🔍 box first and large (for two or more), above the count
+    let html = '<h3>Resolved or closed</h3>' + (tickets.length >= 2 ? lookupBarHtml('ticket-statuses', heads, { big: true }) : '') +
+        '<p class="home-status">' + (tickets.length
         ? `${howMany(tickets.length, 'ticket', 'tickets')} ${where} that someone said they resolved or closed, newest first. Change one's status with its menu; ` +
           '"Open" takes the status away. Only OneTouch\'s record changes, never the ticket\'s data.'
         : `Nobody has said they resolved or closed a ticket ${where} yet. When someone does, it shows here.`) + '</p>';
     if (!tickets.length) return html;
-    if (tickets.length >= 2) html += lookupBarHtml('ticket-statuses', heads);
     const rows = tickets.map(t => {
         const n = escapeHtml(t.number);
         const blank = { kind: kindOf(t.number) };
@@ -27059,7 +27230,10 @@ tickets by any of its columns (or one picked column): every word must appear, "q
 words" stay together. Lists the page holds whole are looked up where they are; lists
 shown a page at a time look through all of their tickets, the Team tab, Ticket families
 and the Families page on the server (`?q=&col=`, `tickets.mjs` `lookupMatches`), only
-ever among the tickets that person may already see.
+ever among the tickets that person may already see. On a tab's own list (Home's four lists,
+the Team tab's three, the Families page) the box comes first, larger (`{ big: true }`,
+`.lookup-bar-big`), above the count and buttons; lists inside an answer, a record or a family keep
+the small one. A rows box looks up the first table after it (`lookupTable`).
 
 **No blank cells.** Where the data has nothing, a list says why ("No priority" for
 requests and catalog tasks, "Not assigned", "No parent", …; `blankText` in `app.js` and
@@ -27133,6 +27307,16 @@ to the health checks (`asProblems`, `risk` set), so Health, the banner and the r
 reading that climbs to coming true in about 4 s (4.5 s to 100%), ends itself after 10 minutes, in memory only, labelled
 made up everywhere; the page polls twice a second while it climbs. **Something that could go wrong
 but hasn't gets a risk in `buildRisks`.**
+
+**Two versions of the AI assistant** (`AI_PROVIDER` in `server.mjs`). `claude` (the default) asks
+the Claude API (`CLAUDE_MODEL`). `local` asks a free model (`LOCAL_LLM_MODEL`, default `qwen3:4b`,
+Apache 2.0) that Ollama runs in its own container (`local_llm.mjs`; started with
+`docker compose -f docker-compose.yml -f docker-compose.local-ai.yml up -d`, model downloaded with
+`npm run local-ai -- pull`). Same system prompt, question, schema, validator and permissions; only
+the translation step differs. Saved answers and `claude_usage` rows carry the model name
+(`local:…`, $0), the page says "the AI" instead of Claude (`/api/me` `ai.local`), and 🩺 Health
+checks Ollama. Ollama is capped at 5 GB (`mem_limit`) so it can never starve the live containers.
+On this laptop's CPU it is slow (see README "Two versions of the AI assistant").
 
 **Notifications** (`notifications.mjs`, the 🔔 in the header, checked every
 minute). Each one is saved in the same transaction as the change it reports:
@@ -28714,12 +28898,15 @@ function lookupCountText(shown, total, noun, active) {
 // The box over a list. list: its name, whose lookup is kept while the page is open
 // ('' forgets it when the list is drawn again). labels: the columns it can look in.
 // mode: 'rows' (every row is on the page) or 'list' (pagedLookups draws it again).
-// count: { shown, total } for a 'list' box.
-function lookupBarHtml(list, labels, { mode = 'rows', count = null, noun = 'tickets' } = {}) {
+// count: { shown, total } for a 'list' box. big: drawn larger, to be seen first
+// (every tab's own list: above the list's count and filters; lists inside an
+// answer, a record or a family keep the small box). A 'rows' box looks up the
+// first table after it (lookupTable).
+function lookupBarHtml(list, labels, { mode = 'rows', count = null, noun = 'tickets', big = false } = {}) {
     const { q, col } = lookupFor(list);
     const options = `<option value="">every column</option>` +
         labels.map(label => `<option value="${escapeHtml(label)}"${label === col ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('');
-    return `<div class="lookup-bar" role="search" data-lookup="${escapeHtml(list)}" data-lookup-mode="${mode}" data-noun="${escapeHtml(noun)}">` +
+    return `<div class="lookup-bar${big ? ' lookup-bar-big' : ''}" role="search" data-lookup="${escapeHtml(list)}" data-lookup-mode="${mode}" data-noun="${escapeHtml(noun)}">` +
         '<span class="lookup-icon" aria-hidden="true">🔍</span>' +
         `<input type="search" class="lookup-input" value="${escapeHtml(q)}" maxlength="${LOOKUP_MAX_LENGTH}" placeholder="Look up ${escapeHtml(noun)}…"` +
         ` aria-label="Look up ${escapeHtml(noun)} in this list" title='Every word must appear; "words in quotes" stay together' autocomplete="off" spellcheck="false">` +
@@ -28751,10 +28938,19 @@ function cellLookupText(cell) {
     return `${cell.getAttribute('title') || cell.textContent}${/^\d{4}-\d{2}-\d{2}/.test(sort) ? ` ${sort}` : ''}`;
 }
 
+// A 'rows' box's list: the first table after it, beside it on the page (a large box
+// sits above its list's count and buttons, so those may come in between)
+function lookupTable(bar) {
+    for (let el = bar.nextElementSibling; el && !el.matches('.lookup-bar'); el = el.nextElementSibling) {
+        if (el.matches('.table-wrap')) return el.querySelector('table');
+    }
+    return null;
+}
+
 // A list drawn whole: hides the rows that don't match (a row opened to show more
 // goes with its row), and shows how many do
 function filterTableRows(bar) {
-    const table = bar.nextElementSibling?.querySelector('table');
+    const table = lookupTable(bar);
     const body = table?.tBodies[0];
     if (!body) return;
     const terms = lookupTerms(bar.querySelector('.lookup-input').value);
@@ -31411,9 +31607,10 @@ export const NODES = [
     facts: [
       ['Key', 'ANTHROPIC_API_KEY in .env'],
       ['Model setting', 'CLAUDE_MODEL in .env, or the default below'],
+      ['Offline version', 'AI_PROVIDER=local: a free model in Ollama on this computer takes Claude\'s place (docker-compose.local-ai.yml)'],
     ],
     secure: 'Called only by the server, over HTTPS. Never connected to the database.',
-    files: ['business_logic.mjs', 'empty_results.mjs', 'server.mjs'],
+    files: ['business_logic.mjs', 'empty_results.mjs', 'server.mjs', 'local_llm.mjs'],
   },
   {
     id: 'brevo', name: 'Brevo', layer: 'outside', shape: 'orb', pos: [-14.5, 9.5, 3], big: true,
@@ -34892,7 +35089,7 @@ const fail = (text, detail) => {
   return problem;
 };
 
-// tools: { db(sql) -> rows, cubeQuery(query), fetch, listClaudeModels(), hasClaudeKey, claudeOffline,
+// tools: { db(sql) -> rows, cubeQuery(query), fetch, listClaudeModels(), hasClaudeKey, claudeOffline, aiLocal, checkLocalModel(),
 //          mailEnabled, publicUrl, metabaseUrl, dashboardsReady(), listening() }
 // Each check returns a sentence when all is well, or { off: sentence }, or throws.
 export function buildChecks(tools) {
@@ -34938,10 +35135,20 @@ export function buildChecks(tools) {
       },
     },
     {
-      id: 'claude', node: 'claude', name: 'AI assistant (Claude API)', keepMs: KEEP_OUTSIDE_MS, failText: 'The Claude API refused this server\'s key or didn\'t answer.',
+      id: 'claude', node: 'claude', keepMs: KEEP_OUTSIDE_MS,
+      // The offline version (AI_PROVIDER=local) checks its own model instead
+      name: tools.aiLocal ? 'AI assistant (local model)' : 'AI assistant (Claude API)',
+      failText: tools.aiLocal ? 'The local model (Ollama) didn\'t answer, or doesn\'t have its model.' : 'The Claude API refused this server\'s key or didn\'t answer.',
       effect: 'New questions can\'t be answered. Repeated ones still can.',
       async run() {
         if (tools.claudeOffline) return { off: 'Offline mode (DEMO_MODE=offline): Claude isn\'t asked, and only questions asked before are answered.' };
+        if (tools.aiLocal) {
+          try {
+            return await tools.checkLocalModel();
+          } catch (error) {
+            throw fail(error.message);
+          }
+        }
         if (!tools.hasClaudeKey) throw fail('No ANTHROPIC_API_KEY is set.');
         await tools.listClaudeModels();
         return 'The Claude API accepts this server\'s key.';
@@ -35537,6 +35744,8 @@ const PRICES = {
 
 // What one call cost, from the API's usage object; null for an unknown model
 export function costUsd(model, usage) {
+  // The offline version's model (local_llm.mjs) runs on this computer: no charge per call
+  if (String(model).startsWith('local:') && usage) return 0;
   const p = PRICES[model];
   if (!p || !usage) return null;
   const written = usage.cache_creation_input_tokens || 0;
@@ -35942,8 +36151,10 @@ near(costUsd('claude-sonnet-5-5', { input_tokens: 300, output_tokens: 220, cache
 near(costUsd('claude-haiku-5-5', { input_tokens: 1_000_000, output_tokens: 1_000_000 }), 0.6);
 assert.equal(costUsd('claude-unknown', { input_tokens: 5, output_tokens: 5 }), null);
 assert.equal(costUsd('claude-sonnet-5-5', null), null);
+// The offline version's model (AI_PROVIDER=local) runs on this computer: free per call
+assert.equal(costUsd('local:qwen3:4b', { input_tokens: 22_000, output_tokens: 400 }), 0);
 
-console.log('usage: 9 checks passed');
+console.log('usage: 10 checks passed');
 ```
 
 <a id="b94"></a>
@@ -35969,6 +36180,240 @@ console.log('usage: 9 checks passed');
     { "name": "Public address (Cloudflare tunnel)", "url": "https://onetouch.fyi/" }
   ]
 }
+```
+
+<a id="b95"></a>
+### B.95 `local_llm.mjs`
+
+```js
+// =====================================================================
+// THE OFFLINE VERSION'S AI: a free, open model run on this computer by
+// Ollama (docker-compose.local-ai.yml), instead of the Claude API.
+//
+// Chosen with AI_PROVIDER=local (server.mjs). It gets the same system prompt,
+// the same question wrapper and the same output schema as Claude (Ollama
+// holds the model to the schema), and its answer goes through the same
+// validator, so nothing past the translation changes. It costs nothing per
+// question; what it costs is a computer able to run it (README "Two versions
+// of the AI assistant").
+//
+// The model's licence must allow business use: the default, Qwen3 4B, is
+// Apache 2.0. Change it with LOCAL_LLM_MODEL (then: npm run local-ai -- pull).
+// =====================================================================
+
+import http from 'node:http';
+import https from 'node:https';
+
+export const LOCAL_LLM_URL = (process.env.LOCAL_LLM_URL || 'http://ollama:11434').replace(/\/+$/, '');
+export const LOCAL_LLM_MODEL = process.env.LOCAL_LLM_MODEL || 'qwen3:4b';
+// The system prompt alone is ~22k tokens, so the model must read at least that
+// much; more costs memory (the KV cache), not money
+export const LOCAL_LLM_CONTEXT = Number(process.env.LOCAL_LLM_CONTEXT) || 28 * 1024;
+// On a laptop's processor the first question reads the whole system prompt
+// (minutes); later ones reuse it and take tens of seconds. A GPU: seconds.
+export const LOCAL_LLM_TIMEOUT_MS = Number(process.env.LOCAL_LLM_TIMEOUT_MS) || 10 * 60 * 1000;
+// How many earlier questions the local model sees: each one adds ~600 tokens
+// to every request, and a small model's window is far smaller than Claude's
+export const LOCAL_LLM_TURNS = Number(process.env.LOCAL_LLM_TURNS) || 4;
+
+// The name the answer cache and claude_usage keep, so local answers are
+// never reused as Claude's (or the other way round)
+export const LOCAL_MODEL_NAME = `local:${LOCAL_LLM_MODEL}`;
+
+// One request to Ollama's own chat API. messages: [{ role, content: string }].
+// Returns { text, usage, ms, stop } with usage in the Claude API's shape, so
+// usage.mjs saves it the same way (it costs $0).
+export async function localChat({ system, messages, schema, maxTokens = 4000, timeoutMs = LOCAL_LLM_TIMEOUT_MS }) {
+  const started = Date.now();
+  const response = await postJson(`${LOCAL_LLM_URL}/api/chat`, timeoutMs, {
+      model: LOCAL_LLM_MODEL,
+      messages: [{ role: 'system', content: system }, ...messages],
+      ...(schema ? { format: schema } : {}),
+      stream: false,
+      // A thinking model would spend minutes thinking on a processor
+      think: false,
+      // Kept loaded for good (-1): unloading it would mean reading the system
+      // prompt again, which takes minutes without a graphics card
+      keep_alive: process.env.LOCAL_LLM_KEEP_ALIVE || -1,
+      options: { num_ctx: LOCAL_LLM_CONTEXT, num_predict: maxTokens, temperature: 0 },
+  });
+  if (response.status !== 200) {
+    throw new Error(`The local model (Ollama) answered ${response.status}: ${response.text.slice(0, 300)}`);
+  }
+  const data = JSON.parse(response.text);
+  return {
+    text: data.message?.content || '',
+    stop: data.done_reason === 'length' ? 'max_tokens' : 'end_turn',
+    ms: Date.now() - started,
+    usage: { input_tokens: data.prompt_eval_count || 0, output_tokens: data.eval_count || 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+  };
+}
+
+// Node's fetch gives up when a response's headers take over 5 minutes, and
+// Ollama sends none until the answer is done (on a processor, the first one
+// takes longer than that). node:http has no such limit: timeoutMs is the only one.
+function postJson(url, timeoutMs, body) {
+  const target = new URL(url);
+  const client = target.protocol === 'https:' ? https : http;
+  const payload = JSON.stringify(body);
+  return new Promise((resolve, reject) => {
+    const request = client.request(target, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
+    }, response => {
+      const chunks = [];
+      response.on('data', chunk => chunks.push(chunk));
+      response.on('end', () => { clearTimeout(timer); resolve({ status: response.statusCode, text: Buffer.concat(chunks).toString('utf8') }); });
+      response.on('error', fail);
+    });
+    const timer = setTimeout(() => request.destroy(new Error(`The local model didn't answer within ${Math.round(timeoutMs / 1000)} s`)), timeoutMs);
+    function fail(error) { clearTimeout(timer); reject(error); }
+    request.on('error', fail);
+    request.end(payload);
+  });
+}
+
+// For 🩺 Health: Ollama answers and has the model (listing them costs nothing)
+export async function checkLocalModel() {
+  const response = await fetch(`${LOCAL_LLM_URL}/api/tags`, { signal: AbortSignal.timeout(5000) });
+  if (!response.ok) throw new Error(`Ollama answered ${response.status}`);
+  const { models = [] } = await response.json();
+  const name = LOCAL_LLM_MODEL.includes(':') ? LOCAL_LLM_MODEL : `${LOCAL_LLM_MODEL}:latest`;
+  if (!models.some(m => m.name === name || m.model === name)) {
+    throw new Error(`Ollama doesn't have ${LOCAL_LLM_MODEL} yet: docker exec analytics_node_app npm run local-ai -- pull`);
+  }
+  return `${LOCAL_LLM_MODEL} is loaded in Ollama (free, on this computer).`;
+}
+
+// Downloads the model into Ollama's volume (once; ~2.5 GB for qwen3:4b)
+export async function pullLocalModel(onProgress = () => {}) {
+  const response = await fetch(`${LOCAL_LLM_URL}/api/pull`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: LOCAL_LLM_MODEL, stream: true }),
+  });
+  if (!response.ok || !response.body) throw new Error(`Ollama answered ${response.status}`);
+  const decoder = new TextDecoder();
+  let rest = '';
+  for await (const chunk of response.body) {
+    rest += decoder.decode(chunk, { stream: true });
+    const lines = rest.split('\n');
+    rest = lines.pop();
+    for (const line of lines.filter(Boolean)) {
+      const event = JSON.parse(line);
+      if (event.error) throw new Error(event.error);
+      onProgress(event);
+    }
+  }
+}
+
+// Reads the system prompt once at start, so the first person to ask doesn't
+// wait for it: Ollama keeps what it has read, and every question starts with
+// the same system prompt. Without a graphics card this alone takes well over
+// 10 minutes, so it may take an hour. Never throws.
+export async function warmLocalModel(system) {
+  console.log(`🦙 ${LOCAL_LLM_MODEL} is reading the system prompt (minutes without a graphics card)…`);
+  try {
+    const t = await localChat({ system, messages: [{ role: 'user', content: 'Reply with OK.' }], maxTokens: 1, timeoutMs: 60 * 60 * 1000 });
+    console.log(`🦙 ${LOCAL_LLM_MODEL} read the system prompt (${t.usage.input_tokens} tokens) in ${(t.ms / 1000).toFixed(0)} s`);
+  } catch (error) {
+    console.error(`🦙 Could not warm ${LOCAL_LLM_MODEL} up:`, error.message);
+  }
+}
+```
+
+<a id="b96"></a>
+### B.96 `scripts/local-ai.mjs`
+
+```js
+// =====================================================================
+// THE OFFLINE VERSION'S MODEL (local_llm.mjs, docker-compose.local-ai.yml):
+//   docker exec analytics_node_app npm run local-ai -- pull     download it (once)
+//   docker exec analytics_node_app npm run local-ai -- status   is it there?
+//   docker exec analytics_node_app npm run local-ai -- ask "How many open P1 incidents are there?"
+// "ask" shows the query the local model writes for one question, with how
+// long it took; it runs nothing in Cube and needs no account.
+// =====================================================================
+
+import dotenv from 'dotenv';
+
+dotenv.config();
+const { LOCAL_LLM_MODEL, LOCAL_LLM_URL, checkLocalModel, localChat, pullLocalModel } = await import('../local_llm.mjs');
+
+const [command = 'status', ...rest] = process.argv.slice(2);
+
+if (command === 'pull') {
+  console.log(`Downloading ${LOCAL_LLM_MODEL} into Ollama (${LOCAL_LLM_URL})…`);
+  let shown = '';
+  // In a terminal the line updates in place; otherwise (docker exec, logs) every 25%
+  const step = process.stdout.isTTY ? 1 : 25;
+  await pullLocalModel(event => {
+    const line = event.total ? `${event.status} ${Math.floor((100 * (event.completed || 0)) / event.total / step) * step}%` : event.status;
+    if (line === shown) return;
+    process.stdout.write(process.stdout.isTTY ? `\r${line.padEnd(60)}` : `${line}\n`);
+    shown = line;
+  });
+  console.log(`\n✅ ${LOCAL_LLM_MODEL} is ready.`);
+} else if (command === 'status') {
+  console.log(await checkLocalModel());
+} else if (command === 'ask') {
+  const { buildSystemPrompt, buildUserMessage, normalizeAndValidate, OUTPUT_SCHEMA } = await import('../business_logic.mjs');
+  const question = rest.join(' ');
+  if (!question) throw new Error('Give a question: npm run local-ai -- ask "How many open incidents are there?"');
+  const t = await localChat({ system: buildSystemPrompt(), messages: [{ role: 'user', content: buildUserMessage(question, new Date()) }], schema: OUTPUT_SCHEMA });
+  const verdict = normalizeAndValidate(JSON.parse(t.text));
+  console.log(JSON.stringify(verdict.ok ? { intent: verdict.intent, message: verdict.message, queries: verdict.queries } : { rejected: verdict.error }, null, 2));
+  console.log(`${t.usage.input_tokens} tokens read, ${t.usage.output_tokens} written, ${(t.ms / 1000).toFixed(1)} s`);
+} else {
+  console.log('Use: npm run local-ai -- pull | status | ask "<question>"');
+  process.exitCode = 1;
+}
+```
+
+<a id="b97"></a>
+### B.97 `docker-compose.local-ai.yml`
+
+```yaml
+# THE OFFLINE VERSION: the AI assistant uses a free, open model on this
+# computer (Ollama) instead of the Claude API. Everything else is the same.
+# Laid over docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.local-ai.yml up -d
+#   docker exec analytics_node_app npm run local-ai -- pull      (once: ~2.5 GB)
+#
+# Back to the Claude version (Ollama stops; its downloaded model is kept):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.local-ai.yml stop ollama
+#   docker compose up -d app
+#
+# Without a graphics card (this laptop) answers take tens of seconds, and the
+# first one after a start several minutes: see README "Two versions of the AI assistant".
+services:
+  ollama:
+    image: ollama/ollama:0.12.6
+    container_name: onetouch_ollama
+    restart: unless-stopped
+    # Only the app reaches it, inside Docker's network: no port on this computer
+    environment:
+      # One question at a time, one model, and a smaller memory cache per word
+      OLLAMA_NUM_PARALLEL: 1
+      OLLAMA_MAX_LOADED_MODELS: 1
+      OLLAMA_FLASH_ATTENTION: 1
+      OLLAMA_KV_CACHE_TYPE: q8_0
+    # If the model needs more than this, Ollama is stopped, never the database,
+    # Cube or Metabase (Docker has ~8 GB here; the rest of OneTouch uses ~2 GB)
+    mem_limit: 5g
+    volumes:
+      - ollama-models:/root/.ollama
+
+  app:
+    environment:
+      AI_PROVIDER: local
+      LOCAL_LLM_URL: http://ollama:11434
+    depends_on:
+      - ollama
+
+volumes:
+  ollama-models:
 ```
 
 ## Appendix C: images

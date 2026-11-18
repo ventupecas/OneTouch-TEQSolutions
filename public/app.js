@@ -143,7 +143,9 @@ async function loadCurrentUser() {
         const response = await fetch(`${API_BASE}/api/me`, { headers: authHeaders() });
         if (handleUnauthorized(response)) return;
         if (response.ok) {
-            setCurrentUser(await response.json());
+            const me = await response.json();
+            setCurrentUser(me);
+            applyAssistantName(me.ai);
             signInLinkWhileSignedIn();
         }
     } catch (err) {
@@ -468,8 +470,27 @@ function updateChatControls() {
     count.hidden = !asked;
     count.textContent = asked.toLocaleString();
     document.getElementById('nav-ask-btn').title = asked
-        ? `Ask Claude. With nothing typed, this opens your chat (${asked.toLocaleString()} ${asked === 1 ? 'question' : 'questions'} so far)`
-        : 'Ask Claude. With nothing typed, this opens the chat';
+        ? `Ask ${assistantName}. With nothing typed, this opens your chat (${asked.toLocaleString()} ${asked === 1 ? 'question' : 'questions'} so far)`
+        : `Ask ${assistantName}. With nothing typed, this opens the chat`;
+}
+
+// Who answers questions: Claude, or in the offline version (AI_PROVIDER=local
+// on the server) a free model on OneTouch's own computer, which the page then
+// calls "the AI" wherever it would say Claude (/api/me's ai.local)
+let assistantName = 'Claude';
+function applyAssistantName(ai) {
+    if (!ai?.local || assistantName !== 'Claude') return;
+    assistantName = 'the AI';
+    const reword = text => text.replace(/\bClaude's\b/g, "the AI's").replace(/\bClaude\b/g, 'the AI');
+    for (const el of document.querySelectorAll('#nav-ask, #nav-ask-input, #nav-ask-btn, #send-btn')) {
+        for (const attr of ['aria-label', 'placeholder', 'title']) if (el.hasAttribute(attr)) el.setAttribute(attr, reword(el.getAttribute(attr)));
+    }
+    document.getElementById('send-btn').textContent = 'Ask the AI';
+    for (const span of document.querySelectorAll('.access-switch > span')) {
+        const words = span.firstChild;
+        if (words?.nodeType === Node.TEXT_NODE) words.textContent = reword(words.textContent);
+    }
+    updateChatControls();
 }
 
 // A click anywhere outside the open chat closes it, the header included (its
@@ -894,7 +915,7 @@ function showAnswer(userPromptText, data, seconds, { replay = false } = {}) {
     // A new answer (not a saved chat drawn again): ♿ can read it aloud (accessibility.js)
     if (!replay) setTimeout(() => document.dispatchEvent(new CustomEvent('onetouch:answer')));
     if (data.memoryReset) {
-        appendMessage('system-msg', 'This conversation got long, so Claude started fresh. Earlier questions are no longer remembered.');
+        appendMessage('system-msg', `This conversation got long, so ${assistantName} started fresh. Earlier questions are no longer remembered.`);
     }
 
     if (data.error) {
@@ -2194,10 +2215,16 @@ function formatStarredAt(iso) {
 // is open under that name ('': forgets it when drawn again); false: no box, for
 // a list that looks itself up (lookup.js)
 // Every cell shows something: where a ticket has nothing, it says why (blankText).
+// A ticket list's 🔍 box (lookup.js), for a list of two or more. big: a tab's own list,
+// whose box comes first, above its count and buttons (the table then has lookup: false)
+function ticketLookupBarHtml(tickets, columns, list, big = false) {
+    return tickets.length >= 2 ? lookupBarHtml(list, lookupColumns(columns).map(([label]) => label), { big }) : '';
+}
+
 function ticketTableHtml(tickets, columns = TICKET_COLUMNS, highlight = new Set(), highlightClass = 'fresh', { select = null, rowClass = null, sort = '', lookup = '' } = {}) {
     const sortable = sort !== false;
     if (sort) tickets = sortedTickets(tickets, sort, columns, ticketSortValue);
-    const bar = lookup !== false && tickets.length >= 2 ? lookupBarHtml(lookup, lookupColumns(columns).map(([label]) => label)) : '';
+    const bar = lookup !== false ? ticketLookupBarHtml(tickets, columns, lookup) : '';
     const head = (select ? `<th class="select-cell"><input type="checkbox" class="select-all" data-select-list="${select}" aria-label="Select all"></th>` : '') +
         columns.map(([label]) => (sortable && !UNSORTED_COLUMNS.has(label) ? sortHeadHtml(sort, label) : `<th>${escapeHtml(label)}</th>`)).join('');
     const body = tickets.map((t, i) => {
@@ -2385,16 +2412,17 @@ function assignedHtml() {
     if (!listed.length) {
         return head + `<p class="home-status">${drill ? `None ${which}in ${escapeHtml(drill.label)}.` : status === 'attention' ? 'None of your tickets need attention.' : `None ${status === 'open' ? 'open: you\'re all caught up.' : 'closed yet.'}`}</p>`;
     }
+    // The 🔍 box first and large, above the count and the open / closed / all buttons
     const bar = lookupBarHtml('assigned', lookupColumns(columns).map(([label]) => label),
-        { mode: 'list', count: { shown: shown.length, total: listed.length } });
-    if (!shown.length) return head + bar + '<p class="home-status">No tickets match what you typed. Change it, or press Escape in the box to see them all.</p>';
+        { mode: 'list', count: { shown: shown.length, total: listed.length }, big: true });
+    if (!shown.length) return bar + head + '<p class="home-status">No tickets match what you typed. Change it, or press Escape in the box to see them all.</p>';
 
     const pager = pages > 1
         ? `<div class="team-pager"><span>${(first + 1).toLocaleString()}–${(first + page.length).toLocaleString()} of ${shown.length.toLocaleString()}</span>` +
           `<button type="button" class="home-action" data-assigned-page="-1"${assignedView.page ? '' : ' disabled'}>← Previous</button>` +
           `<button type="button" class="home-action" data-assigned-page="1"${assignedView.page < pages - 1 ? '' : ' disabled'}>Next →</button></div>`
         : '';
-    return head + bar + ATTENTION_LEGEND_HTML + KPI_LEGEND_HTML + ticketTableHtml(page, columns, new Set(), 'fresh', { sort: 'assigned', lookup: false }) + pager +
+    return bar + head + ATTENTION_LEGEND_HTML + KPI_LEGEND_HTML + ticketTableHtml(page, columns, new Set(), 'fresh', { sort: 'assigned', lookup: false }) + pager +
         ticketDownloadHtml(shown, `Assigned to me (${status === 'all' ? 'all' : status})`, ASSIGNED_COLUMNS);
 }
 
@@ -2737,8 +2765,9 @@ function familiesHtml() {
         const none = mine && status !== 'open' ? 'None of your tickets are in a family yet.' : status === 'open' ? 'No families with open tickets: all caught up.' : 'No families.';
         return head + `<p class="home-status">${none}</p>`;
     }
-    const bar = lookupBarHtml('team-families', TEAM_FAMILY_LOOKUP_COLUMNS, { mode: 'list', noun: 'families', count: { shown: data.total, total: all } });
-    if (!data.families.length) return head + bar + '<p class="home-status">No families match what you typed. Change it, or press Escape in the box to see them all.</p>';
+    // The 🔍 box first and large, above the count and the filters
+    const bar = lookupBarHtml('team-families', TEAM_FAMILY_LOOKUP_COLUMNS, { mode: 'list', noun: 'families', count: { shown: data.total, total: all }, big: true });
+    if (!data.families.length) return bar + head + '<p class="home-status">No families match what you typed. Change it, or press Escape in the box to see them all.</p>';
     const rows = data.families.map(f => {
         const id = escapeHtml(f.id);
         const summary = String(f.ticket?.summary || '');
@@ -2759,7 +2788,7 @@ function familiesHtml() {
           `<button type="button" class="home-action" data-families-page="-1"${teamFamiliesView.offset ? '' : ' disabled'}>← Previous</button>` +
           `<button type="button" class="home-action" data-families-page="1"${last < data.total ? '' : ' disabled'}>Next →</button></div>`
         : '';
-    return head + bar + KPI_LEGEND_HTML + '<div class="table-wrap"><table class="result-table" data-sort-list="team-families"><thead><tr>' +
+    return bar + head + KPI_LEGEND_HTML + '<div class="table-wrap"><table class="result-table" data-sort-list="team-families"><thead><tr>' +
         sortHeadHtml('team-families', 'Family', 'Family (its first ticket)') + sortHeadHtml('team-families', 'Tickets') + sortHeadHtml('team-families', 'KPIs') +
         (mine ? '' : '<th>Give it all to</th>') + '<th></th></tr></thead>' + `<tbody>${rows}</tbody></table></div>` + pager;
 }
@@ -2907,13 +2936,13 @@ function showTicketResults(quiet = false) {
         if (!tickets.length) return NO_TICKET_RESULTS_HTML;
         const columns = withLinks(SHOWN_COLUMNS);
         const fresh = tickets.filter(t => latestShown.has(t.number)).length;
-        return '<div class="results-head">' +
+        return ticketLookupBarHtml(tickets, columns, 'results', true) + '<div class="results-head">' +
             `<p class="home-status">${tickets.length.toLocaleString()} ${tickets.length === 1 ? 'ticket' : 'tickets'} shown to you, newest first. ` +
             (fresh ? `<span class="fresh-key">Highlighted: the ${fresh.toLocaleString()} from your latest question.</span> ` : '') +
             'Click a ticket number to see its full record, or its parent or family to see those.</p>' +
             `<button type="button" class="home-action danger" onclick="clearTicketResults(${tickets.length})">🧹 Clear ticket results</button></div>` +
             starAllHtml(tickets.map(t => t.number)) + selectBarHtml('results') +
-            ticketTableHtml(tickets, columns, latestShown, 'fresh', { select: 'results', sort: 'results', lookup: 'results' }) + ticketDownloadHtml(tickets, 'Ticket results', columns);
+            ticketTableHtml(tickets, columns, latestShown, 'fresh', { select: 'results', sort: 'results', lookup: false }) + ticketDownloadHtml(tickets, 'Ticket results', columns);
     }, quiet).then(() => paintSelection('results'));
 }
 
@@ -3172,12 +3201,12 @@ function showStarred(quiet = false) {
         const missing = (data.noAccess?.length
             ? `<p class="home-status">You don't have permission to see these any more (they're no longer yours): ${escapeHtml(data.noAccess.join(', '))}</p>` : '') +
             (data.notFound.length ? `<p class="home-status">Not in the data any more: ${escapeHtml(data.notFound.join(', '))}</p>` : '');
-        return '<div class="results-head">' +
+        return ticketLookupBarHtml(data.tickets, columns, 'starred', true) + '<div class="results-head">' +
             `<p class="home-status">${numbers.length.toLocaleString()} starred ${numbers.length === 1 ? 'ticket' : 'tickets'}, newest first. ` +
             'Tick tickets to unstar several at once.</p>' +
             `<button type="button" class="home-action danger" onclick="unstarAll()">☆ Unstar all</button></div>` +
             unstarByIssueHtml(data.tickets) + selectBarHtml('starred') +
-            ticketTableHtml(data.tickets, columns, new Set(), 'fresh', { select: 'starred', sort: 'starred', lookup: 'starred' }) + missing + ticketDownloadHtml(data.tickets, 'Starred tickets', columns);
+            ticketTableHtml(data.tickets, columns, new Set(), 'fresh', { select: 'starred', sort: 'starred', lookup: false }) + missing + ticketDownloadHtml(data.tickets, 'Starred tickets', columns);
     }, quiet).then(() => paintSelection('starred'));
 }
 
