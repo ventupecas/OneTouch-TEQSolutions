@@ -25,11 +25,27 @@
   How it tells: Cloudflare answers 530 when no tunnel is connected. OneTouch's
   pages carry X-OneTouch-Host (server.mjs), which differs between computers.
   Log: %LOCALAPPDATA%\OneTouch\tunnel-watch.log
+
+  Phone notifications (ntfy.sh, free app): what the watch does (started after a
+  restart, tunnel started or stopped, another computer serving, app not
+  answering) and how a take-over ended. Messages sent while offline wait and go
+  out once the internet is back. They only name this computer and what
+  happened, never anything from OneTouch's data.
+    powershell -ExecutionPolicy Bypass -File scripts\take-over.ps1 -SetupNotify
+        Makes a private topic for this computer (saved in
+        %LOCALAPPDATA%\OneTouch\ntfy-topic.txt, not in .env or git), sends a
+        test and prints the topic to subscribe to in the ntfy app. Run it again
+        with -Topic <name> to use an existing topic (e.g. the same on the laptop).
+    -TestNotify  sends one test notification.
+  No topic file: no notifications.
 #>
 param(
   [switch]$Watch,
   [switch]$InstallWatch,
-  [switch]$RemoveWatch
+  [switch]$RemoveWatch,
+  [switch]$SetupNotify,
+  [switch]$TestNotify,
+  [string]$Topic = ''
 )
 
 $ErrorActionPreference = 'Continue'
@@ -50,6 +66,61 @@ function Write-Log([string]$Message) {
     if ((Test-Path $LogFile) -and (Get-Item $LogFile).Length -gt 1MB) { Move-Item $LogFile "$LogFile.old" -Force }
     Add-Content -Path $LogFile -Value $line -Encoding utf8
   } catch {}
+}
+
+# ---------------------------------------------------------------- phone notifications (ntfy.sh)
+$TopicFile = Join-Path $LogDir 'ntfy-topic.txt'
+$script:Pending = New-Object System.Collections.ArrayList
+
+# Queues a notification and tries to send everything waiting. Plain ASCII only
+# (Windows PowerShell 5.1 sends bodies and headers as Latin-1).
+function Send-Push([string]$Title, [string]$Message, [string]$Priority = 'default', [string]$Tags = '') {
+  if (-not (Test-Path $TopicFile)) { return }
+  if ($script:Pending.Count -ge 20) { $script:Pending.RemoveAt(0) }
+  [void]$script:Pending.Add(@{
+    Title = "$Title ($env:COMPUTERNAME)"; Message = $Message; Priority = $Priority; Tags = $Tags
+    At = (Get-Date -Format 'MMM d, h:mm:ss tt')
+  })
+  Send-PendingPushes
+}
+
+function Send-PendingPushes {
+  if ($script:Pending.Count -eq 0 -or -not (Test-Path $TopicFile)) { return }
+  $name = (Get-Content $TopicFile -TotalCount 1).Trim()
+  if (-not $name) { return }
+  while ($script:Pending.Count -gt 0) {
+    $p = $script:Pending[0]
+    $headers = @{ Title = $p.Title; Priority = $p.Priority }
+    if ($p.Tags) { $headers['Tags'] = $p.Tags }
+    try {
+      Invoke-RestMethod -Method Post -Uri "https://ntfy.sh/$name" -Body "$($p.Message) (at $($p.At))" `
+        -Headers $headers -TimeoutSec 10 -UseBasicParsing | Out-Null
+      $script:Pending.RemoveAt(0)
+    } catch { return }
+  }
+}
+
+if ($SetupNotify) {
+  if (-not $Topic) {
+    $chars = 'abcdefghijkmnpqrstuvwxyz23456789'.ToCharArray()
+    $Topic = 'onetouch-' + (-join (1..20 | ForEach-Object { $chars | Get-Random }))
+  }
+  if ($Topic -notmatch '^[A-Za-z0-9_-]{8,64}$') { Write-Host 'A topic is 8-64 letters, digits, - or _.'; exit 1 }
+  Set-Content -Path $TopicFile -Value $Topic -Encoding ascii
+  Send-Push 'OneTouch notifications are on' 'This computer will tell you here when its tunnel starts, stops or has trouble.' 'default' 'white_check_mark'
+  if ($script:Pending.Count -gt 0) { Write-Host "Saved, but the test couldn't be sent (no internet?)." }
+  Write-Host ''
+  Write-Host 'In the ntfy app: + (Subscribe to topic), server ntfy.sh, topic:'
+  Write-Host "    $Topic"
+  Write-Host 'Keep it private: anyone with the topic can read these notifications.'
+  exit 0
+}
+if ($TestNotify) {
+  if (-not (Test-Path $TopicFile)) { Write-Host 'No topic yet: run with -SetupNotify first.'; exit 1 }
+  Send-Push 'OneTouch test' 'Test notification from the tunnel watch script.' 'default' 'bell'
+  if ($script:Pending.Count -gt 0) { Write-Host 'Could not reach ntfy.sh.'; exit 1 }
+  Write-Host 'Sent.'
+  exit 0
 }
 
 # What onetouch.fyi looks like from here:
@@ -132,16 +203,22 @@ if ($Watch) {
   Write-Log 'Watch started; waiting for Docker.'
   Wait-Docker 0 | Out-Null
   Write-Log 'Docker is up.'
+  Send-Push 'OneTouch watch started' 'This computer signed in (after a restart or power cut) and its tunnel watch is running.' 'default' 'arrows_counterclockwise'
   $last = ''
   $offlineSince = $null
   $noneSince = $null
   $noneRunningSince = $null
+  $brokenSince = $null
+  $brokenTold = $false
+  $failTold = $false
   while ($true) {
     if (-not (Wait-Docker 60)) { continue }
+    Send-PendingPushes
     $running = Test-TunnelRunning
     $s = Get-SiteState
     $now = Get-Date
     if ($s.State -eq 'offline') { if (-not $offlineSince) { $offlineSince = $now } } else { $offlineSince = $null }
+    if (-not ($running -and $s.State -eq 'broken')) { $brokenSince = $null }
 
     if (-not $running) {
       $noneRunningSince = $null
@@ -150,7 +227,17 @@ if ($Watch) {
         # Two looks 10 s apart, so a computer that is just connecting isn't run over
         if (($now - $noneSince).TotalSeconds -ge 10) {
           Write-Log 'No computer is serving onetouch.fyi: starting the tunnel here.'
-          if (Start-Tunnel) { Write-Log 'Tunnel started.' } else { Write-Log 'Starting the tunnel failed; trying again shortly.' }
+          if (Start-Tunnel) {
+            Write-Log 'Tunnel started.'
+            Send-Push 'OneTouch: tunnel started here' 'No computer was serving onetouch.fyi, so this computer started its tunnel.' 'default' 'rocket'
+            $failTold = $false
+          } else {
+            Write-Log 'Starting the tunnel failed; trying again shortly.'
+            if (-not $failTold) {
+              Send-Push 'OneTouch: tunnel would not start' 'onetouch.fyi is down and this computer could not start its tunnel. It keeps trying; check Docker here or run take-over.ps1 on the laptop.' 'urgent' 'rotating_light'
+              $failTold = $true
+            }
+          }
           $noneSince = $null
         }
       } else {
@@ -160,15 +247,34 @@ if ($Watch) {
           'broken'  { "A tunnel is connected elsewhere but its app isn't answering ($($s.Code)): the tunnel stays off here." }
           'offline' { "This computer can't reach Cloudflare: waiting." }
         }
-        if ($what -ne $last) { Write-Log $what; $last = $what }
+        if ($what -ne $last) {
+          Write-Log $what
+          if ($s.State -eq 'served') { Send-Push 'OneTouch: another computer is serving' 'onetouch.fyi is served by another computer, so this one keeps its tunnel off. To hand it back, stop the tunnel on that computer.' 'default' 'information_source' }
+          if ($s.State -eq 'broken') { Send-Push 'OneTouch: site not answering' "Another computer's tunnel is connected but its app answers $($s.Code). This one stays off; check that computer." 'high' 'warning' }
+          $last = $what
+        }
       }
     } else {
       $noneSince = $null
       if ($offlineSince -and ($now - $offlineSince).TotalSeconds -ge 30) {
         Write-Log 'Lost the internet for 30 s: stopping the tunnel here, so another computer can take over safely.'
         Stop-Tunnel; $offlineSince = $null; $last = ''
+        Send-Push 'OneTouch: internet lost, tunnel stopped' 'This computer lost the internet for 30 s and stopped its tunnel. When it is back online it starts the tunnel again, unless another computer is serving by then.' 'high' 'warning'
+      } elseif ($s.State -eq 'broken') {
+        $noneRunningSince = $null
+        if (-not $brokenSince) { $brokenSince = $now }
+        if (-not $brokenTold -and ($now - $brokenSince).TotalSeconds -ge 60) {
+          Write-Log "The tunnel is connected but the app has answered $($s.Code) for a minute."
+          Send-Push 'OneTouch: app not answering' "The tunnel is up but onetouch.fyi has answered $($s.Code) for a minute. Check the app here: docker compose ps" 'urgent' 'rotating_light'
+          $brokenTold = $true
+        }
       } elseif ($s.State -eq 'served') {
         $noneRunningSince = $null
+        if ($brokenTold) {
+          Write-Log 'The app answers again.'
+          Send-Push 'OneTouch: app answering again' 'onetouch.fyi answers normally again.' 'default' 'white_check_mark'
+          $brokenTold = $false
+        }
         $mine = Get-LocalHostId
         $others = @()
         if ($mine) {
@@ -181,6 +287,7 @@ if ($Watch) {
         if ($others.Count -gt 0) {
           Write-Log 'Another computer is also serving onetouch.fyi: stopping the tunnel here (that computer keeps it).'
           Stop-Tunnel; $last = ''
+          Send-Push 'OneTouch: two tunnels, stopped this one' 'Another computer was also serving onetouch.fyi, so this computer stopped its tunnel. That computer keeps the site.' 'high' 'warning'
         } elseif ($last -ne 'serving') {
           Write-Log 'onetouch.fyi is served by this computer.'; $last = 'serving'
         }
@@ -189,6 +296,7 @@ if ($Watch) {
         if (($now - $noneRunningSince).TotalSeconds -ge 90) {
           Write-Log "The tunnel runs here but isn't connected after 90 s: restarting it."
           docker restart $Tunnel 2>&1 | Out-Null
+          Send-Push 'OneTouch: tunnel restarted' "This computer's tunnel was running but not connected for 90 s, so it was restarted." 'high' 'warning'
           $noneRunningSince = $null; $last = ''
         }
       } else { $noneRunningSince = $null }
@@ -240,9 +348,11 @@ while ((Get-Date) -lt $until) {
   $s = Get-SiteState
   if ($s.State -eq 'served' -and $mine -and $s.HostId -eq $mine) {
     Write-Log 'DONE: onetouch.fyi is served by this computer. People need to sign in again.'
+    Send-Push 'OneTouch: taken over' 'onetouch.fyi is now served by this computer. People need to sign in again.' 'high' 'rocket'
     Write-Log 'To hand it back later: docker compose stop tunnel-named (here); the other computer takes over if its watch runs.'
     exit 0
   }
 }
 Write-Log 'The tunnel started, but onetouch.fyi has not answered from this computer within 2 minutes. Check: docker logs onetouch_tunnel_named --tail 20'
+Send-Push 'OneTouch: take-over not finished' 'The tunnel started here, but onetouch.fyi has not answered from this computer within 2 minutes.' 'urgent' 'rotating_light'
 exit 1

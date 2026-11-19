@@ -274,6 +274,11 @@ with two tunnels.
   - Install or remove it from the OneTouch folder, not `C:\WINDOWS\system32`:
     `powershell -ExecutionPolicy Bypass -File scripts\take-over.ps1 -InstallWatch` (or `-RemoveWatch`).
 - **Laptop:** no watch. It only takes over by hand (below).
+- **Phone notifications** (ntfy app): the watch and take-overs push what they do. `-SetupNotify`
+  makes a private topic for the computer, saved in `%LOCALAPPDATA%\OneTouch\ntfy-topic.txt`
+  (not `.env` or git). `-SetupNotify -Topic <name>` reuses one, e.g. the PC's on the laptop.
+  `-TestNotify` sends a test. A power cut can't be reported from the PC itself, so an outside
+  uptime check (e.g. UptimeRobot on `https://onetouch.fyi`, keyword "Sign in to OneTouch") covers that.
 
 **Failover, if the PC stops working (power or internet out) during a presentation:**
 1. **Laptop**, in PowerShell in its OneTouch folder, online (a phone hotspot is safest: venue
