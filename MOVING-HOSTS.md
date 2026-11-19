@@ -233,8 +233,8 @@ Ask Ventura before changing system settings. Explain each one.
 - **After a reboot, Docker only starts once someone signs in to Windows.** Either Ventura
   signs in after any reboot, or sets up automatic sign-in (Ventura's call: it's a security
   trade-off).
-  - The containers then come back by themselves: `restart: always`, and `unless-stopped` for
-    the tunnel.
+  - The containers then come back by themselves (`restart: always`). The tunnel doesn't
+    (`restart: "no"`): the **tunnel watch** starts it (see Part E, "The tunnel watch").
 - **Network:** a wired connection beats Wi-Fi. Every visitor's page comes through the home
   upload speed; about 10 Mbps up is plenty for ~30 people.
 - **Remote access** (Chrome Remote Desktop, Tailscale or similar): suggest it strongly. Without
@@ -262,14 +262,33 @@ changes. The standby is only as fresh as its last copy.
 4. Code changes made on one computer go to the other by `git pull`, or by copying the changed
    files. **`.env` must stay identical on both.**
 
-**Failover, if the PC stops working during a presentation:**
-1. If the PC can still be reached (remote access), stop its tunnel first:
-   `docker compose stop tunnel-named`.
-2. **Laptop:** `docker compose up -d`, then `docker compose --profile tunnel-named up -d tunnel-named`.
-   onetouch.fyi is back in about 30 seconds, with the data as of the last refresh.
-3. People have to sign in again.
-4. **When the PC comes back, don't start its tunnel** until one computer is chosen and the
-   other has been refreshed from it.
+**The tunnel watch (`scripts\take-over.ps1`).** Built 2026-11-18 so a power cut can't end
+with two tunnels.
+- OneTouch's pages carry `X-OneTouch-Host`, which differs between computers. Cloudflare
+  answers 530 when no tunnel is connected.
+- **PC:** a sign-in task, "OneTouch tunnel watch", runs `take-over.ps1 -Watch` hidden.
+  - Starts the tunnel only when onetouch.fyi has no computer connected.
+  - Restarts it if it dies.
+  - Stops it if the PC loses the internet for 30 s, or sees another computer serving.
+  - Log: `%LOCALAPPDATA%\OneTouch\tunnel-watch.log`.
+  - Install or remove it from the OneTouch folder, not `C:\WINDOWS\system32`:
+    `powershell -ExecutionPolicy Bypass -File scripts\take-over.ps1 -InstallWatch` (or `-RemoveWatch`).
+- **Laptop:** no watch. It only takes over by hand (below).
+
+**Failover, if the PC stops working (power or internet out) during a presentation:**
+1. **Laptop**, in PowerShell in its OneTouch folder, online (a phone hotspot is safest: venue
+   networks may block the tunnel):
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File scripts\take-over.ps1
+   ```
+   - It checks for a minute that no computer is connected, starts the stack and the tunnel,
+     and says DONE when onetouch.fyi answers from the laptop.
+   - It refuses if another computer is serving the site.
+2. People have to sign in again. The data is as of the last refresh.
+3. **When the PC comes back:** its watch sees the laptop serving and keeps its own tunnel off.
+4. **To hand the site back to the PC:** on the laptop, run `docker compose stop tunnel-named`.
+   The PC's watch takes over within about 20 s. Anything changed on the laptop meanwhile stays
+   on the laptop.
 
 Running both tunnels at once as "automatic backup" doesn't work. See rule 1.
 

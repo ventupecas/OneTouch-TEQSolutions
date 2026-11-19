@@ -56,6 +56,7 @@ const FILES = [
 const SKIPPED = {
   'README.md': 'this file',
   'MOVING-HOSTS.md': 'steps for moving the hosting to another computer, for the agents doing it',
+  'scripts/take-over.ps1': 'runs the tunnel on one computer only (failover between two hosts); see MOVING-HOSTS.md Part E',
   'package-lock.json': 'written by `npm install`; the versions it pins are in the table above',
   'servicenow-sync/package-lock.json': 'written by `npm install` in `servicenow-sync/`',
   'db/accounts.json': "everyone's usernames and password hashes; make your own accounts instead (step 16)",

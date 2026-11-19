@@ -2,6 +2,7 @@ import dns from 'node:dns/promises';
 import { createHash, createHmac } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { mkdir, rename, statfs, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import v8 from 'node:v8';
 import { dirname } from 'node:path';
 import express from 'express';
@@ -121,8 +122,13 @@ const CONTENT_SECURITY_POLICY = [
   "base-uri 'none'",
   "form-action 'self'",
 ].join('; ');
+// Which computer answered: a hash of this container's name, so
+// scripts/take-over.ps1 can tell whether onetouch.fyi is being served by its
+// own computer or another one (only one may run the tunnel; MOVING-HOSTS.md)
+const HOST_ID = createHash('sha256').update(`onetouch-host:${os.hostname()}`).digest('hex').slice(0, 12);
 app.use((req, res, next) => {
   res.set({
+    'X-OneTouch-Host': HOST_ID,
     'Content-Security-Policy': CONTENT_SECURITY_POLICY,
     'X-Frame-Options': 'SAMEORIGIN',
     'X-Content-Type-Options': 'nosniff',

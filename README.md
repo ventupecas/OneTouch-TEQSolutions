@@ -4385,11 +4385,14 @@ services:
   # account; create the tunnel there (route it to http://app:8000) and put its
   # token in .env as TUNNEL_TOKEN.
   #   docker compose --profile tunnel-named up -d tunnel-named
+  # Only one computer may run it at a time (MOVING-HOSTS.md), so it never
+  # starts by itself after a reboot: scripts/take-over.ps1 starts it, only
+  # when no other computer is serving onetouch.fyi.
   tunnel-named:
     image: cloudflare/cloudflared:2026.9.3
     container_name: onetouch_tunnel_named
     profiles: ["tunnel-named"]
-    restart: unless-stopped
+    restart: "no"
     command: tunnel --no-autoupdate run
     environment:
       TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
@@ -6658,6 +6661,7 @@ import dns from 'node:dns/promises';
 import { createHash, createHmac } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { mkdir, rename, statfs, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import v8 from 'node:v8';
 import { dirname } from 'node:path';
 import express from 'express';
@@ -6777,8 +6781,13 @@ const CONTENT_SECURITY_POLICY = [
   "base-uri 'none'",
   "form-action 'self'",
 ].join('; ');
+// Which computer answered: a hash of this container's name, so
+// scripts/take-over.ps1 can tell whether onetouch.fyi is being served by its
+// own computer or another one (only one may run the tunnel; MOVING-HOSTS.md)
+const HOST_ID = createHash('sha256').update(`onetouch-host:${os.hostname()}`).digest('hex').slice(0, 12);
 app.use((req, res, next) => {
   res.set({
+    'X-OneTouch-Host': HOST_ID,
     'Content-Security-Policy': CONTENT_SECURITY_POLICY,
     'X-Frame-Options': 'SAMEORIGIN',
     'X-Content-Type-Options': 'nosniff',
@@ -19053,6 +19062,7 @@ const FILES = [
 const SKIPPED = {
   'README.md': 'this file',
   'MOVING-HOSTS.md': 'steps for moving the hosting to another computer, for the agents doing it',
+  'scripts/take-over.ps1': 'runs the tunnel on one computer only (failover between two hosts); see MOVING-HOSTS.md Part E',
   'package-lock.json': 'written by `npm install`; the versions it pins are in the table above',
   'servicenow-sync/package-lock.json': 'written by `npm install` in `servicenow-sync/`',
   'db/accounts.json': "everyone's usernames and password hashes; make your own accounts instead (step 16)",
@@ -36446,6 +36456,7 @@ Make or download an image with the same name and size (step 14). The SHA-256 let
 |---|---|
 | `README.md` | this file |
 | `MOVING-HOSTS.md` | steps for moving the hosting to another computer, for the agents doing it |
+| `scripts/take-over.ps1` | runs the tunnel on one computer only (failover between two hosts); see MOVING-HOSTS.md Part E |
 | `package-lock.json` | written by `npm install`; the versions it pins are in the table above |
 | `servicenow-sync/package-lock.json` | written by `npm install` in `servicenow-sync/` |
 | `db/accounts.json` | everyone's usernames and password hashes; make your own accounts instead (step 16) |

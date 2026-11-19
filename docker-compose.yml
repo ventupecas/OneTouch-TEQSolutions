@@ -158,11 +158,14 @@ services:
   # account; create the tunnel there (route it to http://app:8000) and put its
   # token in .env as TUNNEL_TOKEN.
   #   docker compose --profile tunnel-named up -d tunnel-named
+  # Only one computer may run it at a time (MOVING-HOSTS.md), so it never
+  # starts by itself after a reboot: scripts/take-over.ps1 starts it, only
+  # when no other computer is serving onetouch.fyi.
   tunnel-named:
     image: cloudflare/cloudflared:2026.9.3
     container_name: onetouch_tunnel_named
     profiles: ["tunnel-named"]
-    restart: unless-stopped
+    restart: "no"
     command: tunnel --no-autoupdate run
     environment:
       TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
