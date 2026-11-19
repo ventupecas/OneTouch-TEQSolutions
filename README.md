@@ -2545,6 +2545,11 @@ node_modules/
 .npm
 .eslintcache
 
+# 📦 MOVING TO ANOTHER COMPUTER (MOVING-HOSTS.md): copies of the whole database,
+# with everyone's email addresses and password hashes. Never in git.
+onetouch-transfer/
+*.tgz
+
 # 📊 RAW DATA & LARGE DATASETS (Keep your 75,000 CSV rows local)
 csv_data/
 *.csv
