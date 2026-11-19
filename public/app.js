@@ -2554,6 +2554,7 @@ function myChartsTickets() {
     const all = assignedView.tickets || [];
     if (!myChartsView.status) myChartsView.status = all.some(t => t.open) ? 'open' : 'all';
     const { status } = myChartsView;
+    if (status === 'attention') return all.filter(needsAttention);
     return status === 'all' ? all : all.filter(t => t.open === (status === 'open'));
 }
 
@@ -2566,15 +2567,18 @@ function myChartsHtml() {
     }
     const tickets = myChartsTickets();
     const { status } = myChartsView;
-    const counts = { open: all.filter(t => t.open).length, all: all.length };
+    // The same buttons as Assigned to me (ASSIGNED_STATUSES): each needs its count here
+    const counts = { open: all.filter(t => t.open).length, attention: all.filter(needsAttention).length, all: all.length };
     counts.closed = counts.all - counts.open;
     const filter = '<div class="assigned-filter" role="group" aria-label="Which tickets to draw">' + ASSIGNED_STATUSES.map(([key, label]) =>
-        `<button type="button" class="home-action" data-mycharts-status="${key}" aria-pressed="${status === key}">${label} (${counts[key].toLocaleString()})</button>`).join('') + '</div>';
-    const which = status === 'all' ? '' : `${status} `;
+        `<button type="button" class="home-action" data-mycharts-status="${key}" aria-pressed="${status === key}">${label} (${(counts[key] ?? 0).toLocaleString()})</button>`).join('') + '</div>';
+    const which = status === 'all' ? '' : status === 'attention' ? 'highlighted ' : `${status} `;
     const head = '<div class="results-head">' +
         `<p class="home-status">The ${tickets.length.toLocaleString()} ${which}${tickets.length === 1 ? 'ticket' : 'tickets'} assigned to you, in charts. ` +
         'Hover a bar or slice for its numbers, or click it to list those tickets in Assigned to me.</p>' + filter + '</div>';
-    if (!tickets.length) return head + `<p class="home-status">None ${status === 'open' ? 'open: you\'re all caught up.' : 'closed yet.'}</p>`;
+    if (!tickets.length) {
+        return head + `<p class="home-status">${status === 'attention' ? 'None of your tickets need attention.' : `None ${status === 'open' ? 'open: you\'re all caught up.' : 'closed yet.'}`}</p>`;
+    }
     return head + '<div class="tile-grid my-charts">' + MY_CHARTS.map(def =>
         `<article class="chart-tile size-medium" data-my-chart="${def.key}">` +
         `<div class="tile-head"><div class="tile-titles"><h3 class="tile-title">${escapeHtml(def.title)}</h3>` +
