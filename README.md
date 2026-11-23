@@ -30564,8 +30564,8 @@ jobs:
         run: |
           URL="https://onetouch.fyi"
           BODY=$(curl -fsS --max-time 20 "$URL")
-          echo "$BODY" | grep -q "Sign in to OneTouch" \
-            || { echo "::error::The URL responded but the page is not our app."; exit 1; }
+          echo "$BODY" | grep -q "Try the OneTouch demo" \
+            || { echo "::error::The URL responded but the page is not our landing page."; exit 1; }
           echo "Alive, and it is ours."
 ```
 
