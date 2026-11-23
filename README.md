@@ -2706,16 +2706,16 @@ public/vendor/** -text
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/vperez-stars/OneTouch-TEQSolutions.git"
+    "url": "git+https://github.com/ventupecas/OneTouch-TEQSolutions.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "bugs": {
-    "url": "https://github.com/vperez-stars/OneTouch-TEQSolutions/issues"
+    "url": "https://github.com/ventupecas/OneTouch-TEQSolutions/issues"
   },
-  "homepage": "https://github.com/vperez-stars/OneTouch-TEQSolutions#readme"
+  "homepage": "https://github.com/ventupecas/OneTouch-TEQSolutions#readme"
 }
 ```
 
@@ -16739,7 +16739,7 @@ if (sessionTokenValue) loadCurrentUser().then(resumeLatestChat);
       <input id="team" type="text" placeholder="your-password" autocomplete="current-password" required
              spellcheck="false" autocapitalize="off">
     </div>
-    <button class="btn" type="submit" style="margin-top:20px" onclick="location.href='vperez-stars.github.io/datatool/database';">Continue with SSO</button>
+    <button class="btn" type="submit" style="margin-top:20px" onclick="location.href='ventupecas.github.io/datatool/database';">Continue with SSO</button>
   </form>
   <div class="or"><span>or use</span></div>
   <div class="provs">
